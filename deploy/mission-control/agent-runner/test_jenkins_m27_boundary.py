@@ -274,7 +274,55 @@ UI_DELIVERY_CONTEXT_SHA256 = {
     "src/rust/forge-ide-web/ui/styles.yaml": "960473ec8185275bcf0901e48d0bf2fad48c27cfa05bc056c479b2705277a9a1",
 }
 
+
+# Current additive delivery source; historical maps above remain provenance.
+DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
+    'deploy/mission-control/agent-runner/runner.py': '4e112cd0624e46c8964e37e66c86eb274ce7392cb02a1dd24b548fc8a075537c',
+    'deploy/mission-control/agent-runner/setup-runner.sh': '341784d296e7c984b3fe37fb78d86fd4aa924ba2c8dabb06d68c760c28b55eb5',
+    'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': 'de459b8d5a49922d5272c186f887bad40afb87421661d31fc0bfa85ac85e0664',
+    'deploy/mission-control/agent-runner/test_ci_supervision.py': '09c0020f66701d5c10a24a5b169cc3ac787955623f3ee703614aa2e8ac5fc2a5',
+    'deploy/mission-control/agent-runner/test_delivery_ops.py': 'd0d9428dfe0e264a7dce8f2edf9e2562eadbf29bb425adceae18040c39cf4a7a',
+    'deploy/mission-control/agent-runner/test_delivery_worker.py': '67f1d60bc99f93b81cc171d7774f5c178ee96cad9dc65f84ae0b884eb38ca60c',
+    'deploy/mission-control/agent-runner/test_muse_read_access.py': 'fa9dac349452485440260861f6ddf499ccdec11892a4eb5b992cd67232a1b9a1',
+    'deploy/mission-control/agent-runner/test_portal_release_actor.py': 'c25e352bfc64992d085d0819f8c153dc2306d838bf63c3edc65bb2fb0756a84e',
+    'deploy/mission-control/agent-runner/test_portal_release_recovery.py': '83fdbff03f32d9403d055ade2fe90530a591dbe0df4cbe8a0e6fd61782b40249',
+    'deploy/mission-control/agent-runner/test_work_delivery_automation.py': '3e042786f1d54c1fe8c75f5c9dc0d46b973b0871f3f0fea5946dbcc502afcaa9',
+    'deploy/mission-control/agent-runner/test_work_muse_intake.py': '94a79619048c5c8fbe599db9ae8f90782884da1652e877f5bcc9f2eeb8cac9c2',
+    'deploy/mission-control/agent-runner/test_work_owner_fence.py': '86b555fa3622264fd00e2e14fa1640ccbcf8a215e3d388f7243954fdf7fb38e1',
+    'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '37667ad1681094f52d5f777317da0931b606bb1bda44b2393a2ab4e7631efcae',
+    'deploy/mission-control/agent-runner/work_api.py': 'dbef2c2ecd0bd48c7a95240c9c74758ae18475aef5527a1f8b744dadc0e3c419',
+    'deploy/mission-control/agent-runner/work_ci_contract.py': '71b55c469064b394ab16aaae9ab336634eb3549417da0e1064dc015c3e59c37d',
+    'deploy/mission-control/agent-runner/work_config.py': '1d67059a436ebe3b9bd4c3c470bb43cd0097d161fcf4fbd3a70f1f41e1b53172',
+    'deploy/mission-control/agent-runner/work_delivery_ops.py': '05fcf5728e9ebbc0cd58a206e0345e24a24ad3151995d351613fc50fffd648da',
+    'deploy/mission-control/agent-runner/work_delivery_repair.py': '3d06ea4e5edf6036b31187087c5c48b83d0fcbf021b3d9e259d39e0ce0150c6c',
+    'deploy/mission-control/agent-runner/work_delivery_worker.py': 'a454060e94a7f15527d81ddabef2b7bfb39241f43308bb5aa7604930a8d00996',
+    'deploy/mission-control/agent-runner/work_publication.py': '035eb4d919918e80bdaa8b4c5242e069fc3e17036ff84f6a1bd46a186f356bf0',
+    'deploy/mission-control/agent-runner/work_publication_config.py': 'f9f235ca112aefe2d6214e6c26ee4e74541a2ae2b21f96875ce17b37bd907a0c',
+    'deploy/mission-control/agent-runner/work_store.py': 'de047f8f6ef3dcf5fb1f3752b9efaee99a00956bf4817fd6cb0f5346c2b0dffe',
+    'deploy/mission-control/agent-runner/work_worker_store.py': '634b1f300ae6248f2f95105ce8e7879c052978f55db44f209980844189bc6e27',
+    'deploy/mission-control/agent-runner/work_workflow.py': '8266b5246b3a42f94f4e89a0d7016dd0f7c734490d265df99c3eab3acd78ddf8',
+    'deploy/mission-control/backend-suites.py': '4eb46989a6635ddc6ad037887e2a5b60dc553a486d5117765483ce84a02cf010',
+    'deploy/mission-control/jenkins/setup-ci.py': '8d8b6fdf59d24d65dc0983ddace6d0d5a89418007d4338228dfdb695a3e05170',
+    'deploy/mission-control/jenkins/verify-candidate.py': 'ab7e578e6a5dc7d8762e42c9602334e005d6f68a250806c16a5e7c3fc0169cff',
+    'deploy/mission-control/portal_release_actor.py': '3e43d5235c5a33507237f29363745556307a20104d8a8ffde3a8e0505a9a44bb',
+    'deploy/mission-control/sql/apply.sql': '83471649c4b88c381c4f449135f28675b962fe9706caec4842598fc46a7dfb8d',
+    'deploy/mission-control/sql/management/grant-muse-read-access.sql': 'ee52fd223d7edd1c2691f320da508a2f31dbe79d3678579521a0ea9154b83523',
+    'deploy/mission-control/sql/management/grant-runner.sql': 'ad482e962144b4c1c3d283a7597a9eb43c2aa08f8b03b864b2b62c04c1bb46cd',
+    'deploy/mission-control/sql/management/verify-delivery.sql': '132055d1d8803b88737d8ec168c4cc85f4fea98b38d2a85a70863b5e4de12a41',
+    'deploy/mission-control/sql/management/verify-muse-read-access.sql': 'c351265a894c8bc04abead41a4902ead8b03a679f562e8a8932e836407449f09',
+    'deploy/mission-control/sql/management/verify-post-merge.sql': '7bc90aea2d4b4c567d46ae89e85acc6772483d36c0b9af34ba6de1b10b20bc01',
+    'deploy/mission-control/sql/management/verify.sql': '71674f4b392b34a088a5aae86f36fdb976190db4ecbd67430b6c6d6eca27de1e',
+    'deploy/mission-control/sql/migrations/0029_delivery_automation.sql': '08cd5a770cb11b9b22b6be9fd47aee9ca1a9a2481f667c0d63fce5f2d82019c9',
+    'docs/architecture/forge-post-merge-verification.md': '8aa3497128f0017e12a3aa86cc1502f7205ba0d1dd42cceb0ff7396107684ad8',
+    'docs/design/implementation-status.md': '381c951d14f8e74c1e47ef658081a2743f61a74b2d43b1eccf53da53644679d1',
+}
+
+
+def qualified_source(relative, expected):
+    return DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))
+
 STRICT_VERIFIER_FILES = {
+    "verify-delivery.sql",
     "verify-post-merge.sql",
     "verify.sql",
     "verify-owner-continuation.sql",
@@ -310,19 +358,19 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in current.items():
             with self.subTest(source=relative):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
-                    UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))
+                    qualified_source(relative, expected))
 
     def test_explicit_reviewer_context_matches_included_unapproved_source(self):
         for name, expected in INCLUDED_REVIEWER_CONTEXT_SHA256.items():
             with self.subTest(context=REVIEWER_CONTEXT_REVISION, source=name):
                 self.assertEqual(hashlib.sha256((RUNNER / name).read_bytes()).hexdigest(),
-                    POST_MERGE_CONTEXT_SHA256.get("deploy/mission-control/agent-runner/" + name, expected))
+                    qualified_source("deploy/mission-control/agent-runner/" + name, expected))
 
     def test_task_organization_changes_match_explicit_unapproved_context(self):
         for relative, expected in TASK_ORGANIZATION_CONTEXT_SHA256.items():
             with self.subTest(context='unapproved task organization', source=relative):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
-                    UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))
+                    qualified_source(relative, expected))
 
     def test_retirement_and_ui_composition_match_their_explicit_source_contexts(self):
         for context, pins in ((RETIREMENT_CONTEXT_REVISION, INCLUDED_RETIREMENT_CONTEXT_SHA256),
@@ -330,7 +378,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             for relative, expected in pins.items():
                 with self.subTest(context=context, source=relative):
                     self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
-                    UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))
+                    qualified_source(relative, expected))
 
     def test_delivery_ui_overlay_is_scoped_to_reviewed_abi14_source(self):
         self.assertEqual(UI_DELIVERY_CONTEXT_REVISION, "f246b1494f29cf86af8a32a24da80d56c17427d1")
@@ -339,6 +387,15 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             with self.subTest(delivery_ui=relative):
                 self.assertTrue(relative.startswith(("src/rust/forge-ide-ui/", "src/rust/forge-ide-web/", "src/rust/forge-ide-web-host/"))
                     or relative in {".github/workflows/ide-ui-browser.yml", "docs/architecture/forge-post-merge-verification.md", "docs/design/implementation-status.md"})
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_delivery_automation_overlay_is_scoped_and_exact(self):
+        for relative, expected in DELIVERY_AUTOMATION_CONTEXT_SHA256.items():
+            with self.subTest(delivery_source=relative):
+                self.assertTrue(relative.startswith('deploy/mission-control/') or relative in {
+                    'docs/architecture/forge-post-merge-verification.md', 'docs/design/implementation-status.md'})
+                if '/migrations/' in relative:
+                    self.assertTrue(relative.endswith('0029_delivery_automation.sql'))
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):

@@ -241,8 +241,8 @@ sequenceDiagram
     C->>R: Activate checkpointed plan
     R->>DB: Fresh lease, current main and exact checkpoint digest
     R->>R: Save restart intent before service write
-    R->>W: Replace fixed override and restart homelab-web only
-    alt Exact binary/config and authenticated health pass
+    R->>W: Replace fixed override and restart homelab-web
+    alt Exact binary/config and authenticated origin/entry health pass
         R-->>C: Root activation receipt and confirmed cleanup
         C->>DB: Record deployed
     else Candidate or live health fails
@@ -257,7 +257,11 @@ Root actor validates a fixed configuration, protected ancestry and pinned export
 Its public plan has nine identity fields plus version, policy, artifact manifest
 and plan digest. Private generation/lease tokens travel only over stdin. Model
 workers receive neither the actor sudo grant nor Jenkins/publication credentials.
-Fresh database authority is checked immediately before the privileged write.
+The fixed existing `bitwave-portal-cloudflare.service` socket proxy is restored
+after its web dependency restarts. Both the origin and the port8090 entry must
+serve the exact bundle and pass authenticated admission/negative probes before a
+healthy activation or rollback is recorded. Fresh database authority is checked
+immediately before the privileged write.
 A lost acknowledgement reconciles the actual running binary/config without a
 second restart. If staging completed before the database checkpoint was saved,
 the actor recovers its own sealed journal. Revoked start authority still permits

@@ -102,6 +102,28 @@ lost-ack, observer/native-race, scope-pagination and affected historical fixture
 checks follow before qualification/activation. Root owns installer publication,
 all source context/guard overlays, integration and privileged operational rollout.
 
+## Integrated qualification and runtime evidence boundary
+
+The reviewed source composes one unified verification store and rotating ready
+verification/observation/release ports. Current strict source qualifications retain
+historical maps and all twenty authority AST guards. Actual ABI14 browser QA
+passed all28 groups with cleanup; Root recovery tests cover the fixed entrybridge,
+interrupted rollback and operator attention. The protected database backup was
+restored into disposable PostgreSQL16:45tables/1,565rows, all counts equal and all
+historical task/workflow/receipt contents exact. Current usage/readiness differences
+are bounded live refresh/heartbeat fields. The two inherited GitHub Actions
+workflows were explicitly disabled for the Jenkins-only operating path.
+
+Release qualification and activation happen AFTER this source snapshot freezes.
+Their completion receipts are retained outside Git under
+`/var/lib/forge-provisioning/complete-sdlc-20261123/` and
+`/var/lib/forge-provisioning/portal-release/`, with working evidence under
+`/mnt/data/homelab-build/complete-sdlc-20261123/`. The live Agents delivery panel is
+the current runtime projection. Do not publish a documentation-only completion
+commit after activation: the main observer would correctly schedule another full
+verification/release. This record claims prepared source and the checks stated
+above, not a prospective Jenkins pass or activation outcome.
+
 --- Previous task record ---
 
 # Current: Coordinator-owned post-merge verification — 2026-11-23
