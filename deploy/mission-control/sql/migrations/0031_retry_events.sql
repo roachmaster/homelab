@@ -30,7 +30,7 @@ REVOKE ALL ON forge_agent.coding_retry_events,forge_agent.coding_retry_event_adm
 CREATE FUNCTION forge_agent._retry_scope(p_project text,p_scope_kind text,p_scope_id uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $f$
 BEGIN
- IF session_user NOT IN('forge_agent','forge_coding_reconciler') OR coalesce(current_setting('forge.coding_owner',true),'')='' THEN RAISE EXCEPTION 'Trusted scoped retry service required' USING ERRCODE='42501';END IF;
+ IF current_user<>'forge_agent_owner' OR(session_user NOT IN('forge_agent','forge_coding_reconciler') AND NOT EXISTS(SELECT FROM pg_roles WHERE rolname=session_user AND rolsuper)) OR coalesce(current_setting('forge.coding_owner',true),'')='' THEN RAISE EXCEPTION 'Trusted scoped retry service required' USING ERRCODE='42501';END IF;
  IF NOT (CASE p_scope_kind
  WHEN 'native_workflow' THEN EXISTS(SELECT FROM forge_agent.coding_workflows WHERE owner_id=current_setting('forge.coding_owner',true) AND project_alias=p_project AND workflow_id=p_scope_id)
  WHEN 'external_workflow' THEN EXISTS(SELECT FROM forge_external_workflow.workflows WHERE owner_id=current_setting('forge.coding_owner',true) AND project_alias=p_project AND workflow_id=p_scope_id)
@@ -132,14 +132,20 @@ BEGIN
   IF(e.legacy_used,e.legacy_source_id,e.legacy_source_digest) IS DISTINCT FROM(p_used,p_source_id,p_digest) THEN RAISE EXCEPTION 'Retained retry evidence changed' USING ERRCODE='P0006';END IF;
   RETURN forge_agent._retry_event_dto(e);
  END IF;
- IF e.used<>0 OR e.status<>'open' OR e.scope_kind<>'external_workflow' OR e.kind<>'planning' THEN RAISE EXCEPTION 'Retry adoption is not a reset path' USING ERRCODE='P0009';END IF;
- SELECT plan_revisions INTO spent FROM forge_external_workflow.workflows WHERE(owner_id,project_alias,workflow_id)=(e.owner_id,e.project_alias,e.scope_id);
+ IF e.used<>0 OR e.status<>'open' THEN RAISE EXCEPTION 'Retry adoption is not a reset path' USING ERRCODE='P0009';END IF;
+ IF e.scope_kind='external_workflow' AND e.kind='planning' THEN
+  SELECT plan_revisions INTO spent FROM forge_external_workflow.workflows WHERE(owner_id,project_alias,workflow_id)=(e.owner_id,e.project_alias,e.scope_id);
+ ELSIF e.scope_kind='native_workflow' AND e.kind='reviewer_correction' AND e.phase_id~'^reviewer_correction\.[0-9a-f-]{36}$' THEN
+  IF NOT EXISTS(SELECT FROM forge_agent.coding_workflow_reviews WHERE(owner_id,project_alias,workflow_id,workflow_review_id)=(e.owner_id,e.project_alias,e.scope_id,split_part(e.phase_id,'.',2)::uuid)) THEN RAISE EXCEPTION 'Retained review scope mismatch' USING ERRCODE='P0006';END IF;
+  SELECT count(*) INTO spent FROM forge_agent.coding_workflow_actions WHERE workflow_id=e.scope_id AND kind='decide' AND source_key LIKE 'peer-reviewer-correction:'||split_part(e.phase_id,'.',2)||':%';
+ ELSE RAISE EXCEPTION 'Unsupported retained retry evidence' USING ERRCODE='P0009';END IF;
  IF spent IS DISTINCT FROM p_used THEN RAISE EXCEPTION 'Retained planning counter changed' USING ERRCODE='P0006';END IF;
- UPDATE forge_agent.coding_retry_events SET used=p_used,legacy_used=p_used,legacy_source_id=p_source_id,legacy_source_digest=p_digest,updated_at=clock_timestamp() WHERE event_id=p_event RETURNING * INTO e;
+ UPDATE forge_agent.coding_retry_events SET used=p_used,status=CASE WHEN p_used=20 THEN 'exhausted' ELSE 'open' END,legacy_used=p_used,legacy_source_id=p_source_id,legacy_source_digest=p_digest,updated_at=clock_timestamp() WHERE event_id=p_event RETURNING * INTO e;
  RETURN forge_agent._retry_event_dto(e);
 END;$f$;
 REVOKE ALL ON FUNCTION forge_agent._retry_scope(text,text,uuid),forge_agent._retry_event_dto(forge_agent.coding_retry_events),forge_agent.retry_event_get(uuid),forge_agent.retry_event_project(text,text,uuid),forge_agent.retry_event_resolve(text,text,uuid,text,text,text,text),forge_agent.retry_event_observe(text,text,uuid,text,text,text,text[],text,text[]),forge_agent.retry_event_reserve(uuid,text),forge_agent.retry_event_adopt_legacy(uuid,integer,text,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_agent.retry_event_get(uuid),forge_agent.retry_event_project(text,text,uuid),forge_agent.retry_event_resolve(text,text,uuid,text,text,text,text),forge_agent.retry_event_observe(text,text,uuid,text,text,text,text[],text,text[]),forge_agent.retry_event_reserve(uuid,text) TO forge_agent,forge_coding_reconciler;
 GRANT EXECUTE ON FUNCTION forge_agent.retry_event_adopt_legacy(uuid,integer,text,text) TO forge_agent;
 \ir ../fragments/0031_native_retry_events.sql
+\ir ../fragments/0031_ci_stage_receipts.sql
 \ir ../fragments/0031_delivery_retry_events.sql
