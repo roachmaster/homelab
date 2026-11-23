@@ -7,6 +7,14 @@ Mail remains retired. Their PostgreSQL history and supported inert local
 snapshots remain preserved. The current browser contract is **ABI14**; the
 native HTTP protocol remains version1.
 
+The shared retry implementation uses one default allowance of **20** across
+native and external agents, including plan/code revisions, repairs and reviewer
+corrections. Migration30 adds scoped, recorded updates for active budgets while
+preserving original snapshots, reviews, checks and spent counters. A stopped
+legacy workflow can continue through an idempotent owner action using its actual
+last plan and review. This source description is not a live activation receipt;
+the delivery panel and protected rollout records establish the deployed version.
+
 The retained pre-delivery live checkpoint is main `95651a5` (tree `6d380c5a`) on
 23 November 2026. Its Rust/UI artifacts and native/browser qualification retain
 their actual built revision `a3a14e9`: all **499 consumed build inputs** match

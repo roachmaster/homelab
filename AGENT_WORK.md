@@ -12,6 +12,16 @@ shared-policy owner owns native/SQL; external owner owns Muse continuation; audi
 owner owns reviewer-correction and manual-history compatibility. Process timeout
 durations and OS rollback limits remain separate from agent revision allowances.
 
+Integrated source checkpoint: shared policy, native amendment sweep, M30,
+external continuation and reviewer/manual-history compatibility are implemented.
+Legacy source-readiness exhaustion uses the frozen or amended threshold while
+retaining its once-only delivery guard. Portal protocol accepts historical and
+20-attempt limits without a new ABI. Component UI verification passed113 native
+tests and28 browser groups; integrated source preflight passed221 tests with zero
+skips. Actual PostgreSQL tests cover20→21, immutable snapshots/counters and raced
+continuation. Final exact-main Jenkins proof and protected deployment are separate
+live gates; no task history or allowance was changed by this source checkpoint.
+
 # Previous: Recover feedback delivery through the event stream — 2026-11-23
 
 The user explicitly requests implementing recovery for the stopped diagram

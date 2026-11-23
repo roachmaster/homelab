@@ -295,6 +295,28 @@ Pending successors remain Active; a terminal exhausted repair or failed release
 appears in Attention. Header-absent legacy clients retain their previous payload
 and scope behavior before pagination; ABI14 clients negotiate the new projection.
 
+## Shared agent retry allowance
+
+The owner-selected default is 20 attempts for all agents: native and external
+plan revisions, code revisions, repair rounds, stagnant rounds, infrastructure
+retries, reviewer corrections and feedback delivery recovery. A provider does
+not get a separate allowance. Required reviews, checks, grants and process
+supervision remain enforced; this policy does not change rollback or timeout
+controls.
+
+Migration30 expands counter constraints and provides the scoped
+`amend_agent_retry_policy` port. Active work records a `retry_policy_updated`
+checkpoint before its numeric allowance changes. Original snapshots, approved
+plans, recipes, digests, source receipts and spent counters remain unchanged.
+An existing workflow with three revisions spent therefore has 17 remaining.
+Historical completed work retains its original receipts.
+
+A workflow already stopped by the old limit uses a revision-bound, idempotent
+owner continuation. The next assignment contains the previous plan and actual
+review findings; it resumes at revision4 rather than starting another root.
+The UI accepts both historical limits and the shared20 contract. Activate the
+matching decoder and schema before exposing the wider backend projection.
+
 ## Feedback delivery recovery
 
 A stopped native implementation can recover unavailable build feedback through
