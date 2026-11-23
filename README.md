@@ -4,7 +4,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 
 ## Current implementation
 
-[Current design and deployment status](docs/design/implementation-status.md) is the starting point: generated Chat/Agents/Workbench, saved PostgreSQL conversations and queued inference, optional managed editing, typed providers and durable jobs, game runtime/assets/replay and the static-web Studio service. The live portal publishes the same reference at [Design](https://portal.thedevex.com/design/implementation). Repository support and live enablement are recorded separately; the current host has no Studio relay and its source project is read-only.
+[Current design and deployment status](docs/design/implementation-status.md) is the starting point. The generated portal opens to Agents, with Workbench, Home and Design alongside it. Chat and Mail are inactive portal views; their PostgreSQL history remains preserved. Repository capabilities include optional managed editing, typed providers and durable jobs, game runtime/assets/replay and the static-web Studio service. The last qualified live release is `95651a5` on 23 November 2026, using ABI13 and schema26; Studio has no configured relay and its source project is read-only. Documentation and source fixes after that checkpoint do not deploy themselves. The portal's [Design reader](https://portal.thedevex.com/design/implementation) reflects its installed release until a separate verified rollout.
 
 ## Forge framework portfolio
 
@@ -24,7 +24,7 @@ The [first Rust core](src/rust/README.md) now implements typed contracts, a sync
 
 ## Forge GPU inference
 
-The [Mission Control runner](deploy/mission-control/agent-runner/README.md) records Chat requests and events in PostgreSQL and sends inference requests over the private Forge tunnel. See the [service inventory](docs/architecture/forge-ide-system-inventory.yaml) for the deployed endpoints.
+The [Mission Control runner](deploy/mission-control/agent-runner/README.md) retains native Chat/Mail APIs, PostgreSQL history and queued inference contracts. The current portal sends no Chat/Mail inference requests. See the dated [service inventory](docs/architecture/forge-ide-system-inventory.yaml) for earlier GPU endpoints; the Web-only deployment does not requalify GPU/model availability.
 
 ## Forge IDE read-only workbench
 
@@ -32,7 +32,7 @@ The [Mission Control runner](deploy/mission-control/agent-runner/README.md) reco
 
 The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) opens a single allowed project automatically and provides project-wide file/symbol search, Explorer, Outline and a read-only source viewer. Opening a file reads bounded source through the admitted host and agent; its SHA-256 must match the bytes used for inspection. Selecting a symbol reveals its numbered source lines, including on phones. Problems, metadata and source-shape analysis remain supporting tools. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above are design images, not screenshots. Managed editing/saving are implemented behind explicit project opt-in and revision checks; LSP and general Run/Debug remain future capabilities.
 
-[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe current compositions and state ownership, including the current mobile controls. The current [generated IDE](src/rust/forge-ide-web/README.md) opens to Chat and uses local WASM ABI 7. Rebuild its assets as a bundle. The native gateway admits `ide.source` separately and validates inspected-content digests, so deploy the host and agent together. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
+[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe current compositions and state ownership, including the mobile controls. The [generated IDE](src/rust/forge-ide-web/README.md) opens to Agents and uses local WASM ABI13. Deploy matching host and HTML/CSS/JS/WASM assets atomically. The native gateway admits `ide.source` separately and validates inspected-content digests; an unchanged agent can remain running only after its wire compatibility is verified. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
 
 ## Forge IDE generated browser boundary
 
@@ -67,8 +67,10 @@ make asm                     # release assembly for the system library
 
 The [root Makefile](Makefile) wraps Cargo in `src/rust/`; [target/feature selection,
 assembly output and CI details](src/rust/README.md#root-makefile) include the direct
-Cargo equivalents. The workflow performs CI checks only: no deployment or release
-publication is configured.
+Cargo equivalents. These Make targets run checks; they do not publish source or
+deploy services. The separately configured [Jenkins delivery workflow](docs/architecture/ci-pipeline.md)
+owns trusted verification/publication. GitHub Actions remain disabled. New CI
+profiles and this documentation require explicit qualification and rollout.
 
 [Headless IDE QA](src/rust/forge-ide-web/tests/browser/README.md) reuses the 28-group
 real-browser workbench suite with stable scenario IDs, JSON/Markdown/JUnit results,
@@ -77,7 +79,7 @@ browser prerequisites first; `make ui-qa` does not install or weaken browser sec
 Native/unit checks and injected faults remain distinct from actual browser-to-agent
 acceptance. Each run gets fresh ignored output rather than reusing stale evidence.
 
-The terminal discovers its selected registered commands and sends typed requests through the shared bridge. A separate [command-description contract](src/rust/forge-command/README.md) supplies names, help, named argument types and required/optional/default declarations; `Task` remains an independent execution stereotype. `help COMMAND` or `COMMAND --help` describes an admitted catalog entry without running the business task/client. In a session, use `disk.pwd`, `disk.list`, `disk.cd PATH`, `disk.permissions PATH`, `node.info`, `node.status`, `help`, then `exit`. Directory changes persist only in that session, not the process or your parent shell. Paths in session input are literal remaining text—not shell quoting or expansion. [Usage, feature selection and exit codes](src/rust/forge-terminal/README.md) · [Application assembly](src/rust/forge-local/README.md).
+The terminal discovers its selected registered commands and sends typed requests through the shared bridge. The [`forge_core::command` contract](src/rust/forge-core/src/command.rs) supplies names, help, named argument types and required/optional/default declarations; [`forge_core::task`](src/rust/forge-core/src/task.rs) remains an independent execution stereotype. `help COMMAND` or `COMMAND --help` describes an admitted catalog entry without running the business task/client. In a session, use `disk.pwd`, `disk.list`, `disk.cd PATH`, `disk.permissions PATH`, `node.info`, `node.status`, `help`, then `exit`. Directory changes persist only in that session, not the process or your parent shell. Paths in session input are literal remaining text—not shell quoting or expansion. [Usage, feature selection and exit codes](src/rust/forge-terminal/README.md) · [Application assembly](src/rust/forge-local/README.md).
 
 **Implemented:** local node observations, command discovery, optional native disk navigation and [bounded local counter jobs](src/rust/forge-local/JOBS.md). In one session use `jobs.submit KEY TOTAL`, copy its ID, then `jobs.inspect ID`, `jobs.step ID`, `jobs.cancel ID` and `jobs.list`. Only explicit stepping runs work; receipts are volatile and local owner labels are not authentication. Node status reports client-instance uptime/responding, not machine health. **Separate implemented slice:** authenticated durable jobs in `forge-jobs`. **Later:** generic remote execution and Raspberry Pi deployment.
 
@@ -162,7 +164,7 @@ this is not type checking or a full expression AST.
 
 ```bash
 cargo fetch --manifest-path src/rust/Cargo.toml --locked # first dependency setup
-make ide ARGS='inspect src/rust/forge-task'
+make ide ARGS='inspect src/rust/forge-core'
 ```
 
 ![Implemented Forge IDE inspection flow](docs/architecture/diagrams/mermaid/images/m11-ide-inspection.svg)
@@ -207,7 +209,7 @@ Repository skills live separately from application code in `.agents/skills/`.
 Use [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md) first
 when adding, changing, or reviewing a Forge capability or runtime dependency.
 It connects typed ports, factories, provider scopes, and startup wiring, with
-working examples from the Agent, Portal, model runtime, and durable jobs.
+working examples from the Agent, Portal, playtest I/O, and durable jobs.
 
 `Use $wire-forge-providers to add this capability and prove that the normal host selects and injects its provider.`
 
@@ -250,4 +252,4 @@ Examples: `Use $model-forge-module to explain the DSL and model a notifications 
 
 `Use $design-package-boundaries to review this feature and propose cohesive packages, dependency rules, and a safe migration plan.`
 
-Manual Mail archiving is implemented behind the native `mail_archive_enabled` opt-in (false by default). It requires the matching runner, registered schema migration 0008, native host, and ABI 5 asset bundle. Existing live-portal settings are unchanged by this repository work.
+The earlier Mail archive contract and migration0008 remain historical backend references. The current ABI13 portal has no Mail controls or mutation route, and legacy Mail links resolve to Agents. Reintroducing that UI requires an explicit request and fresh contract/rollout verification; an old archive flag does not enable it.

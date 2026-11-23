@@ -19,6 +19,8 @@ The installed runtime remains at the separately qualified 95651a5 deployment
 until any later rollout is explicitly verified; source changes confer no live
 activation claim.
 
+Documentation integration: reviewed223ca465 corrects active guides, ABI13/schema26, current956 deployment provenance and inactive/optional capabilities. Its262 scoped local/repository links and current-state assertions passed. Historical rollout evidence stays separate; remaining deleted-package examples are handled in a scoped follow-up.
+
 --- Previous task record ---
 
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22

@@ -95,10 +95,10 @@ as unimplemented merely because a third-party widget is not installed.
   lifecycle; there is no need to invent a widget-mount `UiEffect` for it.
 - Main-thread glue owns textarea DOM, caret, composition and bounded unacknowledged
   presentation input. Rust accepts the edits and ignores stale identity/context.
-  Dirty or pending file work blocks changing its file/project/report. Chat ↔
+  Dirty or pending file work blocks changing its file/project/report. Agents ↔
   Workbench switching retains the editor; the generated portal handoff blocks
-  leaving while a file draft is unsaved. Do not claim file drafts are durable
-  Chat-navigation checkpoints. Protected DOM clears on teardown and fatal/resume
+  leaving while a file draft is unsaved. Do not claim unsaved file drafts are durable
+  across page navigation. Protected DOM clears on teardown and fatal/resume
   recovery.
 - Saving prepares the typed browser `ide.edit_write` effect. The native host
   revalidates source and translates it to the agent's `ide.managed_write` contract.

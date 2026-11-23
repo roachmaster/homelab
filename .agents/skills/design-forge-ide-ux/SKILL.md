@@ -1,9 +1,16 @@
 ---
 name: design-forge-ide-ux
-description: Design or review Forge IDE Chat, Mail and Workbench UX, including responsive conversations, email reading, file navigation, information hierarchy and keyboard/touch flows. Apply to Forge IDE wireframes, UI implementation and review.
+description: Design or review Forge IDE Agents and Workbench UX, file navigation, information hierarchy and keyboard/touch flows. Retained Chat/Mail guidance applies only to historical references or an explicitly requested future UI.
 ---
 
 # Design Forge IDE UX
+
+Current navigation is Agents, Workbench, Home and Design, using ABI13. Chat is
+inactive and Mail is retired. Their layout guidance below is historical/future
+reference, not permission to restore controls or inference requests. Preserve
+inert legacy snapshots and backend history. Distinguish implemented optional
+capabilities from the last verified live configuration in the
+[implementation reference](../../../docs/design/implementation-status.md).
 
 Use [Design Modern UI](../design-modern-ui/SKILL.md) before layout changes
 to choose the action hierarchy, typography, surfaces, and responsive spacing.

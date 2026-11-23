@@ -1,6 +1,6 @@
 # Forge architecture
 
-The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Updated 21 November 2026; distinguish source capabilities from what a live host enables.
+The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Updated 23 November 2026; distinguish source capabilities from what a live host enables. The last qualified deployment is `95651a5`, ABI13/schema26; later review fixes are not a deployment.
 
 ## Current design references
 
@@ -30,6 +30,11 @@ trusted merge flow, including bounded revision, cancellation and lost-ack recove
 [Bootstrap/registrars](bootstrap-registrars.md) · [Dependency injection](dependency-injection.md) · [Module authoring](module-authoring.md) · [Foundation contracts](foundation-contracts.md) · [Foundation interface sketches](foundation-interfaces.md) · [DSL semantics](framework-dsl.md) · [Analysis/design method](analysis-and-design.md) · [Reuse map](reuse-map.md).
 
 Current synchronous core, native/remote adapters, authenticated durable job capability and managed file operations have concrete implementations. Broader federation, generic remote scheduling, full DSL automation and bootable-kernel ambitions remain proposals. The Rust durable jobs store and the Python/PostgreSQL inference/build queues are different implementations with different ownership.
+
+The [PostgreSQL/queue split](proposals/postgres-queue-split.md) is also an
+unimplemented proposal. No broker or orchestration microservice is enabled by
+that document; existing database leases, committed state and scoped coordinator
+admissions remain the current delivery boundary.
 
 ## Evidence and historical plans
 

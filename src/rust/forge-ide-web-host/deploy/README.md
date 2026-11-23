@@ -1,11 +1,15 @@
 # Access-controlled HTTPS deployment
 
-This is a single-operator IDE with chat and a read-only workbench. For an authenticated TLS proxy such
+This is a single-operator IDE with Agents and a source workbench. Active
+navigation is Agents, Workbench, Home and Design. Chat/Mail UI is inactive and
+its stored history remains preserved. For an authenticated TLS proxy such
 as Cloudflare Access, set `"session_auth": "trusted_proxy"` and the exact
-`public_origin`. Chat opens automatically after proxy sign-in. The Workbench button opens the
+`public_origin`. Agents opens after proxy sign-in. Workbench opens the
 source tools. Sessions last 30 minutes and are automatically
 re-established on reload after expiry or restart. They are not durable or isolated
-user accounts. No remote shell, source editing or background jobs are exposed.
+user accounts. Work/Usage and Studio require separately configured relays and
+grants; managed writes require explicit project opt-in and native authorization.
+No arbitrary remote shell is exposed.
 
 ```text
 Browser → HTTPS + access policy → local tunnel/proxy → loopback web host
@@ -16,10 +20,12 @@ Browser → HTTPS + access policy → local tunnel/proxy → loopback web host
                                                allowed source snapshot
 ```
 
-For inference, add the [private chat relay configuration](../README.md#chat-relay)
-to the web host and run the llama.cpp adapter on Forge GPU. If the services run
-on different hosts, use a loopback-only SSH forward from the web host to the
-adapter and keep its bearer token in an owner-only file outside served assets.
+The last qualified live `95651a5` deployment on 23 November 2026 used ABI13/schema26,
+configured Work/Usage/workspace persistence, no Studio relay and a read-only
+`homelab` project. See [implementation status](../../../../docs/design/implementation-status.md)
+for evidence boundaries. Later source/documentation changes are not a rollout.
+The legacy `chat` host block now configures workspace persistence only; it cannot
+enable retired Chat/Mail UI or inference commands.
 
 ## Build and stage
 
@@ -29,8 +35,11 @@ and `make ui-qa`. Browser QA requires sandbox-enabled Chrome and the pinned npm
 dependencies; localhost browser acceptance is separate from deployed HTTPS
 verification. Source must remain unchanged during the final fingerprinted run.
 
-Build `forge-agent` and `forge-ide-web-host` with Cargo `--release --locked`, and
-copy the generated asset bundle **including its manifest** as one unit. The host
+Build the candidate `forge-ide-web-host` with Cargo `--release --locked`, and
+copy the ABI13 generated asset bundle **including its manifest** as one unit. Build
+and update `forge-agent` separately when its code/configuration or wire contract
+changes. A Web-only replacement may retain the existing agent only after exact
+used DTO/codec/route compatibility is verified. The host
 verifies the manifest; never regenerate individual live files. Keep immutable
 release directories containing binaries, assets, source snapshot and hashes.
 Copy only tracked source files into the inspection snapshot, excluding operational
@@ -86,7 +95,9 @@ either mode invalidates the previous session.
 
 ## Verify and switch
 
-1. Start the agent and candidate web service on unused loopback ports. Confirm
+1. For a new installation, start the agent and candidate web service on unused
+   loopback ports. For an existing deployment, record which units actually need
+   replacement and preserve the others. Confirm
    listener ownership, restricted file modes and service startup.
 2. Fetch every static asset using the configured Host and compare its hash with
    the staged bundle. Wrong Host/Origin, inspection without a session and bad CSRF
@@ -105,9 +116,10 @@ either mode invalidates the previous session.
    authenticated browser journey when credentials are available; an Access login
    page alone does not prove the downstream authenticated flow. Record this gap
    explicitly when it cannot be exercised.
-6. Restart the web service after verification to discard test sessions. Confirm
-   a fresh Resume reconnects automatically without generating a pairing file.
-   Enable the candidate units for boot only after checks pass. Save safe evidence:
+6. Record the intended restart count before switching. Avoid an additional
+   production restart merely to repeat verification. Confirm a fresh Resume
+   reconnects without generating a pairing file. Enable newly installed units
+   for boot only after checks pass. Save safe evidence:
    source revision/diff hash, binary/asset hashes, test results, service state,
    source snapshot and credential expiration. Never save session/token contents.
 
@@ -117,8 +129,9 @@ Keep the old origin running until the new route is verified. Restore the saved
 proxy origin and restart only the bridge, then confirm its old response before
 stopping the candidate. No DNS or tunnel credential change is needed when the
 public tunnel still points at the same local bridge. For later Forge releases,
-restore both the matching binary/assets release and the matching agent config;
-restart the agent then web host. Trusted-proxy sessions reconnect on reload.
+restore the matching Web binary/assets/config as a unit. Restore/restart the
+agent only if that rollout changed its contract or configuration; preserve
+unaffected API, database and worker services. Trusted-proxy sessions reconnect on reload.
 
 This recipe is operational guidance, not an automatic deployment target or
 multi-user production certification. The applications still serve synchronously,

@@ -3,7 +3,9 @@
 A **loopback-bound, single-operator prototype** serving the generated IDE UI
 and adapting one browser command gateway to the existing authenticated remote
 IDE inspection task. Explicit HTTPS-origin configuration supports an access-controlled
-TLS proxy; this is not an unrestricted public service, editor or multi-user login.
+TLS proxy; this is not an unrestricted public service or multi-user login.
+Agents is the default admitted view, alongside Workbench, Home and Design.
+Managed editing is optional and requires independent native write grants.
 
 ## Composition and public API
 
@@ -89,7 +91,8 @@ retrieve the exact level bytes across releases. The active cook is served by
 its digest even when an archive directory is unset.
 
 The host registrar stages typed recipes for the asset bundle and archive,
-Chat relay, Studio relay, and independent optional Work and Usage relays. The host factory opens the configured directories
+workspace persistence (under the legacy `chat` configuration key), Studio relay,
+and independent optional Work and Usage relays. The host factory opens the configured directories
 and reads relay credentials after registry freeze. Each assembled host owns
 one of each configured resource and shares the ready instances with its handlers.
 
@@ -100,6 +103,9 @@ its `token_file`, and the separate HTTPS `preview_origin`. The web host checks
 the browser session, CSRF token, and configured project grants before dispatch.
 Open **Forge Studio** from the Game Engine design page or go to `/studio`.
 [Studio service setup](../../../deploy/mission-control/studio/README.md)
+
+The last qualified live `95651a5` host had no `studio` block. A launcher or static
+Studio page does not establish that its build service is enabled.
 
 ### Coding assignments and agent usage
 
@@ -154,7 +160,7 @@ Work and Usage remain disabled when their respective configuration is absent.
 
 See [the complete contracts and worker setup](../../../docs/architecture/coding-admission.md)
 and [the runner guide](../../../deploy/mission-control/agent-runner/README.md).
-The host validates browser ABI7; deploy the matching generated bundle atomically.
+The host validates browser ABI13; deploy the matching generated bundle atomically.
 
 Work requests are at most16 KiB on the wire, with an8 KiB UTF-8 prompt and2 KiB
 acceptance criteria. Escaped JSON may reach the wire limit first. Lists default to20
@@ -304,7 +310,8 @@ declarations in `forge-ide-web-host/src/design`. Open **Home** in the IDE or
 visit `/home` for links to the IDE, Studio, the Room One playtest, and Design.
 The host embeds these documents with their styles and diagrams. The Design
 overview is a compact index with sticky topics and focused readers. `/design/implementation`
-is the current source/configuration checkpoint; current controlled captures are in the
+records current source capabilities and a separately dated last-qualified deployment;
+editing that reference does not update a running host. Current controlled captures are in the
 wireframe reader. `/design/characters` showcases Scout creation stages and authored
 animation clips from the existing rig and illustrated skin. The sample
 Previous chats sandbox is at `/design/previous-chats`, layout snapshots are at
@@ -322,7 +329,9 @@ declarations,4 KiB per text and2 MiB aggregate text. Over-limit projections fail
 explicitly rather than truncating silently. WASM/UI bounds and agent traversal
 bounds remain independent. Native parser work is trusted-source synchronous work,
 not an adversarial-input sandbox. Operational credential provisioning, multi-user
-identity/delegation, public TLS hosting and file editing are deferred.
+identity/delegation and general remote execution remain separate work. Managed
+editing is implemented only for explicitly provisioned projects; the last checked
+live `homelab` source project remained read-only.
 
 ## Browser playtest
 
@@ -426,5 +435,6 @@ returned bytes against the expected digest before exposing source to WASM.
 `InspectionPort::source` is an explicit optional substitution seam; its default
 denies reads, preserving inspection-only consumers. The native response is at most
 1 MiB. The UI displays bounded windows (256 lines / 64 KiB) and safely renders text;
-this is a read-only source viewer, with no save or execution route. Generated assets
-and WASM ABI 5 must be replaced atomically with this host.
+this source-read operation does not grant mutation or execution. Optional direct
+editing uses its separate admitted `ide.edit_write`/`ide.managed_write` path.
+Generated assets and WASM ABI13 must be replaced atomically with this host.

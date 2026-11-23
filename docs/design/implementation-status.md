@@ -1,20 +1,34 @@
 # Current Forge implementation
 
-Updated 22 November 2026. The current source navigation is **Agents, Workbench,
-Home and Design**. Chat is temporarily inactive; Mail remains retired. Their
-PostgreSQL history and backend APIs remain preserved. This **PRELIMINARY, UNAPPROVED** reference
-adds optional Jenkins observations as schema27 after shipped Owner26 on prepared
-corrected cache context `4dc2214` (tree `db1036f5`, held main `c5d8647`).
-Frozen helper047, its correctness addendum and historical b870 timing reports
-are preserved. Owner4f source-followup/private authority, nativeca8
-accounting/terminal compatibility, M1–26 and the Rust7b ACK/browser tree with
-ABI12 remain unchanged.
-The candidate is not approved/main: genuine cache delivery and an actual
-merged-main context refresh must precede any new Plan/admission. It establishes no
-production activation or independent source approval. The remaining source retains native `forge-coding-v10`, separately selected unattended
-Antigravity execution and an atomic **ABI12** host/assets bundle.
-External authors use the separately versioned `forge-external-db-v2` workflow.
-Source validation and live rollout receipts remain separate.
+Updated 23 November 2026. Active navigation is **Agents, Workbench, Home and
+Design**, with Agents as the default admitted view. Chat is temporarily inactive;
+Mail remains retired. Their PostgreSQL history and supported inert local
+snapshots remain preserved. The current browser contract is **ABI13**; the
+native HTTP protocol remains version1.
+
+The last qualified live deployment is main `95651a5` (tree `6d380c5a`) on
+23 November 2026. Its Rust/UI artifacts and native/browser qualification retain
+their actual built revision `a3a14e9`: all **499 consumed build inputs** match
+the final source exactly. Genuine Jenkins native build 17 and companion build 1
+completed successfully, covering all 965 backend tests with zero skips. Separate
+artifact qualification passed 195 UI tests, 65 host tests and all 28 browser groups
+with successful cleanup. These are distinct evidence scopes, not a summed test
+count or a new execution claim for the reused artifacts.
+
+That Web-only rollout preserved **PostgreSQL schema26**, API/worker/source-agent
+services, configuration, credentials and replay archives. Origin and entry-bridge
+checks passed. Work, Usage and workspace persistence were configured; the host
+had **no Studio relay**, and the `homelab` source project had neither managed-write
+opt-in nor write grants. Protected activation and bridge receipts are retained
+under `/var/lib/forge-provisioning/portal-web-activation/operator-main-release/`.
+
+Repository changes after that checkpoint, including the current review fixes,
+are **not deployed by updating this reference**. A later rollout needs its own
+source, CI, artifact and activation evidence. Optional M27 Jenkins observations
+remain default-disabled and unactivated. The separate PostgreSQL/queue split is
+a [proposal](https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/postgres-queue-split.md), not an installed
+broker or orchestration service. Native `forge-coding-v10` and external
+`forge-external-db-v2` remain separate contracts.
 
 The typed agent catalog and usage contracts accept Grok when the configured
 backend advertises it. Missing allowance and token observations stay unknown;
@@ -22,7 +36,7 @@ policy9/migration18 add its supervised native adapter and independent default-of
 execution fences. A usage-only profile does not configure runnable work. The
 one authorized free-preview response verified structured token output, while
 production execution and numerical allowance remain unqualified. See the
-[Grok provider design](../architecture/grok-coding-provider.md).
+[Grok provider design](https://github.com/roachmaster/homelab/blob/main/docs/architecture/grok-coding-provider.md).
 
 An earlier successful runtime checkpoint activated M17 / `forge-coding-v8` from
 `8a1faf496f76ef30dd6f1362a32e5d70f80f012a`, with the prior checked UI assets.
@@ -43,10 +57,10 @@ Earlier observations below are dated history, not current readiness claims.
 | Mail (retired portal view) | Saved PostgreSQL threads and private backend contracts are preserved; old local draft hints stay inert. | No active Mail controls, requests or polling. Legacy Mail URLs lead to Agents; public Mail flags are disabled during rollout. |
 | Workbench | Header project breadcrumb and view sheet; unified search with entry-name mode; Explorer, verified File source, Outline and supplied Problems. Markdown has Raw/Display and source has Wrap. | Search covers the accepted report, not arbitrary filesystem contents or resolved references. Problems are inspection diagnostics, not compiler/test results. |
 | Agents | Catalog-backed autonomous assignments with configured independent author/reviewer roles, bounded revisions/repairs, exact-head checks and trusted automatic publication/merge; legacy assignments retain their manual lifecycle. Task/usage cards use semantic badges, readable times, precise token metrics and scoped refresh. | Independent Work/Usage grants and supervised workers remain required. Quota blocks never automatically rotate accounts or purchase credits. Runtime activation is recorded separately from source UI delivery. |
-| Grok provider | Pinned native 1.0.92 adapter, explicit fresh sessions, bound terminal cache accounting, instruction-only project trust and owned credential cleanup. Typed cards render supplied catalog/usage data. | Execution defaults off in API and worker config. Usage-only visibility reports Not reported; no quota polling, inferred allowance, paid fallback or change to Gemini/Codex roles. Historical M18/P9 qualification remains distinct from current schema26/P10/ABI12 source support and separately verified activation. |
+| Grok provider | Pinned native 1.0.92 adapter, explicit fresh sessions, bound terminal cache accounting, instruction-only project trust and owned credential cleanup. Typed cards render supplied catalog/usage data. | Execution defaults off in API and worker config. Usage-only visibility reports Not reported; no quota polling, inferred allowance, paid fallback or change to Gemini/Codex roles. Historical M18/P9 qualification remains distinct from schema26/P10/ABI13 source support and separately verified runtime enablement. |
 | Muse database workflow | A scoped `muse-db-primary` external runner authors Plan/Implement through PostgreSQL. The API coordinator queues actual independent native Codex reviews, bounded revisions and trusted Jenkins delivery; the root envelope displays phase, reviewer links and verified candidate/merge receipts. | Muse owns its process. No Mission Control Muse CLI or email runner is used. External artifacts supply no native attempt, stop proof or inferred allowance. Activation requires the matching schema22 scopes, `external_reviews:true`, delivery service and Jenkins job. |
 | Task envelopes and history | Every task has an immutable correlation UUID; every event has its own UUID and derives correlation from its owning task. One task row opens paged lifecycle/progress history with exact identities in disclosures. | Rust retains one 50-event page, a 256KiB summary budget and 64 cursor bookmarks. Native current-attempt milestones keep their separate 21-entry bound. Foreign attempt/assignment/workflow summaries are omitted. |
-| Editing | Direct textarea editing, Undo and status reconciliation remain available for admitted managed projects. Chat questions and model-generated proposal controls are inactive; backend contracts remain preserved. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. A rendered button is not write authority. |
+| Editing | Direct textarea editing, Undo and status reconciliation are implemented for admitted managed projects. Chat questions and model-generated proposal controls are inactive; backend contracts remain preserved. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. They were not enabled for the last checked live `homelab` project. A rendered button is not write authority. |
 
 The current [implementation captures](/design/wireframes) use disposable acceptance fixtures. Some fixtures contain partial inspection results or mask editable controls. Chat and Mail wireframes are dated historical references; they do not show the current active navigation. All captures use controlled data, not private operator data.
 
@@ -54,19 +68,20 @@ The current [implementation captures](/design/wireframes) use disposable accepta
 
 | Concern | Implemented ownership | Practical limit |
 | --- | --- | --- |
-| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **12**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
+| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **13**; deploy matching host and HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version1. |
 | Same-tab navigation | The IDE saves a checkpoint and bounded local JSON handoff before Home/Design. Return resumes admission, restores state and re-verifies Workbench source. Declared `#workbench` and `#agents` entry actions run after restore and are consumed. Legacy `#chat` and `#mail` map to Agents. Inert restore/save preserves Chat metadata without hydration. | URLs contain view intent, not reports, credentials or source identities. A fresh tab does not inherit another tab's unsent drafts. |
 | Chat persistence | PostgreSQL keeps operator history, tab checkpoints, conversation retention and queued runs. The history DAO supports list/open, expiry, long-term retention and deletion. | A default expiry applies automatically; deleting a saved conversation is distinct from cancelling a model run. |
-| Mail persistence | PostgreSQL stores threads, ordered messages, queued runs and recall metadata. Each inference reconstructs the accepted transcript and pins its model/profile. | Mail drafts survive the supported same-tab documentation handoff in local JSON; there is no durable cross-device Mail-draft table. |
+| Mail persistence | PostgreSQL retains threads, ordered messages, queued runs and recall metadata for backend access. | Supported legacy navigation snapshots retain inert draft hints. No Mail UI or polling is active, and there is no durable cross-device Mail-draft table. |
 | Dispatch | Mission Control commits scoped queued work and events. Native workers own isolated CLI processes; Muse claims its external assignments; the database coordinator validates actual results and schedules review/delivery successors. | Notifications only wake discovery. Committed rows, leases, immutable hashes, current grants and actual receipts authorize transitions. The browser never advances workflow state. |
 | Trusted delivery | A separate scoped delivery worker prepares a sanitized same-tree candidate, requests fixed Jenkins checks and records a guarded remote-main receipt. A private journal reconciles lost queue/merge acknowledgements. | Models receive no GitHub/Jenkins credentials. Required gates are `make ci`, `make ui-qa` and the full backend Python suite on the exact reviewed source; GitHub Actions stay disabled. Cancellation needs actual process cleanup. |
-| Jenkins observations | Authenticated `ci.jenkins.*` dispatch, HMAC webhook translation, immutable event records, leased consumer deliveries and monotonic observations use explicit factories and an optional API-owned consumer. | These observations do not authorize CI, review or merge. The default-disabled capability requires M27 and explicit runtime configuration; source support does not establish live activation. See the [Jenkins event contract](../architecture/jenkins-events.md). |
-| Mail token budget | Repository and inspected live runner profile: **4,096 context / 1,024 completion / 16 safety margin / 256 minimum follow-up tokens**. | An 8k profile is not active in the inspected runner. Context reservation is not a guarantee of response length. |
+| Jenkins observations | Authenticated `ci.jenkins.*` dispatch, HMAC webhook translation, immutable event records, leased consumer deliveries and monotonic observations use explicit factories and an optional API-owned consumer. | These observations do not authorize CI, review or merge. The default-disabled capability requires M27 and explicit runtime configuration; source support does not establish live activation. See the [Jenkins event contract](https://github.com/roachmaster/homelab/blob/main/docs/architecture/jenkins-events.md). |
+| Queue process split | A [design proposal](https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/postgres-queue-split.md) separates PostgreSQL state from queue delivery and reconciliation. | No message broker, new queue consumer or orchestration microservice is implemented or enabled by that document. Existing committed rows, leases and scoped coordinator admissions remain authoritative. |
+| Historical Mail token profile | Earlier runner observations recorded **4,096 context / 1,024 completion / 16 safety margin / 256 minimum follow-up tokens**. | These are dated profile observations, not a fresh GPU/model qualification or active Mail UI promise. New profiles require separate verification; context reservation never guarantees response length. |
 | Coding execution | Root-managed namespace supervisor drops to the approved signed-in CLI UID, zero capabilities and no-new-privileges; scoped worker/reconciler roles, isolated worktree, database-time leases, stop proofs and immutable full results. | Source capability; deployment is separately verified. Expiry/uncertain stop keeps the workspace reserved and requires trusted reconciliation plus explicit user resume. |
 | Agent usage | Codex supported metadata-only allowance/activity; fresh-session per-job counters for both adapters; decimal counters, provenance and stale/unknown states. | Antigravity headless allowance is `unsupported_headless`; external Muse allowance and unsupplied token observations stay Not reported. Account activity is separate from project totals. Context/cost estimates are future work; metadata refresh never generates a model turn. |
 | Recall/cache | The complete selected thread is re-tokenized within its profile. Mail can request llama.cpp prefix-cache reuse; the database remains the transcript authority. | Prefix caching is an optimization, not persistent model memory. A full thread archives for review when follow-up no longer fits. |
 
-The current [external workflow](../architecture/external-agent-workflow.md) documents the full Plan → independent review → Implement → code review → Jenkins → merge saga and factory/provider boundaries. [Task envelopes](../architecture/proposals/forge-task-event-envelope.md) records M21 and bounded Rust history.
+The current [external workflow](https://github.com/roachmaster/homelab/blob/main/docs/architecture/external-agent-workflow.md) documents the full Plan → independent review → Implement → code review → Jenkins → merge saga and factory/provider boundaries. [Task envelopes](https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-task-event-envelope.md) records M21 and bounded Rust history.
 
 Read the focused [Chat history](/design/chat-history), [dispatch](/design/chat-dispatch), [Mail](/design/mail) and [workspace recovery](/design/workspace) contracts for the exact DAO/DTO, event and recovery flows.
 
@@ -78,16 +93,26 @@ Read the focused [Chat history](/design/chat-history), [dispatch](/design/chat-d
 | Durable jobs/access | `forge-jobs` and `forge_core::access` provide authenticated contracts, retained receipts, leases, retry/recovery and owned execution. | This Rust jobs capability is distinct from the Python/PostgreSQL Chat/Mail runner and Studio service. |
 | Game runtime | Fixed-tick Q16 simulation, controller/collision queries, movement/jump, animation poses, bounded snapshots, debug traces and replay are implemented. | Room One is a browser playtest, not a complete general-purpose game editor. |
 | Assets | Offline cooking, manifests, atlas scale, verified level loading, two authored rooms and replay resource admission are implemented. | Browser I/O workers return bytes; Rust verifies and owns simulation activation. |
-| Studio | Generated Studio UI and a Python/PostgreSQL static-web build service implement admission, idempotency, worker leases, cancellation and verified previews. | Studio's current browser controller is generated JavaScript; moving its application intent into Rust/WASM remains work. Native/desktop/mobile game export is not implied. |
+| Studio | Generated Studio UI and a Python/PostgreSQL static-web build service implement admission, idempotency, worker leases, cancellation and verified previews. | The last qualified live host had no Studio relay. Studio's browser controller is generated JavaScript; moving its application intent into Rust/WASM remains work. Native/desktop/mobile game export is not implied. |
 | CI/CD & YAML AST | `forge-ide` exposes `ast_graph` (`ide.ast_graph@1`, YAML default and `--format json` interchange) alongside unchanged `ide.inspect@1`, with inline-module ancestry, truncation incompleteness, and lossless non-UTF-8 unsupported path reporting. Root Make targets provide `make fmt`/`fmt-check`/`portal-style-check`, `make ast-yaml`, `make dead-code` (authoritative Rust clippy dead-code/unused checks without `RUSTFLAGS` cache invalidation, advisory Rust YAML AST orphan/pub/allow census, and Python AST checks), and strictly 1-hop `make build-affected`/`check-affected`/`test-affected` (`SCOPE=all` default, schema validation, base/current deletion+rename tracking, conservative invalidation on incomplete graphs or global/unmapped changes, and skipped transitive reporting). | 1-hop selective targets accelerate local and PR feedback (`pr-fast-gate`); Cargo may still compile required upstream prerequisites. Full `make ci`, Mission Control backend suites, and the 28 browser QA groups (`make ui-qa`, distinct from `make ui-qa-check` helper tests) remain authoritative before merge. |
 
 Explore [Scout character creation](/design/characters) for the greybox-to-illustrated workflow and all 16 authored animation clips.
 
 See [plug-and-play](/design/forge-providers), [workers](/design/forge-workers), [game runtime](/design/game-studio), [physics](/design/game-physics) and [assets](/design/game-asset-pipeline).
 
+## Historical preliminary M27 source context — 22 November 2026
+
+An earlier draft described unapproved M27 observations on corrected cache context
+`4dc2214` (tree `db1036f5`, then-held main `c5d8647`). It preserved helper047,
+its correctness addendum, historical b870 timing reports, Owner4f private
+source-followup authority, nativeca8 accounting compatibility, M1–26 and the
+earlier Rust7b ACK/browser ABI12 tree. Those identities describe that draft's
+qualification boundary; they are not the current main, browser ABI or a live M27
+activation receipt. The subsequent `95651a5` Web rollout above did not apply M27.
+
 ## Historical feedback-loop source checkpoint — 20 November 2026
 
-The [feedback-loop implementation](../architecture/proposals/forge-agent-feedback-loop.md)
+The [feedback-loop implementation](https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-agent-feedback-loop.md)
 adds migration15 and `forge-coding-v5`, immutable lease-bound repair feedback,
 independent local/hosted verification, append-only retry runs and a frozen root
 repair budget. The default policy permits three repair rounds, two successive
@@ -110,7 +135,7 @@ Later activation is recorded separately; this dated entry is not the current
 schema, policy or ABI declaration.
 The new focused design reader is [/design/agent-feedback-loop](/design/agent-feedback-loop).
 
-## Observed deployment checkpoint
+## Historical deployment checkpoint — 19 November 2026
 
 On **19 November 2026**, code commit `aa2eb1a` was deployed as release
 `20261119T225400Z-aa2eb1a-agents-dashboard`. Gemini publishes a public plan first

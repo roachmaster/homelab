@@ -1,7 +1,7 @@
 # Forge IDE UI model
 
-Portable Rust policy for Forge IDE Chat, Mail, source inspection and opt-in
-managed editing. This package has
+Portable Rust policy for Forge IDE Agents, source inspection and opt-in
+managed editing, including inert legacy Chat/Mail snapshot validation. This package has
 only `serde` as a normal dependency: no native inspection, filesystem, DOM,
 network, TLS or asynchronous runtime. It is intentionally a pure model, not an
 empty DI container or an additional implementation of `Task`.
@@ -22,8 +22,8 @@ codec, not internal state. The same model runs in native unit tests and real
   once as an effect and is not stored in the model or view; this is not a claim
   of cryptographic memory erasure in Rust or JavaScript.
 - Generated main-thread primitives apply the generic `ViewModel` bindings as text
-  and semantic controls, preserving focus and browser lifecycle. Assistant replies
-  and verified Markdown file previews pass through the sanitizing Rust renderer
+  and semantic controls, preserving focus and browser lifecycle. Verified
+  Markdown file previews pass through the sanitizing Rust renderer
   in `src/markdown.rs`. The generated IDE browser app applies the resulting HTML
   through the single `innerHTML` assignment in `setMarkdown`.
 - Host and agent independently authorize every request. Catalog choices, view IDs,
@@ -140,23 +140,17 @@ work or Explorer on narrow displays without becoming a domain-state controller.
 
 ## ABI and verification
 
-The repository WASM ABI is **5** and includes Chat/Mail intents, transcript
-bindings, inference effects and the manual Mail archive contract. Deploy the
-generated scripts, HTML/CSS and WASM together as one verified bundle; this source
-update does not change the dated live ABI 4 deployment. The HTTP catalog/report
-protocol remains version 1.
+The current WASM ABI is **13**. Agents is the default admitted view; navigation
+is Agents, Workbench, Home and Design. Chat/Mail reducers, inference effects and
+mutation controls are retired. Their supported legacy snapshots remain inert
+and cannot submit or replay work. Deploy the matching native host and generated
+HTML/CSS/JS/WASM atomically. Older bundles, including ABI12, cannot be mixed with
+this host. The HTTP catalog/report protocol remains version1.
 
-Manual archive is available only when the admitted catalog enables it. The native
-`chat.mail_archive_enabled` flag defaults to false. Rust binds an eligible thread
-and its expected revision, blocks drafts and active jobs, and accepts only the
-matching authoritative receipt. A same-owner/thread/base replay returns the
-original committed revision; a Manual reason is distinct from ContextLimit.
-Uncertain delivery retains the archive intent for an explicit retry. The runner,
-registered migration 0008, native host and ABI 5 assets require a coordinated
-rollout with session rotation. Once Manual records exist, rollback requires a
-compatible reader; see [host compatibility](../forge-ide-web-host/README.md#workbench-asset-compatibility).
-Folder navigation, delete and unarchive remain separate operations; the latter
-two are not part of this archive capability.
+The [implementation status](../../../docs/design/implementation-status.md)
+records the last qualified live `95651a5` deployment and distinguishes it from later
+source/documentation changes. Managed direct editing is a repository capability;
+the last checked live `homelab` project had no managed-write opt-in or write grant.
 
 Worker order: `abi_version()` → `reserve_input(len)` → copy JSON bytes into the
 exported memory → `dispatch_input()` → copy `output_ptr()/output_len()` bytes →
@@ -185,7 +179,14 @@ Native tests cover state transitions, stale/cancel/error handling, malformed
 wire input, projection bounds, native names and declaration hierarchy. Browser
 journeys belong to the composition's separate integration checks.
 
+### Historical Mail archive contract
 
+ABI5 introduced a capability-gated manual Mail archive flow with migration0008,
+thread/revision checks and idempotent receipts. That is historical compatibility
+context, not the current UI API. Stored backend archives remain preserved;
+old flags cannot enable retired portal routes. See
+[host compatibility](../forge-ide-web-host/README.md#workbench-asset-compatibility).
+Reintroducing Mail requires explicit authorization and fresh verification.
 
 ## Source shape
 
@@ -209,7 +210,8 @@ limited to unique bare names in the same file and lexical module; missing import
 and impl generic parameters mean even those header matches are tentative.
 
 All shape rows use existing `SelectEntry` actions with the accepted report token.
-`MoreShape` and `PreviousShape` are additive ABI 2 local intents. The independent
+`MoreShape` and `PreviousShape`, originally introduced in ABI2, remain local
+intents in ABI13. The independent
 page is bounded by the same 256-row/192-KiB budget as other lists, has reversible
 history, emits no pagination effects, ignores stale report tokens and clears with the report. Selecting a readable file prepares its source read.
 The additive bindings require rebuilding and deploying the generated assets and

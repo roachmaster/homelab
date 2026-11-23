@@ -4,7 +4,8 @@ The generated workbench lets an admitted user find a file or Rust declaration an
 read its actual source. Application structure and styles are typed Rust components
 and validated YAML; the compiled Rust/WASM model owns project, selection, source
 and request policy. Source inspection is read-only by default. Opted-in managed
-projects can also apply and undo staged inline edits.
+projects can also save and undo direct edits. The last qualified live `95651a5`
+`homelab` project was read-only; source support does not enable writes by itself.
 
 ## Use the workbench
 
@@ -48,25 +49,16 @@ inputs are limited to 256 UTF-8 bytes. No regular-expression evaluation is expos
 
 ## Source and request ownership
 
-The Workbench dock offers **Send** for a contextual question and **Propose
-edit** for a read-only diff. Both use the active in-session Chat thread.
-Before inference, the host resolves the accepted report entry and re-reads
-the source through the agent to verify its digest. Only a bounded excerpt
-from the selected window is sent. The visible Chat transcript retains the
-question and reply. After a confirmed write, the same Chat thread can use
-**Send with file** once the Workbench has verified the resulting revision.
+Chat questions, **Send with file**, model-generated proposals and their Apply
+controls are inactive. The current portal does not send inference requests from
+Workbench. Historical inline-proposal designs are not active controls.
 
-A proposal accepts a structured replacement of up to eight complete lines
-inside the excerpt. Review shows old and new line numbers and explicit
-addition and deletion markers. **Discard** returns to verified source
-locally. A proposal with a verified native revision in an opted-in managed
-workspace also offers **Apply**. A successful write refreshes the inspection
-and reopens the file if it is still selected. **Undo edit** checks the current
-revision against the applied revision before restoring the saved bytes. An
-ambiguous result offers **Check status** for the same operation ID. Reloading
-the browser can recover the latest operation within the active host session.
-The agent journal survives an agent restart. The web host's operation index
-is in memory, so browser recovery depends on the original host session.
+For an explicitly provisioned managed project, **Edit file** and **Save file**
+use the direct-edit contract below. A confirmed save refreshes source; Undo
+checks the current revision before restoring the saved bytes. An ambiguous
+result offers **Check status** for the same operation ID. The agent's journal
+survives its restart, while the host's operation index is in memory and browser
+recovery depends on the admitted session. Read permission never grants writes.
 
 A source request carries its own request token, the accepted report token, configured
 node/project and report-local entry ID. Browser IDs are not native paths or authority.
@@ -118,8 +110,9 @@ clears the filter draft. After navigation, an admitted tab can recover its
 selected project, file and declaration from an admitted tab checkpoint. Forge
 obtains a fresh report and verifies source again. Browser session storage holds
 the random tab identifier and a bounded navigation handoff containing supported
-drafts and bookmarks. Declared `#chat`, `#mail`, and `#workbench` fragments select
-a view after restore and are then consumed with `history.replaceState`. Source,
+drafts and bookmarks. Declared `#agents` and `#workbench` fragments select a view
+after restore; legacy `#chat`/`#mail` resolve to Agents without retired I/O. Entry
+actions are then consumed with `history.replaceState`. Source,
 report identities, and credentials do not enter URLs; there is no persistent
 report cache, arbitrary source deep link, or cross-tab draft synchronization.
 
@@ -130,7 +123,7 @@ report cache, arbitrary source deep link, or cross-tab draft synchronization.
 | `generate/application.rs`, `ui/theme.yaml` | Typed component composition, transport declarations and bounded visual tokens |
 | Component/generator primitives | Semantic Source, Region and PaneLink components, safe DOM, focus, geometry and lifecycle |
 | `forge-ide-ui` model/projection | Context, report/search/selection, source acceptance, source windows and typed presentation |
-| Generated worker and `src/wasm.rs` | Real ABI 5, bounded codecs, declared effects and transport cleanup |
+| Generated worker and `src/wasm.rs` | Real ABI13, bounded codecs, declared effects and transport cleanup |
 | Native host/agent | Session/Origin/CSRF, configured aliases, mTLS, independent admission and bounded source reads |
 
 Source is a reusable read-only display component, not a JavaScript editor widget.
@@ -141,15 +134,16 @@ runtimes. Non-IDE component fixtures exercise the same primitives.
 
 ## Compatibility and verification
 
-**Repository ABI 5 requires an atomic generated asset/WASM deployment.** It
-includes guarded source/edit events, source-window and editor bindings,
-Chat/Mail state, unified search actions, pane reveal metadata, and capability-gated
-manual Mail archive intents/results. Older workers/WASM, including ABI 4, cannot
-be mixed with this bundle. Source callers and serialized event producers must
-use the matching contracts. The dated live ABI 4 checkpoint is separate from
-this repository update; no deployment is implied.
+**ABI13 requires an atomic matching host/generated asset/WASM deployment.** It
+includes guarded source/direct-edit events, source windows, Agents workflows,
+unified search and pane reveal metadata. Legacy Chat/Mail snapshots remain inert;
+their retired controls/effects cannot run. Older workers/WASM, including ABI12,
+cannot be mixed with this bundle. Source callers and serialized event producers
+must use matching contracts. The separately dated
+[last qualified deployment](../../../docs/design/implementation-status.md)
+does not imply that later repository fixes are already live.
 
-The browser/native protocol remains version 1 with a new typed source command on
+The browser/native protocol remains version1 with the typed source command on
 the existing `POST /forge/v1/dispatch` gateway. Core Task/IoClient, bootstrap/provider
 and shared bridge ownership remain intact. This is not a claim of source-level
 compatibility for exhaustive Rust enum users or direct view constructors.
@@ -172,7 +166,7 @@ not establish keyboard, screen-reader or admission correctness.
 or CRLF line endings. The main thread presents the textarea, caret and composition
 events. WASM owns the draft and identifies the editor instance. It blocks a dirty
 file change until the user saves or discards the draft. Switching between
-Workbench and Chat keeps the draft open.
+Workbench and Agents keeps the draft open.
 
 **Save file** submits the current inspected revision through `ide.edit_write`.
 The host verifies the source and the write agent applies the change using its
@@ -181,5 +175,7 @@ convention. A successful save refreshes the verified source and offers Undo in
 a managed workspace. Conflicts keep the draft open for review or copying. An
 unknown outcome offers **Check status** for the existing operation.
 
-The [inline-edit implementation reference](../../../docs/architecture/proposals/forge-ide-inline-edit.md)
-records the contextual prompt, staged diff, and guarded Apply and Undo path.
+The [earlier inline-edit design](../../../docs/architecture/proposals/forge-ide-inline-edit.md)
+records the historical contextual prompt and model-generated diff. Those controls
+are inactive; current direct editing is documented above and in the
+[Rust editor model](../forge-ide-ui/src/model/edit.rs).

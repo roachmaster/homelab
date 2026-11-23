@@ -1,7 +1,9 @@
 # Postgres for state, a queue for delivery: splitting the Forge event stream
 
 **Status: proposal, drafted 2026-11-22 by Muse at Leonardo's request. Not
-implemented. This branch contains this document only; no code changes.**
+implemented. The proposal introduced this document only, with no broker,
+queue-consumer or orchestration code. Other repository changes do not activate
+this design.**
 
 ## 1. Goal
 

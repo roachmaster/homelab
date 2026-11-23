@@ -2,6 +2,11 @@
 
 Start with the [current implementation reference](design/implementation-status.md). It distinguishes implemented repository capabilities, configured live services, remaining work and historical proposals. The live portal exposes the same reference at `/design/implementation`.
 
+The active portal is Agents, Workbench, Home and Design, with ABI13. The last
+qualified live `95651a5` deployment retained schema26 and kept Studio/managed writes
+disabled for the checked host/project. New source and documentation fixes await
+their own verification and rollout; historical Chat/Mail notes are not active UI.
+
 ## Current architecture and operation
 
 - [Framework implementation inventory](architecture/forge-framework-blueprint.md#current-implementation): typed assembly, factories/providers, durable jobs, access and managed writes.

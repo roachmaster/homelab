@@ -86,11 +86,15 @@ including drafts, messages, saved identities, model choice and pending-run hints
 These hints are never resumed, polled or cancelled by the portal. Explicit or
 restored Workbench selection remains usable, including managed direct editing.
 
-The Agents overview also has an **External agents** directory. Muse Email is a
-manual contact with a verified sender identity, separate from native worker
-profiles and usage cards. Its recipient is `roachmaster@muse.ai`; it exposes no
-task-submit action, quota, worker-ready status or automatic mailbox processing.
-The typed contact declaration lives in `src/generate/application/external_agents.rs`.
+The Agents overview also has an **External agents** directory. Muse owns its
+PostgreSQL-connected runner; Forge dispatches assignments and receives plans and
+review reports through the scoped database contract. The catalog supplies its
+advertised readiness/capabilities, and New task offers it only when available.
+This does not imply a Mission Control Muse CLI/email runner or reported account
+allowance. The typed declaration lives in
+`src/generate/application/external_agents.rs`. The separate
+[Muse email proposal](../../../docs/architecture/muse-email-transport.md)
+does not describe the current active integration.
 
 Browsers that support the native leave warning can show it when a draft,
 conversation or Workbench context is open. The browser supplies the wording.
@@ -180,5 +184,6 @@ Mail controls, request bindings, poll timer or Mail styles. Legacy `#mail` and
 `/mail` links open Agents. Valid old local Mail draft hints remain inert across
 the same-tab handoff; they never reopen Mail or replay an action. PostgreSQL Mail
 history and private backend contracts remain available for archival access.
-Disable both `chat.mail_enabled` and `chat.mail_archive_enabled` in deployed web
-configuration so cached older clients cannot invoke Mail through the gateway.
+The current host disables both Mail capabilities and rejects retired commands
+before upstream I/O, even when legacy configuration flags remain true. Do not
+re-enable Mail through old flags; any future UI requires explicit authorization.
