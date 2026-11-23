@@ -349,8 +349,11 @@ fn shared_retry_allowance_displays_preserved_counts_for_native_and_external_agen
         assert!(workflow.is_valid());
         let mut view = ViewModel::default();
         agents.project(&mut view, true, true, true);
-        assert!(view.texts.iter().any(|binding| binding.id == "agents-workflow-revisions"
-            && binding.text == "Plan revisions 4/20 · Code revisions 3/20"));
+        assert!(view
+            .texts
+            .iter()
+            .any(|binding| binding.id == "agents-workflow-revisions"
+                && binding.text == "Plan revisions 4/20 · Code revisions 3/20"));
         let mut review = review_summary(false);
         review.round = MAX_AGENT_RETRIES;
         review.max_rounds = MAX_AGENT_RETRIES;
