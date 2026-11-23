@@ -172,8 +172,9 @@ class ActorConfig:
 
 
 class SystemPort:
-    def call(self, argv, *, timeout=30):
-        return subprocess.check_output(argv, stdin=subprocess.DEVNULL,
+    def call(self, argv, *, timeout=30, data=None):
+        options = {'stdin': subprocess.DEVNULL} if data is None else {'input': data}
+        return subprocess.check_output(argv, **options,
             stderr=subprocess.PIPE, timeout=timeout, cwd='/', env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
 
     def show(self, key):
@@ -187,7 +188,7 @@ class SystemPort:
         query = ("SELECT forge_agent.delivery_actor_authorize('" + release_id + "'::uuid,"
                  + str(generation) + ",'" + token + "'::uuid," + ('true' if start else 'false') + ");")
         raw = self.call(['/usr/sbin/runuser', '-u', 'postgres', '--', '/usr/bin/psql',
-            '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-d', 'forge_agent', '-c', query])
+            '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-d', 'forge_agent', '-f', '-'], data=query.encode())
         if len(raw) > 16384:
             raise ValueError('Oversized release authority response')
         result = decode(raw)
