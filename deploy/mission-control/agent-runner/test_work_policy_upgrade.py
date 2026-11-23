@@ -1066,6 +1066,12 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 old_relations = [row[0] for row in self.execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace ORDER BY relname", cluster=cluster)]
                 old_functions = [row[0] for row in self.execute("SELECT p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') ORDER BY 1", cluster=cluster)]
                 def snapshot():
+                    # M31 pins the complete replacement definitions separately;
+                    # reverse only its exact known native source amendments when
+                    # comparing this M26 historical function inventory.
+                    definition="pg_get_functiondef(p.oid)"
+                    if self.execute("SELECT to_regprocedure('forge_agent._retry_legacy_source(oid,text)') IS NOT NULL",cluster=cluster)[0][0]:
+                        definition="replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,p.prosrc))"
                     return (
                         self.execute("SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=26 ORDER BY version", cluster=cluster),
                         {table:self.execute("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM forge_agent."+table+" t", cluster=cluster) for table in previous_tables},
@@ -1073,7 +1079,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                         self.execute("SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r", cluster=cluster),
                         self.execute("SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid", cluster=cluster),
                         self.execute("SELECT relname,relowner,relacl FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname=ANY(%s) ORDER BY relname", (old_relations,), cluster=cluster),
-                        self.execute("SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),pg_get_functiondef(p.oid),p.proowner,p.proacl FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') AND p.oid::regprocedure::text=ANY(%s) ORDER BY n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)", (old_functions,), cluster=cluster),
+                        self.execute("SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),"+definition+",p.proowner,p.proacl FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') AND p.oid::regprocedure::text=ANY(%s) ORDER BY n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)", (old_functions,), cluster=cluster),
                         hashlib.sha256((cluster.data/"pg_hba.conf").read_bytes()).hexdigest(),
                     )
                 before = snapshot()

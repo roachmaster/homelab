@@ -152,4 +152,14 @@ GRANT EXECUTE ON FUNCTION forge_agent.retry_event_adopt_legacy(uuid,integer,text
 \ir ../fragments/0031_native_retry_events.sql
 \ir ../fragments/0031_ci_stage_receipts.sql
 \ir ../fragments/0031_delivery_retry_events.sql
+-- Preserve an existing Muse reader's role/defaults without extending its
+-- historical table allowlist to retry authority sidecars.
+DO $retry_reader_boundary$
+BEGIN
+ IF EXISTS(SELECT FROM pg_roles WHERE rolname='muse_events') THEN
+  REVOKE ALL ON forge_agent.coding_retry_events,forge_agent.coding_retry_event_admissions,
+   forge_agent.coding_retry_event_observations,forge_agent.coding_retry_review_events,
+   forge_agent.delivery_retry_event_links FROM muse_events;
+ END IF;
+END;$retry_reader_boundary$;
 \ir ../fragments/0031_retry_event_fingerprints.sql
