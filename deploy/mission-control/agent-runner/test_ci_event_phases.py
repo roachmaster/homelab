@@ -108,7 +108,9 @@ class EventPhaseContractTest(unittest.TestCase):
             'deploy/mission-control/sql/migrations/0031_retry_events.sql',
             'deploy/mission-control/sql/fragments/0031_ci_stage_receipts.sql',
             'deploy/mission-control/sql/fragments/0031_native_retry_events.sql',
-            'deploy/mission-control/sql/fragments/0031_delivery_retry_events.sql'}
+            'deploy/mission-control/sql/fragments/0031_delivery_retry_events.sql',
+            'deploy/mission-control/sql/migrations/0032_observer_retry_lineage.sql',
+            'deploy/mission-control/sql/fragments/0032_observer_retry_lineage.sql'}
         contract=CiGateContractFactory(EVENT_PROFILE).create()
         for path in paths:
             with self.subTest(path=path):
@@ -116,8 +118,10 @@ class EventPhaseContractTest(unittest.TestCase):
                 self.assertTrue(protected_gate_path(path,profile=EVENT_PROFILE))
                 self.assertTrue(supervision.CI.profile_protected_gate_path(path,EVENT_PROFILE))
         for profile in (LEGACY_PROFILE,SCOPED_PROFILE):
-            self.assertFalse(CiGateContractFactory(profile).create().protects(
-                'deploy/mission-control/sql/migrations/0031_retry_events.sql',lambda _path:False))
+            for path in ('deploy/mission-control/sql/migrations/0031_retry_events.sql',
+                    'deploy/mission-control/sql/migrations/0032_observer_retry_lineage.sql',
+                    'deploy/mission-control/sql/management/verify-delivery-lineage.sql'):
+                self.assertFalse(CiGateContractFactory(profile).create().protects(path,lambda _path:False))
 
 
 @unittest.skipUnless(supervision.TOOLCHAIN_AVAILABLE,'Requires the installed isolated Rust toolchain')
