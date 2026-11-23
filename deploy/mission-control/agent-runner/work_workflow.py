@@ -674,7 +674,7 @@ class WorkflowStore:
                 or not task['workflow_required'] or task['workflow_review_id'] is not None or task['cancelled_at'] is not None
                 or not task['parent_task_id'] or not task['scope_plan_decision_id']
                 or task['agent_profile']!=p['author_profile'] or task['pinned_recipe']!=recipe.to_dict() or task['recipe_digest']!=recipe.digest
-                or q['infrastructure_retries']!=self._repair_limit(w,'max_infrastructure_retries') or q['infrastructure_retries']<1):
+                or q['infrastructure_retries'] not in {p['repair_policy']['max_infrastructure_retries'],self._repair_limit(w,'max_infrastructure_retries')} or q['infrastructure_retries']<1):
                 raise Rejected(409,'not_reviewable')
             failure=q['finish_receipt'] or {};outcome=failure.get('outcome',{});verification=outcome.get('verification',{})
             typed_busy=(q['reason']=='workspace_busy' and verification.get('failure_stage')=='snapshot'
@@ -742,7 +742,8 @@ class WorkflowStore:
               AND t.status='awaiting_review' AND t.cancelled_at IS NULL AND w.phase='escalated' AND NOT w.enabled
               AND q.phase='local' AND q.status='handoff' AND q.candidate_commit IS NULL AND q.source_revision=t.revision
               AND q.reason IN('review_unavailable','workspace_busy') AND w.escalation_reason=q.reason
-              AND q.infrastructure_retries=coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)),(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer)
+              AND q.infrastructure_retries IN((w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer,
+                coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)),(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer))
               AND q.infrastructure_retries>0 AND r.created_at>q.updated_at AND r.workspace_digest=q.workspace_digest
               AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff'
               AND q.finish_receipt->'outcome'->'verification'->'checks'='[]'::jsonb

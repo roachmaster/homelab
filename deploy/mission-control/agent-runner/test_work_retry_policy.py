@@ -151,6 +151,28 @@ class SharedRetryPostgresTest(unittest.TestCase):
         self.assertEqual(self.get(admitted['task_id'])['workflow']['max_plan_revisions'],3)
         self.assertFalse(self.read("SELECT payload FROM forge_agent.coding_events WHERE payload->>'stage'='retry_policy_updated'"))
 
+    def test_legacy_source_readiness_exhaustion_remains_bound_after_allowance_update(self):
+        # A genuine old exhausted receipt remains eligible for its once-only
+        # process delivery after the model/infrastructure allowance increases.
+        import test_work_source_readiness as readiness_fixtures
+        fixture=readiness_fixtures.SourceReadinessTest()
+        fixture.cluster=self.cluster;fixture.setUp()
+        _author,child,_plan,_first,old,raw,request=fixture.source_failure()
+        before=fixture.counts(child)
+        original=fixture.rows('SELECT finish_receipt FROM forge_agent.coding_reviews WHERE review_id=%s',
+            (old['review_id'],))[0][0]
+        frozen=fixture.rows('SELECT snapshot,policy_digest FROM forge_agent.coding_workflows')
+        fixture.config=replace(fixture.config,repair_policy=dict(DEFAULT_REPAIR_POLICY),
+            project_workflows={'homelab':WorkflowPolicy('agy-v2','codex-v2')})
+        fixture.service=WorkServiceFactory(fixture.config,lambda:self.cluster.connect('forge_agent')).create()
+        fixture.coordinator=fixture.service.workflow_worker
+        fixture.coordinator.store._apply_retry_allowances()
+        self.assertEqual(fixture.rows("SELECT policy->>'max_infrastructure_retries' FROM forge_agent.coding_review_budget")[0][0],'20')
+        fixture.coordinator.run_once()
+        fixture.assert_delivery(child,old,raw,request,before,original)
+        self.assertEqual(fixture.rows('SELECT snapshot,policy_digest FROM forge_agent.coding_workflows'),frozen)
+        self.assertEqual(fixture.rows("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'source-readiness-delivery:%%'")[0][0],1)
+
     def test_manual_active_budget_uses_shared_policy(self):
         manual=WorkServiceFactory(replace(self.config,project_workflows={}),lambda:self.cluster.connect('forge_agent')).create()
         admitted=manual.submit(make_submit(agent_profile='agy-v2'))
