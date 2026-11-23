@@ -1,3 +1,35 @@
+# Current: Complete the event-driven SDLC and activate live — 2026-11-23
+
+The user explicitly authorizes completing all five listed gaps: live v2/M28+
+activation, normal-policy automatic failed-main repair, portal lifecycle visibility,
+guarded automatic deployment, and capture of main changes outside coordinator
+merges. Complete and prove the loop; do not stop at source-only partial work.
+Use existing PostgreSQL/coordinators and factory-selected injected ports. No NATS,
+GitHub Actions, new broker/service, paid API fallback or model credentials passed
+to workers. Preserve existing data, completed receipts, worktrees and secrets.
+
+Root owns integration, coordinator composition, source qualification, source
+publication, Jenkins qualification and all privileged live rollout/rollback.
+Backend owner owns agreed additive schema29/DAO/normal admission/projections;
+UI owner owns Rust/YAML/DTO/rendering and browser regressions; ops owner owns
+source-only fixed-scope release and main-observation adapters/tests. One writer
+per isolated worktree. Agree shared contracts before overlapping changes.
+
+Automatic repair creates NEW work under current WorkService author/reviewer
+policy and bounded lineage limits, preserving completed parents. Releases need
+exact-main full v2 proof, immutable binary/assets, healthy candidate, confirmed
+activation receipt, once-only/reconciled writes and rollback. Source observation
+must not fabricate a coding workflow identity. Status distinguishes merge, main
+verification, repair and release. Migration28 existing source remains immutable;
+additive29 owns extensions. Retain historical migrations and authority guards.
+Before expensive gates, inspect changed source qualifications and run cheap
+checks. Reuse prior evidence only for verified byte-identical inputs; retain
+failed receipts and report coverage honestly. Live activation is now authorized,
+including required schema/config/scoped grants and normal-account included model
+work for a bounded harmless end-to-end proof. No external emails/messages.
+
+--- Previous task record ---
+
 # Current: Coordinator-owned post-merge verification — 2026-11-23
 
 Completed source implementation. The existing coordinator now claims transactional
