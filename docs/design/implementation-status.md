@@ -1,7 +1,8 @@
 # Current Forge implementation
 
-Updated 23 November 2026. Active navigation is **Agents, Workbench, Home and
-Design**, with Agents as the default admitted view. Chat is temporarily inactive;
+Updated 23 November 2026.
+Active navigation is **Agents, Workbench, Home and Design**,
+with Agents as the default admitted view. Chat is temporarily inactive;
 Mail remains retired. Their PostgreSQL history and supported inert local
 snapshots remain preserved. The current browser contract is **ABI13**; the
 native HTTP protocol remains version1.

@@ -33,6 +33,8 @@ Actual branch attempt1 found missing installed contract and inherited PostgreSQL
 
 Browser follow-up: Root integration passed Rust270/WASM/generated-JS checks, then the implementation reader journey found obsolete documentation assertions. Updated only implementationDesignJourney to verify the historical Mail profile label, current navigation/ABI13/schema26, scoped last-qualified956/builta3/499-input provenance and non-enabled Studio/write flags. Preserved the three-table, same-tab/back, viewport-overflow, script-absence and diagram-load checks. Node syntax check and all34 existing QA harness tests pass with zero skips. No production JS, Rust build or full browser run here; Root reruns actual browser acceptance on final integrated source and qualifies the changed journey hash.
 
+Rendered-doc follow-up: the first renewed browser run exposed literal Markdown emphasis because the navigation bold span crossed a physical source line. Kept that span on one line; fetched actual fixture HTML confirmed the cause, and the current reader assertions now pass against a sandboxed Chrome page. Rebuild and retest the host for its changed embedded document; unchanged Rust/UI/WASM checks retain original8376 attribution. Preserve both prior failed browser attempts and rerun full browser plus all four backend suites before publication.
+
 --- Previous task record ---
 
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
