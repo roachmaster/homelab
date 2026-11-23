@@ -212,7 +212,21 @@ class ReviewerCorrectionProvider:
         cursor.execute("SELECT count(*) AS n FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE %s",
                        (w['workflow_id'], 'peer-reviewer-correction:' + str(peer['workflow_review_id']) + ':%'))
         used = cursor.fetchone()['n']
-        if used >= MAX_CORRECTIONS:
+        key = source_key(peer['workflow_review_id'], critic['latest_attempt_id'])
+        events = self.flow.retry_events
+        event = None
+        if events is not None:
+            from work_retry_events import RetryScope
+            scope = RetryScope(store.owner, w['project_alias'], 'native_workflow', w['workflow_id'])
+            event = events.observe_failure(cursor, scope, 'reviewer_correction',
+                str(critic['latest_attempt_id']), result['result_sha256'],
+                phase_id='reviewer_correction.' + str(peer['workflow_review_id']))
+            if event['used'] == 0 and used > 0:
+                event = events.adopt_legacy(cursor, event['event_id'], used,
+                    str(critic['latest_attempt_id']), result['result_sha256'])
+        if used >= MAX_CORRECTIONS or event is not None and event['used'] >= event['limit']:
+            if event is not None and event['used'] >= event['limit']:
+                events.reserve(cursor, event['event_id'], key)
             if manual:
                 raise Rejected(409, 'not_reviewable')
             self.flow._escalate(cursor, w, 'Independent reviewer approval remained incomplete after '
@@ -228,7 +242,6 @@ class ReviewerCorrectionProvider:
         cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'", (store.owner, [v[0] for v in NATIVE_POLICIES.values()]))
         if not _ready_for_recipe(cursor.fetchall(), w['project_alias'], profile, 'review', recipe):
             raise Rejected(503, 'unavailable')
-        key = source_key(peer['workflow_review_id'], critic['latest_attempt_id'])
         missing = list(error.missing_finding_ids)
         target = parse_review_target(peer['target_json'], peer['target_sha256'])
         required = sorted(f['finding_id'] for f in target['findings'] if f['status'] == 'open')
@@ -244,6 +257,11 @@ class ReviewerCorrectionProvider:
             agent_profile=profile, reconciliation_receipt_id=str(rec['receipt_id']), note=note)
         intent['resume_request'] = internal_request
         intent['resume_intent_digest'] = _resume_intent_digest(**internal_request)
+        if event is not None:
+            event = events.reserve(cursor, event['event_id'], key)
+            if event['status'] == 'exhausted':
+                raise Rejected(409, 'not_reviewable')
+            intent['retry_event'] = event
         authority = BoundReviewerCorrectionAuthority(store, cursor, w['workflow_id'], peer['workflow_review_id'], critic['id'], critic['latest_attempt_id'], critic['revision'], peer['target_sha256'])
         receipt = store.resume(project_alias=w['project_alias'], task_id=critic['id'], expected_revision=critic['revision'],
             idempotency_key=command.idempotency_key if manual else 'peer-correction-' + str(critic['latest_attempt_id']),
