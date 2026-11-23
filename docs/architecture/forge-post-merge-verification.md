@@ -294,3 +294,22 @@ The portal shows merged history separately from verification, repair and release
 Pending successors remain Active; a terminal exhausted repair or failed release
 appears in Attention. Header-absent legacy clients retain their previous payload
 and scope behavior before pagination; ABI14 clients negotiate the new projection.
+
+## Feedback delivery recovery
+
+A stopped native implementation can recover unavailable build feedback through
+the existing PostgreSQL event stream. The selected recovery port validates the
+current plan, execution grants, frozen feedback and parent result, stopped-process
+proof and fresh reconciliation receipt. It resumes the same task through normal
+admission and atomically records a durable action plus a
+`feedback_delivery_recovered` checkpoint. The ordinary `resumed` event wakes the
+worker. A replay returns the prior receipt; it does not create another attempt.
+
+The worker still verifies the actual protected build receipt and log before any
+CLI invocation. A server-issued continuation marker preserves the original
+feedback bytes and parent while binding the new attempt to the same reconciled
+workspace. Missing I/O has a distinct recoverable outcome; mismatched feedback or
+build hashes remain integrity failures. Recovery is limited to twenty deliveries
+per workflow with a sixty-second backoff. Plan/code review budgets, completed
+attempts and failed CI receipts remain historical evidence. This path neither
+approves a plan nor accepts code.

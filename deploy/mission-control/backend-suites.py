@@ -93,6 +93,7 @@ PREFLIGHT_TESTS = (
     'test_work_post_merge', 'test_work_post_merge_provider',
     'test_delivery_ops', 'test_delivery_worker', 'test_portal_release_actor', 'test_portal_release_recovery',
     'test_portal_release_startup',
+    'test_work_feedback_delivery', 'test_work_context_recovery.FeedbackRecoveryFactoryTest',
     'test_work_delivery_automation.DeliveryNegotiationTest',
     'test_work_delivery_automation.DeliveryFactoryTest',
     'test_work_external_delivery', 'test_work_native_jenkins',

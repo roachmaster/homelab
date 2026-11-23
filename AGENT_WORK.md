@@ -1,4 +1,17 @@
-# Current: Complete the event-driven SDLC and activate live — 2026-11-23
+# Current: Recover feedback delivery through the event stream — 2026-11-23
+
+The user explicitly requests implementing recovery for the stopped diagram
+workflow. Gemini's stale build-results directory was corrected in a versioned
+live config; the existing task remains at revision12 with a stopped, reconciled
+attempt and immutable native feedback. Add a factory-selected, bounded recovery
+consumer and durable recovery event, preserve the approved plan and all prior
+attempts, and resume through normal WorkStore admission. Never fabricate a
+timeout, rewrite feedback or reset review budgets. Worker I/O remains outside
+the DB-only coordinator; it must still validate actual build evidence before
+launching the CLI. Root owns worker/context integration, source qualification
+and activation. Backend owns the isolated recovery port, contract and regressions.
+
+# Previous: Complete the event-driven SDLC and activate live — 2026-11-23
 
 Startup-observation checkpoint (source correction, not a rollout): the existing
 `Type=simple` service can report Started before exec. The portal actor now observes
