@@ -1,5 +1,15 @@
 # Current: Complete the event-driven SDLC and activate live — 2026-11-23
 
+Startup-observation checkpoint (source correction, not a rollout): the existing
+`Type=simple` service can report Started before exec. The portal actor now observes
+only its exact requested command/configuration and a known systemd pre-exec image
+within a persisted ten-second deadline, then requires the unchanged origin/entry
+health proofs. Unrelated commands/processes fail immediately; reconciliation does
+not repeat activation or reset the deadline. Fixed private diagnostic stage codes
+preserve failure context without leaking raw errors or secrets. Eight new owned
+startup regressions plus existing actor/recovery/provider tests pass (44 total,
+zero skips); no service, database or prior terminal receipt was modified here.
+
 The user explicitly authorizes completing all five listed gaps: live v2/M28+
 activation, normal-policy automatic failed-main repair, portal lifecycle visibility,
 guarded automatic deployment, and capture of main changes outside coordinator

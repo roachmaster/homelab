@@ -254,6 +254,18 @@ sequenceDiagram
 
 The caller selects an identity, never a filesystem path, command or service. The
 Root actor validates a fixed configuration, protected ancestry and pinned export.
+For the existing `Type=simple` Web service, systemd can acknowledge a restart
+before the process executes the host binary. The actor observes that single
+requested restart with a ten-second polling grace, accepting only the exact requested
+command/configuration and known systemd pre-exec image during the transition.
+The saved deadline survives reconciliation; unrelated commands or executables
+fail immediately. Existing bounded systemd-call and actor RPC timeouts remain
+separate from that polling grace. Expiry uses the guarded rollback, without another
+activation restart. Only exact process identity followed by origin and entry
+health can produce Deployed. Private Root state retains a fixed diagnostic stage
+code; raw exceptions, configuration paths and secrets never enter public receipts.
+This source correction does not rewrite prior failed deployment receipts or
+establish a new live rollout.
 Its public plan has nine identity fields plus version, policy, artifact manifest
 and plan digest. Private generation/lease tokens travel only over stdin. Model
 workers receive neither the actor sudo grant nor Jenkins/publication credentials.

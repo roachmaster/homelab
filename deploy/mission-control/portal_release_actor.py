@@ -29,6 +29,8 @@ ENTRY_UNIT = 'bitwave-portal-cloudflare.service'
 ENTRY_SOCKET = 'bitwave-portal-cloudflare.socket'
 ENTRY_PORT = 8090
 ROLLBACK_RESTART_LIMIT = 3
+STARTUP_IDENTITY_SECONDS = 10
+PRE_EXEC_IMAGES = frozenset({'/usr/lib/systemd/systemd-executor', '/lib/systemd/systemd-executor'})
 CONFIG = Path('/etc/homelab-forge/portal-release.json')
 IDENTITY = ('release_id', 'verification_id', 'owner_id', 'project_alias',
             'commit_sha', 'tree_sha', 'ci_action_id', 'ci_receipt_sha256', 'gate_manifest_sha256')
@@ -210,8 +212,14 @@ class SystemPort:
         if len(argv) != 4 or argv[1:3] != ['serve', '--config'] or match[1] != argv[0]:
             raise ValueError('Unexpected portal service command')
         pid = int(self.show('MainPID'))
+        try:
+            process_binary = os.readlink('/proc/' + str(pid) + '/exe') if pid else None
+        except (FileNotFoundError, ProcessLookupError):
+            process_binary = None
         return {'binary': argv[0], 'config': argv[3], 'pid': pid,
-                'process_binary': os.readlink('/proc/' + str(pid) + '/exe') if pid else None}
+                'process_binary': process_binary, 'service_type': self.show('Type'),
+                'active_state': self.show('ActiveState'), 'sub_state': self.show('SubState'),
+                'startup_job': self.restart_pending()}
 
     def main_head(self, config):
         # Existing account credentials stay in the account. Root executes no
@@ -350,11 +358,13 @@ class PortalProbe:
 
 class PortalReleaseActor:
     def __init__(self, config, system, *, reader=read_root, writer=write_root,
-                 probe_factory=PortalProbe, public_directory=None, authorizer=None):
+                 probe_factory=PortalProbe, public_directory=None, authorizer=None,
+                 clock=time.time, monotonic=time.monotonic, sleep=time.sleep):
         self.config, self.system = config, system
         self.read, self.write, self.probe_factory = reader, writer, probe_factory
         self.public_directory = public_directory if public_directory is not None else self._public_parent
         self.authorizer = authorizer if authorizer is not None else system.authorize
+        self.clock, self.monotonic, self.sleep = clock, monotonic, sleep
         self._authority = None
 
     def _authorize(self, job, *, start, plan_sha256=None):
@@ -385,6 +395,59 @@ class PortalReleaseActor:
 
     def _save(self, directory, state):
         self.write(directory / 'state.json', canonical(state) + b'\n')
+
+    def _diagnostic(self, directory, state, stage):
+        # Only fixed private stage codes, never exception text, paths or secrets.
+        if stage not in {'activation_intent', 'service_reload', 'service_restart',
+                'startup_identity_pending', 'startup_identity_timeout', 'startup_identity_read_failed',
+                'startup_command_mismatch', 'startup_config_mismatch', 'startup_process_mismatch',
+                'live_health', 'live_health_failed', 'activation_call_failed'}:
+            raise ValueError('Unknown private activation diagnostic stage')
+        state['activation_diagnostic_stage'] = stage
+        self._save(directory, state)
+
+    def _observe_target(self, directory, state):
+        """Observe one requested restart, without granting another restart."""
+        started, deadline = state.get('startup_started_at'), state.get('startup_deadline_at')
+        now = self.clock()
+        valid_window = (type(started) in {int, float} and type(deadline) in {int, float}
+            and 0 < started <= deadline and deadline - started <= STARTUP_IDENTITY_SECONDS
+            and started <= now < deadline)
+        # The persisted wall window survives actor restarts. The local monotonic
+        # cap also bounds a backward wall-clock adjustment during this call.
+        local_deadline = self.monotonic() + (deadline - now if valid_window else 0)
+        target = str(Path(state['release']) / 'bin/forge-ide-web-host')
+        while True:
+            try:
+                current = self._current()
+            except (OSError, ValueError):
+                self._diagnostic(directory, state, 'startup_identity_read_failed')
+                return None
+            if current['binary'] != target or current['config'] != state['live_config']:
+                self._diagnostic(directory, state, 'startup_command_mismatch')
+                return None
+            if (current['override_sha256'] != state['target_override_sha256']
+                    or current['config_sha256'] != state['live_config_sha256']):
+                self._diagnostic(directory, state, 'startup_config_mismatch')
+                return None
+            if current['process_binary'] == target:
+                return current
+            transient = (current.get('service_type') == 'simple'
+                and current.get('active_state') in {'active', 'activating'}
+                and current.get('sub_state') in {'running', 'start', 'start-pre', 'start-post'}
+                and (current['process_binary'] in PRE_EXEC_IMAGES
+                     or (current['process_binary'] is None and current.get('startup_job') is True)))
+            if not transient:
+                self._diagnostic(directory, state, 'startup_process_mismatch')
+                return None
+            now = self.clock()
+            if (not valid_window or now < started or now >= deadline
+                    or self.monotonic() >= local_deadline):
+                self._diagnostic(directory, state, 'startup_identity_timeout')
+                return None
+            if state.get('activation_diagnostic_stage') != 'startup_identity_pending':
+                self._diagnostic(directory, state, 'startup_identity_pending')
+            self.sleep(min(0.05, deadline - now, max(0, local_deadline - self.monotonic())))
 
     def _proof(self, job):
         raw = self.read(self.config.ci_results_root / (job['ci_action_id'] + '.json'))
@@ -638,15 +701,21 @@ class PortalReleaseActor:
         self._authorize(job, start=True, plan_sha256=state['plan']['plan_sha256'])
         command = str(Path(state['release']) / 'bin/forge-ide-web-host') + ' serve --config ' + state['live_config']
         override = ('[Service]\nExecStart=\nExecStart=' + command + '\n').encode()
-        state.update(phase='activating', target_override_sha256=sha(override), restart_requested=True)
+        now = self.clock()
+        state.update(phase='activating', target_override_sha256=sha(override), restart_requested=True,
+                     startup_started_at=now, startup_deadline_at=now + STARTUP_IDENTITY_SECONDS,
+                     activation_diagnostic_stage='activation_intent')
         self._save(directory, state)  # Durable intent before any service write.
         try:
             self.write(self.config.override, override, mode=0o644)
+            self._diagnostic(directory, state, 'service_reload')
             self.system.reload()
+            self._diagnostic(directory, state, 'service_restart')
             self.system.restart()
-            return self.reconcile(job, public)
         except Exception:
+            self._diagnostic(directory, state, 'activation_call_failed')
             return self.rollback(job, public)
+        return self.reconcile(job, public)
 
     def reconcile(self, job, public):
         directory, state = self._load(job, public)
@@ -673,15 +742,15 @@ class PortalReleaseActor:
             return {'status': 'planned', 'plan': state['plan']}
         if state['phase'] == 'rolling_back':
             return self.rollback(job, public)
-        current = self._current()
-        target = str(Path(state['release']) / 'bin/forge-ide-web-host')
-        if (current['binary'] == target and current['process_binary'] == target
-                and current['config'] == state['live_config']):
+        current = self._observe_target(directory, state)
+        if current is not None:
             try:
+                self._diagnostic(directory, state, 'live_health')
                 self._live_health(current['value'], state['inventory'])
                 return self._receipt(directory, state, 'deployed', health=True, entry=True,
                                      summary='Exact verified main is active; portal health and admission passed.')
             except Exception:
+                self._diagnostic(directory, state, 'live_health_failed')
                 return self.rollback(job, public)
         return self.rollback(job, public)
 
