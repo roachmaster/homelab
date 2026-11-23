@@ -441,7 +441,7 @@ class WorkService:
 class WorkServiceFactory:
     """Effect-free startup factory producing a ready WorkService or None when unconfigured."""
 
-    def __init__(self, config, connect_factory=None, *, external_factory=None, native_control_factory=None, delivery_repair_factory=None):
+    def __init__(self, config, connect_factory=None, *, external_factory=None, native_control_factory=None, delivery_repair_factory=None, retry_event_factory=None):
         if config is not None:
             if not isinstance(config, WorkConfig):
                 raise TypeError("WorkServiceFactory requires a frozen WorkConfig or None")
@@ -451,6 +451,8 @@ class WorkServiceFactory:
             raise TypeError("connect_factory must be callable or None")
         if delivery_repair_factory is not None and not callable(delivery_repair_factory):
             raise TypeError('Delivery repair factory must be callable')
+        if retry_event_factory is not None and not callable(retry_event_factory):raise TypeError("Retry event factory must be callable")
+        self._retry_event_factory=retry_event_factory
         self._delivery_repair_factory=delivery_repair_factory
         self._config = config
         self._connect_factory = connect_factory
@@ -465,6 +467,11 @@ class WorkServiceFactory:
         if self._config is None:
             return None
         catalog = self._config.catalog()
+        if self._retry_event_factory is None:
+            from work_retry_events import RetryEventProviderFactory
+            retry_events=RetryEventProviderFactory(self._config.owner).create()
+        else:
+            retry_events=self._retry_event_factory(self._config).create()
         external = None
         if any(p.is_external for p in self._config.profiles.values()):
             if self._external_factory is not None:
@@ -480,10 +487,12 @@ class WorkServiceFactory:
             repair_policy=self._config.repair_policy,
             external_port=external,
             delivery_enabled=self._config.delivery_enabled,
+            retry_events=retry_events,
         )
         flow=getattr(external,'workflow',None) if external is not None else None
         if self._config.external_workflows:
             if flow is None:raise ValueError('External workflow provider is unavailable')
+            flow.bind_retry_events(retry_events)
             flow.bind_store(store)
         selected_flow=flow if self._config.external_workflows else None
         if self._native_control_factory is None:
@@ -499,12 +508,31 @@ class WorkServiceFactory:
             from work_delivery_repair import DeliveryRepairConsumerFactory
             selected=self._delivery_repair_factory or DeliveryRepairConsumerFactory
             repair=selected(self._config,catalog,store,service.submit).create()
-        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=selected_flow,delivery_repair=repair,**maintenance).create()
+        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=selected_flow,delivery_repair=repair,retry_events=retry_events,**maintenance).create()
         return service
 
 
 def handles(headers):
     return any(value.startswith("ide.work.") for value in headers.get_all("Forge-Destination", []))
+
+
+def retry_events_version(headers):
+    """Optional ABI15 response extension, validated before any request effects."""
+    values=headers.get_all('Forge-Retry-Events-Version',[])
+    if not values:return None
+    if values!=['1']:raise Rejected(400,'invalid_request')
+    return 1
+
+
+def retry_events_response(response,version):
+    if version==1:return response
+    status,body=response
+    if not isinstance(body,dict) or not isinstance(body.get('event'),dict):return response
+    def strip(value):
+        if isinstance(value,list):return [strip(item) for item in value]
+        if isinstance(value,dict):return {key:strip(item) for key,item in value.items() if key!='retry_event'}
+        return value
+    return status,{**body,'event':strip(body['event'])}
 
 
 def delivery_version(headers):
@@ -545,11 +573,12 @@ def delivery_response(response, version):
 
 def destination(headers):
     delivery_version(headers)  # Reject malformed negotiation before request effects.
+    retry_events_version(headers)
     # Work owns this extension. Preserve every other header, including duplicates,
     # for the shared closed-envelope validator rather than relaxing that contract.
     route_headers = Message()
     for name, value in headers.items():
-        if name.lower() != 'forge-delivery-version':
+        if name.lower() not in {'forge-delivery-version','forge-retry-events-version'}:
             route_headers[name] = value
     value = common.dispatch_destination(route_headers)
     try:

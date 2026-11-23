@@ -2008,7 +2008,7 @@ impl Agents {
                         if r.round == 0 {
                             "Initial review".into()
                         } else {
-                            format!("Round {} of {}", r.round, r.max_rounds)
+                            format!("{} repair retries", r.round)
                         },
                         r.open_findings,
                         r.verified_findings
@@ -2722,6 +2722,7 @@ impl Agents {
         self.project_workflow(view, compose, reader);
         self.project_delivery(view, active && work, reader, pending);
         self.project_history(view, active && work && reader);
+        self.project_retry_event(view, reader);
     }
 }
 fn mode_value(mode: WorkMode) -> &'static str {

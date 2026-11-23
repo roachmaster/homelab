@@ -290,6 +290,33 @@ fn zero_repair_budget_keeps_initial_review_readable_without_authorizing_rounds()
 }
 
 #[test]
+fn per_event_retry_and_lifetime_forty_validate_in_the_actual_work_response() {
+    let event = serde_json::json!({"event_id":RETRY_REVIEW,"kind":"tests","used":4,"limit":20,"status":"open"});
+    let value = serde_json::json!({"task_id":TASK,"correlation_id":REVIEW,"project_alias":"homelab","base_revision":"a".repeat(40),"mode":"implement","agent_profile":"agy-primary","recipe_digest":"b".repeat(64),"status":"awaiting_review","revision":7,"created_at":"2026-11-20T12:00:00Z","prompt":"Approved implementation","acceptance_criteria":"Run required checks", "retry_event":event,
+        "review":{"auto_repair":true,"stage":"repair","round":40,"max_rounds":3,"open_findings":1,"verified_findings":0,"required_hosted_green":false,"can_accept":false,"can_repair":false,"can_retry":false,"retry_event":event}});
+    let task: WorkTaskDetail = serde_json::from_value(value).unwrap();
+    assert!(task.is_valid());
+    assert_eq!(task.review.as_ref().unwrap().round, 40);
+    let request = WorkRequest::WorkGet {
+        request_id: "event-budget".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+    };
+    let mut response = WorkResponse::WorkOpened {
+        request_id: "event-budget".into(),
+        task: Box::new(task),
+    };
+    assert!(response.valid_for(&request, 200));
+    if let WorkResponse::WorkOpened { task, .. } = &mut response {
+        task.retry_event.as_mut().unwrap().used = 21;
+    }
+    assert!(
+        !response.valid_for(&request, 200),
+        "only the event budget has a ceiling of twenty"
+    );
+}
+
+#[test]
 fn legacy_review_requirement_is_optional_typed_and_never_defaults_to_false() {
     let value = serde_json::json!({"task_id":TASK,"correlation_id":REVIEW,"project_alias":"homelab","base_revision":"a".repeat(40),"mode":"implement","agent_profile":"agy-primary","recipe_digest":"b".repeat(64),"status":"awaiting_review","revision":7,"created_at":"2026-11-20T12:00:00Z","prompt":"Approved implementation","acceptance_criteria":"Run required checks"});
     let task: WorkTaskDetail = serde_json::from_value(value.clone()).unwrap();

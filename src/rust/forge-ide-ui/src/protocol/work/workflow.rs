@@ -65,6 +65,8 @@ impl WorkWorkflowPhase {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkWorkflowSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_event: Option<WorkRetryEvent>,
     #[serde(default)]
     pub kind: WorkWorkflowKind,
     pub workflow_id: String,
@@ -95,7 +97,10 @@ pub enum WorkWorkflowKind {
 }
 impl WorkWorkflowSummary {
     pub fn is_valid(&self) -> bool {
-        valid_chat_id(&self.workflow_id)
+        self.retry_event
+            .as_ref()
+            .is_none_or(WorkRetryEvent::is_valid)
+            && valid_chat_id(&self.workflow_id)
             && self.reviewer_task_id.as_deref().is_none_or(valid_chat_id)
             && self
                 .candidate_commit
@@ -110,9 +115,7 @@ impl WorkWorkflowSummary {
             && valid_work_name(&self.reviewer_profile, 64)
             && self.author_profile != self.reviewer_profile
             && self.max_plan_revisions <= MAX_AGENT_RETRIES
-            && self.plan_revisions <= self.max_plan_revisions
             && self.max_code_revisions <= MAX_AGENT_RETRIES
-            && self.code_revisions <= self.max_code_revisions
             && self
                 .escalation_reason
                 .as_deref()
@@ -141,6 +144,7 @@ mod tests {
 
     fn valid_summary() -> WorkWorkflowSummary {
         WorkWorkflowSummary {
+            retry_event: None,
             kind: WorkWorkflowKind::Native,
             workflow_id: "11111111-1111-4111-8111-111111111111".into(),
             policy_digest: "c".repeat(64),
@@ -219,11 +223,11 @@ mod tests {
         summary.merge_commit = Some("g".repeat(40));
         assert!(!summary.is_valid());
         let mut summary = valid_summary();
-        summary.plan_revisions = 4;
-        assert!(!summary.is_valid());
+        summary.plan_revisions = 40;
+        assert!(summary.is_valid());
         let mut summary = valid_summary();
-        summary.code_revisions = 11;
-        assert!(!summary.is_valid());
+        summary.code_revisions = 60;
+        assert!(summary.is_valid());
         let mut summary = valid_summary();
         summary.reviewer_profile = summary.author_profile.clone();
         assert!(!summary.is_valid());
@@ -255,7 +259,7 @@ mod tests {
         summary.plan_revisions = MAX_AGENT_RETRIES;
         assert!(summary.is_valid());
         summary.plan_revisions += 1;
-        assert!(!summary.is_valid());
+        assert!(summary.is_valid());
         summary.plan_revisions = 3;
         summary.max_plan_revisions = 3;
         summary.code_revisions = 0;

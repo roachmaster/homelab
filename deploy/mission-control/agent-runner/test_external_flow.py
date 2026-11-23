@@ -72,7 +72,9 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.inc=str(uuid4());profile=cfg().profiles['codex-v2']
   self.db.advertise('review-worker',self.inc,[{'alias':'homelab','base_revision':'a'*40}],[{'alias':profile.alias,'backend':profile.backend,'model':profile.model,'modes':['review']}],work_policy.POLICY_DIGEST)
   self.delivery=ExternalDeliveryStoreFactory(lambda:self.pg.connect('forge_coding_reconciler'),'test-owner').create()
- def service(self):return WorkServiceFactory(cfg(),self.connect).create()
+ # Historical V2 controller fixtures retain their original opaque CI shape.
+ # Current per-event V3 admission is exercised in test_external_retry_events.
+ def service(self):return WorkServiceFactory(cfg(),self.connect,retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
  def test_exact_schema_helpers_and_delivery_role_boundary(self):
   self.pg.run_sql_script(SQL_DIR/'management/verify-external-workflows.sql')
   self.pg.run_sql_script(SQL_DIR/'management/verify-external-agent.sql')
@@ -374,7 +376,7 @@ class ExternalFlowPGTest(unittest.TestCase):
   from work_external_recovery import NativeReviewerGrantScope
   from work_external import ExternalWorkProviderFactory
   scope=NativeReviewerGrantScope(lambda:self.pg.connect('postgres'))
-  return WorkServiceFactory(cfg(),self.connect,external_factory=lambda config:ExternalWorkProviderFactory(config,recovery_grant_provider=scope).create()).create()
+  return WorkServiceFactory(cfg(),self.connect,external_factory=lambda config:ExternalWorkProviderFactory(config,recovery_grant_provider=scope).create(),retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
  def recovery_command(self,w,root,**changes):
   from work_external_recovery import ExternalInfrastructureRetry
   revision=self.rows('SELECT revision FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]['revision']

@@ -1,6 +1,6 @@
-"""Private, recorded continuation after an owner-wide retry allowance increase.
+"""Private, recorded continuation of one retained planning failure event.
 
-This application port reuses an actual independent revision verdict. It does not
+This application port seeds consumed retries from an actual independent revision verdict. It does not
 approve a plan, alter a frozen snapshot or recreate a completed assignment.
 """
 from dataclasses import dataclass
@@ -11,7 +11,8 @@ import unicodedata
 from psycopg2.extras import Json
 from queue_store import Rejected
 from work_external_review_context import canonical, validate_target, parse_verdict
-from work_retry_policy import AGENT_RETRY_LIMIT, AGENT_RETRY_POLICY_ID
+from work_retry_policy import AGENT_RETRY_LIMIT
+EVENT_POLICY_ID = "forge-retry-event-v1"
 
 
 @dataclass(frozen=True)
@@ -38,13 +39,13 @@ class ExternalRetryPolicyContinuation:
             raise ValueError('Invalid continuation reason')
 
     def intent(self, owner):
-        return {'version': 1, 'owner': owner, 'policy': AGENT_RETRY_POLICY_ID,
+        return {'version': 1, 'owner': owner, 'policy': EVENT_POLICY_ID,
             **{k: str(v) if isinstance(v, UUID) else v for k, v in vars(self).items()}}
 
 
 def continue_external_plan(flow, command):
     if (not isinstance(command, ExternalRetryPolicyContinuation)
-            or not flow.manages(command.project_alias) or flow._recovery_grants is None):
+            or not flow.manages(command.project_alias) or flow._recovery_grants is None or flow._retry_events is None):
         raise Rejected(403, 'denied')
     policy = flow.policies[command.project_alias]
     intent = command.intent(flow.owner)
@@ -59,7 +60,7 @@ def continue_external_plan(flow, command):
             if not w:
                 raise Rejected(404, 'not_found')
             root = flow._task(cursor, w, w['root_task_id'])
-            records = w['state'].get('retry_policy_updates', [])
+            records = w['state'].get('retry_event_continuations', [])
             if not isinstance(records, list) or len(records) > AGENT_RETRY_LIMIT:
                 raise Rejected(409, 'result_mismatch')
             for record in records:
@@ -69,20 +70,25 @@ def continue_external_plan(flow, command):
                     saved = record.get('receipt')
                     if (not isinstance(saved, dict) or saved.get('workflow_id') != str(w['workflow_id'])
                             or saved.get('root_task_id') != str(root['id']) or saved.get('status') != 'plan_revision_queued'
-                            or record.get('policy') != AGENT_RETRY_POLICY_ID
+                            or record.get('policy') != EVENT_POLICY_ID
                             or record.get('frozen_policy_digest') != w['policy_digest']):
                         raise Rejected(409, 'result_mismatch')
+                    event=saved.get('retry_event')
+                    if (not isinstance(event,dict) or event.get('event_id')!=record.get('retry_event_id')
+                            or event.get('kind')!='planning' or event.get('limit')!=AGENT_RETRY_LIMIT
+                            or event.get('status')!='open' or type(record.get('retained_used')) is not int
+                            or event.get('used')!=record['retained_used']+1):
+                        raise Rejected(409,'result_mismatch')
                     return dict(saved)
             if w['revision'] != command.expected_workflow_revision or root['revision'] != command.expected_root_revision:
                 raise Rejected(409, 'revision_conflict')
             try:
-                limit = flow._retry_limit(w, 'max_plan_revisions')
-                code_limit = flow._retry_limit(w, 'max_code_revisions')
+                flow._retry_limit(w, 'max_plan_revisions')
+                flow._retry_limit(w, 'max_code_revisions')
+                limit = AGENT_RETRY_LIMIT
             except (ValueError, KeyError, TypeError):
                 raise Rejected(403, 'denied') from None
-            if (limit != AGENT_RETRY_LIMIT or code_limit != AGENT_RETRY_LIMIT
-                    or w['policy_digest'] != w['snapshot'].get('policy_digest')
-                    or limit <= w['snapshot']['max_plan_revisions']
+            if (w['policy_digest'] != w['snapshot'].get('policy_digest')
                     or w['plan_revisions'] < w['snapshot']['max_plan_revisions'] or w['plan_revisions'] >= limit
                     or w['enabled'] or w['phase'] != 'escalated'
                     or not w['state'].get('escalation_reason', '').startswith('The plan revision budget is exhausted. ')
@@ -171,30 +177,36 @@ def continue_external_plan(flow, command):
                 (w['workflow_id'], w['workflow_id'], w['workflow_id']))
             if cursor.fetchone()['active']:
                 raise Rejected(409, 'reconcile_required')
+            source_id='review:'+str(review['review_id'])
+            evidence_digest=hashlib.sha256(canonical({'source_sha256':artifact['sha256'],'feedback':verdict})).hexdigest()
+            retry_event=flow._retry_events.observe_failure(cursor,flow._retry_scope(w),'planning',source_id,evidence_digest,phase_id='planning')
+            retry_event=flow._retry_events.adopt_legacy(cursor,retry_event['event_id'],w['plan_revisions'],source_id,evidence_digest)
+            if retry_event['used']!=w['plan_revisions'] or retry_event['status']!='open':
+                raise Rejected(409,'not_reviewable')
             cursor.execute('''UPDATE forge_agent.coding_tasks SET status='awaiting_review',cancelled_at=NULL,
                 revision=revision+1,updated_at=clock_timestamp() WHERE(owner_id,project_alias,id)=(%s,%s,%s)''',
                 (flow.owner, w['project_alias'], root['id']))
-            record = {'policy': AGENT_RETRY_POLICY_ID, 'idempotency_key': str(command.idempotency_key),
+            record = {'policy': EVENT_POLICY_ID, 'idempotency_key': str(command.idempotency_key),
                 'intent_digest': intent_digest, 'intent': intent, 'frozen_policy_digest': w['policy_digest'],
                 'prior_workflow_revision': w['revision'], 'prior_root_revision': root['revision'],
                 'source_review_id': str(review['review_id']), 'source_assignment_id': artifact['assignment_id'],
                 'source_sha256': artifact['sha256'], 'reviewer_result_sha256': result['sha256'],
                 'plan_revisions_before': w['plan_revisions'], 'code_revisions_before': w['code_revisions'],
-                'max_plan_revisions': limit, 'max_code_revisions': code_limit}
+                'retry_event_id':retry_event['event_id'],'retained_used':retry_event['used'],'limit':limit}
             w['enabled'] = True
             w['state'].pop('escalation_reason', None)
-            flow._event(cursor, w, 'Agent-wide retry allowance updated; retaining all prior plan revisions and review evidence.',
-                details={'stage': 'retry_policy_updated', **{k: record[k] for k in ('policy', 'source_review_id',
+            flow._event(cursor, w, 'The retained planning failure event is continuing; its consumed retries and all prior review evidence remain preserved.',
+                details={'stage': 'retry_event_continued', **{k: record[k] for k in ('policy', 'source_review_id',
                     'source_assignment_id', 'source_sha256', 'plan_revisions_before', 'code_revisions_before',
-                    'max_plan_revisions', 'max_code_revisions')}})
+                    'retry_event_id','retained_used','limit')}})
             flow._revise(cursor, w, 'plan', verdict, artifact)
-            response = {'status': 'plan_revision_queued', 'project_alias': w['project_alias'],
-                'workflow_id': str(w['workflow_id']), 'root_task_id': str(root['id']),
-                'task_id': str(w['active_task_id']), 'workflow_revision': w['revision'],
-                'root_revision': root['revision'] + 1, 'plan_revisions': w['plan_revisions'],
-                'max_plan_revisions': limit, 'max_code_revisions': code_limit}
+            response = {'status':'plan_revision_queued','project_alias':w['project_alias'],
+                'workflow_id':str(w['workflow_id']),'root_task_id':str(root['id']),
+                'task_id':str(w['active_task_id']),'workflow_revision':w['revision'],
+                'root_revision':root['revision']+1,'plan_revisions':w['plan_revisions'],
+                'retry_event':flow._retry_events.get(cursor,retry_event['event_id'])}
             record['receipt'] = response
-            w['state']['retry_policy_updates'] = records + [record]
+            w['state']['retry_event_continuations'] = records + [record]
             cursor.execute('UPDATE forge_external_workflow.workflows SET state=%s WHERE workflow_id=%s AND revision=%s',
                 (Json(w['state']), w['workflow_id'], w['revision']))
             return response

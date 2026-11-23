@@ -54,6 +54,7 @@ class ExternalSharedRetryPolicyTest(unittest.TestCase):
         wid,root,source,assignment,token,task=(uuid4() for _ in range(6))
         command=ExternalRetryPolicyContinuation('homelab',wid,root,source,10,5,token,'Apply the shared allowance.')
         intent=command.intent(config.owner)
+        intent['policy']='forge-agent-retry-v1'  # Retained historical global-policy record, never new admission authority.
         from work_external_review_context import canonical
         import hashlib
         receipt={'status':'plan_revision_queued','project_alias':'homelab','workflow_id':str(wid),'root_task_id':str(root),
@@ -129,6 +130,8 @@ class ExternalRetryContinuationTest(unittest.TestCase):
             definition = cursor.fetchone()[0]
         if '20' not in definition:
             cls.pg.admin_exec((SQL_DIR / 'migrations/0030_agent_wide_retry_policy.sql').read_text())
+        from test_external_retry_events import apply_retry_event_migration
+        apply_retry_event_migration(cls.pg)
 
     @classmethod
     def connect(cls):
@@ -138,7 +141,7 @@ class ExternalRetryContinuationTest(unittest.TestCase):
         old_config = replace(fixture.cfg(), external_workflows={'homelab': {
             'author_profile': fixture.ALIAS, 'reviewer_profile': 'codex-v2',
             'max_plan_revisions': 3, 'max_code_revisions': 3}})
-        service = WorkServiceFactory(old_config, self.connect).create()
+        service = WorkServiceFactory(old_config, self.connect, retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
         command = replace(make_submit(agent_profile=fixture.ALIAS, mode='plan', idempotency_key=str(uuid4())),
             workflow_policy_digest=old_config.external_workflows['homelab'].summary(old_config.catalog())['policy_digest'])
         root = service.submit(command)
@@ -182,7 +185,7 @@ class ExternalRetryContinuationTest(unittest.TestCase):
         command = self.command(root, before)
         receipt = flow.continue_after_retry_policy_update(command)
         self.assertEqual(receipt['plan_revisions'], 4)
-        self.assertEqual(receipt['max_plan_revisions'], AGENT_RETRY_LIMIT)
+        self.assertEqual(receipt['retry_event']['limit'], AGENT_RETRY_LIMIT)
         self.assertEqual(flow.continue_after_retry_policy_update(command), receipt)
         with self.assertRaises(Rejected):
             flow.continue_after_retry_policy_update(replace(command, reason='A conflicting replay'))
@@ -195,10 +198,10 @@ class ExternalRetryContinuationTest(unittest.TestCase):
         self.assertEqual(old_reviews, self.rows('SELECT * FROM forge_external_workflow.reviews ORDER BY review_id'))
         self.assertEqual(old_artifacts, self.rows('SELECT * FROM forge_external_agent.artifacts ORDER BY assignment_id'))
         self.assertEqual(old_children, self.rows('SELECT id,status,revision FROM forge_agent.coding_tasks WHERE id=ANY(%s) ORDER BY id', ([r['id'] for r in old_children],)))
-        events = self.rows("SELECT payload FROM forge_agent.coding_events WHERE task_id=%s AND payload->>'stage'='retry_policy_updated'", (root['task_id'],))
+        events = self.rows("SELECT payload FROM forge_agent.coding_events WHERE task_id=%s AND payload->>'stage'='retry_event_continued'", (root['task_id'],))
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]['payload']['plan_revisions_before'], 3)
-        self.assertEqual(len(after['state']['retry_policy_updates']), 1)
+        self.assertEqual(len(after['state']['retry_event_continuations']), 1)
         next_job = self.call('claim', 'homelab', fixture.ALIAS)
         context = next_job['external_context']
         self.assertEqual(next_job['task_id'], receipt['task_id'])
@@ -216,7 +219,8 @@ class ExternalRetryContinuationTest(unittest.TestCase):
         with self.assertRaises(ValueError):historical._retry_limit(after,'max_plan_revisions')
         with historical._transaction() as cursor:
             preserved=historical.project(cursor,'homelab',UUID(root['task_id']))
-        self.assertEqual((preserved['plan_revisions'],preserved['max_plan_revisions'],preserved['max_code_revisions']),(4,20,20))
+        self.assertEqual((preserved['plan_revisions'],preserved['max_plan_revisions'],preserved['max_code_revisions']),(4,3,3))
+        self.assertEqual((preserved['retry_event']['used'],preserved['retry_event']['limit']),(4,20))
 
 
     def test_concurrent_delivery_is_one_continuation_and_one_author_assignment(self):
@@ -230,7 +234,7 @@ class ExternalRetryContinuationTest(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(run, range(2)))
         self.assertEqual(results[0], results[1])
-        self.assertEqual(self.rows("SELECT count(*) AS n FROM forge_agent.coding_events WHERE payload->>'stage'='retry_policy_updated'")[0]['n'], 1)
+        self.assertEqual(self.rows("SELECT count(*) AS n FROM forge_agent.coding_events WHERE payload->>'stage'='retry_event_continued'")[0]['n'], 1)
         self.assertEqual(self.rows("SELECT count(*) AS n FROM forge_external_agent.assignments WHERE status='queued'")[0]['n'], 1)
 
     def test_wrong_revision_scope_grants_review_or_manual_cancel_cannot_resume(self):
@@ -271,8 +275,7 @@ class ExternalRetryContinuationTest(unittest.TestCase):
         current = self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
         with self.assertRaises(Rejected):
             flow.continue_after_retry_policy_update(self.command(root, current))
-        with self.assertRaises(Exception):
-            self.pg.admin_exec("UPDATE forge_external_workflow.workflows SET plan_revisions=21 WHERE workflow_id='%s'" % w['workflow_id'])
+        self.pg.admin_exec("UPDATE forge_external_workflow.workflows SET plan_revisions=21 WHERE workflow_id='%s'" % w['workflow_id'])
 
     def test_genuine_twentieth_revision_is_allowed_and_next_revision_escalates(self):
         root, w = self.legacy_exhaustion()

@@ -227,7 +227,7 @@ fn compact_review_projection_exposes_counts_toolchain_and_literal_findings() {
         .texts
         .iter()
         .any(|b| b.id == "agents-verification-counts"
-            && b.text == "Round 1 of 3 · 1 open · 2 verified"));
+            && b.text == "1 repair retries · 1 open · 2 verified"));
     assert!(view
         .texts
         .iter()

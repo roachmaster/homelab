@@ -86,6 +86,7 @@ function summary(t) {
     workflow_required:t.workflow_required===true,
     workflow_phase:t.workflow?.phase??null,
     ...(t.delivery?{delivery:t.delivery}:{}),
+    ...(t.retry_event?{retry_event:t.retry_event}:{}),
   };
 }
 function detail(t) {
@@ -128,7 +129,7 @@ function deliveryProjection(stage) {
   return {verification_id:'77777777-7777-4777-8777-777777777777',source_kind:'native',
     commit_sha:'f'.repeat(40),tree_sha:'c'.repeat(40),updated_at:time,
     verification:{status:activeRepair?'failed':deployed?'passed':stage==='queued'?'queued':'running',updated_at:time,summary:activeRepair?'Main failed; source-bound repair is queued.':deployed?'All exact main gates passed.':'Main checks are running.',build_number:42},
-    repair:{status:activeRepair?'queued':deployed?'completed':'none',round:activeRepair||deployed?1:0,max_rounds:20,task_id:activeRepair?'11111111-1111-4111-8111-111111111111':null,updated_at:time,summary:activeRepair?'Independent author and reviewer policy applies.':'No active repair.'},
+    repair:{...(activeRepair||deployed?{retry_event:{event_id:'99999999-9999-4999-8999-999999999999',kind:'tests',used:1,limit:20,status:activeRepair?'open':'resolved'}}:{}),status:activeRepair?'queued':deployed?'completed':'none',round:activeRepair||deployed?1:0,max_rounds:20,task_id:activeRepair?'11111111-1111-4111-8111-111111111111':null,updated_at:time,summary:activeRepair?'Independent author and reviewer policy applies.':'No active repair.'},
     release:{status:deployed?'deployed':'none',release_id:deployed?'88888888-8888-4888-8888-888888888888':null,receipt_sha256:deployed?'e'.repeat(64):null,updated_at:time,summary:deployed?'Activation receipt and health confirmed.':'No activation receipt.'}};
 }
 
@@ -363,6 +364,12 @@ export async function startAgentsRelay() {
     get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},
     setDelivery(taskId,stage){const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');selected.delivery=deliveryProjection(stage);},
     setProjectDelivery(stage){faults.projectDelivery=deliveryProjection(stage);faults.projectDelivery.source_kind='observed';},
+    retryEvent(taskId,kind,used,{status='open',total=used}={}){
+      const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
+      selected.retry_events??={};const event_id=selected.retry_events[kind]??=randomUUID();
+      selected.retry_event={event_id,kind,used,limit:20,status};selected.workflow.retry_event={...selected.retry_event};
+      selected.workflow.code_revisions=total;selected.revision++;
+    },
     workflowPhase(taskId,phase){
       const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
       selected.workflow.phase=phase;selected.workflow.can_cancel=!['completed','cancelled','merging'].includes(phase);

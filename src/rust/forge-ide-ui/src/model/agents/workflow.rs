@@ -3,6 +3,19 @@ use super::*;
 
 impl Agents {
     pub(super) fn task_summary_badge(&self, task: &WorkTaskSummary) -> BadgeView {
+        if task.status == WorkStatus::Cancelled
+            || task.workflow_phase == Some(WorkWorkflowPhase::Cancelled)
+        {
+            return task_badge(WorkStatus::Cancelled);
+        }
+        if let Some(event) = task.retry_event.as_ref().filter(|event| {
+            matches!(
+                event.status,
+                WorkRetryStatus::Open | WorkRetryStatus::Exhausted
+            )
+        }) {
+            return retry_badge(event);
+        }
         if let Some(delivery) = task.delivery.as_ref().filter(|_| {
             task.status == WorkStatus::Completed
                 || task.workflow_phase == Some(WorkWorkflowPhase::Completed)
@@ -163,7 +176,7 @@ impl Agents {
         view.texts.extend([
             text("agents-compose-help",if self.external_assignment() && policy.is_some(){"Muse authors through PostgreSQL. The independent reviewer, required checks and trusted merger advance this assignment automatically."}else if self.external_assignment(){"Muse owns its runner. PostgreSQL carries the assignment and returned artifact; this transport does not authorize a merge."}else if policy.is_some(){"The configured author and reviewer carry this assignment through peer review, required checks and merge."}else{"Runs in the background. Review the result before accepting it."}),
             text("agents-assignment-roles",policy.map_or_else(String::new,|p|format!("{} authors · {} reviews",self.role_label(&p.author_profile),self.role_label(&p.reviewer_profile)))),
-            text("agents-assignment-policy",policy.map_or_else(String::new,|p|if !self.workflow_submission_ready(){"The configured workflow is unavailable. Refresh after its roles, policy and workers are ready.".into()}else{format!("Up to {} plan revisions · {} code revisions · {}",p.max_plan_revisions,p.max_code_revisions,if p.auto_merge{"Merge after required checks"}else{"Project merge policy"})})),
+            text("agents-assignment-policy",policy.map_or_else(String::new,|p|if !self.workflow_submission_ready(){"The configured workflow is unavailable. Refresh after its roles, policy and workers are ready.".into()}else{format!("Each failure event allows up to {MAX_AGENT_RETRIES} retries · {}",if p.auto_merge{"Merge after required checks"}else{"Project merge policy"})})),
             text("agents-workflow-source",workflow.map_or_else(String::new,|w|{
                 let mut lines=Vec::new();
                 if let Some(commit)=w.candidate_commit.as_ref(){lines.push(format!("Verified candidate · {commit}"));}
@@ -171,7 +184,7 @@ impl Agents {
                 if lines.is_empty(){"Source verification has not completed yet.".into()}else{lines.join("\n")}
             })),
             text("agents-workflow-roles",workflow.map_or_else(String::new,|w|format!("{} authors · {} reviews",self.role_label(&w.author_profile),self.role_label(&w.reviewer_profile)))),
-            text("agents-workflow-revisions",workflow.map_or_else(String::new,|w|format!("Plan revisions {}/{} · Code revisions {}/{}",w.plan_revisions,w.max_plan_revisions,w.code_revisions,w.max_code_revisions))),
+            text("agents-workflow-revisions",workflow.map_or_else(String::new,|w|format!("Plan revisions {} · Code revisions {}",w.plan_revisions,w.code_revisions))),
             text("agents-workflow-escalation",workflow.and_then(|w|w.escalation_reason.as_deref()).unwrap_or("")),
             text("agents-workflow-help",match workflow.map(|w|w.phase){None=>"Workflow details unavailable. Refresh to recover the authoritative state.",Some(WorkWorkflowPhase::Escalated)=>"The workflow needs operator attention. Its artifacts and review evidence are preserved.",Some(WorkWorkflowPhase::Completed)=>"The trusted merge is recorded. No further approval is needed.",Some(WorkWorkflowPhase::Cancelled)=>"The workflow was cancelled. Its history is preserved.",_=>"Peer review and required checks advance automatically. Merge uses the verified candidate."}),
         ]);
@@ -277,4 +290,84 @@ impl Agents {
             }
         }
     }
+
+    pub(super) fn project_retry_event(&self, view: &mut ViewModel, reader: bool) {
+        let stopped = self.task.as_ref().is_some_and(|task| {
+            task.status == WorkStatus::Cancelled
+                || task
+                    .workflow
+                    .as_ref()
+                    .is_some_and(|workflow| workflow.phase == WorkWorkflowPhase::Cancelled)
+        });
+        let event = self.task.as_ref().and_then(|task| {
+            let candidates = [
+                task.retry_event.as_ref(),
+                task.workflow
+                    .as_ref()
+                    .and_then(|workflow| workflow.retry_event.as_ref()),
+                task.review
+                    .as_ref()
+                    .and_then(|review| review.retry_event.as_ref()),
+                task.delivery
+                    .as_ref()
+                    .and_then(|delivery| delivery.repair.retry_event.as_ref()),
+            ];
+            candidates
+                .into_iter()
+                .flatten()
+                .find(|event| {
+                    matches!(
+                        event.status,
+                        WorkRetryStatus::Open | WorkRetryStatus::Exhausted
+                    )
+                })
+                .or_else(|| candidates.into_iter().flatten().next())
+        });
+        view.visibility
+            .push(visible("agents-retry-event", reader && event.is_some()));
+        view.texts.push(text(
+            "agents-retry-event",
+            event.map_or_else(String::new, |event| {
+                if stopped {
+                    format!("{} stopped · {} retries", event.kind.label(), event.used)
+                } else {
+                    event.label()
+                }
+            }),
+        ));
+        if let Some(event) = event.filter(|event| {
+            !stopped
+                && matches!(
+                    event.status,
+                    WorkRetryStatus::Open | WorkRetryStatus::Exhausted
+                )
+        }) {
+            if let Some(binding) = view
+                .badges
+                .iter_mut()
+                .find(|binding| binding.id == "agents-task-status")
+            {
+                binding.badge = retry_badge(event);
+            }
+            if let Some(binding) = view
+                .texts
+                .iter_mut()
+                .find(|binding| binding.id == "agents-task-status")
+            {
+                binding.text = event.label();
+            }
+        }
+    }
+}
+
+pub(super) fn retry_badge(event: &WorkRetryEvent) -> BadgeView {
+    badge(
+        &event.label(),
+        match event.status {
+            WorkRetryStatus::Open => BadgeTone::Accent,
+            WorkRetryStatus::Resolved => BadgeTone::Success,
+            WorkRetryStatus::Exhausted => BadgeTone::Warning,
+            WorkRetryStatus::Cancelled => BadgeTone::Neutral,
+        },
+    )
 }

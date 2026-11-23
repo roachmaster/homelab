@@ -227,8 +227,10 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
             assert_eq!(headers["forge-contract-version"], "1");
             if headers["forge-destination"].starts_with("ide.work.") {
                 assert_eq!(headers["forge-delivery-version"], "1");
+                assert_eq!(headers["forge-retry-events-version"], "1");
             } else {
                 assert!(!headers.contains_key("forge-delivery-version"));
+                assert!(!headers.contains_key("forge-retry-events-version"));
             }
             for key in ["cookie", "origin", "forge-csrf", "forge-target-node"] {
                 assert!(!headers.contains_key(key));
