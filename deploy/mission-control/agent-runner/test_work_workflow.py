@@ -24,6 +24,7 @@ class AutonomousWorkflowTest(unittest.TestCase):
  def setUpClass(cls):
   cls.cluster=DisposablePostgresCluster().start();cls.addClassCleanup(cls.cluster.stop)
  def setUp(self):
+  self.cluster.reset_retry_events()
   self.cluster.admin_exec('TRUNCATE forge_agent.coding_tasks,forge_agent.coding_worker_grants,forge_agent.coding_worker_readiness CASCADE',owner=False)
   self.config=replace(make_v2_config(),project_workflows={'homelab':WorkflowPolicy('agy-v2','codex-v2',max_plan_revisions=3)})
   # These historical fixtures keep their original finite allowance; shared-policy

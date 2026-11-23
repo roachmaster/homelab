@@ -284,4 +284,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=30)
 \ir migrations/0030_agent_wide_retry_policy.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(30,'agent_wide_retry_policy');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=31) AS apply_0031
+\gset
+\if :apply_0031
+\ir migrations/0031_retry_events.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(31,'retry_events');
+\endif
 COMMIT;

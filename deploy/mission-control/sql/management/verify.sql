@@ -3,6 +3,9 @@
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
+-- Validate M31 event authority before exact predecessor normalization.
+\ir verify-retry-events.sql
+
 -- Validate M30 numeric allowances before historical catalog normalization.
 \ir verify-agent-retries.sql
 

@@ -14,7 +14,11 @@ BEGIN
  ('forge_agent.coding_review_budget','coding_review_budget_repair_rounds_check','CHECK (((repair_rounds >= 0) AND (repair_rounds <= 20)))'),
  ('forge_agent.coding_review_budget','coding_review_budget_stagnant_rounds_check','CHECK (((stagnant_rounds >= 0) AND (stagnant_rounds <= 20)))')
  ) checks(relation,name,definition) LOOP
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
+  SELECT forge_agent._retry_legacy_constraint(conrelid,conname,pg_get_constraintdef(oid)) INTO actual FROM pg_constraint WHERE conrelid=expected.relation::regclass AND conname=expected.name;
+ ELSE
   SELECT pg_get_constraintdef(oid) INTO actual FROM pg_constraint WHERE conrelid=expected.relation::regclass AND conname=expected.name;
+ END IF;
   IF actual IS DISTINCT FROM expected.definition THEN RAISE EXCEPTION 'Shared retry constraint drift: %.%',expected.relation,expected.name;END IF;
  END LOOP;
  FOR expected IN SELECT * FROM(VALUES

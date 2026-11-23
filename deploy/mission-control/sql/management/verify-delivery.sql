@@ -13,6 +13,16 @@ BEGIN
  ('delivery_project_main_heads','3b9b5f81d27ef242cdeefcba4314b2f1daaa7ea123f14a6c3b808a8696428c08'),
  ('delivery_operations','50a6af275fb86c76b25d0a2339775c98c30e9647e4d9d245898c391c36ef7ab5'))x(name,sha256) LOOP
  relation:=to_regclass('forge_agent.'||expected.name);
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
+ SELECT encode(sha256(convert_to(jsonb_build_object(
+ 'table',jsonb_build_array(c.relkind,c.relpersistence,pg_get_userbyid(c.relowner),c.relrowsecurity,c.relforcerowsecurity,c.relreplident,c.reloptions),
+ 'acl',(SELECT jsonb_agg(item::text ORDER BY item::text) FROM unnest(coalesce(c.relacl,acldefault('r',c.relowner))) item WHERE item::text<>'muse_events=r/forge_agent_owner'),
+ 'columns',(SELECT jsonb_agg(jsonb_build_array(a.attnum,a.attname,a.atttypid::regtype::text,a.atttypmod,a.attnotnull,a.attidentity,a.attgenerated,a.attcollation::regcollation::text,pg_get_expr(d.adbin,d.adrelid),a.attacl) ORDER BY a.attnum) FROM pg_attribute a LEFT JOIN pg_attrdef d ON(d.adrelid,d.adnum)=(a.attrelid,a.attnum) WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),
+ 'constraints',(SELECT jsonb_agg(jsonb_build_array(k.conname,k.contype,k.convalidated,k.condeferrable,k.condeferred,forge_agent._retry_legacy_constraint(k.conrelid,k.conname,pg_get_constraintdef(k.oid,false))) ORDER BY k.conname) FROM pg_constraint k WHERE k.conrelid=c.oid),
+ 'indexes',(SELECT jsonb_agg(jsonb_build_array(ic.relname,i.indisvalid,i.indisready,pg_get_indexdef(i.indexrelid)) ORDER BY ic.relname) FROM pg_index i JOIN pg_class ic ON ic.oid=i.indexrelid WHERE i.indrelid=c.oid),
+ 'triggers',(SELECT jsonb_agg(jsonb_build_array(t.tgname,t.tgenabled,pg_get_triggerdef(t.oid,false)) ORDER BY t.tgname) FROM pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal)
+ )::text,'UTF8')),'hex') INTO actual FROM pg_class c WHERE c.oid=relation;
+ ELSE
  SELECT encode(sha256(convert_to(jsonb_build_object(
  'table',jsonb_build_array(c.relkind,c.relpersistence,pg_get_userbyid(c.relowner),c.relrowsecurity,c.relforcerowsecurity,c.relreplident,c.reloptions),
  'acl',(SELECT jsonb_agg(item::text ORDER BY item::text) FROM unnest(coalesce(c.relacl,acldefault('r',c.relowner))) item WHERE item::text<>'muse_events=r/forge_agent_owner'),
@@ -21,6 +31,7 @@ BEGIN
  'indexes',(SELECT jsonb_agg(jsonb_build_array(ic.relname,i.indisvalid,i.indisready,pg_get_indexdef(i.indexrelid)) ORDER BY ic.relname) FROM pg_index i JOIN pg_class ic ON ic.oid=i.indexrelid WHERE i.indrelid=c.oid),
  'triggers',(SELECT jsonb_agg(jsonb_build_array(t.tgname,t.tgenabled,pg_get_triggerdef(t.oid,false)) ORDER BY t.tgname) FROM pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal)
  )::text,'UTF8')),'hex') INTO actual FROM pg_class c WHERE c.oid=relation;
+ END IF;
  IF actual IS DISTINCT FROM expected.sha256 THEN RAISE EXCEPTION 'Delivery relation drift: %',expected.name;END IF;
  FOREACH role_name IN ARRAY ARRAY['forge_agent','forge_coding_worker','forge_coding_reconciler','forge_gpu_worker','public'] LOOP
  FOREACH privilege_name IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
@@ -66,6 +77,7 @@ BEGIN
  ('forge_coding_reconciler_api.delivery_release_start_allowed(uuid,integer,uuid)','7670d9cb3e34179707edd9d39ce06bf12e0041fa9a327ca9312be0d3116baae4'),
  ('forge_coding_reconciler_api.delivery_renew(uuid,integer,uuid)','59d776933079e4a302c1c739a09931310e09b86d520ed2009c4feccdb5688e24'),
  ('forge_coding_reconciler_api.delivery_start_allowed(uuid,integer,uuid)','fbfb727c9ba01707095dcb2ff85f063b670b27b777b660e0fe651b24097759a1'))x(signature,sha256) LOOP
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN expected.sha256:=coalesce(forge_agent._retry_replacement_fingerprint(expected.signature),expected.sha256);END IF;
  SELECT encode(sha256(convert_to(jsonb_build_array(pg_get_functiondef(p.oid),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex') INTO actual FROM pg_proc p WHERE p.oid=to_regprocedure(expected.signature);
  IF actual IS DISTINCT FROM expected.sha256 THEN RAISE EXCEPTION 'Delivery function drift: %',expected.signature;END IF;
  END LOOP;

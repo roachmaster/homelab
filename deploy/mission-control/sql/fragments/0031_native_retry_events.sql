@@ -49,11 +49,12 @@ BEGIN
  IF p_observation IS NULL THEN RETURN NULL;END IF;
  SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review AND owner_id=current_setting('forge.coding_owner',true);
  SELECT * INTO t FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(q.owner_id,q.project_alias,q.task_id);
- IF t.id IS NULL OR jsonb_typeof(p_observation)<>'object' OR EXISTS(SELECT FROM jsonb_object_keys(p_observation)k WHERE k NOT IN('failure_kind','passed_kinds','stage_evidence_digest','phase_id','passed_phase_ids'))
+ IF t.id IS NULL OR jsonb_typeof(p_observation)<>'object' OR EXISTS(SELECT FROM jsonb_object_keys(p_observation) AS keys(name) WHERE keys.name NOT IN('failure_kind','passed_kinds','stage_evidence_digest','phase_id','passed_phase_ids'))
  OR jsonb_typeof(coalesce(p_observation->'passed_kinds','[]'::jsonb))<>'array' OR jsonb_typeof(coalesce(p_observation->'passed_phase_ids','[]'::jsonb))<>'array'
  THEN RAISE EXCEPTION 'Invalid trusted retry observation' USING ERRCODE='22023';END IF;
  v_scope_kind:=CASE WHEN t.workflow_id IS NULL THEN 'manual_task' ELSE 'native_workflow' END;v_scope_id:=coalesce(t.workflow_id,t.repair_root_task_id,t.id);
  v_kind:=p_observation->>'failure_kind';digest:=p_observation->>'stage_evidence_digest';phase:=coalesce(p_observation->>'phase_id','');
+ IF digest IS NULL OR digest!~'^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'Invalid trusted retry proof digest' USING ERRCODE='22023';END IF;
  passed:=ARRAY(SELECT jsonb_array_elements_text(coalesce(p_observation->'passed_kinds','[]'::jsonb)));passed_phases:=ARRAY(SELECT jsonb_array_elements_text(coalesce(p_observation->'passed_phase_ids','[]'::jsonb)));
  IF v_kind IS NOT NULL THEN
   e:=forge_agent.retry_event_observe(t.project_alias,v_scope_kind,v_scope_id,v_kind,q.review_id::text,digest,passed,phase,passed_phases);

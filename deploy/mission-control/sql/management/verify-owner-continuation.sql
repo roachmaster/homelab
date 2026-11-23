@@ -14,8 +14,13 @@ BEGIN
   ('forge_coding_reconciler_api.owner_continuation_fenced(jsonb)','956d9197560fab8fd931fb9d590b3d6a3d81fccb2cb3bf295e25114d809a536d'),
   ('forge_coding_reconciler_api.review_finish(uuid,uuid,jsonb)','7f954cb3256b9d3b289b7e703ac23b039acef77750f3bb4fb051f2e8fddbdade')
  )x(signature,sha256) LOOP
+  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
+  SELECT encode(sha256(convert_to(jsonb_build_array(replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,p.prosrc)),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
+  INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
+  ELSE
   SELECT encode(sha256(convert_to(jsonb_build_array(pg_get_functiondef(p.oid),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
   INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
+  END IF;
   IF actual IS DISTINCT FROM expected.sha256 THEN RAISE EXCEPTION 'Owner continuation function drift: %',expected.signature;END IF;
  END LOOP;
 END;
