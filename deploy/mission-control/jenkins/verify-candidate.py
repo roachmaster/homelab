@@ -2472,6 +2472,136 @@ def _capture_source_inventory(source, tree_blobs):
     return inventory
 
 
+PORTAL_ARTIFACT_POLICY = 'forge-portal-artifact-v1'
+
+
+def portal_artifact_commands(toolchain):
+    return (
+        (str(Path(toolchain) / 'bin/cargo'), 'build', '--manifest-path', 'src/rust/Cargo.toml',
+         '--offline', '--locked', '--release', '-p', 'forge-ide-web-host', '--jobs', '2'),
+        ('/usr/bin/python3', '-B', 'src/rust/scripts/ui_tools.py', 'check'),
+    )
+
+
+def build_portal_artifacts(config, *, source, environment, account, log, log_path,
+                           cancelled, started, stages):
+    """Two fixed isolated builds; their results never masquerade as a fourth gate."""
+    records = []
+    output_start = None
+    for index, argv in enumerate(portal_artifact_commands(config['toolchain'])):
+        remaining = config['timeout_seconds'] - (time.time() - started)
+        if remaining <= 0:
+            raise InterruptedError('Portal artifact deadline elapsed')
+        output_start = log.tell()
+        before = time.monotonic()
+        code = run_child(argv, cwd=source, env=environment, account=account,
+            log=log, timeout=remaining, cancelled=cancelled)
+        log.flush()
+        stages.append({'name': 'portal_artifact_' + str(index),
+            'status': 'passed' if code == 0 else 'failed', 'returncode': code,
+            'elapsed_ms': int((time.monotonic() - before) * 1000)})
+        if code == 124:
+            raise InterruptedError('Portal artifact build cancelled')
+        if code != 0:
+            raise ValueError('Portal artifact build failed')
+        records.append({'argv': list(argv), 'returncode': 0})
+    output = log_path.read_bytes()[output_start:log.tell()]
+    paths = re.findall(rb'^ASSETS ([^\r\n]+)$', output, re.M)
+    if len(paths) != 1:
+        raise ValueError('Portal build did not produce one exact asset output')
+    return Path(paths[0].decode('utf-8')), records
+
+
+def seal_portal_artifacts(request, *, request_sha256, layout, assets, build_commands,
+                          account, results, reader_group, cancelled):
+    """After process cleanup, copy regular build outputs into a Root-owned export."""
+    if cancelled.exists():
+        raise InterruptedError('Portal export cancelled')
+    assets = assets.resolve(strict=True)
+    target = layout.target.resolve(strict=True)
+    if not assets.is_relative_to(target / 'ui-assets') or assets.name != 'assets':
+        raise ValueError('Portal assets escaped their isolated output')
+    host = target / 'release/forge-ide-web-host'
+    if not host.resolve(strict=True).is_relative_to(target / 'release'):
+        raise ValueError('Portal executable escaped its isolated output')
+    files = [('bin/forge-ide-web-host', host)]
+    for path in sorted(assets.rglob('*')):
+        info = path.lstat()
+        if stat.S_ISDIR(info.st_mode):
+            if info.st_uid != account.pw_uid:
+                raise ValueError('Unexpected portal directory owner')
+        elif stat.S_ISREG(info.st_mode):
+            files.append(('assets/' + path.relative_to(assets).as_posix(), path))
+        else:
+            raise ValueError('Links and special files are outside portal exports')
+    names = {name for name, _path in files}
+    if not {'assets/index.html', 'assets/main.js', 'assets/worker.js',
+            'assets/style.css', 'assets/app.wasm', 'assets/manifest.json'} <= names:
+        raise ValueError('Incomplete portal asset bundle')
+    if len(files) > 1024:
+        raise ValueError('Portal artifact file bound exceeded')
+    payloads, inventory, total = {}, {}, 0
+    for name, path in files:
+        raw = read_file(path, owner=account.pw_uid, maximum=64 * 1024 * 1024)
+        info = path.lstat()
+        if info.st_nlink != 1 or not raw:
+            raise ValueError('Linked or empty portal artifact')
+        total += len(raw)
+        if total > 256 * 1024 * 1024:
+            raise ValueError('Portal artifact byte bound exceeded')
+        payloads[name] = raw
+        inventory[name] = {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+    manifest = {'version': 1, 'policy': PORTAL_ARTIFACT_POLICY,
+        'action_id': request['action_id'],
+        'source_commit': request['candidate_commit'], 'source_tree': request['candidate_tree'],
+        'request_sha256': request_sha256, 'commands': build_commands,
+        'files': [{'path': name, 'sha256': inventory[name]['sha256'],
+                   'byte_count': inventory[name]['bytes'], 'executable': name.startswith('bin/')}
+                  for name in sorted(inventory)]}
+    raw_manifest = canonical(manifest) + b'\n'
+    manifest_sha = hashlib.sha256(raw_manifest).hexdigest()
+    destination = results / (request['action_id'] + '.artifacts')
+    temporary = results / ('.' + request['action_id'] + '.artifacts.new')
+    if destination.exists() or destination.is_symlink():
+        regular_directory(destination, owner=0)
+        actual = {p.relative_to(destination).as_posix() for p in destination.rglob('*')
+                  if not p.is_dir() or p.is_symlink()}
+        if actual != set(payloads) | {'manifest.json'}:
+            raise ValueError('Portal export replay inventory changed')
+        if read_file(destination / 'manifest.json', owner=0, maximum=262144) != raw_manifest:
+            raise ValueError('Portal export replay changed')
+        for name, raw in payloads.items():
+            if read_file(destination / name, owner=0, maximum=64 * 1024 * 1024) != raw:
+                raise ValueError('Sealed portal export changed')
+    else:
+        if temporary.is_symlink():
+            raise ValueError('Unsafe portal export staging path')
+        if temporary.exists():
+            regular_directory(temporary, owner=0)
+            _safe_rmtree(temporary)
+        temporary.mkdir(mode=0o750)
+        os.chown(temporary, 0, reader_group)
+        for name, raw in [*payloads.items(), ('manifest.json', raw_manifest)]:
+            path = temporary / name
+            path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o440)
+            with os.fdopen(fd, 'wb') as stream:
+                os.fchown(stream.fileno(), 0, reader_group)
+                os.fchmod(stream.fileno(), 0o550 if name.startswith('bin/') else 0o440)
+                stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+        for directory in sorted([temporary, *[p for p in temporary.rglob('*') if p.is_dir()]], reverse=True):
+            os.chown(directory, 0, reader_group)
+            directory.chmod(0o550)
+            _fsync_dir(directory)
+        if cancelled.exists():
+            raise InterruptedError('Portal export cancelled before publication')
+        os.rename(temporary, destination)
+        _fsync_dir(results)
+    return {'version': 1, 'policy': PORTAL_ARTIFACT_POLICY, 'action_id': request['action_id'],
+        'source_commit': request['candidate_commit'], 'source_tree': request['candidate_tree'],
+        'manifest_sha256': manifest_sha, 'file_count': len(files), 'total_bytes': total}
+
+
 def execute(action, config, *, cache_port=None):
     require_main = config.get('require_main_ancestor', False)
     if type(require_main) is not bool:
@@ -2497,6 +2627,9 @@ def _execute_locked(action, config, *, cache_port):
     require_main = config.get('require_main_ancestor', False)
     if type(require_main) is not bool:
         raise ValueError('Main ancestry selection must be an operator boolean')
+    export_portal = config.get('portal_artifact_export', False)
+    if type(export_portal) is not bool:
+        raise ValueError('Portal artifact export must be an operator boolean')
     if cache_port is None:
         cache_port = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache'))).create()
     account = pwd.getpwnam(config['build_user'])
@@ -2612,6 +2745,9 @@ def _execute_locked(action, config, *, cache_port):
         tree_blobs = {}
         layout = None
         post_check_quiesced = False
+        portal_export = None
+        portal_assets = None
+        portal_builds = None
         try:
             prep_started = time.monotonic()
             short_tmp = create_short_tmp(account)
@@ -2774,6 +2910,13 @@ def _execute_locked(action, config, *, cache_port):
                         failure = 'cancelled_or_timed_out' if code == 124 else 'checks_failed'
                         break
 
+                if (export_portal and config['verification_profile'] == SCOPED_PROFILE
+                        and branch_scope == 'main' and failure is None
+                        and len(checks) == len(active_checks)):
+                    portal_assets, portal_builds = build_portal_artifacts(config, source=source,
+                        environment=environment, account=account, log=log, log_path=log_path,
+                        cancelled=cancelled, started=started, stages=stages)
+
                 clean_started = time.monotonic()
                 after = subprocess.check_output(['/usr/bin/git', '-C', str(source), 'status', '--porcelain', '--untracked-files=no'], env=safe_env, text=True)
                 if after.strip():
@@ -2790,6 +2933,14 @@ def _execute_locked(action, config, *, cache_port):
                 # Quiesce all build-user processes BEFORE reading scratch outputs or publishing cache.
                 kill_build_user(account)
                 post_check_quiesced = True
+
+                if portal_assets is not None and failure is None:
+                    portal_export = seal_portal_artifacts(request, request_sha256=identity,
+                        layout=layout, assets=portal_assets, build_commands=portal_builds,
+                        account=account, results=results, reader_group=submitter.pw_gid,
+                        cancelled=cancelled)
+                    stages.append({'name': 'portal_artifact_export', 'status': 'sealed',
+                        'file_count': portal_export['file_count'], 'total_bytes': portal_export['total_bytes']})
 
                 # Enrich check_0 and check_1 stages with Cargo compilation & ui-qa telemetry.
                 if check_log_spans:
@@ -2901,6 +3052,8 @@ def _execute_locked(action, config, *, cache_port):
             'elapsed_ms': int((time.time() - started) * 1000)}
         if config['verification_profile'] == SCOPED_PROFILE:
             result['coverage'] = profile_coverage(config['verification_profile'], branch_scope)
+        if portal_export is not None:
+            result['artifact_export'] = portal_export
         try:
             cache_port.finish_result(result_path, result, submitter.pw_gid, cancelled=cancelled)
         except (OSError, ValueError) as error:

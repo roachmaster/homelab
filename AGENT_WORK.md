@@ -51,6 +51,16 @@ Root's integrated atomic WASM/browser gate. No live activation or full Rust matr
 ran in this component worktree. Current docs retain last qualified live956/ABI13/
 schema26 separately from new source support.
 
+Ops handoff: source observer uses the existing trusted source port and persistent
+per-project head/CAS, with one project per turn and sixty-second retry budget.
+Portal release selection injects only the pinned fixed Root actor and its four
+bounded operations; identity/plan/health/rollback proofs are checked before
+handoff. Optional v2-main artifact export performs two fixed isolated build
+steps after the existing three gates, quiesces the build account, and seals
+Root-owned host/assets with a source/request/action-bound manifest. Legacy and
+branch gates remain unchanged. Sixty-three focused tests passed with zero skips
+in 4.358s; diff check passed. No live operation was executed by this writer.
+
 --- Previous task record ---
 
 # Current: Coordinator-owned post-merge verification — 2026-11-23

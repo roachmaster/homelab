@@ -866,6 +866,8 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         run_child_override=None,
         workflow_id=None,
         action=None,
+        portal_artifact_export=False,
+        kill_build_user_override=None,
     ):
         action = action or str(uuid4())
         if checks is None:
@@ -925,6 +927,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             'toolchain': str(TOOLCHAIN), 'cargo_registry': str(self.registry),
             'node_modules': str(self.node_modules), 'timeout_seconds': 120,
             'cargo_cache': cache_raw,
+            'portal_artifact_export': portal_artifact_export,
         }
         # Use current non-root UID as build account and distinct fake submitter UID?
         # execute_locked checks account.pw_uid != submitter.pw_uid, so patch read_file/chown cleanly.
@@ -970,7 +973,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
              patch.object(CI, 'read_file', side_effect=test_read_file), \
              patch.object(CI, 'write_result', side_effect=test_write_result), \
              patch.object(CI, 'open_log', side_effect=test_open_log), \
-             patch.object(CI, 'kill_build_user'), \
+             patch.object(CI, 'kill_build_user', side_effect=kill_build_user_override), \
              patch.object(CI, 'run_child', side_effect=run_child_override or local_run_child):
             # If extra_env is supplied, also inject it into resolve_key's compiler env observation.
             if extra_env:
@@ -2276,6 +2279,145 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         outside.write_text('{"stages": [{"id": "leaked", "status": "passed", "duration_ms": 1}]}')
         (qa_dir / 'forge-ui-qa-1/run.json').symlink_to(outside)
         self.assertIsNone(CI._read_ui_qa_stages(qa_dir, expected_uid=uid_now))
+
+
+class PortalArtifactExportTest(unittest.TestCase):
+    def fixture(self):
+        temporary = tempfile.TemporaryDirectory(prefix='forge-portal-export-')
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        target = root / 'target'; target.mkdir()
+        assets = target / 'ui-assets/build-owned/assets'; assets.mkdir(parents=True)
+        host = target / 'release/forge-ide-web-host'; host.parent.mkdir()
+        host.write_bytes(b'owned isolated host'); host.chmod(0o755)
+        for name in ('index.html', 'main.js', 'worker.js', 'style.css', 'app.wasm', 'manifest.json'):
+            (assets / name).write_bytes(('owned ' + name).encode()); (assets / name).chmod(0o600)
+        results = root / 'results'; results.mkdir()
+        request = {'action_id': str(uuid4()), 'candidate_commit': 'a' * 40,
+            'candidate_tree': 'b' * 40, 'project_alias': 'homelab'}
+        original_read, original_directory = CI.read_file, CI.regular_directory
+        def read(path, *, owner, maximum):
+            return original_read(path, owner=os.geteuid(), maximum=maximum)
+        def directory(path, *, owner):
+            return original_directory(path, owner=os.geteuid())
+        for selected in (patch.object(CI, 'read_file', side_effect=read),
+                         patch.object(CI, 'regular_directory', side_effect=directory),
+                         patch.object(CI.os, 'chown'), patch.object(CI.os, 'fchown')):
+            selected.start(); self.addCleanup(selected.stop)
+        args = dict(request_sha256='c' * 64, layout=SimpleNamespace(target=target),
+            assets=assets, build_commands=[{'argv': list(argv), 'returncode': 0}
+                for argv in CI.portal_artifact_commands(TOOLCHAIN)],
+            account=SimpleNamespace(pw_uid=os.getuid()), results=results,
+            reader_group=os.getgid(), cancelled=root / 'cancelled')
+        return request, args
+
+    def test_sealed_export_binds_exact_source_request_commands_and_regular_bytes(self):
+        request, args = self.fixture()
+        attestation = CI.seal_portal_artifacts(request, **args)
+        path = args['results'] / (request['action_id'] + '.artifacts')
+        raw = (path / 'manifest.json').read_bytes()
+        self.assertEqual(attestation['manifest_sha256'], hashlib.sha256(raw).hexdigest())
+        manifest = json.loads(raw)
+        self.assertEqual(set(manifest), {'version', 'policy', 'action_id', 'source_commit',
+            'source_tree', 'request_sha256', 'commands', 'files'})
+        self.assertEqual(manifest['source_commit'], request['candidate_commit'])
+        self.assertEqual(manifest['source_tree'], request['candidate_tree'])
+        self.assertEqual(manifest['request_sha256'], 'c' * 64)
+        self.assertEqual(manifest['commands'], args['build_commands'])
+        self.assertEqual(attestation['file_count'], len(manifest['files']))
+        self.assertEqual(attestation['total_bytes'], sum(row['byte_count'] for row in manifest['files']))
+        for row in manifest['files']:
+            file = path / row['path']
+            self.assertEqual(hashlib.sha256(file.read_bytes()).hexdigest(), row['sha256'])
+            self.assertEqual(file.stat().st_mode & 0o222, 0)
+            self.assertEqual(row['executable'], row['path'] == 'bin/forge-ide-web-host')
+        self.assertEqual(CI.seal_portal_artifacts(request, **args), attestation)
+        altered = path / 'assets/index.html'; altered.chmod(0o600); altered.write_bytes(b'altered')
+        with self.assertRaises(ValueError):
+            CI.seal_portal_artifacts(request, **args)
+
+    def test_links_outside_paths_missing_assets_and_cancellation_never_publish(self):
+        request, args = self.fixture()
+        link = args['assets'] / 'link'; link.symlink_to('/etc/passwd')
+        with self.assertRaises(ValueError):
+            CI.seal_portal_artifacts(request, **args)
+        link.unlink()
+        outside = args['results'] / 'assets'; outside.mkdir()
+        with self.assertRaises(ValueError):
+            CI.seal_portal_artifacts(request, **{**args, 'assets': outside})
+        (args['assets'] / 'app.wasm').unlink()
+        with self.assertRaises(ValueError):
+            CI.seal_portal_artifacts(request, **args)
+        args['cancelled'].touch()
+        with self.assertRaises(InterruptedError):
+            CI.seal_portal_artifacts(request, **args)
+        self.assertFalse((args['results'] / (request['action_id'] + '.artifacts')).exists())
+
+    def test_hardlinked_build_output_never_becomes_root_artifact(self):
+        request, args = self.fixture()
+        os.link(args['assets'] / 'index.html', args['assets'] / 'second.html')
+        with self.assertRaises(ValueError):
+            CI.seal_portal_artifacts(request, **args)
+
+    @unittest.skipUnless(TOOLCHAIN_AVAILABLE, 'Requires installed isolated toolchain fixture')
+    def test_supervisor_exports_only_main_v2_after_three_gates_and_process_quiescence(self):
+        fixture = CargoCacheSupervisorIntegrationTest('test_main_scope_runs_the_full_gate')
+        fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        order = []
+        def child(argv, *, cwd, env, account, log, timeout, cancelled):
+            order.append('child')
+            if '-p' in argv and 'forge-ide-web-host' in argv:
+                host = Path(env['CARGO_TARGET_DIR']) / 'release/forge-ide-web-host'
+                host.parent.mkdir(exist_ok=True); host.write_bytes(b'isolated executable'); host.chmod(0o755)
+            if 'src/rust/scripts/ui_tools.py' in argv:
+                assets = Path(env['CARGO_TARGET_DIR']) / 'ui-assets/build-test/assets'
+                assets.mkdir(parents=True)
+                for name in ('index.html', 'main.js', 'worker.js', 'style.css', 'app.wasm', 'manifest.json'):
+                    (assets / name).write_bytes(('fixture ' + name).encode()); (assets / name).chmod(0o600)
+                log.write(('ASSETS ' + str(assets) + '\n').encode())
+            return 0
+        seal = CI.seal_portal_artifacts
+        def after_cleanup(*args, **kw):
+            self.assertEqual(order[-1], 'quiesced')
+            return seal(*args, **kw)
+        with patch.object(CI.os, 'chown'), patch.object(CI.os, 'fchown'), \
+             patch.object(CI, 'seal_portal_artifacts', side_effect=after_cleanup):
+            result, _log, _ = fixture._run_supervisor(commit=fixture.base_commit,
+                expected_main=fixture.base_commit, branch_scope='main',
+                profile=CI.SCOPED_PROFILE, run_child_override=child,
+                portal_artifact_export=True, cache_config_override={'enabled': False},
+                kill_build_user_override=lambda _account: order.append('quiesced'))
+        self.assertEqual(result['status'], 'passed', result)
+        self.assertEqual(len(result['checks']), 3)
+        self.assertTrue(result['cleanup_confirmed'])
+        self.assertIn('artifact_export', result)
+        self.assertFalse((fixture.work / 'active').exists())
+        for profile, scope in ((CI.LEGACY_PROFILE, 'main'), (CI.SCOPED_PROFILE, 'branch/fixture')):
+            result, _log, _ = fixture._run_supervisor(commit=fixture.base_commit,
+                expected_main=fixture.base_commit if scope == 'main' else '0' * 40,
+                branch_scope=scope, profile=profile, run_child_override=lambda *a, **kw: 0,
+                portal_artifact_export=True, cache_config_override={'enabled': False})
+            self.assertEqual(result['status'], 'passed')
+            self.assertNotIn('artifact_export', result)
+            self.assertEqual(len(result['checks']), 3)
+
+    @unittest.skipUnless(TOOLCHAIN_AVAILABLE, 'Requires installed isolated toolchain fixture')
+    def test_artifact_build_failure_or_cancellation_cannot_turn_three_green_gates_into_release_proof(self):
+        fixture = CargoCacheSupervisorIntegrationTest('test_main_scope_runs_the_full_gate')
+        fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        for code in (7, 124):
+            def child(argv, **_kwargs):
+                return code if 'src/rust/scripts/ui_tools.py' in argv else 0
+            with self.subTest(code=code):
+                result, _log, _ = fixture._run_supervisor(commit=fixture.base_commit,
+                    expected_main=fixture.base_commit, branch_scope='main', profile=CI.SCOPED_PROFILE,
+                    run_child_override=child, portal_artifact_export=True,
+                    cache_config_override={'enabled': False})
+                self.assertEqual(result['status'], 'failed')
+                self.assertTrue(result['cleanup_confirmed'])
+                self.assertEqual(len(result['checks']), 3)
+                self.assertTrue(all(row['returncode'] == 0 for row in result['checks']))
+                self.assertNotIn('artifact_export', result)
 
 
 if __name__ == '__main__':
