@@ -204,7 +204,10 @@ CONSOLIDATED_UI_CONTEXT_SHA256 = {
     "src/rust/forge-ide-ui/src/protocol.rs": "bdad229225ef916154a747f29516286e21875cd6855acdf728bd60ec03fc1f5f",
     "src/rust/forge-ide-web/src/generate/application.rs": "b9d29c96611fcf87aa5022367428135657dd7886039a8b71c900fdb8af0acd85",
     "src/rust/forge-ide-web/src/wasm.rs": "1f97a8974f37d3d82a444a8b614db38cd6a27f9a23e2674ed0c80e8fc74ab5ee",
-    "src/rust/forge-ide-web/tests/browser/journey.mjs": "54fb3215c4698477193b5456fd2af5e0d215225f9023a44ee0a1195a9512f402",
+    # Reviewed 73315d3 + 239ec2c align assertions with the current implementation
+    # document; prior retirement-context fingerprint remains provenance:
+    # 54fb3215c4698477193b5456fd2af5e0d215225f9023a44ee0a1195a9512f402.
+    "src/rust/forge-ide-web/tests/browser/journey.mjs": "b66170861cca572fd8b3a9f47740cb474427614bc572356a521bedd3749e7e3a",
     "src/rust/forge-ide-web/ui/styles.yaml": "b7fb1b60e30d2afff4e3eadd7c45ef474ffe2f66f0d95b27b7668ad57464188c"
 }
 
