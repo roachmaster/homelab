@@ -12,7 +12,7 @@ CREATE TABLE forge_agent.delivery_capability_grants(
 );
 CREATE TABLE forge_agent.delivery_lineages(
  lineage_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),owner_id text NOT NULL,project_alias text NOT NULL,
- rounds integer NOT NULL DEFAULT 0 CHECK(rounds BETWEEN 0 AND 3),created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+ rounds integer NOT NULL DEFAULT 0 CHECK(rounds BETWEEN 0 AND 20),created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 CREATE TABLE forge_agent.delivery_ledger(
  verification_id uuid PRIMARY KEY,owner_id text NOT NULL,project_alias text NOT NULL,
@@ -36,7 +36,7 @@ CREATE TABLE forge_agent.delivery_post_merge_links(
 );
 CREATE TABLE forge_agent.delivery_task_lineages(
  task_id uuid PRIMARY KEY,owner_id text NOT NULL,project_alias text NOT NULL,lineage_id uuid NOT NULL REFERENCES forge_agent.delivery_lineages,
- round integer NOT NULL CHECK(round BETWEEN 0 AND 3),
+ round integer NOT NULL CHECK(round BETWEEN 0 AND 20),
  FOREIGN KEY(owner_id,project_alias,task_id) REFERENCES forge_agent.coding_tasks(owner_id,project_alias,id)
 );
 CREATE TABLE forge_agent.delivery_project_main_heads(
@@ -54,7 +54,7 @@ CREATE TABLE forge_agent.delivery_operations(
  request jsonb,receipt jsonb,summary text NOT NULL DEFAULT '' CHECK(octet_length(summary)<=4096),
  cancel_requested boolean NOT NULL DEFAULT false,actor_started boolean NOT NULL DEFAULT false,next_poll_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  deadline_at timestamptz NOT NULL DEFAULT(clock_timestamp()+interval '4 hours'),
- occurrence bigint NOT NULL DEFAULT 0,round integer NOT NULL DEFAULT 0 CHECK(round BETWEEN 0 AND 3),task_id uuid,
+ occurrence bigint NOT NULL DEFAULT 0,round integer NOT NULL DEFAULT 0 CHECK(round BETWEEN 0 AND 20),task_id uuid,
  finish_token uuid,finish_generation integer,finish_role name,finish_value jsonb,
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  UNIQUE(verification_id,kind,occurrence),
@@ -350,9 +350,9 @@ BEGIN
  SELECT * INTO a FROM forge_agent.delivery_operations WHERE operation_id=(job->>'operation_id')::uuid;
  SELECT * INTO d FROM forge_agent.delivery_ledger WHERE verification_id=a.verification_id;
  SELECT * INTO l FROM forge_agent.delivery_lineages WHERE lineage_id=d.lineage_id FOR UPDATE;
- IF a.request IS NULL AND l.rounds>=3 THEN
+ IF a.request IS NULL AND l.rounds>=20 THEN
   UPDATE forge_agent.delivery_operations SET round=l.rounds WHERE operation_id=a.operation_id;
-  PERFORM forge_agent.delivery_operation_finish(a.operation_id,a.generation,a.lease_token,'needs_attention',jsonb_build_object('reason','lineage_budget_exhausted'),'Three main-repair assignments were reserved; human attention is required.');RETURN NULL;END IF;
+  PERFORM forge_agent.delivery_operation_finish(a.operation_id,a.generation,a.lease_token,'needs_attention',jsonb_build_object('reason','lineage_budget_exhausted'),'Twenty main-repair assignments were reserved; human attention is required.');RETURN NULL;END IF;
  SELECT * INTO h FROM forge_agent.delivery_project_main_heads WHERE(owner_id,project_alias)=(d.owner_id,d.project_alias);
  IF a.request IS NULL AND h.commit_sha IS NOT NULL AND h.commit_sha<>d.commit_sha THEN
   PERFORM forge_agent.delivery_operation_finish(a.operation_id,a.generation,a.lease_token,'admitted',jsonb_build_object('reason','source_superseded'),'A newer main source superseded this repair before any model admission.');RETURN NULL;END IF;
@@ -361,7 +361,7 @@ BEGIN
   WHERE(t.owner_id,t.project_alias,t.idempotency_key)=(a.owner_id,a.project_alias,a.request->'command'->>'idempotency_key') AND t.intent_digest=a.request->>'intent_digest';
  END IF;
  SELECT jsonb_build_object('prompt',left(prompt,1500),'acceptance_criteria',left(acceptance_criteria,512)) INTO original FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(d.owner_id,d.project_alias,d.root_task_id);
- RETURN job||jsonb_build_object('round',CASE WHEN a.round=0 THEN l.rounds+1 ELSE a.round END,'max_rounds',3,'base_revision',coalesce(h.commit_sha,d.commit_sha),'existing_receipt',existing,'original',original);
+ RETURN job||jsonb_build_object('round',CASE WHEN a.round=0 THEN l.rounds+1 ELSE a.round END,'max_rounds',20,'base_revision',coalesce(h.commit_sha,d.commit_sha),'existing_receipt',existing,'original',original);
 END;$fn$;
 CREATE FUNCTION forge_agent.delivery_repair_renew(p_id uuid,p_generation integer,p_token uuid) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
 DECLARE a forge_agent.delivery_operations%ROWTYPE;
@@ -384,7 +384,7 @@ BEGIN
  OR jsonb_typeof(c->'acceptance_criteria') IS DISTINCT FROM 'string' OR octet_length(c->>'acceptance_criteria')>2048
  OR p_intent->>'intent_digest' IS DISTINCT FROM encode(sha256(convert_to(forge_agent.delivery_canonical(c-ARRAY['idempotency_key','auto_repair']),'UTF8')),'hex')
  THEN RAISE EXCEPTION 'Invalid frozen normal repair admission' USING ERRCODE='22023';END IF;
- IF l.rounds>=3 THEN RAISE EXCEPTION 'Repair lineage budget exhausted' USING ERRCODE='P0009';END IF;
+ IF l.rounds>=20 THEN RAISE EXCEPTION 'Repair lineage budget exhausted' USING ERRCODE='P0009';END IF;
  UPDATE forge_agent.delivery_lineages SET rounds=rounds+1 WHERE lineage_id=d.lineage_id RETURNING * INTO l;
  UPDATE forge_agent.delivery_operations SET request=p_intent,round=l.rounds,updated_at=clock_timestamp() WHERE operation_id=p_id;RETURN true;
 END;$fn$;
@@ -437,7 +437,7 @@ BEGIN
  RETURN jsonb_build_object('verification_id',d.verification_id,'source_kind',d.source_kind,'commit_sha',d.commit_sha,'tree_sha',d.tree_sha,
  'updated_at',forge_agent.delivery_timestamp(greatest(d.updated_at,coalesce(r.updated_at,d.updated_at),coalesce(s.updated_at,d.updated_at),coalesce(t.updated_at,d.updated_at))),
  'verification',jsonb_strip_nulls(jsonb_build_object('status',verification_status,'updated_at',forge_agent.delivery_timestamp(d.updated_at),'summary',left(coalesce(nullif(d.verification_summary,''),'Main verification is queued.'),512),'build_number',d.verification_receipt->'build_number')),
- 'repair',jsonb_strip_nulls(jsonb_build_object('status',repair_status,'round',coalesce(r.round,0),'max_rounds',3,'task_id',r.task_id,'updated_at',forge_agent.delivery_timestamp(coalesce(r.updated_at,d.updated_at)),'summary',left(coalesce(nullif(r.summary,''),'No repair assignment is required.'),512))),
+ 'repair',jsonb_strip_nulls(jsonb_build_object('status',repair_status,'round',coalesce(r.round,0),'max_rounds',20,'task_id',r.task_id,'updated_at',forge_agent.delivery_timestamp(coalesce(r.updated_at,d.updated_at)),'summary',left(coalesce(nullif(r.summary,''),'No repair assignment is required.'),512))),
  'release',jsonb_strip_nulls(jsonb_build_object('status',release_status,'release_id',s.operation_id,'receipt_sha256',s.receipt->>'activation_receipt_sha256','updated_at',forge_agent.delivery_timestamp(coalesce(s.updated_at,d.updated_at)),'summary',left(CASE WHEN s.receipt->'operator_required'='true'::jsonb THEN 'Portal recovery requires operator attention; cleanup remains unconfirmed.' ELSE coalesce(nullif(s.summary,''),'No release is queued.') END,512))));
 END;$fn$;
 CREATE FUNCTION forge_agent.delivery_scope(p_projection jsonb) RETURNS text LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,pg_temp AS $fn$

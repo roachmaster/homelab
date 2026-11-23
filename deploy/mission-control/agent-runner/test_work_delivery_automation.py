@@ -193,25 +193,27 @@ class DeliveryAutomationPGTest(unittest.TestCase):
         consumer.store.checkpoint=revoke
         self.assertTrue(consumer.run_once());self.assertFalse(self.rows('SELECT * FROM forge_agent.coding_tasks'))
         self.assertEqual(self.rows("SELECT status FROM forge_agent.delivery_operations WHERE kind='repair'")[0]['status'],'needs_attention')
-    def test_three_round_budget_survives_new_task_workflows_and_never_creates_fourth(self):
+    def test_twenty_round_budget_survives_new_task_workflows_and_never_creates_twenty_first(self):
         self.verification('failed');service=self.service();consumer=service.workflow_worker._delivery_repair
-        for number in range(3):
+        for number in range(20):
             self.assertTrue(consumer.run_once())
             tasks=self.rows('SELECT * FROM forge_agent.coding_tasks ORDER BY created_at');self.assertEqual(len(tasks),number+1)
             latest=tasks[-1];link=self.rows('SELECT * FROM forge_agent.delivery_task_lineages WHERE task_id=%s',(latest['id'],))[0]
             self.assertEqual(link['round'],number+1)
             # Seed the trusted post-verification failure seam for the legitimately
             # admitted NEW workflow; model roles cannot insert these private rows.
-            commit=chr(ord('b')+number)*40;tree=str(number+5)*40;identity=uuid4()
+            commit=f'{number+11:040x}';tree=f'{number+111:040x}';identity=uuid4()
             with closing(self.pg.connect('postgres')) as c,c,c.cursor() as q:
                 q.execute("UPDATE forge_agent.coding_tasks SET status='completed',revision=revision+1,accepted_at=clock_timestamp() WHERE id=%s",(latest['id'],))
                 q.execute("INSERT INTO forge_agent.post_merge_verifications(post_merge_id,owner_id,project_alias,source_kind,workflow_id,source_action_id,root_task_id,merge_commit,merge_tree,merge_receipt,status,receipt,summary) VALUES(%s,%s,'homelab','native',%s,%s,%s,%s,%s,'{}','failed',%s,'Next real-main failure seam')",(identity,OWNER,latest['workflow_id'],uuid4(),latest['id'],commit,tree,Json({'cleanup_confirmed':True,'failure':'checks_failed'})))
                 q.execute("UPDATE forge_agent.delivery_project_main_heads SET commit_sha=%s,tree_sha=%s,verification_id=%s,generation=generation+1",(commit,tree,identity))
                 q.execute('SELECT forge_agent.delivery_enqueue_successors(%s)',(identity,))
         self.assertFalse(consumer.run_once())
-        self.assertEqual(len(self.rows('SELECT * FROM forge_agent.coding_tasks')),3)
-        self.assertEqual(self.rows('SELECT max(rounds) AS value FROM forge_agent.delivery_lineages')[0]['value'],3)
-        projection=service.catalog()['projects'][0]['delivery'];self.assertEqual(projection['repair']['status'],'needs_attention');self.assertEqual(projection['repair']['round'],3)
+        self.assertEqual(len(self.rows('SELECT * FROM forge_agent.coding_tasks')),20)
+        self.assertEqual(self.rows('SELECT count(DISTINCT workflow_id) AS value FROM forge_agent.coding_tasks')[0]['value'],20)
+        self.assertEqual(self.rows('SELECT count(DISTINCT lineage_id) AS value FROM forge_agent.delivery_task_lineages')[0]['value'],1)
+        self.assertEqual(self.rows('SELECT max(rounds) AS value FROM forge_agent.delivery_lineages')[0]['value'],20)
+        projection=service.catalog()['projects'][0]['delivery'];self.assertEqual(projection['repair']['status'],'needs_attention');self.assertEqual(projection['repair']['round'],20);self.assertEqual(projection['repair']['max_rounds'],20)
     def test_observer_winning_confirmed_native_merge_race_uses_one_ci_action_and_real_root_projection(self):
         import test_work_workflow as native
         from work_api import WorkGet,WorkList

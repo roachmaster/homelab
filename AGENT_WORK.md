@@ -69,6 +69,20 @@ rollback, staged-copy recovery, failed-candidate cleanup and source/proof tamper
 rejection. Provider/actor planned-replay handling is included. Final combined
 focused run: 71 passed, zero skips, 4.148s. These substitute system calls and do
 not constitute live activation evidence.
+## Latest user steering: twenty failed-main repair assignments
+
+The user now requests a shared failed-main lineage limit of20. Apply only to
+additive migration29 constraints/reservation/admission/projection and the actual
+PG regression:20 distinct legitimately admitted repair workflows share one
+lineage, the20th is permitted and the21st is refused. Native Plan/code policy
+budgets and the Root rollback-attempt limit remain unchanged. Historical
+migrations1–28 stay immutable. Regenerate exact M29 schema fingerprints and run
+the focused actual-PG delivery suite before commit; Root owns rollout.
+The updated18-case focused suite passed in12.532s withzero skips, including
+20 distinct normal-policy repair workflows sharing one lineage and refusal of
+the21st. Fresh schema29 full strict verification passed with8 tables,39 functions
+and the one validated M28 synchronization trigger. No live effects occurred.
+
 ## Backend verified follow-up
 
 The complete18-case focused contract suite passed on owned PostgreSQL16 and

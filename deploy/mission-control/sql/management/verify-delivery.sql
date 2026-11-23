@@ -6,12 +6,12 @@ BEGIN
  FOR expected IN SELECT * FROM(VALUES
  ('delivery_projects','7145b29d3d8b6b2305093c32f14720cb6e54ec147f526ace5880fa8bd8ec0058'),
  ('delivery_capability_grants','afa9159f7499c95be6acca2fdb85d62c480ceb5b1b4b6c01f889df530df5e030'),
- ('delivery_lineages','9a93fcd82f5dc1113e6e79b23df4a60570926a8e5e7624b380bd82c5db5df154'),
+ ('delivery_lineages','e5969fab6a4d580b7e22fa75b61829482ab6e8c29225dcac5f16b7388a4b4450'),
  ('delivery_ledger','b7160a62c9067de24e5f64456677a4772825304ec3da4eeb8709b0eb5f602a79'),
  ('delivery_post_merge_links','d10df6d24970620161497b49ff60e487bb2175032a8847e7127829ab4e4440b5'),
- ('delivery_task_lineages','9b65e5890bdfde86fa0b2f0778a6111f0b8b50fe461d3ad4002aec631d32243a'),
+ ('delivery_task_lineages','12c51a70990faaee793a73f34ceeb45c9d657f3fa3f2fcd31c5193762a2b002c'),
  ('delivery_project_main_heads','3b9b5f81d27ef242cdeefcba4314b2f1daaa7ea123f14a6c3b808a8696428c08'),
- ('delivery_operations','fd21a4b2904813609b4fece91e26830c7aae6c7e8bb162223feff41b37c36c0e'))x(name,sha256) LOOP
+ ('delivery_operations','50a6af275fb86c76b25d0a2339775c98c30e9647e4d9d245898c391c36ef7ab5'))x(name,sha256) LOOP
  relation:=to_regclass('forge_agent.'||expected.name);
  SELECT encode(sha256(convert_to(jsonb_build_object(
  'table',jsonb_build_array(c.relkind,c.relpersistence,pg_get_userbyid(c.relowner),c.relrowsecurity,c.relforcerowsecurity,c.relreplident,c.reloptions),
@@ -39,12 +39,12 @@ BEGIN
  ('forge_agent.delivery_operation_replayed(uuid,integer,uuid,jsonb)','8332b5ea0e19f7c1bd82e86c02e380a2148e21ee56f18d4d5b19d5d744ce7c36'),
  ('forge_agent.delivery_own_cleanup(uuid,jsonb,jsonb,text)','324ea6520fae217330434c3bb933d80c1a860aec6f69bb8c12e066512144eb3d'),
  ('forge_agent.delivery_project_head(text)','7f471e7116ce8163692b4756de668015a7b7f26c3704ad760ad603e0628384a9'),
- ('forge_agent.delivery_projection(text,uuid)','5a5bd056b29046b9be771b46c6fd74d9edd9a423d30a4a7ef4cf383a4171cacf'),
+ ('forge_agent.delivery_projection(text,uuid)','537c592c65f48d665dbe096c0970ec71fe3f9b2fa47b2402d8fe28dccdc1a7f9'),
  ('forge_agent.delivery_register_post_merge(uuid)','33f8daed2d89b4aed4e9dcc0d9286da77309ef1dbe443f823d61130384473a06'),
  ('forge_agent.delivery_repair_admit(uuid,integer,uuid,text)','7387358a2471cd0a2c2398b5953b7d2857ea9ef466327bc98d823bb27adf4492'),
  ('forge_agent.delivery_repair_bind(uuid,integer,uuid,uuid,jsonb)','114ccac21314b3289fc30af5f508eb4813a4f0e0c4abad84c25cb91c8d07ac12'),
- ('forge_agent.delivery_repair_checkpoint(uuid,integer,uuid,jsonb)','74967bb9d32cc0e1bc917339a230d99d72a73f963578afe7ebc596fd01e980a7'),
- ('forge_agent.delivery_repair_claim(text)','2c4c3904af68b7d60ac1654bfd9597fd313469dbb2e08d63cc847859ff7e7866'),
+ ('forge_agent.delivery_repair_checkpoint(uuid,integer,uuid,jsonb)','b6a3b222e24d0c7a91a2648885c90028421bb61130048030ea191a8a02109c46'),
+ ('forge_agent.delivery_repair_claim(text)','c6b036b4f2c140b52863db887be11a5e01a3b7b3a28f71bbe38dd1ac8ca6864f'),
  ('forge_agent.delivery_repair_finish(uuid,integer,uuid,text,jsonb,text)','c748112144fa532aff625d031917ec295312a237c2611b65cee4f685c149ab28'),
  ('forge_agent.delivery_repair_renew(uuid,integer,uuid)','07f09d1eb7ede0d61600c009c4770aeb72351dc7cf60abf2801a9ed73f672a23'),
  ('forge_agent.delivery_request_valid(jsonb,uuid,uuid,text,text,text,uuid)','2fd460345d4cd5c07d94f6bd9189fed7e1b5c1477433e3aa40a7e238fbe3cb4f'),
