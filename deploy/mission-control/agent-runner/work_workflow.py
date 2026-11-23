@@ -23,6 +23,7 @@ from work_store import ADVISORY_LOCK_SALT
 from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
 
 LOG=logging.getLogger('forge-workflow')
+_INHERIT_RETRY_EVENTS=object()
 MAX_TARGET_BYTES=64*1024*1024+65536
 NATIVE_DEADLINE_POLICY='forge-native-deadline-recovery-v1'
 NATIVE_DEADLINE_RETRIES=1
@@ -125,8 +126,8 @@ class BoundPreparationRetryAuthority:
 
 
 class WorkflowStore:
-    def __init__(self,config,catalog,store,*,retry_events=None):
-        self.retry_events=retry_events
+    def __init__(self,config,catalog,store,*,retry_events=_INHERIT_RETRY_EVENTS):
+        self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
         self.config=config;self.catalog=catalog;self.store=store
         self.reviewer_correction = None
         self.feedback_recovery = None
@@ -186,6 +187,7 @@ class WorkflowStore:
         # Only the explicitly selected common twenty-attempt policy widens old
         # ledgers. The database function journals the old/new allowance once;
         # snapshots, recipes, attempts and all spent counters remain unchanged.
+        if self.retry_events is not None:return
         if any(self.config.repair_policy[k]!=AGENT_RETRY_LIMIT for k in
                ('max_rounds','max_stagnant_rounds','max_infrastructure_retries')):
             return
@@ -496,7 +498,7 @@ class WorkflowStore:
             if cursor.fetchone()['used']:raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT repair_rounds,stagnant_rounds,policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
                            (self.store.owner,project_alias,task['repair_root_task_id'] or task['id']));budget=cursor.fetchone()
-            if (q['round']>=self._retry_limit(w,'max_code_revisions') or budget and (budget['repair_rounds']>=self._retry_limit(w,'max_code_revisions')
+            if self.retry_events is None and (q['round']>=self._retry_limit(w,'max_code_revisions') or budget and (budget['repair_rounds']>=self._retry_limit(w,'max_code_revisions')
                 or budget['stagnant_rounds']>=budget['policy']['max_stagnant_rounds'])):raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='code_review',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
@@ -943,6 +945,10 @@ class WorkflowStore:
             return evidence
         return None
 
+    def _retry_scope(self,w):
+        from work_retry_events import RetryScope
+        return RetryScope(self.store.owner,w['project_alias'],'native_workflow',UUID(str(w['workflow_id'])))
+
     def _code_handoff(self,cursor,w,review,reason,budget=None):
         note=('Independent code review requested revisions; the frozen repair budget is exhausted.'
             if reason=='repair_budget_exhausted' else 'The source-bound code decision was rejected by a repair/publication guard; retained verdict requires reconciliation.')
@@ -968,7 +974,20 @@ class WorkflowStore:
         review.update(reviewer_attempt_id=critic['latest_attempt_id'],reviewer_result_sha256=result['result_sha256'])
         authority=BoundDelegatedAuthority(self.store,cursor,w,action,review,verdict)
         decision=verdict['decision'];key='peer-'+str(review['workflow_review_id'])
-        if decision=='escalate' or(review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
+        retry_event=None;event_exhausted=False
+        if self.retry_events is not None:
+            scope=self._retry_scope(w);kind='planning' if review['target_kind']=='plan' else 'review'
+            evidence=hashlib.sha256(result['content'].encode()).hexdigest();source=str(review['workflow_review_id'])
+            self.retry_events.resolve_verified(cursor,scope,'reviewer_correction',source,evidence,phase_id='reviewer_correction.'+source)
+            if decision=='approve':self.retry_events.resolve_verified(cursor,scope,kind,source,evidence)
+            elif decision=='revise':
+                retry_event=self.retry_events.observe_failure(cursor,scope,kind,source,evidence)
+                if review['target_kind']=='plan':retry_event=self.retry_events.reserve(cursor,retry_event['event_id'],'plan-revision.'+source)
+                event_exhausted=retry_event['status']=='exhausted'
+                if review['target_kind']=='code' and not event_exhausted:
+                    self.retry_events.bind_review(cursor,review['source_review_id'],retry_event['event_id'],'peer-revision.'+source)
+
+        if decision=='escalate' or event_exhausted or(review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
             self._escalate(cursor,w,verdict['summary']);receipt={'status':'escalated','workflow_id':str(w['workflow_id'])}
         elif review['target_kind']=='plan':
             mode='implement' if decision=='approve' else 'plan';self._grant(cursor,w,p['author_profile'],mode)
@@ -979,7 +998,7 @@ class WorkflowStore:
             cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,plan_revisions=plan_revisions+%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('implement' if decision=='approve' else 'plan_revision',0 if decision=='approve' else 1,w['workflow_id']))
         else:
             source=self._code_review_source(cursor,review,task,authority)
-            budget=self._exhausted_code_budget(cursor,task,source) if decision=='revise' else None
+            budget=self._exhausted_code_budget(cursor,task,source) if decision=='revise' and self.retry_events is None else None
             from work_owner_control import owner_continuation_used
             owner_spent = decision == 'revise' and owner_continuation_used(cursor, w['workflow_id'])
             if owner_spent:
@@ -1004,7 +1023,7 @@ class WorkflowStore:
                 cursor.execute('RELEASE SAVEPOINT peer_code_decision')
                 if receipt.get('status')!='escalated':
                     cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('publishing' if decision=='approve' else 'repair',w['workflow_id']))
-        if receipt.get('status')!='escalated' and decision in {'approve','revise'} and not (review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
+        if receipt.get('status')!='escalated' and decision in {'approve','revise'} and not (review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
             next_task=UUID(receipt['repair_task_id']) if receipt.get('repair_task_id') else task['id']
             cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_feedback_review_id=%s,workflow_feedback_sha256=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(review['workflow_review_id'],hashlib.sha256(result['content'].encode()).hexdigest(),self.store.owner,w['project_alias'],next_task))
         cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='decided',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
@@ -1059,17 +1078,17 @@ class WorkflowCoordinator:
 
 
 class WorkflowCoordinatorFactory:
-    def __init__(self,config,catalog,store,*,external_maintenance=None,external_workflow=None,delivery_repair=None,retry_events=None):
-        self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance;self.external_workflow=external_workflow;self.delivery_repair=delivery_repair;self.retry_events=retry_events
+    def __init__(self,config,catalog,store,*,external_maintenance=None,external_workflow=None,delivery_repair=None,retry_events=_INHERIT_RETRY_EVENTS):
+        self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance;self.external_workflow=external_workflow;self.delivery_repair=delivery_repair;self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
     def create(self):
         return WorkflowCoordinator(WorkflowStoreFactory(self.config,self.catalog,self.store,retry_events=self.retry_events).create(),external_maintenance=self.external_maintenance,external_workflow=self.external_workflow,delivery_repair=self.delivery_repair)
 
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,retry_events=None):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
         self.config,self.catalog,self.store=config,catalog,store
-        self.retry_events=retry_events
+        self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
         self.reviewer_correction_factory=reviewer_correction_factory
         self.feedback_recovery_factory=feedback_recovery_factory
     def create(self):

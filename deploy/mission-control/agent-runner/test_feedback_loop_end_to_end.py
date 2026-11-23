@@ -24,6 +24,7 @@ from work_review import validate_review
 from work_review_context import validate_context
 from work_verification import DEFAULT_REQUIRED_HOSTED_CHECKS
 from work_worker_store import OutcomeConflictError, WorkerDB
+from work_retry_policy import AGENT_RETRY_LIMIT
 import work_policy
 
 
@@ -92,6 +93,9 @@ class FeedbackLoopEndToEndTest(unittest.TestCase):
             "diagnostic_code": "assert-answer-two", "summary": "answer() must return 2.",
             "reproduction": "Run the owned answer assertion.", "expected": "2", "actual": "1"}
         return {
+            "retry_observation":{"failure_kind":None if passed else 'tests','phase_id':'owned-answer-assertion',
+                'passed_kinds':['tests'] if passed else [],'passed_phase_ids':['owned-answer-assertion'] if passed else [],
+                'stage_evidence_digest':hashlib.sha256(result.stderr+str(result.returncode).encode()+self.program.read_bytes()).hexdigest()},
             "disposition": "awaiting_review" if passed else "repair",
             "candidate_commit": "d" * 40, "gate_manifest_sha256": "e" * 64,
             "findings": [] if passed else [finding],
@@ -183,12 +187,14 @@ class FeedbackLoopEndToEndTest(unittest.TestCase):
 
     def test_claimed_success_without_a_fix_reaches_handoff_instead_of_unbounded_repairs(self):
         lease = self.submit()
-        for index in range(3):
+        for index in range(AGENT_RETRY_LIMIT+1):
             job = self.stop_and_review(lease, reply="I fixed everything and all tests pass.")
+            self.assertEqual(job["policy"]["max_rounds"],AGENT_RETRY_LIMIT)
+            self.assertEqual(job["policy"]["max_stagnant_rounds"],AGENT_RETRY_LIMIT)
             result = self.db.review_finish(job, self.independent_check())
             detail = self.get(lease)
             self.assertEqual(detail["review"]["verified_findings"], 0)
-            if index < 2:
+            if index < AGENT_RETRY_LIMIT:
                 self.assertEqual(result["status"], "repair")
                 lease = self.claim()
                 self.assertIsNotNone(lease)

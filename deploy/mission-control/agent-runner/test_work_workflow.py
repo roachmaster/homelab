@@ -5,6 +5,7 @@ import hashlib
 import json
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 from uuid import UUID,uuid4
 import psycopg2
 from queue_store import Rejected
@@ -28,7 +29,7 @@ class AutonomousWorkflowTest(unittest.TestCase):
   # These historical fixtures keep their original finite allowance; shared-policy
   # migration/boundary tests select twenty explicitly.
   self.config=replace(self.config,repair_policy={**dict(self.config.repair_policy),'max_rounds':3,'max_stagnant_rounds':2,'max_infrastructure_retries':1})
-  self.service=WorkServiceFactory(self.config,lambda:self.cluster.connect('forge_agent')).create()
+  self.service=WorkServiceFactory(self.config,lambda:self.cluster.connect('forge_agent'),retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
   self.coordinator=self.service.workflow_worker
   self.db=WorkerDB(lambda:self.cluster.connect('forge_coding_worker'),'mission-control',reconcile_connect_factory=lambda:self.cluster.connect('forge_coding_reconciler'))
   self.incarnation=str(uuid4())
