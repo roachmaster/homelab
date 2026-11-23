@@ -37,6 +37,8 @@ class PublicationConfig:
     native_delivery_mode: str = "integrate-first-v1"
     jenkins_verification_profile: str = LEGACY_PROFILE
     jenkins_verification_scope: str = "branch"
+    post_merge_enabled: bool = False
+    post_merge_jenkins_delivery_config: Path | None = None
 
     @property
     def state_root(self):
@@ -48,7 +50,8 @@ def parse_config(raw, worker, *, source_path=None):
         raise ValueError("Publisher requires typed worker configuration")
     if not {"worker_config", "repositories", "github_config_dir"} <= raw.keys() <= {
         "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email", "required_hosted_checks",
-        "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode", "jenkins_verification_profile", "jenkins_verification_scope"
+        "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode", "jenkins_verification_profile", "jenkins_verification_scope",
+        "post_merge_enabled", "post_merge_jenkins_delivery_config"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -124,11 +127,22 @@ def parse_config(raw, worker, *, source_path=None):
         raise ValueError("Invalid required hosted checks")
     if hosted_provider == "jenkins" and tuple(tuple(row) for row in required) != plan.required_hosted_checks:
         raise ValueError("Jenkins verification requires the selected exact logical gate identities")
+    post_merge_enabled = raw.get("post_merge_enabled", False)
+    post_merge_delivery = raw.get("post_merge_jenkins_delivery_config")
+    if type(post_merge_enabled) is not bool:
+        raise ValueError("Invalid post-merge verification selection")
+    if post_merge_enabled:
+        if not merge_enabled or hosted_provider != "jenkins" or post_merge_delivery is None:
+            raise ValueError("Post-merge verification requires trusted merge and explicit Jenkins configuration")
+        post_merge_delivery = absolute_path(post_merge_delivery)
+    elif post_merge_delivery is not None:
+        raise ValueError("Unused post-merge Jenkins configuration")
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
                              absolute_path(source_path) if source_path else None,
                              tuple(tuple(row) for row in required), merge_enabled, merge_method,
-                             hosted_provider, delivery_path, delivery_mode, profile, execution_scope)
+                             hosted_provider, delivery_path, delivery_mode, profile, execution_scope,
+                             post_merge_enabled, post_merge_delivery)
 
 
 def _object(pairs):

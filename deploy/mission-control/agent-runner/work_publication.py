@@ -26,6 +26,8 @@ from work_merge import GitHubExactTreeMergeProvider, MergeWorker
 from work_source_revision import VerifiedSourceSyncProvider
 from work_native_jenkins import create_native_jenkins
 from work_native_repair import BranchFirstRepairProvider
+from work_post_merge import PostMergeWorker
+from work_post_merge_provider import PostMergeProviderFactory
 
 LOG = logging.getLogger("forge-publication")
 
@@ -55,12 +57,13 @@ def validate_job(config, job):
 
 class PublicationWorker:
     def __init__(self, config, store, snapshots, git, checks, pull_requests, *, candidates, reviewer=None, merger=None, stop=None,
-                 native_ci=None):
+                 native_ci=None, post_merge=None):
         self.config, self.store, self.snapshots, self.git = config, store, snapshots, git
         self.checks, self.pull_requests = checks, pull_requests
         self.candidates, self.reviewer = candidates, reviewer
         self.merger = merger
         self.native_ci = native_ci
+        self.post_merge = post_merge
         self.stop = stop if stop is not None else threading.Event()
 
     @contextmanager
@@ -168,6 +171,8 @@ class PublicationWorker:
             return False
         if self.native_ci is not None:
             self.native_ci.reconcile_once()
+        if self.post_merge is not None and self.post_merge.run_once():
+            return True
         if self.reviewer is not None:
             review = self.store.review_claim(self.config.worker.worker_id[:54] + "-reviewer")
             if review is not None:
@@ -215,7 +220,9 @@ class PublicationWorkerFactory:
                  merge_provider_factory=GitHubExactTreeMergeProvider, merge_worker_factory=MergeWorker,
                  source_sync_factory=VerifiedSourceSyncProvider,
                  repair_source_factory=BranchFirstRepairProvider,
-                 native_jenkins_factory=create_native_jenkins, stop=None):
+                 native_jenkins_factory=create_native_jenkins,
+                 post_merge_provider_factory=PostMergeProviderFactory,
+                 post_merge_worker_factory=PostMergeWorker, stop=None):
         if not isinstance(config, PublicationConfig) or not callable(store_factory):
             raise TypeError("Publication requires frozen config and a store factory")
         if (type(config.merge_enabled) is not bool or config.merge_method != "merge"
@@ -231,6 +238,8 @@ class PublicationWorkerFactory:
         self.candidate_factory, self.reviewer_factory = candidate_factory, reviewer_factory
         self.hosted_factory = hosted_factory
         self.native_jenkins_factory = native_jenkins_factory
+        self.post_merge_provider_factory = post_merge_provider_factory
+        self.post_merge_worker_factory = post_merge_worker_factory
         self.merge_provider_factory, self.merge_worker_factory = merge_provider_factory, merge_worker_factory
         self.source_sync_factory = source_sync_factory
         self.repair_source_factory = repair_source_factory
@@ -270,9 +279,16 @@ class PublicationWorkerFactory:
                     self.merge_provider_factory(self.config, pulls, git, candidates, hosted),
                     source_sync=self.source_sync_factory(self.config, git), **merge_options)
                   if self.config.merge_enabled else None)
+        post_merge = None
+        if self.config.post_merge_enabled:
+            if not store.post_merge_available(self.config.worker.owner):
+                raise ValueError('Post-merge schema and scoped worker grant must be provisioned')
+            provider = self.post_merge_provider_factory(self.config).create()
+            post_merge = self.post_merge_worker_factory(self.config, store, provider, stop=self.stop)
         return PublicationWorker(self.config, store, snapshots, git, checks,
                                  pulls, candidates=candidates,
-                                 reviewer=reviewer, merger=merger, stop=self.stop, native_ci=native_ci)
+                                 reviewer=reviewer, merger=merger, stop=self.stop, native_ci=native_ci,
+                                 post_merge=post_merge)
 
 
 def default_store_factory(config):
