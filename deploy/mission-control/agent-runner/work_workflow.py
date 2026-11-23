@@ -127,6 +127,7 @@ class WorkflowStore:
     def __init__(self,config,catalog,store):
         self.config=config;self.catalog=catalog;self.store=store
         self.reviewer_correction = None
+        self.feedback_recovery = None
 
     @contextmanager
     def _transaction(self):
@@ -735,6 +736,8 @@ class WorkflowStore:
         cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('code_review' if q else 'plan_review',w['workflow_id']))
 
     def claim(self,worker_id):
+        if self.feedback_recovery is not None:
+            self.feedback_recovery.run_once()
         self._recover_source_readiness()
         self._recover_preparations()
         self._recover_peer_verdicts()
@@ -976,14 +979,19 @@ class WorkflowCoordinatorFactory:
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None):
         self.config,self.catalog,self.store=config,catalog,store
         self.reviewer_correction_factory=reviewer_correction_factory
+        self.feedback_recovery_factory=feedback_recovery_factory
     def create(self):
         from work_reviewer_correction import ReviewerCorrectionFactory
+        from work_context_recovery import FeedbackRecoveryFactory
         flow=WorkflowStore(self.config,self.catalog,self.store)
         factory=self.reviewer_correction_factory or ReviewerCorrectionFactory
         flow.reviewer_correction=factory(flow).create()
         if not all(callable(getattr(flow.reviewer_correction, name, None)) for name in ('correct','resume')):
             raise TypeError('Reviewer correction requires a ready correction/control port')
+        flow.feedback_recovery=(self.feedback_recovery_factory or FeedbackRecoveryFactory)(flow).create()
+        if flow.feedback_recovery is not None and not callable(getattr(flow.feedback_recovery,'run_once',None)):
+            raise TypeError('Feedback recovery requires a ready recovery port')
         return flow
