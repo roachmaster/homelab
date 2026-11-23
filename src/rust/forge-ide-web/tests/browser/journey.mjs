@@ -3412,6 +3412,11 @@ async function agentsJourney() {
         await check(page.locator('#agents-delivery-source')).toContainText('Activation receipt · '+'e'.repeat(64));
       }
     }
+    // Exact receipt assertions above stay read-only; keep hash-shaped values
+    // behind their native disclosure when producing shareable screenshots.
+    const deliveryDetails=page.locator('#agents-delivery-details');
+    if(await deliveryDetails.getAttribute('open')!==null)await deliveryDetails.locator('summary').click();
+    await page.locator('#agents-delivery-state').scrollIntoViewIfNeeded();
     await screenshot(page,'ide-agents-delivery-deployed.png');
     const deliveryTaskCount=relay.taskCount;
     relay.setProjectDelivery('deployed');

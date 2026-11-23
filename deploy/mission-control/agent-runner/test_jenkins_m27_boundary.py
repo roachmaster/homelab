@@ -266,7 +266,9 @@ UI_DELIVERY_CONTEXT_SHA256 = {
     "src/rust/forge-ide-web/src/wasm.rs": "bf857b74aabc157492665e3b8081bc9c11e1965dd21c43578f34fa53f102c2d3",
     "src/rust/forge-ide-web/tests/browser/agents-relay.mjs": "19c7ef943a10590661807770b4428d1d0cc52960109c12c999a15f909a1d46a7",
     "src/rust/forge-ide-web/tests/browser/agents-relay.test.mjs": "d0cf35feb49a7b100799ad4fd9e4271161442e6e1ed46942b7e09dd168db583a",
-    "src/rust/forge-ide-web/tests/browser/journey.mjs": "56602f5677b962c3440e3d4447206dca790ec9a39ba3f35d56d0d2a366a30bc2",
+    # Browser-only capture follow-up: close exact-source details before screenshots.
+    # Preserve the f246 journey fingerprint as provenance: 56602f5677b962c3440e3d4447206dca790ec9a39ba3f35d56d0d2a366a30bc2.
+    "src/rust/forge-ide-web/tests/browser/journey.mjs": "7c130f5335cc511ba9d3e2c445055fe210af07c84ce81979159c4bf47260fb34",
     "src/rust/forge-ide-web/tests/generation.rs": "03c30669e72497842be36d6e638e232205e6c46c85d03c61e976d4a851f72e9d",
     "src/rust/forge-ide-web/tests/playtest-wire.mjs": "4528a669e7fee2dca2c1fd099364793075cb3671de9ced507475c7f3cd1031bb",
     "src/rust/forge-ide-web/ui/styles.yaml": "960473ec8185275bcf0901e48d0bf2fad48c27cfa05bc056c479b2705277a9a1",
