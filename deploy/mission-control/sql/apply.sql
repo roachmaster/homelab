@@ -272,4 +272,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=28)
 \ir migrations/0028_post_merge_verification.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(28,'post_merge_verification');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=29) AS apply_0029
+\gset
+\if :apply_0029
+\ir migrations/0029_delivery_automation.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(29,'delivery_automation');
+\endif
 COMMIT;

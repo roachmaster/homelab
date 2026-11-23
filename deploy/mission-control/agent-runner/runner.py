@@ -534,7 +534,9 @@ class Handler(BaseHTTPRequestHandler):
                 work_service = getattr(self.server, "work_service", None)
                 if work_service is None:
                     raise Rejected(503, "unavailable")
-                return api.dispatch(route, correlation, command, work_service)
+                return api.delivery_response(api.dispatch(route, correlation, command, work_service,
+                                                                    delivery_version=api.delivery_version(self.headers)),
+                                             api.delivery_version(self.headers))
             if api is u_api:
                 usage_service = getattr(self.server, "usage_service", None)
                 if usage_service is None:

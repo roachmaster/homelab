@@ -66,6 +66,25 @@ rollback, staged-copy recovery, failed-candidate cleanup and source/proof tamper
 rejection. Provider/actor planned-replay handling is included. Final combined
 focused run: 71 passed, zero skips, 4.148s. These substitute system calls and do
 not constitute live activation evidence.
+## Backend initial implementation checkpoint
+
+Owner: backend, isolated `complete-sdlc-20261123/backend`, task-record base5262806.
+Drafted additive M29 (8tables,39 narrow/private functions), immutable canonical
+verification/source-CAS ledger, normal WorkService bounded repair admission,
+atomic task-lineage binding and independent lifecycle projections. Existing M28
+functions/tables remain unchanged except an independently pinned M29 sync trigger
+excluded only after strict M29 verification. Root-only activation authorization
+checks live lease/scope/deadline/source and exposes checkpoint/hash metadata;
+its actor_started latch preserves cleanup after pre-checkpoint revocation.
+Header1 gates both delivery fields and new list-scope semantics for ABI13 rollout.
+No model, GitHub, outbound message, native build or live DB/service action occurred.
+
+Initial actual-PG16 create/reapply/full strict catalog checks and9 focused
+integration/compatibility cases pass (5.414s,zero skips). Source migrations1–28
+are byte-identical. This is an initial reviewable checkpoint: deeper lineage3,
+lost-ack, observer/native-race, scope-pagination and affected historical fixture
+checks follow before qualification/activation. Root owns installer publication,
+all source context/guard overlays, integration and privileged operational rollout.
 
 --- Previous task record ---
 

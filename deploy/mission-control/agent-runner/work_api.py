@@ -1,6 +1,6 @@
 """Versioned, header-selected coding-job API and service factory."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from http import HTTPStatus
 import re
@@ -79,6 +79,7 @@ class WorkSubmit:
     idempotency_key: str
     auto_repair: bool = False
     workflow_policy_digest: str | None = None
+    delivery_admission: dict | None = None  # Internal ready-port authority, never admitted from JSON.
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ class WorkList:
     status_filter: str | None
     limit: int
     cursor: UUID | None
+    delivery_visible: bool = True
 
 
 @dataclass(frozen=True)
@@ -251,6 +253,7 @@ class WorkService:
             resolve_recipe=resolve_recipe,
             auto_repair=command.auto_repair,
             workflow_policy_digest=command.workflow_policy_digest,
+            delivery_admission=command.delivery_admission,
             resolve_workflow=lambda:self._workflow_snapshot(command.project_alias,command.mode,command.agent_profile,command.workflow_policy_digest),
         )
 
@@ -284,6 +287,7 @@ class WorkService:
             status_filter=command.status_filter,
             limit=command.limit,
             cursor_task_id=command.cursor,
+            delivery_visible=command.delivery_visible,
         )
 
     def events(self, command):
@@ -466,6 +470,7 @@ class WorkServiceFactory:
             max_pending=self._config.max_pending,
             repair_policy=self._config.repair_policy,
             external_port=external,
+            delivery_enabled=self._config.delivery_enabled,
         )
         flow=getattr(external,'workflow',None) if external is not None else None
         if self._config.external_workflows:
@@ -480,7 +485,9 @@ class WorkServiceFactory:
         service=WorkService(self._config,catalog,store,external_workflow=selected_flow,native_control=native_control)
         from work_workflow import WorkflowCoordinatorFactory
         maintenance = {"external_maintenance": store.maintain_external} if external is not None else {}
-        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=selected_flow,**maintenance).create()
+        from work_delivery_repair import DeliveryRepairConsumerFactory
+        repair=DeliveryRepairConsumerFactory(self._config,catalog,store,service.submit).create()
+        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=selected_flow,delivery_repair=repair,**maintenance).create()
         return service
 
 
@@ -488,7 +495,40 @@ def handles(headers):
     return any(value.startswith("ide.work.") for value in headers.get_all("Forge-Destination", []))
 
 
+def delivery_version(headers):
+    """Opt-in response extension; old ABI13 callers keep the exact old shape."""
+    values = headers.get_all('Forge-Delivery-Version', [])
+    if not values:
+        return None
+    if values != ['1']:
+        raise Rejected(400, 'invalid_request')
+    return 1
+
+
+def delivery_response(response, version):
+    """Strip only new fields from known envelopes, never user result content."""
+    if version == 1:
+        return response
+    status, body = response
+    body = dict(body)
+    kind = body.get('kind')
+    def legacy(value):
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        value.pop('delivery', None)
+        return value
+    if kind == 'work_catalog' and isinstance(body.get('projects'), list):
+        body['projects'] = [legacy(value) for value in body['projects']]
+    elif kind == 'work_opened':
+        body['task'] = legacy(body.get('task'))
+    elif kind == 'work_listed' and isinstance(body.get('tasks'), list):
+        body['tasks'] = [legacy(value) for value in body['tasks']]
+    return status, body
+
+
 def destination(headers):
+    delivery_version(headers)  # Reject malformed negotiation before request effects.
     value = common.dispatch_destination(headers)
     try:
         return Destination(value)
@@ -745,7 +785,7 @@ def failed(correlation, error):
     return status, common.envelope("work_failed", correlation, code=code)
 
 
-def dispatch(route, correlation, command, service):
+def dispatch(route, correlation, command, service, *, delivery_version=1):
     if service is None:
         raise Rejected(503, "unavailable")
     if route is Destination.CATALOG and isinstance(command, WorkCatalogRequest):
@@ -758,7 +798,7 @@ def dispatch(route, correlation, command, service):
         opened = service.get(command)
         return HTTPStatus.OK, common.envelope("work_opened", correlation, task=opened)
     if route is Destination.LIST and isinstance(command, WorkList):
-        page = service.list_tasks(command)
+        page = service.list_tasks(replace(command,delivery_visible=delivery_version==1))
         return HTTPStatus.OK, common.envelope("work_listed", correlation, **page)
     if route is Destination.EVENTS and isinstance(command, WorkEvents):
         page = service.events(command)

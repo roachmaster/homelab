@@ -718,6 +718,72 @@ class WorkerDB:
             cursor.execute("SELECT forge_coding_reconciler_api.merge_finish(%s,%s,%s,%s)",(_coerce_uuid(job['merge_id']),_coerce_uuid(job['lease_token']),status,Json(receipt)))
             return dict(cursor.fetchone()[0])
 
+    def _delivery_call(self, name, *args):
+        allowed = {'delivery_available','delivery_claim','delivery_renew','delivery_start_allowed',
+                   'delivery_checkpoint','delivery_finish','delivery_observe','delivery_project_head',
+                   'delivery_release_claim','delivery_release_renew','delivery_release_start_allowed','delivery_release_checkpoint','delivery_release_finish'}
+        if name not in allowed:
+            raise ValueError('Unknown delivery port')
+        try:
+            with self._reconcile_cursor() as cursor:
+                cursor.execute('SELECT forge_coding_reconciler_api.' + name + '(' + ','.join(['%s']*len(args)) + ')', args)
+                return cursor.fetchone()[0]
+        except psycopg2.Error as error:
+            if error.pgcode=='P0006':
+                raise OutcomeConflictError() from None
+            raise
+
+    @staticmethod
+    def _delivery_lease(job, key='post_merge_id'):
+        return (_coerce_uuid(job[key]), job['generation'], _coerce_uuid(job['lease_token']))
+
+    def delivery_available(self, owner=None):
+        selected=self._owner if owner is None else validate_owner(owner)
+        return selected==self._owner and self._delivery_call('delivery_available',selected) is True
+
+    def delivery_claim(self, worker_id):
+        validate_identifier(worker_id,'worker_id')
+        return self._delivery_call('delivery_claim',worker_id)
+
+    def delivery_renew(self, job):
+        return self._delivery_call('delivery_renew',*self._delivery_lease(job)) is True
+
+    def delivery_start_allowed(self, job):
+        return self._delivery_call('delivery_start_allowed',*self._delivery_lease(job)) is True
+
+    def delivery_checkpoint(self, job, request):
+        from uuid import uuid5
+        if not isinstance(request,dict) or request.get('prepare_action_id')!=str(uuid5(_coerce_uuid(job['post_merge_id']),'prepare-v1')):
+            raise ValueError('Invalid delivery preparation identity')
+        return self._delivery_call('delivery_checkpoint',*self._delivery_lease(job),Json(request)) is True
+
+    def delivery_finish(self, job, status, receipt, summary):
+        return self._delivery_call('delivery_finish',*self._delivery_lease(job),status,Json(receipt),summary) is True
+
+    def delivery_project_head(self, project_alias):
+        validate_identifier(project_alias,'project_alias')
+        return self._delivery_call('delivery_project_head',project_alias)
+
+    def delivery_observe(self, project_alias, repository, commit_sha, tree_sha, expected_previous_commit=None):
+        validate_identifier(project_alias,'project_alias')
+        return self._delivery_call('delivery_observe',project_alias,repository,commit_sha,tree_sha,expected_previous_commit)
+
+    def delivery_release_claim(self, worker_id):
+        validate_identifier(worker_id,'worker_id')
+        return self._delivery_call('delivery_release_claim',worker_id)
+
+    def delivery_release_renew(self, job):
+        return self._delivery_call('delivery_release_renew',*self._delivery_lease(job,'release_id')) is True
+
+    def delivery_release_start_allowed(self, job):
+        return self._delivery_call('delivery_release_start_allowed',*self._delivery_lease(job,'release_id')) is True
+
+    def delivery_release_checkpoint(self, job, plan):
+        return self._delivery_call('delivery_release_checkpoint',*self._delivery_lease(job,'release_id'),Json(plan)) is True
+
+    def delivery_release_finish(self, job, status, receipt, summary):
+        return self._delivery_call('delivery_release_finish',*self._delivery_lease(job,'release_id'),status,Json(receipt),summary) is True
+
     def post_merge_available(self, owner=None):
         """Opt-in startup probe; an unprovisioned historical schema stays inert."""
         owner = self._owner if owner is None else validate_owner(owner)

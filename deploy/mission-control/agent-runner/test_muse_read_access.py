@@ -19,9 +19,11 @@ TABLES = (
     "coding_tasks", "coding_workflows", "coding_workflow_reviews",
     "coding_workflow_actions", "coding_attempts",
     # This fixture creates the reader after the latest schema already exists;
-    # its future-table default cannot retroactively grant these M27/M28 reads.
+    # its future-table default cannot retroactively grant these M27/M28/M29 reads.
     "jenkins_events", "jenkins_event_deliveries", "jenkins_observations",
     "post_merge_verification_grants", "post_merge_verifications", "post_merge_remediations",
+    "delivery_projects", "delivery_capability_grants", "delivery_lineages", "delivery_ledger",
+    "delivery_post_merge_links", "delivery_task_lineages", "delivery_project_main_heads", "delivery_operations",
 )
 GRANT = SQL_DIR / "management/grant-muse-read-access.sql"
 VERIFY = SQL_DIR / "management/verify.sql"
@@ -71,7 +73,7 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
         # Either an explicit refusal or a no-op is safe when no reader exists.
         self.cluster.run_sql_script(GRANT)
         self.assertEqual(self.rows("SELECT to_regrole('muse_events')"), [(None,)])
-        self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations"), [(28,)])
+        self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations"), [(29,)])
         self.assertEqual(self.rows("SELECT to_regclass('forge_agent.coding_muse_intake')"), [(None,)])
         self.assertEqual(self.rows(
             "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "

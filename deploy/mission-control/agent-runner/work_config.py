@@ -32,7 +32,7 @@ PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
 PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled"}
 
@@ -372,6 +372,8 @@ class WorkConfig:
     repair_policy: MappingProxyType = field(default_factory=lambda:DEFAULT_REPAIR_POLICY)
     project_workflows: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
     external_workflows: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
+    delivery_enabled: bool = False
+    delivery_repair_projects: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self):
         repair_policy=freeze_repair_policy(self.repair_policy)
@@ -413,6 +415,16 @@ class WorkConfig:
         object.__setattr__(self,"repair_policy",repair_policy)
         object.__setattr__(self,"project_workflows",freeze_workflows(self.project_workflows,projects,copied_profiles,modes))
         object.__setattr__(self,"external_workflows",freeze_external_workflows(self.external_workflows,projects,copied_profiles,modes))
+        if type(self.delivery_enabled) is not bool or not isinstance(self.delivery_repair_projects, (tuple, list, set, frozenset)):
+            raise ValueError('Invalid delivery automation configuration')
+        selected=frozenset(validate_identifier(alias, 'delivery repair project') for alias in self.delivery_repair_projects)
+        if not selected<=projects or selected and not self.delivery_enabled:
+            raise ValueError('Delivery repair requires enabled configured projects')
+        for alias in selected:
+            policy=self.project_workflows.get(alias) or self.external_workflows.get(alias)
+            if policy is None or any(not copied_profiles[p].execution_enabled for p in (policy.author_profile,policy.reviewer_profile)):
+                raise ValueError('Delivery repair requires current enabled author and reviewer policy')
+        object.__setattr__(self,'delivery_repair_projects',selected)
 
     def project_label(self, alias):
         return self.project_labels.get(alias, alias)
@@ -497,6 +509,8 @@ def parse_work_config(raw):
         repair_policy=freeze_repair_policy(raw.get("repair_policy",{})),
         project_workflows=raw.get("project_workflows",{}),
         external_workflows=raw.get("external_workflows",{}),
+        delivery_enabled=raw.get('delivery_enabled',False),
+        delivery_repair_projects=raw.get('delivery_repair_projects',()),
     )
 
 

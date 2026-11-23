@@ -18,6 +18,9 @@ BEGIN
     IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=28 AND name='post_merge_verification') THEN
         allowed_tables:=allowed_tables||ARRAY['post_merge_verification_grants','post_merge_verifications','post_merge_remediations'];
     END IF;
+    IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=29 AND name='delivery_automation') THEN
+        allowed_tables:=allowed_tables||ARRAY['delivery_projects','delivery_capability_grants','delivery_lineages','delivery_ledger','delivery_post_merge_links','delivery_task_lineages','delivery_project_main_heads','delivery_operations'];
+    END IF;
     IF current_database()<>'forge_agent' THEN
         RAISE EXCEPTION 'Muse reader contract requires forge_agent database';
     END IF;

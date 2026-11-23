@@ -233,7 +233,7 @@ def _parse_result_cursor(cursor):
 class WorkStore:
     """Owner- and project-scoped durable store for coding jobs, results, and control receipts."""
 
-    def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING,repair_policy=None, external_port=None):
+    def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING,repair_policy=None, external_port=None, delivery_enabled=False):
         self._repair_policy=freeze_repair_policy(repair_policy or DEFAULT_REPAIR_POLICY)
         self._owner = validate_owner(owner)
         if not isinstance(allowed_projects, (frozenset, set, tuple, list)):
@@ -256,6 +256,8 @@ class WorkStore:
         ):
             raise TypeError("External work requires an explicit scoped port")
         self._external = external_port
+        if type(delivery_enabled) is not bool:raise ValueError("Invalid delivery selection")
+        self._delivery_enabled=delivery_enabled
 
     @property
     def owner(self):
@@ -268,6 +270,19 @@ class WorkStore:
     @property
     def max_pending(self):
         return self._max_pending
+
+    def _delivery_projection(self, cursor, project_alias, task_id=None):
+        if not self._delivery_enabled:
+            return None
+        cursor.execute('SELECT forge_agent.delivery_projection(%s,%s)',(project_alias,task_id))
+        return cursor.fetchone()['delivery_projection']
+
+    def _delivery_head(self, cursor, project_alias):
+        if not self._delivery_enabled:
+            return None
+        cursor.execute('SELECT forge_agent.delivery_project_head(%s)',(project_alias,))
+        value=cursor.fetchone()['delivery_project_head']
+        return value.get('commit_sha') if value else None
 
     def _external_workflow_for(self, project_alias):
         workflow = getattr(self._external,"workflow",None)
@@ -390,6 +405,13 @@ class WorkStore:
             }
             for alias in sorted(config.allowed_projects)[:MAX_PROJECTS]
         ]
+        if self._delivery_enabled:
+            with self._transaction(read_only=True) as cursor:
+                for project in projects:
+                    head=self._delivery_head(cursor,project['alias'])
+                    if head is not None:project['base_revision']=head
+                    delivery=self._delivery_projection(cursor,project['alias'])
+                    if delivery is not None:project['delivery']=delivery
         profiles = []
         for alias in sorted(alias for alias, profile in config.profiles.items() if profile.execution_enabled)[:MAX_PROFILES]:
             modes = advertised_profile_modes.get(alias)
@@ -413,7 +435,7 @@ class WorkStore:
 
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
                prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False,
-               workflow_policy_digest=None,resolve_workflow=lambda:None):
+               workflow_policy_digest=None,resolve_workflow=lambda:None,delivery_admission=None):
         self._require_project(project_alias)
         if type(auto_repair) is not bool:
             raise Rejected(400,"invalid_request")
@@ -457,6 +479,15 @@ class WorkStore:
             if cursor.fetchone()["pending"] >= self._max_pending:
                 raise Rejected(503, "queue_full")
 
+            if delivery_admission is not None:
+                if (not self._delivery_enabled or not isinstance(delivery_admission,dict)
+                        or set(delivery_admission)!={'operation_id','generation','lease_token'}):
+                    raise Rejected(403,'denied')
+                cursor.execute('SELECT forge_agent.delivery_repair_admit(%s,%s,%s,%s)',
+                               (UUID(delivery_admission['operation_id']),delivery_admission['generation'],
+                                UUID(delivery_admission['lease_token']),intent_digest))
+            trusted_main=self._delivery_head(cursor,project_alias)
+            if trusted_main is not None and trusted_main!=base_revision:raise Rejected(409,"result_mismatch")
             workflow=resolve_workflow()
             if workflow is not None:
                 cursor.execute("""SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head FROM forge_agent.coding_workflow_actions a
@@ -464,7 +495,8 @@ class WorkStore:
                  AND a.finish_receipt->>'status'='merged' AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'
                  ORDER BY a.updated_at DESC,a.action_id DESC LIMIT 1""",(self._owner,project_alias))
                 merged=cursor.fetchone()
-                if merged and merged['head']!=base_revision:raise Rejected(409,'result_mismatch')
+                trusted_head=trusted_main or (merged["head"] if merged else None)
+                if trusted_head is not None and trusted_head!=base_revision:raise Rejected(409,'result_mismatch')
                 auto_repair=True
             recipe = resolve_recipe()
             if (not isinstance(recipe, PinnedRecipe)
@@ -507,6 +539,10 @@ class WorkStore:
                 if self._external is None or agent_profile not in self._external.profiles:
                     raise Rejected(503, "unavailable")
                 self._external.enqueue(cursor, project_alias, task_id)
+            if delivery_admission is not None:
+                cursor.execute('SELECT forge_agent.delivery_repair_bind(%s,%s,%s,%s,%s)',
+                               (UUID(delivery_admission['operation_id']),delivery_admission['generation'],
+                                UUID(delivery_admission['lease_token']),task_id,Json(receipt)))
             cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
             return receipt
 
@@ -617,9 +653,11 @@ class WorkStore:
                 artifact = self._external.artifact_by_task(cursor, project_alias, task_id)
                 if artifact is not None:
                     detail["external_result"] = artifact
+            delivery=self._delivery_projection(cursor,project_alias,task_id)
+            if delivery is not None:detail["delivery"]=delivery
             return detail
 
-    def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None):
+    def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None, delivery_visible=True):
         self._require_project(project_alias)
         if status_filter is not None and (not isinstance(status_filter, str) or status_filter not in VALID_LIST_FILTERS):
             raise Rejected(400, "invalid_request")
@@ -628,7 +666,7 @@ class WorkStore:
         if cursor_task_id is not None and not isinstance(cursor_task_id, UUID):
             raise Rejected(400, "invalid_request")
         if status_filter in TASK_SCOPES:
-            return self._list_task_scope(project_alias, status_filter, limit, cursor_task_id)
+            return self._list_task_scope(project_alias, status_filter, limit, cursor_task_id, delivery_visible)
 
         mode = {"repeatable_read": True} if self._external_workflow_for(project_alias) is not None else {"read_only": True}
         external_filter = "AND NOT forge_external_workflow_api.is_internal(t.owner_id,t.project_alias,t.id)" if self._external_workflow_for(project_alias) is not None else ""
@@ -666,6 +704,8 @@ class WorkStore:
                 limit + 1,
             ))
             rows = cursor.fetchall()
+            if self._delivery_enabled:
+                for row in rows:row["delivery"]=self._delivery_projection(cursor,project_alias,row["id"])
             projected = {}
             external_workflow = self._external_workflow_for(project_alias)
             if external_workflow is not None:
@@ -678,6 +718,7 @@ class WorkStore:
         summaries = []
         for row in page:
             item = _summary(row)
+            if row.get("delivery") is not None:item["delivery"]=row["delivery"]
             if str(row["id"]) in projected:
                 item["workflow_required"] = True
                 item["workflow_phase"] = projected[str(row["id"])]["phase"]
@@ -689,7 +730,7 @@ class WorkStore:
             "next_cursor": next_cursor,
         }
 
-    def _list_task_scope(self, project_alias, scope, limit, cursor_task_id):
+    def _list_task_scope(self, project_alias, scope, limit, cursor_task_id, delivery_visible=True):
         """Classify complete workflow roots before counting and keyset paging.
 
         Raw statuses remain evidence. A running workflow can have a stopped
@@ -718,18 +759,21 @@ class WorkStore:
                 WHERE (member_link.owner_id,member_link.project_alias,member_link.workflow_id)=
                       (ew.owner_id,ew.project_alias,ew.workflow_id)
             ),t.updated_at)"""
+        delivery = "forge_agent.delivery_projection(t.project_alias,t.id)" if self._delivery_enabled and delivery_visible else "NULL::jsonb"
         classified = f"""
             WITH classified AS (
                 SELECT t.id,t.correlation_id,t.project_alias,t.base_revision,t.mode,t.agent_profile,
                        t.recipe_digest,t.status,t.revision,t.created_at,t.title,
                        (t.workflow_required OR {phase} IS NOT NULL) AS workflow_required,
                        {phase} AS workflow_phase, {enabled} AS workflow_enabled,
-                       greatest(t.updated_at,coalesce(w.updated_at,t.updated_at),coalesce((
+                       {delivery} AS delivery,
+                       greatest(t.updated_at,coalesce(({delivery}->>'updated_at')::timestamptz,t.updated_at),coalesce(w.updated_at,t.updated_at),coalesce((
                            SELECT max(member.updated_at) FROM forge_agent.coding_tasks member
                            WHERE (member.owner_id,member.project_alias,member.workflow_id)=
                                  (w.owner_id,w.project_alias,w.workflow_id)
                        ),t.updated_at){activity}) AS list_updated_at,
-                       CASE WHEN {phase} IN ('completed','cancelled') THEN 'history'
+                       CASE WHEN t.status='completed' AND {delivery} IS NOT NULL THEN forge_agent.delivery_scope({delivery})
+                            WHEN {phase} IN ('completed','cancelled') THEN 'history'
                             WHEN {phase} IS NOT NULL THEN
                                 CASE WHEN {phase}='escalated' OR NOT {enabled} THEN 'attention' ELSE 'active' END
                             WHEN t.workflow_required THEN 'attention'
@@ -773,6 +817,7 @@ class WorkStore:
             summaries = []
             for row in page:
                 item = _summary(row)
+                if row.get("delivery") is not None:item["delivery"]=row["delivery"]
                 item["updated_at"] = _timestamp(row["list_updated_at"])
                 if row["workflow_enabled"] is not None:
                     item["workflow_enabled"] = row["workflow_enabled"]

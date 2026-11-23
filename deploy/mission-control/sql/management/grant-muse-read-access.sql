@@ -40,6 +40,13 @@ BEGIN
     END IF;
 END;
 $post_merge_reads$;
+DO $delivery_reads$
+BEGIN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=29 AND name='delivery_automation') THEN
+ GRANT SELECT ON forge_agent.delivery_projects,forge_agent.delivery_capability_grants,forge_agent.delivery_lineages,forge_agent.delivery_ledger,forge_agent.delivery_post_merge_links,forge_agent.delivery_task_lineages,forge_agent.delivery_project_main_heads,forge_agent.delivery_operations TO muse_events;
+ END IF;
+END;
+$delivery_reads$;
 -- Match the pre-existing permission for future tables from this owner/schema.
 ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent
     GRANT SELECT ON TABLES TO muse_events;

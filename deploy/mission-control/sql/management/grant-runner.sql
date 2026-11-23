@@ -143,3 +143,20 @@ GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.post_merge_available(text)
  forge_coding_reconciler_api.post_merge_finish(uuid,integer,uuid,text,jsonb,text),
  forge_coding_reconciler_api.post_merge_start_allowed(uuid,integer,uuid) TO forge_coding_reconciler;
 \endif
+
+-- M29: typed delivery capabilities and read-only lifecycle projections.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=29) AS has_delivery_automation
+\gset
+\if :has_delivery_automation
+GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.delivery_available(text),forge_coding_reconciler_api.delivery_claim(text),
+ forge_coding_reconciler_api.delivery_renew(uuid,integer,uuid),forge_coding_reconciler_api.delivery_start_allowed(uuid,integer,uuid),
+ forge_coding_reconciler_api.delivery_checkpoint(uuid,integer,uuid,jsonb),forge_coding_reconciler_api.delivery_finish(uuid,integer,uuid,text,jsonb,text),
+ forge_coding_reconciler_api.delivery_project_head(text),forge_coding_reconciler_api.delivery_observe(text,text,text,text,text),
+ forge_coding_reconciler_api.delivery_release_claim(text),forge_coding_reconciler_api.delivery_release_renew(uuid,integer,uuid),
+ forge_coding_reconciler_api.delivery_release_start_allowed(uuid,integer,uuid),
+ forge_coding_reconciler_api.delivery_release_checkpoint(uuid,integer,uuid,jsonb),forge_coding_reconciler_api.delivery_release_finish(uuid,integer,uuid,text,jsonb,text) TO forge_coding_reconciler;
+GRANT EXECUTE ON FUNCTION forge_agent.delivery_projection(text,uuid),forge_agent.delivery_scope(jsonb),forge_agent.delivery_task_scope(text,uuid),forge_agent.delivery_project_head(text),
+ forge_agent.delivery_repair_bind(uuid,integer,uuid,uuid,jsonb),
+ forge_agent.delivery_repair_admit(uuid,integer,uuid,text),
+ forge_agent.delivery_repair_claim(text),forge_agent.delivery_repair_renew(uuid,integer,uuid),forge_agent.delivery_repair_checkpoint(uuid,integer,uuid,jsonb),forge_agent.delivery_repair_finish(uuid,integer,uuid,text,jsonb,text) TO forge_agent;
+\endif
