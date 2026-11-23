@@ -1,5 +1,22 @@
 # Current: Coordinator-owned post-merge verification — 2026-11-23
 
+Integration checkpoint: provider, fair coordinator scheduling, additive M28
+transactional native/external merge hooks, exact-main request/receipt fencing and
+cleanup-only recovery after permission revocation are integrated. Current source
+009e56f passes130 early checks with zero skips; component validation includes
+12 actual PostgreSQL cases after final defenses,26 policy-upgrade cases before
+the final two narrow defenses, and42 existing native/external workflow cases.
+All27 historical migrations and20 legacy authority method ASTs are unchanged.
+
+Failed checks create independent durable remediation evidence; automatically
+admitting another coding task remains outside this handler and must use current
+WorkService policy. Completed parent tasks are not reopened. Native evidence
+reuse is explicit:433 tracked Rust/cooker files and91 literal embedded inputs
+match main aae81e4; prior Rust/WASM/browser execution keeps original provenance.
+Fresh branch and four-suite main backend checks follow against this clean tree.
+Evidence is under /mnt/data/homelab-build/post-merge-coordinator-20261123.
+No live schema, configuration, Jenkins profile or portal activation has occurred.
+
 Implement the approved missing handler inside the existing coordinator. PostgreSQL
 owns durable queue/state and wakeups; the coordinator selects/injects ready ports
 through factories and invokes the existing Rust Jenkins IoClient. No new service,
