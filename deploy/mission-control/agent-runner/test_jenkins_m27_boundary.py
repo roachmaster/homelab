@@ -344,7 +344,7 @@ AGENT_WIDE_RETRY_CONTEXT_SHA256 = {
     "deploy/mission-control/agent-runner/test_work_reviewer_correction.py": "b607a99b103dd7232edb0d4b78c189deaed30b9d7217f7a8d5d9d218c250905b",
     "deploy/mission-control/agent-runner/work_config.py": "d70cf089b24d90383504e97aaf2200361a221704f043df6c7ce0d5eab7ba034b",
     "deploy/mission-control/agent-runner/work_context_recovery.py": "fa7d2f55425659975d9c05c8f85264ec87f6095f3129b5fbecd53bcc3c870f60",
-    "deploy/mission-control/agent-runner/work_external_workflow.py": "a3509f79f55345d3a4af59296ada31e0b985f1218de3e0a759208f518c51691a",
+    "deploy/mission-control/agent-runner/work_external_workflow.py": "0d4f3539430f355b08f22b51c715c3e0dddfc363ba9c7774a60795a032785b94",
     "deploy/mission-control/agent-runner/work_owner_control.py": "0d3854f87ed0c4cbee1105a50f34496ea09a9d9ca1f4f2e0ce13907c6e099bb6",
     "deploy/mission-control/agent-runner/work_owner_reverification.py": "0f52cdeea8d8925c86fe5bca8c73810694eda7d701d456733d4d13141bf80784",
     "deploy/mission-control/agent-runner/work_peer_review.py": "35caedf43d10c81bde72543575eae277002d3e3a201e8926aef6b4813680e8d0",
