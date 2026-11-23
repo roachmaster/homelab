@@ -3,6 +3,9 @@
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
+-- Validate M30 numeric allowances before historical catalog normalization.
+\ir verify-agent-retries.sql
+
 -- Validate the M23 replacement before any historical-catalog normalization.
 \ir verify-owner-continuation.sql
 \ir verify-agy-unattended.sql

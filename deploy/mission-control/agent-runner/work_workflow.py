@@ -20,6 +20,7 @@ from queue_store import Rejected
 from work_config import PinnedRecipe,sha256_canonical,prepare_title
 from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_matches
 from work_store import ADVISORY_LOCK_SALT
+from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
 
 LOG=logging.getLogger('forge-workflow')
 MAX_TARGET_BYTES=64*1024*1024+65536
@@ -128,6 +129,8 @@ class WorkflowStore:
         self.config=config;self.catalog=catalog;self.store=store
         self.reviewer_correction = None
         self.feedback_recovery = None
+        self._retry_allowance_position = None
+        self._manual_allowance_position = None
 
     @contextmanager
     def _transaction(self):
@@ -161,11 +164,93 @@ class WorkflowStore:
 
     def _current_policy(self,workflow):
         policy=self.config.project_workflows.get(workflow['project_alias'])
-        if policy is None or policy.snapshot(self.catalog,self.config.repair_policy)['policy_digest']!=workflow['policy_digest']:
+        if policy is None:
+            raise Rejected(403,'denied')
+        current=policy.snapshot(self.catalog,self.config.repair_policy)
+        if current['policy_digest']!=workflow['policy_digest'] and not budget_compatible_snapshot(workflow['snapshot'],current):
             raise Rejected(403,'denied')
         if not {'plan','review','implement'}<=self.config.allowed_modes:
             raise Rejected(403,'denied')
         return policy
+
+    def _retry_limit(self,workflow,key):
+        policy=self._current_policy(workflow)
+        return effective_limit(workflow['snapshot'],key,policy.snapshot(self.catalog,self.config.repair_policy))
+
+    def _repair_limit(self,workflow,key):
+        self._current_policy(workflow)
+        return self.config.repair_policy[key]
+
+    def _apply_retry_allowances(self):
+        # Only the explicitly selected common twenty-attempt policy widens old
+        # ledgers. The database function journals the old/new allowance once;
+        # snapshots, recipes, attempts and all spent counters remain unchanged.
+        if any(self.config.repair_policy[k]!=AGENT_RETRY_LIMIT for k in
+               ('max_rounds','max_stagnant_rounds','max_infrastructure_retries')):
+            return
+        with self._transaction() as cursor:
+            cursor.execute("SELECT to_regprocedure('forge_agent.amend_agent_retry_policy(text,uuid,jsonb)') IS NOT NULL AS available")
+            if not cursor.fetchone()['available']:
+                return
+            cursor.execute("""SELECT w.* FROM forge_agent.coding_workflows w
+              JOIN forge_agent.coding_review_budget b ON(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)
+              WHERE w.owner_id=%s AND w.project_alias=ANY(%s) AND w.phase NOT IN('completed','cancelled')
+              AND ((w.snapshot->>'max_plan_revisions')::integer<20 OR (w.snapshot->>'max_code_revisions')::integer<20
+                OR b.policy->'max_rounds'<>'20'::jsonb OR b.policy->'max_stagnant_rounds'<>'20'::jsonb OR b.policy->'max_infrastructure_retries'<>'20'::jsonb)
+              AND NOT EXISTS(SELECT FROM forge_agent.coding_events e WHERE(e.owner_id,e.project_alias,e.task_id)=(w.owner_id,w.project_alias,w.root_task_id)
+                AND e.event_kind='checkpoint' AND e.payload->>'stage'='retry_policy_updated'
+                AND e.payload->>'policy'='forge-agent-retry-v1' AND e.payload->>'scope_id'=w.workflow_id::text)
+              AND (%s::timestamptz IS NULL OR (w.created_at,w.workflow_id)>(%s::timestamptz,%s::uuid))
+              ORDER BY w.created_at,w.workflow_id LIMIT 64""",(self.store.owner,list(self.store.allowed_projects)) +
+                ((self._retry_allowance_position[0],*self._retry_allowance_position) if self._retry_allowance_position else (None,None,None)))
+            rows=cursor.fetchall()
+            self._retry_allowance_position=(rows[-1]['created_at'],rows[-1]['workflow_id']) if len(rows)==64 else None
+            for w in rows:
+                try:
+                    policy=self._current_policy(w)
+                except Rejected:
+                    continue
+                if policy.max_plan_revisions!=AGENT_RETRY_LIMIT:
+                    continue
+                if any(not self.config.profiles[p].execution_enabled for p in (policy.author_profile,policy.reviewer_profile)):
+                    continue
+                self._project_lock(cursor,w['project_alias'])
+                self._amend_retry_allowance(cursor,w['project_alias'],w['root_task_id'])
+            cursor.execute("""SELECT t.project_alias,t.id,t.created_at,t.agent_profile,t.mode,b.policy FROM forge_agent.coding_tasks t
+              JOIN forge_agent.coding_review_budget b ON(b.owner_id,b.project_alias,b.root_task_id)=(t.owner_id,t.project_alias,t.id)
+              WHERE t.owner_id=%s AND t.project_alias=ANY(%s) AND t.workflow_id IS NULL
+              AND (t.status NOT IN('completed','cancelled') OR EXISTS(SELECT FROM forge_agent.coding_tasks child
+                WHERE(child.owner_id,child.project_alias,child.repair_root_task_id)=(t.owner_id,t.project_alias,t.id)
+                AND child.status NOT IN('completed','cancelled')))
+              AND b.policy IS DISTINCT FROM %s
+              AND (b.policy-ARRAY['max_rounds','max_stagnant_rounds','max_infrastructure_retries'])=
+                (%s::jsonb-ARRAY['max_rounds','max_stagnant_rounds','max_infrastructure_retries'])
+              AND (%s::timestamptz IS NULL OR (t.created_at,t.id)>(%s::timestamptz,%s::uuid))
+              ORDER BY t.created_at,t.id LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),
+                Json(dict(self.config.repair_policy)),Json(dict(self.config.repair_policy))) +
+                ((self._manual_allowance_position[0],*self._manual_allowance_position) if self._manual_allowance_position else (None,None,None)))
+            manual_rows=cursor.fetchall()
+            self._manual_allowance_position=(manual_rows[-1]['created_at'],manual_rows[-1]['id']) if len(manual_rows)==64 else None
+            for row in manual_rows:
+                profile=self.config.profiles.get(row['agent_profile'])
+                if profile is None or not profile.execution_enabled or row['mode'] not in self.config.allowed_modes:
+                    continue
+                self._project_lock(cursor,row['project_alias'])
+                self._amend_retry_allowance(cursor,row['project_alias'],row['id'])
+
+    def _amend_retry_allowance(self,cursor,project,root):
+        # A concurrent grant revocation or historical orphan must not roll back
+        # unrelated amendments. Keep grants private to the narrow SQL port.
+        cursor.execute('SAVEPOINT retry_allowance_scope')
+        try:
+            cursor.execute('SELECT forge_agent.amend_agent_retry_policy(%s,%s,%s)',
+                (project,root,Json(dict(self.config.repair_policy))))
+        except psycopg2.Error as error:
+            cursor.execute('ROLLBACK TO SAVEPOINT retry_allowance_scope')
+            if error.pgcode not in {'P0009','P0006'}:
+                raise
+        finally:
+            cursor.execute('RELEASE SAVEPOINT retry_allowance_scope')
 
     def _grant(self,cursor,workflow,profile,mode):
         self._current_policy(workflow)
@@ -410,7 +495,7 @@ class WorkflowStore:
             if cursor.fetchone()['used']:raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT repair_rounds,stagnant_rounds,policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
                            (self.store.owner,project_alias,task['repair_root_task_id'] or task['id']));budget=cursor.fetchone()
-            if (q['round']>=p['max_code_revisions'] or budget and (budget['repair_rounds']>=p['max_code_revisions']
+            if (q['round']>=self._retry_limit(w,'max_code_revisions') or budget and (budget['repair_rounds']>=self._retry_limit(w,'max_code_revisions')
                 or budget['stagnant_rounds']>=budget['policy']['max_stagnant_rounds'])):raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='code_review',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
@@ -488,7 +573,7 @@ class WorkflowStore:
                 or q['candidate_commit'] is not None or q['reconciliation_receipt_id']!=reconciliation_receipt_id
                 or q['verification'].get('checks_passed') is not False or q['verification'].get('checks')!=[]
                 or q['verification'].get('cleanup_confirmed') is not True
-                or q['infrastructure_retries']>=p['repair_policy']['max_infrastructure_retries']):
+                or q['infrastructure_retries']>=self._repair_limit(w,'max_infrastructure_retries')):
                 raise Rejected(409,'not_reviewable')
             failure=q['finish_receipt'] or {};outcome=failure.get('outcome',{});verified=outcome.get('verification',{})
             if (q['finish_token'] is None or failure.get('review_id')!=str(review_id) or failure.get('status')!='handoff'
@@ -539,7 +624,7 @@ class WorkflowStore:
               AND q.verification->'cleanup_confirmed'='true'::jsonb AND q.source_revision=t.revision
               AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff'
               AND q.finish_receipt->'outcome'->>'reason'='publication_command_failed'
-              AND q.infrastructure_retries<(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer
+              AND q.infrastructure_retries<coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)),(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer)
               ORDER BY q.updated_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects)));rows=cursor.fetchall()
         for row in rows:
             try:self.retry_preparation(project_alias=row['project_alias'],task_id=row['id'],expected_revision=row['revision'],
@@ -589,7 +674,7 @@ class WorkflowStore:
                 or not task['workflow_required'] or task['workflow_review_id'] is not None or task['cancelled_at'] is not None
                 or not task['parent_task_id'] or not task['scope_plan_decision_id']
                 or task['agent_profile']!=p['author_profile'] or task['pinned_recipe']!=recipe.to_dict() or task['recipe_digest']!=recipe.digest
-                or q['infrastructure_retries']!=p['repair_policy']['max_infrastructure_retries'] or q['infrastructure_retries']<1):
+                or q['infrastructure_retries']!=self._repair_limit(w,'max_infrastructure_retries') or q['infrastructure_retries']<1):
                 raise Rejected(409,'not_reviewable')
             failure=q['finish_receipt'] or {};outcome=failure.get('outcome',{});verification=outcome.get('verification',{})
             typed_busy=(q['reason']=='workspace_busy' and verification.get('failure_stage')=='snapshot'
@@ -657,7 +742,7 @@ class WorkflowStore:
               AND t.status='awaiting_review' AND t.cancelled_at IS NULL AND w.phase='escalated' AND NOT w.enabled
               AND q.phase='local' AND q.status='handoff' AND q.candidate_commit IS NULL AND q.source_revision=t.revision
               AND q.reason IN('review_unavailable','workspace_busy') AND w.escalation_reason=q.reason
-              AND q.infrastructure_retries=(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer
+              AND q.infrastructure_retries=coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)),(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer)
               AND q.infrastructure_retries>0 AND r.created_at>q.updated_at AND r.workspace_digest=q.workspace_digest
               AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff'
               AND q.finish_receipt->'outcome'->'verification'->'checks'='[]'::jsonb
@@ -736,6 +821,7 @@ class WorkflowStore:
         cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('code_review' if q else 'plan_review',w['workflow_id']))
 
     def claim(self,worker_id):
+        self._apply_retry_allowances()
         if self.feedback_recovery is not None:
             self.feedback_recovery.run_once()
         self._recover_source_readiness()
@@ -880,7 +966,7 @@ class WorkflowStore:
         review.update(reviewer_attempt_id=critic['latest_attempt_id'],reviewer_result_sha256=result['result_sha256'])
         authority=BoundDelegatedAuthority(self.store,cursor,w,action,review,verdict)
         decision=verdict['decision'];key='peer-'+str(review['workflow_review_id'])
-        if decision=='escalate' or(review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=p['max_plan_revisions']):
+        if decision=='escalate' or(review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
             self._escalate(cursor,w,verdict['summary']);receipt={'status':'escalated','workflow_id':str(w['workflow_id'])}
         elif review['target_kind']=='plan':
             mode='implement' if decision=='approve' else 'plan';self._grant(cursor,w,p['author_profile'],mode)
@@ -916,7 +1002,7 @@ class WorkflowStore:
                 cursor.execute('RELEASE SAVEPOINT peer_code_decision')
                 if receipt.get('status')!='escalated':
                     cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('publishing' if decision=='approve' else 'repair',w['workflow_id']))
-        if receipt.get('status')!='escalated' and decision in {'approve','revise'} and not (review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=p['max_plan_revisions']):
+        if receipt.get('status')!='escalated' and decision in {'approve','revise'} and not (review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
             next_task=UUID(receipt['repair_task_id']) if receipt.get('repair_task_id') else task['id']
             cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_feedback_review_id=%s,workflow_feedback_sha256=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(review['workflow_review_id'],hashlib.sha256(result['content'].encode()).hexdigest(),self.store.owner,w['project_alias'],next_task))
         cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='decided',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))

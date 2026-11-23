@@ -285,8 +285,10 @@ class WorkCatalog:
         )
 
 
-DEFAULT_REPAIR_POLICY = MappingProxyType({'version':'forge-repair-v1','max_rounds':3,'max_stagnant_rounds':2,
-    'max_infrastructure_retries':1,'required_hosted_checks':('check','pr-fast-gate','real-browser')})
+from work_retry_policy import AGENT_RETRY_LIMIT
+
+DEFAULT_REPAIR_POLICY = MappingProxyType({'version':'forge-repair-v1','max_rounds':AGENT_RETRY_LIMIT,'max_stagnant_rounds':AGENT_RETRY_LIMIT,
+    'max_infrastructure_retries':AGENT_RETRY_LIMIT,'required_hosted_checks':('check','pr-fast-gate','real-browser')})
 
 
 def freeze_repair_policy(value):
@@ -294,7 +296,7 @@ def freeze_repair_policy(value):
         raise ValueError('Invalid owner repair policy')
     policy={**DEFAULT_REPAIR_POLICY,**value}
     if policy['version']!='forge-repair-v1':raise ValueError('Invalid repair policy version')
-    for name,minimum,maximum in (('max_rounds',0,10),('max_stagnant_rounds',1,10),('max_infrastructure_retries',0,3)):
+    for name,minimum,maximum in (('max_rounds',0,AGENT_RETRY_LIMIT),('max_stagnant_rounds',1,AGENT_RETRY_LIMIT),('max_infrastructure_retries',0,AGENT_RETRY_LIMIT)):
         if type(policy[name]) is not int or not minimum<=policy[name]<=maximum:raise ValueError('Invalid repair policy bound')
     checks=policy['required_hosted_checks']
     if not isinstance(checks,(list,tuple)) or not 1<=len(checks)<=16 or any(not isinstance(x,str) or not IDENTIFIER_RE.fullmatch(x) for x in checks) or len(set(checks))!=len(checks):
@@ -308,7 +310,7 @@ class WorkflowPolicy:
     """Owner-selected role delegation; recipes and policy identity freeze at admission."""
     author_profile: str
     reviewer_profile: str
-    max_plan_revisions: int = 3
+    max_plan_revisions: int = AGENT_RETRY_LIMIT
     auto_merge: bool = True
     merge_method: str = "merge"
     version: str = "forge-autonomy-v1"
@@ -318,7 +320,7 @@ class WorkflowPolicy:
         validate_identifier(self.reviewer_profile, "workflow reviewer")
         if self.author_profile == self.reviewer_profile:
             raise ValueError("Workflow author and reviewer must be distinct profiles")
-        if self.version != "forge-autonomy-v1" or type(self.max_plan_revisions) is not int or not 0 <= self.max_plan_revisions <= 3:
+        if self.version != "forge-autonomy-v1" or type(self.max_plan_revisions) is not int or not 0 <= self.max_plan_revisions <= AGENT_RETRY_LIMIT:
             raise ValueError("Invalid workflow revision policy")
         if type(self.auto_merge) is not bool or self.merge_method != "merge":
             raise ValueError("Invalid workflow merge delegation")

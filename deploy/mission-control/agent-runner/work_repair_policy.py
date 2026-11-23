@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
+from work_retry_policy import AGENT_RETRY_LIMIT
 
 __all__ = (
     "CATEGORIES",
@@ -51,9 +52,9 @@ DISPOSITIONS = frozenset(
     }
 )
 
-MAX_ROUNDS_LIMIT = 10
-MAX_STAGNANT_ROUNDS_LIMIT = 10
-MAX_INFRASTRUCTURE_RETRIES_LIMIT = 5
+MAX_ROUNDS_LIMIT = AGENT_RETRY_LIMIT
+MAX_STAGNANT_ROUNDS_LIMIT = AGENT_RETRY_LIMIT
+MAX_INFRASTRUCTURE_RETRIES_LIMIT = AGENT_RETRY_LIMIT
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _ISO_TIMESTAMP_RE = re.compile(
@@ -101,9 +102,9 @@ def _require_str(value: object, name: str, *, non_empty: bool = False) -> str:
 class RepairPolicy:
     """Bounded policy limits for automated repair rounds and infrastructure retries."""
 
-    max_rounds: int = 3
-    max_stagnant_rounds: int = 2
-    max_infrastructure_retries: int = 1
+    max_rounds: int = AGENT_RETRY_LIMIT
+    max_stagnant_rounds: int = AGENT_RETRY_LIMIT
+    max_infrastructure_retries: int = AGENT_RETRY_LIMIT
 
     def __post_init__(self) -> None:
         _require_int(self.max_rounds, "max_rounds", minimum=0, maximum=MAX_ROUNDS_LIMIT)

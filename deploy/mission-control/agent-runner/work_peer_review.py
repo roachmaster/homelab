@@ -6,6 +6,7 @@ never open a resource or choose a command, provider or next agent.
 """
 
 from copy import deepcopy
+from work_retry_policy import AGENT_RETRY_LIMIT
 import hashlib
 import json
 import re
@@ -115,7 +116,7 @@ def validate_review_target(value):
         _require(value["author_profile"] != value["reviewer_profile"]
                  and value["source_task_id"] != value["reviewer_task_id"]
                  and type(value["source_revision"]) is int and 1 <= value["source_revision"] < 2**53
-                 and type(value["plan_revision"]) is int and 0 <= value["plan_revision"] <= 3
+                 and type(value["plan_revision"]) is int and 0 <= value["plan_revision"] <= AGENT_RETRY_LIMIT
                  and value["target_kind"] in ("plan", "code"))
         source = _text(value["source_text"], MAX_ARTIFACT_BYTES)
         _require(hashlib.sha256(source).hexdigest() == value["source_result_sha256"])

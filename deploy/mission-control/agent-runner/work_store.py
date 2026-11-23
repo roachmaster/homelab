@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from psycopg2.extras import Json, RealDictCursor, register_uuid
 
+from work_retry_policy import AGENT_RETRY_LIMIT
 from queue_store import Rejected
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
@@ -1441,9 +1442,17 @@ class WorkStore:
         w=cursor.fetchone()
         if w is None:return None
         p=w["snapshot"]
+        limits={key:p[key] for key in ('max_plan_revisions','max_code_revisions')}
+        cursor.execute("SELECT payload FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND event_kind='checkpoint' AND payload->>'stage'='retry_policy_updated' AND payload->>'policy'='forge-agent-retry-v1' AND payload->>'workflow_id'=%s AND payload->>'snapshot_digest'=%s ORDER BY sequence DESC LIMIT 1",
+            (self._owner,w['project_alias'],w['root_task_id'],str(w['workflow_id']),w['policy_digest']))
+        allowance=cursor.fetchone()
+        if allowance:
+            for key in limits:
+                if allowance['payload'].get(key)==AGENT_RETRY_LIMIT:
+                    limits[key]=AGENT_RETRY_LIMIT
         return {"workflow_id":str(w["workflow_id"]),"policy_digest":w["policy_digest"],"phase":w["phase"],
             "author_profile":p["author_profile"],"reviewer_profile":p["reviewer_profile"],"plan_revisions":w["plan_revisions"],
-            "max_plan_revisions":p["max_plan_revisions"],"code_revisions":w["code_revisions"],"max_code_revisions":p["max_code_revisions"],
+            "max_plan_revisions":limits["max_plan_revisions"],"code_revisions":w["code_revisions"],"max_code_revisions":limits["max_code_revisions"],
             "escalation_reason":w["escalation_reason"] or None,"can_cancel":w["phase"] not in {"completed","cancelled","merging"}}
 
     def plan_decide(self, *, project_alias, task_id, expected_revision, plan_attempt_id,
@@ -1564,6 +1573,11 @@ class WorkStore:
             (self._owner,project_alias,p['version'],p['max_rounds'],p['max_stagnant_rounds'],p['max_infrastructure_retries'],list(p['required_hosted_checks'])))
         cursor.execute("""INSERT INTO forge_agent.coding_review_budget(owner_id,project_alias,root_task_id,policy)
             VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING""",(self._owner,project_alias,root_task_id,Json(dict(p))))
+        if all(p[key]==AGENT_RETRY_LIMIT for key in ('max_rounds','max_stagnant_rounds','max_infrastructure_retries')):
+            cursor.execute('SELECT policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
+                (self._owner,project_alias,root_task_id))
+            if cursor.fetchone()['policy']!={**p,'required_hosted_checks':list(p['required_hosted_checks'])}:
+                cursor.execute('SELECT forge_agent.amend_agent_retry_policy(%s,%s,%s)',(project_alias,root_task_id,Json(dict(p))))
 
     def _hosted_green(self,cursor,task):
         cursor.execute("""SELECT h.required_green FROM forge_agent.coding_publications p
@@ -1586,13 +1600,13 @@ class WorkStore:
         if not flags['review_required']:
             cursor.execute('SELECT 1 FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s LIMIT 1',(self._owner,task['project_alias'],task['id']))
             if cursor.fetchone() is None:return None
-        cursor.execute("""SELECT r.*,coalesce((SELECT(b.policy->>'max_rounds')::integer FROM forge_agent.coding_review_budget b JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,coalesce(t.repair_root_task_id,t.id))=(b.owner_id,b.project_alias,b.root_task_id) WHERE t.owner_id=r.owner_id AND t.project_alias=r.project_alias AND t.id=r.task_id),p.max_rounds,3) AS max_rounds FROM forge_agent.coding_reviews r
+        cursor.execute("""SELECT r.*,coalesce((SELECT(b.policy->>'max_rounds')::integer FROM forge_agent.coding_review_budget b JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,coalesce(t.repair_root_task_id,t.id))=(b.owner_id,b.project_alias,b.root_task_id) WHERE t.owner_id=r.owner_id AND t.project_alias=r.project_alias AND t.id=r.task_id),p.max_rounds,%s) AS max_rounds FROM forge_agent.coding_reviews r
             LEFT JOIN forge_agent.coding_review_policy p USING(owner_id,project_alias)
             WHERE r.owner_id=%s AND r.project_alias=%s AND r.task_id=%s ORDER BY r.review_no DESC LIMIT 1""",
-            (self._owner,task['project_alias'],task['id']))
+            (AGENT_RETRY_LIMIT,self._owner,task['project_alias'],task['id']))
         row=cursor.fetchone()
         green=self._hosted_green(cursor,task) if task['latest_attempt_id'] else False
-        value={'stage':'waiting_for_result','review_id':None,'feedback_id':None,'round':0,'max_rounds':3,
+        value={'stage':'waiting_for_result','review_id':None,'feedback_id':None,'round':0,'max_rounds':AGENT_RETRY_LIMIT,
             'open_findings':0,'verified_findings':0,'latest_check_status':None,'toolchain':None,'handoff_reason':None,
             'source_attempt_id':str(task['latest_attempt_id']) if task['latest_attempt_id'] else None,
             'candidate_commit':None,'workspace_digest':None,'gate_manifest_sha256':None,'required_hosted_green':green,
