@@ -568,8 +568,60 @@ UI_STAGE_DIAGRAM_CONTEXT_SHA256 = {
     'src/rust/forge-ide-web/ui/styles.yaml': '33a1696b367038ef2534f3200d8656aa3f61e856431b91fa78b90cdd4d149def',
 }
 
+
+
+# Current additive Jenkins pipeline stages diagram source; historical maps
+# above remain provenance. Binds the stage_started migration, the lifecycle
+# producer and drain, the stage emitter, the server and UI projections, the
+# ABI 14->15 move, and their tests and browser journey. It grants no live
+# activation and changes no legacy owner/publication guard.
+PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
+    'deploy/mission-control/agent-runner/jenkins_api.py': '8bf9e3046fab277a3399e110ce4d6cacd9d0c305e5fc29848f7c24981325626f',
+    'deploy/mission-control/agent-runner/jenkins_events.py': 'e1b7cf6bab521404be16683642069227485f9d5525993630cd889da08a38cb45',
+    'deploy/mission-control/agent-runner/runner.py': '27eaa28a5ceca354b2ea78b855ea00e42de1ae7bdd6f5c0bd95652d1bdde5684',
+    'deploy/mission-control/agent-runner/setup-runner.sh': '23e8ae9dd7c67c1664d4ec49096f6c50316df185276809ea67a45fc95b7b03a1',
+    'deploy/mission-control/agent-runner/test_jenkins_api.py': 'c66ef69224bc5792321f8343bd27b98c9439d1347793eeb8dd8021c21faac494',
+    'deploy/mission-control/agent-runner/test_jenkins_codec.py': 'e3c94bc68e875f27875d4b078517472edda6ee9609e4a94bf15f036c76d49e4a',
+    'deploy/mission-control/agent-runner/test_jenkins_pipeline_lifecycle.py': 'bad9c600c09f61c0d1611ea6cba3aa3d3bce9c8d57b829968984c440c092b082',
+    'deploy/mission-control/agent-runner/test_jenkins_stage_emitter.py': 'c0c2fb868da60f4e8e5721c26b9f8046482d712699656376b5fbf6b76b8e8e10',
+    'deploy/mission-control/agent-runner/test_jenkins_store.py': '5489e07b4fae09f610e379e26f62e85b5def06f2dc5278de3729be7b3ea65ffc',
+    'deploy/mission-control/agent-runner/test_pipeline_projection.py': 'f2de8675e3a259a6d7eee53855d1216144eac0382c863ae8d8795c22f4005ab4',
+    'deploy/mission-control/agent-runner/test_work_native_jenkins.py': '31394ee6b3e410ca980719018b4d1247205dcf3fd8d2040a26235291c3240fe7',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '6998e121574cb46eedf9b32e32f507aff4d37ee491a1c32327e3dc71387a33ac',
+    'deploy/mission-control/agent-runner/work_jenkins_lifecycle.py': '809259f4fa4f7c1945a6282aaba6fa7841bc4e158118375b491301d0d14ddd04',
+    'deploy/mission-control/agent-runner/work_native_jenkins.py': 'd396b6d46eafba8fa62cc1c7c20afc87bbd9d2b05626c32d5b17776dbabf54bc',
+    'deploy/mission-control/agent-runner/work_pipeline_projection.py': '0f1face783c26f9c5bf93d070d19f7569bb429e11cec1579de19f7774c4a5bce',
+    'deploy/mission-control/agent-runner/work_publication.py': '95074f8c1e70fe21395167997f3e412a389cdcc735fb891e0be7c186a166904c',
+    'deploy/mission-control/agent-runner/work_publication_config.py': '787697911a188e8ab75d69568edbae8193ec377e4cfa316446e57771b531bf0f',
+    'deploy/mission-control/agent-runner/work_store.py': '7c219c43b24ebb525a7080a23637a6c65ba8a51184315910632343f185045d8d',
+    'deploy/mission-control/jenkins/setup-ci.py': '79f1c43ae66c96451f3aafb000ede3ad00170260d8efb249247e9f5d8e280fb9',
+    'deploy/mission-control/jenkins/verify-candidate.py': 'e7c2b0b0b89589944345208b2c5193b851ab268377d3c5d7eed6048ee531f734',
+    'deploy/mission-control/sql/apply.sql': '6c6481fbf6e72be95ecacaf338c76940b5d1dc4f40eb61753b10bf5ec69768f5',
+    'deploy/mission-control/sql/management/verify-jenkins-events.sql': '1eb78295a9c49634fa7516141842b97e459928ff59889bfcb72decdb0155482a',
+    'deploy/mission-control/sql/migrations/0034_jenkins_stage_started.sql': '5ee11519561b0a0d77e606e6b6e76b2f89e85e8b45713a8c6b2b1b90aa52ba2f',
+    'src/rust/forge-ide-ui/src/model/agents.rs': 'f4a0bc836bc2fa7befec7653845413d0d6110c5985d416e3db6f18eab1887a82',
+    'src/rust/forge-ide-ui/src/model/agents/pipeline_diagram.rs': '323f34d15c47e604b9349a44f08d232844dadc57b5075554a7920e09a97e11ff',
+    'src/rust/forge-ide-ui/src/model/agents/tests.rs': 'd79caf9f67da2f9727e9146176630d7cbca2f8a6cbc8f167dbbf668ce96cb8f6',
+    'src/rust/forge-ide-ui/src/model/projection.rs': 'b5f993da9d2d0a4ddc59da43f4f948df85f84a69a1330f65aa221bfce4cc5138',
+    'src/rust/forge-ide-ui/src/protocol/work.rs': 'ef0987d6985e245c2cd2babaeba79303d1fdb8ef3e30373e925ba434ce3d37b2',
+    'src/rust/forge-ide-ui/src/view.rs': '85156fe7301b359e98f6537782bb7cd61684ef4779bb12aac2f033422c1a05ab',
+    'src/rust/forge-ide-web/README.md': '2feb9e100fa0368ebe3963b3865ede6bc5be8af5f672acbfa57c4eba919323a4',
+    'src/rust/forge-ide-web/WORKBENCH.md': '9495eab741f88ba8c1b4ebfaf007de2a6c6795f14d9d3efc20c54fcc4528c33e',
+    'src/rust/forge-ide-web/src/generate/application.rs': 'f70a061ee157b4a050421d6be78926f2e32ed9332c9b9b5173d16b348485ae97',
+    'src/rust/forge-ide-web/src/generate/component.rs': 'f7af659a222113f7e7c5ef19688ab15fba59c71705f1095dd0555eae5a52acbc',
+    'src/rust/forge-ide-web/src/generate/html.rs': 'ad0cd101d75d0ff8ff72b1c0af0255536089d29bfa23dc65751d0ac946254e99',
+    'src/rust/forge-ide-web/src/generate/javascript.rs': '07a68e5a3bbe95966ddbfb81956a5c690b03cb6c1c950f579e18d6da9e9c5465',
+    'src/rust/forge-ide-web/src/generate/mod.rs': 'e1bc357350d0b302c972baa47ded9d0fd32a743f7f7a0c20507aaec7972363d8',
+    'src/rust/forge-ide-web/src/wasm.rs': '503ddfbdf1c3f2b3d5de3888da3d882b0b5926ed1e64fa71b049ffd6726e8819',
+    'src/rust/forge-ide-web/tests/browser/agents-relay.mjs': '7b1a58cfd22bd720d709de37eb26638e7a40f443e2510a999b57ed00722e9666',
+    'src/rust/forge-ide-web/tests/browser/journey.mjs': 'f7c0f496bc27f83ea5d96017d4223a671ded6e908b03a98080a80374fc1518d8',
+    'src/rust/forge-ide-web/tests/playtest-wire.mjs': '048817854abba0d5dff68dc42df4e3abae8b5768b13ad3b3bac945fff71df1f5',
+    'src/rust/forge-ide-web/ui/styles.yaml': '58410a04dc87fa16667e6316f12437a63661b171c43fae7e130bc738b6e3503b',
+}
+
+
 def qualified_source(relative, expected):
-    return UI_STAGE_DIAGRAM_CONTEXT_SHA256.get(relative, REVIEW_PROTOCOL_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected))))))))))
+    return PIPELINE_DIAGRAM_CONTEXT_SHA256.get(relative, UI_STAGE_DIAGRAM_CONTEXT_SHA256.get(relative, REVIEW_PROTOCOL_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))))))))
 
 STRICT_VERIFIER_FILES = {
     "verify-superseding-reviews.sql",
@@ -644,6 +696,9 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
 
     def test_delivery_automation_overlay_is_scoped_and_exact(self):
+        # The pipeline diagram overlay supersedes this map for the files it
+        # changed; the delivery hashes remain literal provenance, resolved
+        # through qualified_source like the older overlay tests.
         for relative, expected in DELIVERY_AUTOMATION_CONTEXT_SHA256.items():
             with self.subTest(delivery_source=relative):
                 self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/')) or relative in {
@@ -743,6 +798,15 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 )
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
+    def test_pipeline_diagram_overlay_is_scoped_and_exact(self):
+        self.assertEqual(len(PIPELINE_DIAGRAM_CONTEXT_SHA256), 41)
+        for relative, expected in PIPELINE_DIAGRAM_CONTEXT_SHA256.items():
+            with self.subTest(pipeline_source=relative):
+                self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/')))
+                if '/migrations/' in relative:
+                    self.assertTrue(relative.endswith('0034_jenkins_stage_started.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
             with self.subTest(retired=relative):
@@ -786,6 +850,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             "work_post_merge.py", "work_post_merge_provider.py", "jenkins_events.py", "jenkins_config.py",
             "jenkins_codec.py", "jenkins_store.py", "jenkins_consumer.py",
             "jenkins_api.py", "jenkins_emitter.py", "jenkins_emit_tool.py",
+            "work_jenkins_lifecycle.py", "work_pipeline_projection.py",
         )
         for name in required:
             with self.subTest(module=name):

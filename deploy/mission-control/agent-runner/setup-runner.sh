@@ -120,6 +120,8 @@ publish "$directory/jenkins_consumer.py" "$target/jenkins_consumer.py"
 publish "$directory/jenkins_api.py" "$target/jenkins_api.py"
 publish "$directory/jenkins_emitter.py" "$target/jenkins_emitter.py"
 publish "$directory/jenkins_emit_tool.py" "$target/jenkins_emit_tool.py"
+publish "$directory/work_jenkins_lifecycle.py" "$target/work_jenkins_lifecycle.py"
+publish "$directory/work_pipeline_projection.py" "$target/work_pipeline_projection.py"
 publish "$directory/runner.py" "$target/runner.py"
 publish "$directory/forge-agent-runner.service" "$unit"
 systemctl daemon-reload
