@@ -7,10 +7,11 @@ the prompt and request a new independently valid review through the existing
 bounded superseding-review provider. Do not normalize or accept invalid bytes.
 
 The external Postgres-proxy workflow8c300 exhausted its reviewer-correction
-event20/20 after CLI JSON transport parsing failures. A bounded read-only
-supervised diagnostic reproduced the failure after54.8seconds: Codex0.160
+event at 20/20 after CLI JSON transport parsing failures. A bounded read-only
+supervised diagnostic reproduced the failure after 54.8 seconds: Codex 0.160
 serializes both the outer item ID and web-search ID under the same JSON key.
-The153-byte rejected record has SHA256547a2be149ecb96f6dfecf9e172cd3138b8aa9113f9f87b3efdd9537e31a4076.
+The 153-byte rejected record has SHA-256
+`547a2be149ecb96f6dfecf9e172cd3138b8aa9113f9f87b3efdd9537e31a4076`.
 The narrow transport adapter accepts that exact root web-search metadata alias,
 preserves the outer ID, and rejects duplicate control, result and nested fields.
 Its actual-record replay and chunk-boundary regressions pass. Private structured
