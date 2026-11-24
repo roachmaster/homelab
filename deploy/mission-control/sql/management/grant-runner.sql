@@ -49,10 +49,10 @@ GRANT EXECUTE ON FUNCTION
     forge_coding_worker_api.record_usage(text, bigint, bigint, jsonb),
     forge_coding_worker_api.fail_usage_poll(text, bigint, bigint, text)
 TO forge_coding_worker;
--- M33: record_stop gained a cause argument (5-arg); grant it only when
--- migration 33 is applied, so this file stays safe on older schemas
+-- M36: record_stop gained a cause argument (5-arg); grant it only when
+-- migration 36 is applied, so this file stays safe on older schemas
 -- where the 4-arg form still holds its historical grant.
-SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=33) AS has_record_stop_cause
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=36) AS has_record_stop_cause
 \gset
 \if :has_record_stop_cause
 GRANT EXECUTE ON FUNCTION forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text, text) TO forge_coding_worker;

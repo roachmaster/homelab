@@ -34,10 +34,10 @@ from work_jenkins_lifecycle import (
     ACTOR,
     LifecycleProducer,
     create_lifecycle_producer,
-    lifecycle_delivery_id,
+    producer_lifecycle_delivery_id,
     map_build_result,
     map_stage_status,
-    stage_delivery_id,
+    producer_stage_delivery_id,
 )
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE
 
@@ -264,7 +264,7 @@ class LifecycleFlowTest(ProducerTestCase):
         self.assertEqual(queued.occurred_at, "2026-11-24T05:00:00Z")  # submitted timestamp
         self.assertFalse(queued.backfilled)
         self.assertEqual(queued.actor, ACTOR)
-        self.assertEqual(queued.delivery_id, lifecycle_delivery_id(ACTION_ID, "build_queued"))
+        self.assertEqual(queued.delivery_id, producer_lifecycle_delivery_id(ACTION_ID, "build_queued"))
         started = events["build_started"]
         self.assertEqual(started.build_number, 7)
         self.assertEqual(started.occurred_at, "2026-11-24T05:00:30Z")
@@ -372,7 +372,7 @@ class StageProgressTest(ProducerTestCase):
         self.assertTrue(self.process(building_observation()))
         events = self.store.events
         self.assertEqual(len(events), 3)  # queued, started, stage_started
-        started = events[stage_delivery_id(ACTION_ID, "stage_started", 0)]
+        started = events[producer_stage_delivery_id(ACTION_ID, "stage_started", 0)]
         self.assertEqual(started.event_kind.value, "stage_started")
         self.assertEqual(started.stage_name, "check_0")
         self.assertEqual(started.build_number, 7)
@@ -401,7 +401,7 @@ class StageProgressTest(ProducerTestCase):
         path.write_text(json.dumps({"action_id": other, "gate_manifest_sha256": MANIFEST}) + "\n"
                         + json.dumps(self.start_record(0)) + "\n", encoding="utf-8")
         self.assertTrue(self.process(building_observation()))
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_started", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_started", 0), self.store.events)
 
     def test_progress_header_manifest_mismatch_ignores_the_file(self):
         self.write_journal(queue_id=42, build_number=7)
@@ -410,7 +410,7 @@ class StageProgressTest(ProducerTestCase):
         path.write_text(json.dumps({"action_id": ACTION_ID, "gate_manifest_sha256": "f" * 64}) + "\n"
                         + json.dumps(self.start_record(0)) + "\n", encoding="utf-8")
         self.assertTrue(self.process(building_observation()))
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_started", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_started", 0), self.store.events)
 
     def test_progress_file_with_wrong_owner_is_ignored(self):
         # The producer runs with progress_owner=0 (root) in production; a
@@ -422,7 +422,7 @@ class StageProgressTest(ProducerTestCase):
                                           progress_owner=0)
         self.write_progress([self.start_record(0)])
         self.assertTrue(self.process(building_observation()))
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_started", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_started", 0), self.store.events)
 
     def test_group_writable_progress_file_is_ignored(self):
         self.write_journal(queue_id=42, build_number=7)
@@ -430,14 +430,14 @@ class StageProgressTest(ProducerTestCase):
         path = self.write_progress([self.start_record(0)])
         os.chmod(path, 0o660)
         self.assertTrue(self.process(building_observation()))
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_started", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_started", 0), self.store.events)
 
     def test_completion_is_not_emitted_live(self):
         self.write_journal(queue_id=42, build_number=7)
         self.assertTrue(self.process(building_observation()))
         self.write_progress([self.start_record(0), self.completion_record(0, rc=0)])
         self.assertTrue(self.process(building_observation()))
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
         state = self.read_json("progress-state.json")
         self.assertEqual(state["completions"]["0"]["rc"], 0)
 
@@ -459,7 +459,7 @@ class TerminalReconciliationTest(ProducerTestCase):
             [{"name": "check_0", "status": "passed", "returncode": 0, "elapsed_ms": 1200}],
             [self.start_record(0), self.completion_record(0, rc=0)])
         self.assertEqual(decisions["0"]["outcome"], "eligible")
-        event = self.store.events[stage_delivery_id(ACTION_ID, "stage_completed", 0)]
+        event = self.store.events[producer_stage_delivery_id(ACTION_ID, "stage_completed", 0)]
         self.assertEqual(event.stage_status.value, "success")
         self.assertEqual(event.occurred_at, "2026-11-24T05:00:00Z")  # progress first-sight time
         self.assertFalse(event.backfilled)
@@ -472,20 +472,20 @@ class TerminalReconciliationTest(ProducerTestCase):
             [self.start_record(0), self.completion_record(0, rc=1)])
         self.assertEqual(decisions["0"]["outcome"], "suppressed_conflict")
         self.assertIsNone(decisions["0"]["payload"])
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
         # Suppression survives a drain and a restart: no event ever appears.
         self.producer = LifecycleProducer(store=self.store, delivery_config=self.delivery_config,
                                           jenkins_config=self.config, clock=self.clock,
                                           progress_owner=os.geteuid())
         self.producer.drain_all()
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
 
     def test_conflict_completion_without_receipt_entry_is_suppressed(self):
         decisions = self._terminal(
             [{"name": "check_1", "status": "passed", "returncode": 0, "elapsed_ms": 900}],
             [self.start_record(0), self.completion_record(0, rc=0)])
         self.assertEqual(decisions["0"]["outcome"], "suppressed_conflict")
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
 
     def test_gap_is_reconciled_at_terminal_time(self):
         # The receipt has the stage and NO progress record exists at all
@@ -495,7 +495,7 @@ class TerminalReconciliationTest(ProducerTestCase):
             [{"name": "check_0", "status": "passed", "returncode": 0, "elapsed_ms": 1200}],
             [])
         self.assertEqual(decisions["0"]["outcome"], "eligible")
-        event = self.store.events[stage_delivery_id(ACTION_ID, "stage_completed", 0)]
+        event = self.store.events[producer_stage_delivery_id(ACTION_ID, "stage_completed", 0)]
         self.assertEqual(event.stage_status.value, "success")
         self.assertEqual(event.occurred_at, "2026-11-24T05:00:30Z")  # reconciliation time
         self.assertTrue(event.backfilled)
@@ -509,7 +509,7 @@ class TerminalReconciliationTest(ProducerTestCase):
             [{"name": "check_0", "status": "failed", "returncode": 124, "elapsed_ms": 5000}],
             [self.start_record(0)])
         self.assertEqual(decisions["0"]["outcome"], "eligible")
-        event = self.store.events[stage_delivery_id(ACTION_ID, "stage_completed", 0)]
+        event = self.store.events[producer_stage_delivery_id(ACTION_ID, "stage_completed", 0)]
         self.assertEqual(event.stage_status.value, "aborted")  # rc 124
         self.assertTrue(event.backfilled)
         self.assertTrue(event.reconciled)
@@ -521,7 +521,7 @@ class TerminalReconciliationTest(ProducerTestCase):
             [{"name": "check_1", "status": "passed", "returncode": 0, "elapsed_ms": 900}],
             [self.start_record(0)])
         self.assertNotIn("0", decisions)
-        self.assertNotIn(stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
+        self.assertNotIn(producer_stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
 
     def test_terminal_observation_from_disk_reconciles_after_restart(self):
         # The terminal observation was written to observation.json but the
@@ -537,7 +537,7 @@ class TerminalReconciliationTest(ProducerTestCase):
                                           jenkins_config=self.config, clock=self.clock,
                                           progress_owner=os.geteuid())
         self.producer.drain_all()
-        event = self.store.events[stage_delivery_id(ACTION_ID, "stage_completed", 0)]
+        event = self.store.events[producer_stage_delivery_id(ACTION_ID, "stage_completed", 0)]
         self.assertEqual(event.stage_status.value, "success")
 
 
@@ -547,14 +547,14 @@ class DrainAndCrashTest(ProducerTestCase):
     def test_drain_reconstructs_a_lost_intent_from_history(self):
         self.write_journal(queue_id=42)
         self.assertTrue(self.process(queued_observation()))
-        self.assertIn(lifecycle_delivery_id(ACTION_ID, "build_queued"), self.store.events)
+        self.assertIn(producer_lifecycle_delivery_id(ACTION_ID, "build_queued"), self.store.events)
         # Simulate a crash between the history append and the intent: the
         # intent file is gone, the history payload survives.
         (self.directory / "pending-emissions.json").unlink()
         (self.directory / "emitted.json").unlink()
         self.store.events.clear()
         self.producer.drain_all()
-        event = self.store.events[lifecycle_delivery_id(ACTION_ID, "build_queued")]
+        event = self.store.events[producer_lifecycle_delivery_id(ACTION_ID, "build_queued")]
         self.assertEqual(event.occurred_at, "2026-11-24T05:00:00Z")  # history bytes, not now
 
     def test_decision_then_crash_recreates_intents_from_decisions(self):
@@ -564,18 +564,18 @@ class DrainAndCrashTest(ProducerTestCase):
         self.assertTrue(self.process(building_observation()))
         self.assertTrue(self.process(terminal_observation(
             stages=[{"name": "check_0", "status": "passed", "returncode": 0, "elapsed_ms": 1200}])))
-        self.assertIn(stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
+        self.assertIn(producer_stage_delivery_id(ACTION_ID, "stage_completed", 0), self.store.events)
         (self.directory / "pending-emissions.json").unlink()
         (self.directory / "emitted.json").unlink()
         self.store.events.clear()
         self.producer.drain_all()
-        event = self.store.events[stage_delivery_id(ACTION_ID, "stage_completed", 0)]
+        event = self.store.events[producer_stage_delivery_id(ACTION_ID, "stage_completed", 0)]
         self.assertEqual(event.occurred_at, "2026-11-24T05:00:00Z")
 
     def test_emit_then_crash_before_confirmation_deduplicates(self):
         self.write_journal(queue_id=42)
         self.assertTrue(self.process(queued_observation()))
-        delivery_id = lifecycle_delivery_id(ACTION_ID, "build_queued")
+        delivery_id = producer_lifecycle_delivery_id(ACTION_ID, "build_queued")
         self.assertIn(delivery_id, self.store.events)
         first_digest = self.store.events[delivery_id].payload_sha256()
         # The emit landed in the store but the process crashed before the
@@ -607,7 +607,7 @@ class DrainAndCrashTest(ProducerTestCase):
         self.store.fail = Rejected(503, "queue_full")
         self.write_progress([self.start_record(0)])
         self.assertTrue(self.process(building_observation()))
-        delivery_id = stage_delivery_id(ACTION_ID, "stage_started", 0)
+        delivery_id = producer_stage_delivery_id(ACTION_ID, "stage_started", 0)
         intent = self.read_json("pending-emissions.json")[delivery_id]
         self.assertEqual(intent["payload"]["occurred_at"], "2026-11-24T05:00:00Z")
         (self.directory / "progress-state.json").unlink()
@@ -635,23 +635,23 @@ class DrainAndCrashTest(ProducerTestCase):
         self.write_journal(queue_id=42)
         self.assertTrue(self.process(queued_observation()))
         self.assertEqual(self.store.events, {})
-        intent = self.read_json("pending-emissions.json")[lifecycle_delivery_id(ACTION_ID, "build_queued")]
+        intent = self.read_json("pending-emissions.json")[producer_lifecycle_delivery_id(ACTION_ID, "build_queued")]
         self.assertEqual(intent["attempt_count"], 1)
         # Inside the 5s backoff: no retry.
         self.clock.advance(4)
         self.producer.drain_all()
         self.assertEqual(self.read_json("pending-emissions.json")
-                         [lifecycle_delivery_id(ACTION_ID, "build_queued")]["attempt_count"], 1)
+                         [producer_lifecycle_delivery_id(ACTION_ID, "build_queued")]["attempt_count"], 1)
         # Past the backoff: a retry happens (and fails again, 15s next).
         self.clock.advance(2)
         self.producer.drain_all()
-        intent = self.read_json("pending-emissions.json")[lifecycle_delivery_id(ACTION_ID, "build_queued")]
+        intent = self.read_json("pending-emissions.json")[producer_lifecycle_delivery_id(ACTION_ID, "build_queued")]
         self.assertEqual(intent["attempt_count"], 2)
         # The store recovers; the next due retry delivers.
         self.store.fail = None
         self.clock.advance(16)
         self.producer.drain_all()
-        self.assertIn(lifecycle_delivery_id(ACTION_ID, "build_queued"), self.store.events)
+        self.assertIn(producer_lifecycle_delivery_id(ACTION_ID, "build_queued"), self.store.events)
 
     def test_intent_older_than_24h_is_escalated_not_retried(self):
         self.store.fail = Rejected(503, "queue_full")
@@ -659,19 +659,19 @@ class DrainAndCrashTest(ProducerTestCase):
         self.assertTrue(self.process(queued_observation()))
         self.clock.advance(25 * 3600)
         self.producer.drain_all()
-        intent = self.read_json("pending-emissions.json")[lifecycle_delivery_id(ACTION_ID, "build_queued")]
+        intent = self.read_json("pending-emissions.json")[producer_lifecycle_delivery_id(ACTION_ID, "build_queued")]
         self.assertTrue(intent["undeliverable"])
         self.assertEqual(intent["undeliverable_reason"], "max_age_exceeded")
         self.assertEqual(self.store.events, {})
 
     def test_idempotency_conflict_escalates_the_intent(self):
-        self.store = FakeStore(conflict_ids={lifecycle_delivery_id(ACTION_ID, "build_queued")})
+        self.store = FakeStore(conflict_ids={producer_lifecycle_delivery_id(ACTION_ID, "build_queued")})
         self.producer = LifecycleProducer(store=self.store, delivery_config=self.delivery_config,
                                           jenkins_config=self.config, clock=self.clock,
                                           progress_owner=os.geteuid())
         self.write_journal(queue_id=42)
         self.assertTrue(self.process(queued_observation()))
-        intent = self.read_json("pending-emissions.json")[lifecycle_delivery_id(ACTION_ID, "build_queued")]
+        intent = self.read_json("pending-emissions.json")[producer_lifecycle_delivery_id(ACTION_ID, "build_queued")]
         self.assertTrue(intent["undeliverable"])
         self.assertEqual(intent["undeliverable_reason"], "idempotency_conflict")
         # A later drain does not retry it.

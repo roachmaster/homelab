@@ -55,7 +55,7 @@ class SupersedingReviewSchemaTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(), before)
-                self.assertEqual(self.rows(cluster, 'SELECT max(version) FROM forge_agent.schema_migrations'), [(33,)])
+                self.assertEqual(self.rows(cluster, 'SELECT max(version) FROM forge_agent.schema_migrations'), [(37,)])
                 self.assertEqual(self.rows(cluster, 'SELECT DISTINCT review_generation,supersedes_review_id FROM forge_agent.coding_workflow_reviews'), [(0, None)])
             finally:
                 cluster.stop()
