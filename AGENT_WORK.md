@@ -52,6 +52,25 @@ publication. Core owns the narrow pure validator and full provider regression;
 Audit owns the scoped automatic recovery port and actual PostgreSQL regressions.
 Ops stages release and CI configuration only; Root activates qualified artifacts.
 
+## Component: one post-fix external review after transport exhaustion
+
+The user requests finding and fixing the current review failures. The proxy
+Plan's reviewer-correction event is exhausted at20/20 after CLI transport parsing
+failures. Extend only the existing private deployed-fix recovery port: authorize
+one explicitly recorded operator review exception after the qualified fix, with
+all twenty automatic admissions, original Plan/roles and stopped attempt history
+retained. Read and lock the exact terminal event through the already selected
+private grant provider; grant no new SQL/model authority. A valid fresh review
+resolves that same event; failure remains exhausted with no automatic twenty-first
+retry. Preserve the historical one-retry immutable-context recovery unchanged.
+
+The recovery component owns its private provider predicate, actual-role
+PostgreSQL regressions and external workflow documentation. Root owns the real
+transport correction, integrated source qualification, deployment and the actual
+explicit recovery command. The component performs no live state mutation or
+model invocation. A guarded preflight against actual production data reached the
+first write boundary with every guard satisfied and identical before/after state.
+
 # Previous: Recover malformed native reviews automatically — 2026-11-24
 
 The user requests actual automated completion of the original stage-diagram task,

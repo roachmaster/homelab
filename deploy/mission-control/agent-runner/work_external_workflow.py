@@ -340,7 +340,8 @@ class ExternalWorkflowStore:
                 if w['enabled'] or w['phase']!='escalated' or not w['state'].get('active_review_id'):raise Rejected(409,'not_reviewable')
                 cursor.execute('SELECT * FROM forge_external_workflow.reviews WHERE workflow_id=%s AND review_id=%s FOR UPDATE',(w['workflow_id'],w['state']['active_review_id']))
                 review=cursor.fetchone()
-                if not review or review['target_kind']!='plan' or review['status'] not in {'reviewing','escalated'} or w['state'].get('review_retries')!=1:
+                transport_exception=w['state'].get('review_retries')==AGENT_RETRY_LIMIT
+                if not review or review['target_kind']!='plan' or review['status'] not in {'reviewing','escalated'} or w['state'].get('review_retries') not in {1,AGENT_RETRY_LIMIT}:
                     raise Rejected(409,'not_reviewable')
                 target=validate_target(review['target_json'],review['target_sha256'])
                 critic=self._task(cursor,w,review['reviewer_task_id']);source=self._task(cursor,w,review['source_task_id'])
@@ -356,17 +357,38 @@ class ExternalWorkflowStore:
                         or critic['recipe_digest']!=w['snapshot']['recipes']['reviewer_review']['digest']
                         or source['mode']!='plan' or source['latest_attempt_id'] is not None or source['agent_profile']!=w['author_profile']
                         or source['status']!='cancelled' or source['revision']!=target['source_revision']+1):raise Rejected(409,'not_reviewable')
-                cursor.execute('''SELECT a.attempt_id,a.summary,r.receipt_id FROM forge_agent.coding_attempts a
+                expected_summary=('The coding agent returned malformed machine output.' if transport_exception
+                                  else 'The immutable execution context is unavailable.')
+                cursor.execute('''SELECT a.attempt_id,a.summary,a.unit_name,r.receipt_id,r.stop_proof FROM forge_agent.coding_attempts a
                   JOIN forge_agent.coding_reconciliation_receipts r ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(a.owner_id,a.project_alias,a.task_id,a.attempt_id,%s)
                   WHERE(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(%s,%s,%s,%s) AND a.phase='stopped' AND NOT a.reservation_active
                   AND a.lease_expires_at IS NULL AND a.published_at IS NOT NULL AND a.outcome='failed' AND a.result_sha256 IS NULL
                   AND a.result_byte_count IS NULL AND a.result_chunk_count IS NULL
                   AND NOT EXISTS(SELECT FROM forge_agent.coding_result_chunks c WHERE c.attempt_id=a.attempt_id)
-                  AND a.summary='The immutable execution context is unavailable.' ORDER BY r.created_at DESC LIMIT 1''',
-                  (critic['revision'],self.owner,w['project_alias'],critic['id'],critic['latest_attempt_id']))
+                  AND a.summary=%s ORDER BY r.created_at DESC LIMIT 1''',
+                  (critic['revision'],self.owner,w['project_alias'],critic['id'],critic['latest_attempt_id'],expected_summary))
                 failed=cursor.fetchone()
                 if not failed:raise Rejected(409,'reconcile_required')
                 evidence_lock.lock_review_evidence(review['review_id'],failed['attempt_id'])
+                retained_event=None
+                if transport_exception:
+                    if (self._retry_events is None or w['state'].get('escalation_reason')!=
+                            'Reviewer correction event exhausted its twenty retry attempts. All source and review evidence are retained.'
+                            or failed['stop_proof'].get('scope_stopped') is not True
+                            or failed['stop_proof'].get('source')!='systemd'
+                            or failed['stop_proof'].get('unit_name')!=failed['unit_name']):
+                        raise Rejected(409,'not_reviewable')
+                    cursor.execute("SELECT EXISTS(SELECT FROM forge_agent.coding_control_receipts WHERE(owner_id,project_alias,task_id,action)=(%s,%s,%s,'cancel')) AS cancelled",
+                        (self.owner,w['project_alias'],root['id']))
+                    if cursor.fetchone()['cancelled']:raise Rejected(409,'not_reviewable')
+                    # The private operator port reads and locks the exact
+                    # existing terminal observation and its twenty admissions.
+                    # It neither creates a cause nor reserves another retry.
+                    read_event=getattr(evidence_lock,'exhausted_reviewer_event',None)
+                    if not callable(read_event):raise Rejected(503,'unavailable')
+                    retained_event=read_event(review['review_id'],critic['id'],failed['attempt_id'],review['target_sha256'])
+                    if not retained_event or (retained_event.get('kind'),retained_event.get('status'),retained_event.get('used'),retained_event.get('limit'))!=('reviewer_correction','exhausted',AGENT_RETRY_LIMIT,AGENT_RETRY_LIMIT):
+                        raise Rejected(409,'not_reviewable')
                 cursor.execute('''SELECT EXISTS(SELECT FROM forge_agent.coding_attempts a JOIN forge_external_workflow.tasks t
                   ON(t.owner_id,t.project_alias,t.task_id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s
                   AND(a.phase<>'stopped' OR a.reservation_active OR a.lease_expires_at IS NOT NULL)) AS active''',(w['workflow_id'],))
@@ -393,11 +415,20 @@ class ExternalWorkflowStore:
                         'prior_review_id':str(review['review_id']),'prior_reviewer_task_id':str(critic['id']),'prior_attempt_id':str(failed['attempt_id']),
                         'prior_reconciliation_receipt_id':str(failed['receipt_id']),'prior_escalation_reason':old_reason,
                         'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'receipt':receipt}
+                if retained_event is not None:
+                    # One explicit human/operator continuation after a deployed
+                    # transport fix. The twenty automatic admissions stay spent;
+                    # failure of this review cannot admit a twenty-first retry.
+                    exception={'kind':'post_fix_transport_review','retained_retry_event':retained_event,
+                               'automatic_retry_admissions':0}
+                    receipt['operator_exception']=exception;record['operator_exception']=exception
                 w['state']['operator_infrastructure_rescues']=[record]
                 w['state']['operator_source_epoch']=str(rescue_id);w['state']['operator_rescue_pending']=True
                 w['state'].pop('base_revision',None)
                 w['active_task_id']=source['id'];w['enabled']=True
-                self._save(cursor,w,'Operator authorized one infrastructure review retry after deployed fix '+command.deployed_fix_revision+'. Selecting fresh trusted source; previous attempts and budgets remain preserved.',phase='plan',related_task_id=source['id'])
+                summary=('Operator authorized one post-fix transport review exception; its twenty automatic retry admissions remain spent. '
+                         if transport_exception else 'Operator authorized one infrastructure review retry after deployed fix '+command.deployed_fix_revision+'. ')
+                self._save(cursor,w,summary+'Selecting fresh trusted source; previous attempts and budgets remain preserved.',phase='plan',related_task_id=source['id'])
                 return receipt
 
     def continue_after_retry_policy_update(self,command):
