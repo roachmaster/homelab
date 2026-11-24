@@ -67,6 +67,7 @@ def validate_workflow_feedback(lease, envelope, *, plan_context=None, feedback_c
                     or previous.get("candidate_commit") != target["candidate_commit"]
                     or previous.get("gate_manifest_sha256") != target["gate_manifest_sha256"]
                     or (lease.get("parent_task_id") is not None
+                        and target["source_task_id"] == lease["parent_task_id"]
                         and target["review_id"] != lease.get("repair_source_review_id"))
                     or target["approved_plan"]["attempt_id"] != plan_context.get("plan_attempt_id")
                     or target["approved_plan"]["sha256"] != plan_context.get("plan_sha256")):
