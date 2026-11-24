@@ -8,6 +8,9 @@ its parent remains escalated, recovery discovers escalated rows, and the
 Retain M33's source-binding constraint including review_generation and its
 canonical lineage guard. Reconcile the branch-only M35 correction path with
 that contract, keeping its final superseded status confined to that path.
+When the canonical correction provider and retry accounting are selected, the
+compatibility scanner yields to that provider instead of spending a second
+correction budget or changing the canonical parent's status.
 M35 is unmerged branch source; migrations 1–34 remain unchanged. Regenerate only
 the affected M35 catalog expectations and explicit changed-source pins.
 

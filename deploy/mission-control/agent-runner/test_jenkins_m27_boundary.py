@@ -649,11 +649,12 @@ PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
 # provenance; only these explicit current bytes may supersede their source pins.
 # M35 has not shipped on main. No applied migration or guard is qualified here.
 MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256 = {
-    'AGENT_WORK.md': 'b326136cb864717197f975644f96eff262c3a91c22b3f5f6f894a5320af5a84f',
+    'AGENT_WORK.md': '69ff065737bc8933a1d0b4fc46e1d36d627251086291ce15950c89bb2cd6f66d',
     'deploy/mission-control/agent-runner/test_superseding_review_schema.py': '40a5a4ce294461a8da7b16f330fb96d39c57953387d482f912a63a0b6839bc5a',
     'deploy/mission-control/agent-runner/test_work_peer_diagnostics_schema.py': '6669fd97ab41d7408727c0b4c71e99d1cb8982c19894b8be9ef73e403b5a2024',
-    'deploy/mission-control/agent-runner/test_work_peer_replay.py': '1135bc2c298609a2bfb5c89754e815645d05af51d40b4fbcd36514b0d4efb653',
-    'deploy/mission-control/agent-runner/work_workflow.py': '94b72c6c0a0aed1c3f1ef2070743bbdd96470d4b207ac52a0b62b76b2528b2ff',
+    'deploy/mission-control/agent-runner/test_work_peer_replay.py': '6f4cc5f4d160fa67301c827fa49d36aad0efe49f4d8ea1816820931b6fc5dbeb',
+    'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '639b83bb28b870c7931f28041d8690a189b87be02bd68284cfcf2111cff58dd1',
+    'deploy/mission-control/agent-runner/work_workflow.py': '0c82c3b4135af650c7358cbfd3b36f85b5a4693f8288057bc84a856d92c59a39',
     'deploy/mission-control/sql/management/verify-autonomy.sql': 'd4ea5e110f74934f3a8b7626b444436c2cf17cb7ae538c49aa65829beffc1c11',
     'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '27ba8c6b9594fb0e607e60a551ea0aa4d15cf11809b077e1027c8e936da0b77f',
     'deploy/mission-control/sql/migrations/0035_event_stream_peer_review_diagnostics.sql': 'bb30872c207b9dd7b510430dde93761567c03c46b72424b305025923c6c07957',
@@ -856,6 +857,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             'deploy/mission-control/agent-runner/test_superseding_review_schema.py',
             'deploy/mission-control/agent-runner/test_work_peer_diagnostics_schema.py',
             'deploy/mission-control/agent-runner/test_work_peer_replay.py',
+            'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py',
             'deploy/mission-control/agent-runner/work_workflow.py',
             'deploy/mission-control/sql/management/verify-autonomy.sql',
             'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
