@@ -153,7 +153,7 @@ class NativeTimeoutRetryTest(unittest.TestCase):
                 if status == "lease_expired":
                     receipt, detail = self.expire(implementation, deadline=False)
                 elif status == "early_stop":
-                    self.db.record_stop(implementation, proof, "Not a deadline failure.")
+                    self.db.record_stop(implementation, proof, "Not a deadline failure.", "interrupted")
                     receipt = self.db.reconcile(implementation, "c" * 64, proof)
                     detail = self.get(implementation.task_id)
                 elif status == "cancelled":

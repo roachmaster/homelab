@@ -193,7 +193,8 @@ def _review_chain(cursor, task, workflow, latest, rec, owner):
         policy = intent.get('policy')
         expected_key = 'owner-verification-retry:' + str(workflow['workflow_id']) if policy == V1 else source_key(workflow['workflow_id'], previous['review_id'])
         expected = dict(project_alias=task['project_alias'], task_id=str(task['id']), base_revision=previous['source_revision'],
-                        revision=q['source_revision'], status='awaiting_review', review_id=str(q['review_id']))
+                        revision=q['source_revision'], status='awaiting_review', review_id=str(q['review_id']),
+                        actor={'kind': 'operator', 'id': task['owner_id']})
         if (a['status'] != 'completed' or a['source_key'] != expected_key or finish.get('status') != STATUS or finish.get('receipt') != expected
                 or intent.get('workflow_id') != str(workflow['workflow_id'])
                 or request.get('project_alias') != task['project_alias'] or request.get('task_id') != str(task['id'])

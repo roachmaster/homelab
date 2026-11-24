@@ -586,6 +586,7 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
             "base_revision": 2,
             "revision": 3,
             "status": "cancel_requested",
+            "actor": {"kind": "operator", "id": "mission-control"},
         })
         self.assertTrue(db.cancellation_requested(lease))
 
