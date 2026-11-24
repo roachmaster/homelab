@@ -3255,6 +3255,20 @@ async function agentsJourney() {
     await check(page.locator('#agents-retry')).toBeHidden();
     await check(page.locator('#agents-plan-actions')).toBeHidden();
     await check(page.locator('#agents-verification-status')).toHaveText('Awaiting independent review');
+    await check(page.locator('#agents-verification-pipeline')).toBeVisible();
+    await check(page.locator('#agents-verification-pipeline-heading')).toHaveText('Pipeline');
+    assert.deepEqual(
+      await page.locator('#agents-verification-pipeline-diagram .fg-flow-node .fg-flow-label').allTextContents(),
+      ['source and Python preflight','make ci','in-memory backend'],
+      'pipeline diagram renders branch gate stages in plan order',
+    );
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[aria-current="step"]')).toContainText('make ci');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[data-stage-id="source-preflight"]')).toHaveAttribute('data-state','completed');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[data-stage-id="in-memory-backend"]')).toHaveAttribute('data-state','upcoming');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-badge')).toHaveText('Running · make ci');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-summary')).toHaveText('Verification is running. 1 of 3 stages passed.');
+    await check(page.locator('#agents-verification-pipeline-diagram script,#agents-verification-pipeline-diagram img')).toHaveCount(0);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'pipeline diagram fits the viewport');
     const verificationTarget=relay.requireVerificationRetry(approvedPlan);
     const tasksBeforeVerification=relay.taskCount;
     const submissionsBeforeVerification=relay.calls.filter(kind=>kind==='work_submit').length;
@@ -3265,6 +3279,28 @@ async function agentsJourney() {
     await page.locator('#agents-review-note').fill('Retry verification only against the same finished author source.');
     await page.locator('#agents-review-retry').click();
     await check(page.locator('#agents-verification-status')).toHaveText('Awaiting independent review');
+    relay.setPipeline(approvedPlan,[
+      {id:'source-preflight',label:'source and Python preflight',status:'passed'},
+      {id:'check',label:'make ci',status:'passed'},
+      {id:'in-memory-backend',label:'in-memory backend',status:'running'},
+    ],'available','running');
+    await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[aria-current="step"]')).toContainText('in-memory backend');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[data-stage-id="check"]')).toHaveAttribute('data-state','completed');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-badge')).toHaveText('Running · in-memory backend');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-summary')).toHaveText('Verification is running. 2 of 3 stages passed.');
+    relay.setPipeline(approvedPlan,[
+      {id:'source-preflight',label:'source and Python preflight',status:'passed'},
+      {id:'check',label:'make ci',status:'failed',finding_id:'compiler-fixture',finding_summary:'Required compiler fixture finding'},
+      {id:'in-memory-backend',label:'in-memory backend',status:'not_run'},
+    ],'available','complete');
+    await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[data-stage-id="check"]')).toHaveAttribute('data-state','error');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[data-stage-id="check"] .fg-flow-detail')).toHaveText('compiler-fixture · Required compiler fixture finding');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[data-stage-id="in-memory-backend"]')).toHaveAttribute('data-state','skipped');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-node[data-stage-id="in-memory-backend"] .fg-flow-detail')).toHaveText('not run');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-badge')).toHaveText('Complete · 1 stage failed');
+    await check(page.locator('#agents-verification-pipeline-diagram .fg-flow-summary')).toHaveText('Verification complete. 1 of 3 stages passed.');
     await check(page.locator('#agents-retry')).toBeHidden();
     await check(page.locator('#agents-review-retry')).toBeHidden();
     await check(page.locator('#agents-review-note')).toHaveValue('');

@@ -246,7 +246,14 @@ export async function startAgentsRelay() {
           selected.status = 'awaiting_review'; selected.revision++; event(selected, 'awaiting_review');
           if (selected.mode === 'implement') {
             selected.review={auto_repair:selected.auto_repair,stage:'awaiting_decision',review_id:randomUUID(),feedback_id:randomUUID(),round:1,max_rounds:3,open_findings:1,verified_findings:0,latest_check_status:'passed',toolchain:'rustc fixture',handoff_reason:null,source_attempt_id:selected.attempt_id,candidate_commit:'e'.repeat(40),workspace_digest:'f'.repeat(64),gate_manifest_sha256:'c'.repeat(64),required_hosted_green:false,can_accept:false,can_repair:true,can_retry:false,
-              findings:[{finding_id:'compiler-fixture',category:'source',summary:'Required compiler fixture finding',expected:'Required check passes',actual:'Local rerun passed; owner review required',status:'open'}]};
+              findings:[{finding_id:'compiler-fixture',category:'source',summary:'Required compiler fixture finding',expected:'Required check passes',actual:'Local rerun passed; owner review required',status:'open'}],
+              pipeline_stages:[
+                {id:'source-preflight',label:'source and Python preflight',status:'passed'},
+                {id:'check',label:'make ci',status:'running'},
+                {id:'in-memory-backend',label:'in-memory backend',status:'waiting'},
+              ],
+              pipeline_availability:'available',
+              pipeline_phase:'running'};
 
           }
         } else if (selected.status === 'cancel_requested') {
@@ -363,6 +370,7 @@ export async function startAgentsRelay() {
     addHistory(){const next=task('awaiting_review',tasks.size,{prompt:'Complete event history fixture'});next.events=[];next.sequence=0;for(let i=1;i<=61;i++)event(next,'checkpoint',{attempt_id:next.attempt_id,sequence:Math.min(i,128),stage:i===1?'plan':'progress',summary:`History checkpoint ${i}. Literal <img src=x onerror=globalThis.__historyExecuted=true> remains text.`});tasks.set(next.task_id,next);return next.task_id;},
     get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},
     setDelivery(taskId,stage){const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');selected.delivery=deliveryProjection(stage);},
+    setPipeline(taskId,stages,availability,phase){const selected=tasks.get(taskId);if(!selected?.review)throw new Error('No fixture review');selected.review.pipeline_stages=stages;selected.review.pipeline_availability=availability;selected.review.pipeline_phase=phase;selected.revision++;},
     setProjectDelivery(stage){faults.projectDelivery=deliveryProjection(stage);faults.projectDelivery.source_kind='observed';},
     retryEvent(taskId,kind,used,{status='open',total=used}={}){
       const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
