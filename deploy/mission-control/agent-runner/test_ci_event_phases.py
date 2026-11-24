@@ -115,7 +115,12 @@ class EventPhaseContractTest(unittest.TestCase):
             'deploy/mission-control/sql/fragments/0033_superseding_reviews.sql',
             'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
             'deploy/mission-control/agent-runner/work_superseding_review.py',
-            'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py'}
+            'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py',
+            'deploy/mission-control/agent-runner/work_cli_transport.py',
+            'deploy/mission-control/agent-runner/work_executor.py',
+            'deploy/mission-control/agent-runner/work_worker.py',
+            'deploy/mission-control/agent-runner/work_external_recovery.py',
+            'deploy/mission-control/agent-runner/work_external_workflow.py'}
         contract=CiGateContractFactory(EVENT_PROFILE).create()
         for path in paths:
             with self.subTest(path=path):
