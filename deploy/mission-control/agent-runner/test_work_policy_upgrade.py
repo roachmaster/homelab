@@ -1054,9 +1054,17 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 # The broad historical helper deliberately strips several
                 # legacy read grants for old schemas. Reapply the version-gated
                 # runtime registry before snapshotting an actual complete M26
-                # surface; its M27 block is still inactive here.
+                # surface; its M27 block is still inactive here. The current
+                # registry restores the stripped grants, but its record_stop
+                # grant names the 5-arg form that only exists from M33, so
+                # run an adjusted copy naming the 4-arg form that exists
+                # at M26.
+                adjusted_grant = registry/"management"/"grant-runner-m26.sql"
+                adjusted_grant.write_text((SQL_DIR/"management/grant-runner.sql").read_text().replace(
+                    "forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text, text)",
+                    "forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text)"))
                 cluster._run("psql", "-h", cluster.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1",
-                    "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", registry/"management/grant-runner.sql")
+                    "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", adjusted_grant)
                 self.execute("CREATE ROLE muse_events LOGIN NOINHERIT", cluster=cluster)
                 result = cluster._run("psql", "-h", cluster.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1",
                     "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", SQL_DIR/"management/grant-muse-read-access.sql")
@@ -1065,8 +1073,34 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 previous_tables = [row[0] for row in self.execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND relname<>'schema_migrations' ORDER BY relname", cluster=cluster)]
                 # Compare the complete pre-upgrade inventory. New M27/M28
                 # objects are independently pinned by the strict current verifier.
-                old_relations = [row[0] for row in self.execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace ORDER BY relname", cluster=cluster)]
-                old_functions = [row[0] for row in self.execute("SELECT p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') ORDER BY 1", cluster=cluster)]
+                # Migration 0032 replaces the M26 source-binding unique
+                # constraint (and its backing index) with the partial index
+                # coding_workflow_reviews_source_binding_unique, so the old
+                # index name is gone after the upgrade by design; exclude it
+                # here (the new index is pinned by the current verifier).
+                old_relations = [row[0] for row in self.execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace ORDER BY relname", cluster=cluster)
+                                 if row[0] != 'coding_workflow_reviews_workflow_id_target_kind_source_atte_key']
+                old_functions = [row[0] for row in self.execute("SELECT p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') ORDER BY 1", cluster=cluster)
+                                 if row[0] not in {
+                                     # Migration 0033 intentionally redefines
+                                     # these twelve emitters with actor/cause
+                                     # attribution (record_stop also gains its
+                                     # fifth parameter); their sources are
+                                     # pinned separately by the current
+                                     # verifier snapshots.
+                                     'forge_agent.coding_schedule_repair(uuid,uuid)',
+                                     'forge_coding_reconciler_api.expire_leases()',
+                                     'forge_coding_reconciler_api.native_branch_first_replay(uuid,bigint)',
+                                     'forge_coding_reconciler_api.native_branch_published(uuid,uuid,jsonb)',
+                                     'forge_coding_reconciler_api.native_merge_failure(uuid,uuid,jsonb)',
+                                     'forge_coding_reconciler_api.publication_finish(uuid,uuid,text,text,text,text,text)',
+                                     'forge_coding_reconciler_api.review_finish(uuid,uuid,jsonb)',
+                                     'forge_coding_worker_api.checkpoint(uuid,uuid,text)',
+                                     'forge_coding_worker_api.claim(text,uuid,text[])',
+                                     'forge_coding_worker_api.publish(uuid,uuid,text,jsonb,jsonb,text,jsonb)',
+                                     'forge_coding_worker_api.record_stop(uuid,uuid,jsonb,text)',
+                                     'forge_coding_worker_api.report_progress(uuid,uuid,integer,text,text)',
+                                 }]
                 def snapshot():
                     # M31 pins the complete replacement definitions separately;
                     # reverse only its exact known native source amendments when

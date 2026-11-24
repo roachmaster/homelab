@@ -48,7 +48,8 @@ def replay(cursor, store, task, action, request, digest):
         raise Rejected(409, 'idempotency_conflict')
     saved = _object(finish.get('receipt'), 'reconcile_required')
     try:
-        valid = (set(saved) == {'project_alias', 'task_id', 'base_revision', 'revision', 'status', 'review_id'}
+        valid = (set(saved) - {'actor'} == {'project_alias', 'task_id', 'base_revision', 'revision', 'status', 'review_id'}
+            and ('actor' not in saved or saved['actor'] == {'kind': 'operator', 'id': task['owner_id']})
             and saved['project_alias'] == task['project_alias'] and saved['task_id'] == str(task['id'])
             and type(saved['base_revision']) is int and saved['base_revision'] == request['expected_revision']
             and type(saved['revision']) is int and saved['revision'] == request['expected_revision'] + 1
