@@ -1627,6 +1627,40 @@ class WorkStore:
         value=cursor.fetchone()
         return bool(value and value['required_green'])
 
+    def _pipeline_projection(self,cursor,task,row):
+        # Pipeline diagram data for the latest review. The stage list comes
+        # from the frozen plan identified by the latest hosted observation's
+        # check-name set; states come from the latest native build's Jenkins
+        # events for the review's candidate commit plus the terminal
+        # observation. Single-instance assumption: the deployment has one
+        # Jenkins instance, so events are scoped by job + commit only.
+        from work_pipeline_projection import (NATIVE_JENKINS_JOB, identify_plan,
+            project_pipeline_stages, select_latest_build_events)
+        no_run={'pipeline_stages':[],'pipeline_availability':'no_run','pipeline_phase':'unknown'}
+        if row is None or not row.get('candidate_commit'):
+            return no_run
+        candidate=row['candidate_commit']
+        observation=None
+        if row.get('source_publication_id') is not None:
+            cursor.execute("""SELECT checks FROM forge_agent.coding_hosted_checks
+                WHERE owner_id=%s AND project_alias=%s AND publication_id=%s AND candidate_commit=%s
+                ORDER BY observed_at DESC,observation_id DESC LIMIT 1""",
+                (self._owner,task['project_alias'],row['source_publication_id'],candidate))
+            found=cursor.fetchone()
+            if found is not None:
+                observation=found['checks']
+        plan=identify_plan([check.get('name') for check in observation]) if observation else None
+        cursor.execute("""SELECT event_kind,build_number,queue_id,commit_sha,build_result,
+                stage_name,stage_status,occurred_at,sequence
+            FROM forge_agent.jenkins_events
+            WHERE owner_id=%s AND project_alias=%s AND job_name=%s AND commit_sha=%s
+            ORDER BY sequence""",
+            (self._owner,task['project_alias'],NATIVE_JENKINS_JOB,candidate))
+        events=select_latest_build_events([dict(item) for item in cursor.fetchall()])
+        return project_pipeline_stages(plan=plan,events=events,observation=observation,
+            findings=row.get('findings') or (),
+            verification_unavailable=row.get('reason')=='hosted_wait_exhausted')
+
     def _review_projection(self,cursor,task):
         cursor.execute("SELECT review_required,auto_repair,parent_task_id FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",
                        (self._owner,task['project_alias'],task['id']))
@@ -1646,7 +1680,8 @@ class WorkStore:
             'source_attempt_id':str(task['latest_attempt_id']) if task['latest_attempt_id'] else None,
             'candidate_commit':None,'workspace_digest':None,'gate_manifest_sha256':None,'required_hosted_green':green,
             'can_accept':False,'can_repair':False,'can_retry':False,'auto_repair':flags['auto_repair'],'findings':[],
-            'repair_task_id':None,'parent_task_id':None}
+            'repair_task_id':None,'parent_task_id':None,
+            'pipeline_stages':[],'pipeline_availability':'no_run','pipeline_phase':'unknown'}
         value['parent_task_id']=str(flags['parent_task_id']) if flags['parent_task_id'] else None
         if row:
             value['repair_task_id']=str(row['repair_task_id']) if row['repair_task_id'] else None
@@ -1672,6 +1707,7 @@ class WorkStore:
         if event is not None:
             value['retry_event']=event
             value['can_repair']=task['status'] in {'completed','awaiting_review'} and row is not None and row['candidate_commit'] is not None and event['status']=='open' and event['used']<event['limit']
+        value.update(self._pipeline_projection(cursor,task,row))
         return value
 
     def _control_task(self,cursor,project_alias,task_id,expected_revision,key,action,intent):
