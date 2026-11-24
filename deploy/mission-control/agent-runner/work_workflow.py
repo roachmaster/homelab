@@ -131,6 +131,7 @@ class WorkflowStore:
         self.config=config;self.catalog=catalog;self.store=store
         self.reviewer_correction = None
         self.feedback_recovery = None
+        self.superseding_review = None
         self._retry_allowance_position = None
         self._manual_allowance_position = None
 
@@ -831,6 +832,8 @@ class WorkflowStore:
         self._recover_source_readiness()
         self._recover_preparations()
         self._recover_peer_verdicts()
+        if self.superseding_review is not None:
+            self.superseding_review.recover()
         self._recover_native_timeouts()
         with self._transaction() as cursor:
             for project in sorted(self.store.allowed_projects):self._project_lock(cursor,project)
@@ -909,6 +912,8 @@ class WorkflowStore:
         cursor.execute("SELECT count(*) AS n FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND status IN('queued','running','cancel_requested')",(self.store.owner,w['project_alias']))
         if cursor.fetchone()['n']>=self.store.max_pending:raise Rejected(503,'queue_full')
         prompt='Independently review the immutable agent-review.json target. Return exactly the specified source-bound JSON verdict. Do not modify source, execute builds, or implement fixes.'
+        if review.get('supersedes_review_id') is not None:
+            prompt+=' Copy context_sha256 exactly as '+digest+' (64 lowercase hexadecimal characters). Check every identity against the supplied target before returning JSON.'
         receipt={'task_id':str(reviewer_id),'project_alias':w['project_alias'],'revision':1,'status':'queued','recipe_digest':recipe.digest}
         cursor.execute("""INSERT INTO forge_agent.coding_tasks(owner_id,project_alias,id,idempotency_key,intent_digest,base_revision,mode,agent_profile,title,prompt,acceptance_criteria,pinned_recipe,recipe_digest,status,revision,auto_repair,review_required,workflow_required,workflow_id,workflow_review_id,review_target_sha256)
           VALUES(%s,%s,%s,%s,%s,%s,'review',%s,%s,%s,%s,%s,%s,'queued',1,false,false,true,%s,%s,%s)""",
@@ -964,12 +969,17 @@ class WorkflowStore:
         expected=recipe_from_snapshot(p,'reviewer_review')
         if not critic or critic['mode']!='review' or critic['agent_profile']!=p['reviewer_profile'] or critic['recipe_digest']!=expected.digest or critic['workflow_review_id']!=review['workflow_review_id'] or critic['status']!='awaiting_review':raise Rejected(409,'result_mismatch')
         result=self._artifact(cursor,critic['id'],critic['latest_attempt_id'])
-        from work_peer_review import IncompleteApprovalError
+        from work_peer_review import IncompleteApprovalError, PeerReviewError
         try:
             verdict=parse_verdict(result['content'],target)
         except IncompleteApprovalError as error:
             if self.reviewer_correction is None:raise Rejected(503,'unavailable')
             return self.reviewer_correction.correct(cursor,w,review,task,critic,result,error,action=action)
+        except PeerReviewError as error:
+            if self.superseding_review is not None:
+                receipt=self.superseding_review.correct(cursor,w,review,task,critic,result,error,action=action)
+                if receipt is not None:return receipt
+            raise
         cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET reviewer_attempt_id=%s,reviewer_result_sha256=%s,verdict_json=%s,verdict_sha256=%s WHERE workflow_review_id=%s",(critic['latest_attempt_id'],result['result_sha256'],result['content'],hashlib.sha256(result['content'].encode()).hexdigest(),review['workflow_review_id']))
         review.update(reviewer_attempt_id=critic['latest_attempt_id'],reviewer_result_sha256=result['result_sha256'])
         authority=BoundDelegatedAuthority(self.store,cursor,w,action,review,verdict)
@@ -978,7 +988,9 @@ class WorkflowStore:
         if self.retry_events is not None:
             scope=self._retry_scope(w);kind='planning' if review['target_kind']=='plan' else 'review'
             evidence=hashlib.sha256(result['content'].encode()).hexdigest();source=str(review['workflow_review_id'])
-            self.retry_events.resolve_verified(cursor,scope,'reviewer_correction',source,evidence,phase_id='reviewer_correction.'+source)
+            family=(self.superseding_review.root_review_id(cursor,review)
+                if self.superseding_review is not None and review.get('supersedes_review_id') is not None else review['workflow_review_id'])
+            self.retry_events.resolve_verified(cursor,scope,'reviewer_correction',source,evidence,phase_id='reviewer_correction.'+str(family))
             if decision=='approve':self.retry_events.resolve_verified(cursor,scope,kind,source,evidence)
             elif decision=='revise':
                 retry_event=self.retry_events.observe_failure(cursor,scope,kind,source,evidence)
@@ -1086,14 +1098,16 @@ class WorkflowCoordinatorFactory:
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,superseding_review_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
         self.config,self.catalog,self.store=config,catalog,store
         self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
         self.reviewer_correction_factory=reviewer_correction_factory
         self.feedback_recovery_factory=feedback_recovery_factory
+        self.superseding_review_factory=superseding_review_factory
     def create(self):
         from work_reviewer_correction import ReviewerCorrectionFactory
         from work_context_recovery import FeedbackRecoveryFactory
+        from work_superseding_review import SupersedingReviewFactory
         flow=WorkflowStore(self.config,self.catalog,self.store,retry_events=self.retry_events)
         factory=self.reviewer_correction_factory or ReviewerCorrectionFactory
         flow.reviewer_correction=factory(flow).create()
@@ -1102,4 +1116,7 @@ class WorkflowStoreFactory:
         flow.feedback_recovery=(self.feedback_recovery_factory or FeedbackRecoveryFactory)(flow).create()
         if flow.feedback_recovery is not None and not callable(getattr(flow.feedback_recovery,'run_once',None)):
             raise TypeError('Feedback recovery requires a ready recovery port')
+        flow.superseding_review=(self.superseding_review_factory or SupersedingReviewFactory)(flow).create()
+        if not all(callable(getattr(flow.superseding_review,name,None)) for name in ('recover','correct','root_review_id')):
+            raise TypeError('Superseding review requires a ready source-bound recovery port')
         return flow

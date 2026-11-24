@@ -1,3 +1,40 @@
+# Current: Recover malformed native reviews automatically — 2026-11-24
+
+The user requests actual automated completion of the original stage-diagram task,
+not another status report. Preserve original Gemini/Antigravity author and Codex
+reviewer identities. The native workflow3939c2a5 is disabled after reviewer719aa2b2
+returned a49-character context hash against a64-character immutable target.
+Never repair or accept those result bytes. Add a bounded, factory-selected
+superseding independent review, preserving original artifacts, plan, candidate,
+checks, snapshots and event budgets. Existing immutable review identity uniqueness
+requires additiveM33; migrations1–32 and applied fingerprints stay immutable.
+
+Core owns backend port, schema33, exact source/grant verification and focused
+regressions in this worktree. Audit owns independent PostgreSQL tests in its own
+worktree. Root owns source-qualification/CI protection integration, publication,
+backup/migration/runtime rollout and normal recovery of the exact original task.
+Use20 attempts per logical reviewer-protocol event; superseding review UUIDs must
+not reset the same event. Duplicate and raced recovery admissions consume once.
+Cancelled/revoked/busy/drifted scopes remain fenced. Real independently valid
+review and existing CI/merge gates remain required. Muse tasks retain their original
+owners and dispatch requests; do not claim or restart Muse on its behalf.
+
+The source implementation now selects a narrow superseding-review provider at
+the normal WorkflowStore factory. It classifies only a context-digest fault;
+all other strict verdict fields and attestations must already validate. Original
+verdict bytes are never corrected or accepted. AdditiveM33 enforces immutable
+generations, one successor and one live review per exact source. The replacement
+uses ordinary review actions and a different native reviewer task. Existing
+scoped grant capabilities are reused without widening application/model ACLs.
+The shared reviewer-correction event uses the root review UUID through the
+entire chain. Source/Plan/check evidence and actor identities remain unchanged.
+
+Component verification:24 pure classifier/peer/factory tests and53 owned
+PostgreSQL schema/upgrade/security tests passed with zero skips. Independent
+actual-role recovery and normal legacy lifecycle qualification are recorded
+separately; these source checks do not claim live activation or task completion.
+
+
 # Current follow-up: Preserve repair lineage when the observer wins — 2026-11-23
 
 M31 is live and strict verification passed with unchanged Muse history. M1–31

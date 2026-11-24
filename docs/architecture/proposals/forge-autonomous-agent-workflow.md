@@ -46,6 +46,29 @@ workers do not reach into global registries. The API process hosts a DB-only
 coordinator; existing coding and publication workers retain their separate
 process ownership. Construction stays effect-free until validated creation.
 
+### Context-digest transcription recovery
+
+Additive schema33 and the factory-selected `SupersedingReviewProvider` support a
+narrow automatic recovery: the reviewer returned a wrong `context_sha256`, while
+every other identity, decision, finding and required attestation passes the strict
+verdict contract. A pure classifier validates an in-memory counterfactual copy;
+that copy is never stored, accepted or used to authorize an implementation.
+Malformed JSON, another wrong identity, incomplete approval or an invalid source
+retain their existing guarded escalation behavior.
+
+The provider validates the exact stopped and reconciled source/reviewer attempts,
+approved Plan, protected candidate/check receipt, current grants and policy. It
+appends a new immutable review generation and queues an ordinary independent
+reviewer task through the existing coordinator. The prior target, result and
+handoff stay intact. One live review per immutable source and one successor per
+review prevent duplicate or raced admissions. The root review UUID owns the
+logical reviewer-correction event, so replacement UUIDs share its twenty-attempt
+budget. Only a genuinely valid subsequent verdict resolves that event. Legacy
+context-digest handoffs are discovered by the same normal coordinator after the
+compatible schema/runtime is activated. Quota, cancellation, permission and source
+drift remain fences, and recovery never fabricates a source approval or reruns an
+author command.
+
 The selected supervisor owns execution isolation. Codex 0.160's nested
 Bubblewrap sandbox cannot initialize its loopback interface in Forge's existing
 capability-free process scope. Policy 7 therefore selects Codex's supported
