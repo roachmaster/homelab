@@ -2442,6 +2442,13 @@ class PortalArtifactExportTest(unittest.TestCase):
         self.assertEqual(built.returncode, 0, built.stderr)
         host = args['layout'].target / 'release/forge-ide-web-host'
         self.assertEqual(host.stat().st_nlink, 2, 'the regression must exercise actual Cargo hardlinks')
+        # Cargo 1.100 no longer creates release/deps/; the second hardlink is
+        # the build-unit artifact at release/build/<crate>/<hash>/out/.
+        release = args['layout'].target / 'release'
+        self.assertFalse((release / 'deps').exists(), 'cargo 1.100 dropped the deps layout')
+        aliases = list((release / 'build/forge-ide-web-host').glob('*/out/forge_ide_web_host'))
+        self.assertEqual(len(aliases), 1, 'exactly one cargo 1.100 alias')
+        self.assertEqual(aliases[0].stat().st_ino, host.stat().st_ino)
         with self.assertRaises(ValueError):
             CI.read_file(host, owner=os.getuid(), maximum=64 * 1024 * 1024)
         attestation = CI.seal_portal_artifacts(request, **args)
