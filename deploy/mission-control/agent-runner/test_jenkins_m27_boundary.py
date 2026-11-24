@@ -596,7 +596,7 @@ PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/runner.py': '20a84ac0699d6be2643b12ce1b7d0eb9d057fd682e7f9522e4881420fe95cd65',
     'deploy/mission-control/agent-runner/setup-runner.sh': '97c695cc59ad59df8a5fb37e51eb14a06e3e57aa53f0118c2ce1321f3e78a588',
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': 'eed7dd4b74a6463061c178139623b24f611230c58cf935b1cffe68079afe0bfa',
-    'deploy/mission-control/agent-runner/test_ci_supervision.py': '49aecc26da28b37ba6a592dd9603fbca83f42f6155e7d83a341808adbd6e9576',
+    'deploy/mission-control/agent-runner/test_ci_supervision.py': 'f1ca0bffcc886768a9c91f209f77c82e0af31ed440172d0d5af87b58d89966ee',
     'deploy/mission-control/agent-runner/test_jenkins_api.py': 'c66ef69224bc5792321f8343bd27b98c9439d1347793eeb8dd8021c21faac494',
     'deploy/mission-control/agent-runner/test_jenkins_codec.py': 'e3c94bc68e875f27875d4b078517472edda6ee9609e4a94bf15f036c76d49e4a',
     'deploy/mission-control/agent-runner/test_jenkins_pipeline_lifecycle.py': 'bad9c600c09f61c0d1611ea6cba3aa3d3bce9c8d57b829968984c440c092b082',
