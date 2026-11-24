@@ -65,10 +65,12 @@ V3_PROTECTED_PATHS = frozenset({
     'deploy/mission-control/agent-runner/work_retry_policy.py',
     'deploy/mission-control/agent-runner/work_retry_events.py',
     'deploy/mission-control/agent-runner/work_reviewer_correction.py',
+    'deploy/mission-control/agent-runner/work_superseding_review.py',
     'deploy/mission-control/agent-runner/work_retry_continuation.py',
     'deploy/mission-control/agent-runner/work_context_recovery.py',
     'deploy/mission-control/sql/management/verify-retry-events.sql',
     'deploy/mission-control/sql/management/verify-delivery-lineage.sql',
+    'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
 })
 
 
@@ -77,7 +79,9 @@ def protected_event_policy_path(path):
         or path.startswith('deploy/mission-control/sql/migrations/0031_')
         or path.startswith('deploy/mission-control/sql/fragments/0031_')
         or path.startswith('deploy/mission-control/sql/migrations/0032_')
-        or path.startswith('deploy/mission-control/sql/fragments/0032_'))
+        or path.startswith('deploy/mission-control/sql/fragments/0032_')
+        or path.startswith('deploy/mission-control/sql/migrations/0033_')
+        or path.startswith('deploy/mission-control/sql/fragments/0033_'))
 
 
 def scope_kind(scope):

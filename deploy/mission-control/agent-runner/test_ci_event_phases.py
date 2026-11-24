@@ -110,7 +110,11 @@ class EventPhaseContractTest(unittest.TestCase):
             'deploy/mission-control/sql/fragments/0031_native_retry_events.sql',
             'deploy/mission-control/sql/fragments/0031_delivery_retry_events.sql',
             'deploy/mission-control/sql/migrations/0032_observer_retry_lineage.sql',
-            'deploy/mission-control/sql/fragments/0032_observer_retry_lineage.sql'}
+            'deploy/mission-control/sql/fragments/0032_observer_retry_lineage.sql',
+            'deploy/mission-control/sql/migrations/0033_superseding_reviews.sql',
+            'deploy/mission-control/sql/fragments/0033_superseding_reviews.sql',
+            'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
+            'deploy/mission-control/agent-runner/work_superseding_review.py'}
         contract=CiGateContractFactory(EVENT_PROFILE).create()
         for path in paths:
             with self.subTest(path=path):
