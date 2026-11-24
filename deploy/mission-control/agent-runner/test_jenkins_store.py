@@ -94,7 +94,7 @@ class JenkinsStorePostgresTest(unittest.TestCase):
         after = broad_store.get_event(project_alias=(denied or {}).get('project_alias','homelab'),event_id=old['event_id'])
         self.assertEqual(after,before,'Revoked deliveries remain intact and unclaimed, not failed or deleted')
 
-    def test_stage_started_emits_and_persists_under_migration_0030(self):
+    def test_stage_started_emits_and_persists_under_migration_0034(self):
         store = self.make_store()
         receipt = store.emit(sample_event(delivery_id='del-stage-1',
             event_kind=JenkinsEventKind.STAGE_STARTED, stage_name='check',
@@ -105,7 +105,7 @@ class JenkinsStorePostgresTest(unittest.TestCase):
         self.assertEqual(event['stage_name'], 'check')
         self.assertIsNone(event['stage_status'])
         self.assertIsNone(event['build_result'])
-        # The 0030 field constraint is a DB backstop: a stage_started row
+        # The 0034 field constraint is a DB backstop: a stage_started row
         # carrying a result or a stage status is rejected even bypassing
         # emit validation.
         with closing(self.cluster.connect()) as conn:
