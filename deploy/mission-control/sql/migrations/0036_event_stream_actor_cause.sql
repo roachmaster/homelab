@@ -38,6 +38,12 @@
 -- and review_finish (the two registered functions whose source changes here):
 -- new_sha to the new prosrc hash, old_sha to the reversed form of the new
 -- source; see the registry block below.
+--
+-- report_progress now carries the worker actor in the progress payload, and
+-- migration 0012's exact-keys progress check forbids any fifth key, so the
+-- constraint is restated below with 'actor' allowed and bound to the worker
+-- holding the attempt lease. Historical rows are unaffected: the check only
+-- constrains rows written after this migration.
 
 -- _retry_native_patches: advance the 0031 pins for the two
 -- registered functions whose source 0036 changes (coding_schedule_repair,
@@ -1470,3 +1476,31 @@ BEGIN a:=forge_external_agent._active(p_id,p_gen,p_token);s:=CASE WHEN a.generat
  PERFORM forge_external_agent._event(a,CASE WHEN s='queued' THEN 'resumed' ELSE 'failed' END,jsonb_build_object('provider','muse-db','assignment_id',p_id,'generation',p_gen,'actor',jsonb_build_object('kind','agent','id',a.profile_alias)));
  PERFORM pg_notify('forge_external_agent_jobs','');RETURN jsonb_build_object('status',s);END;
 $function$;
+
+-- coding_events_progress_check: restate migration 0012's exact-keys
+-- check with the worker 'actor' allowed (report_progress carries it now).
+ALTER TABLE forge_agent.coding_events
+    DROP CONSTRAINT IF EXISTS coding_events_progress_check,
+    ADD CONSTRAINT coding_events_progress_check CHECK (
+        ((progress_attempt_id IS NULL AND progress_sequence IS NULL)
+         OR (progress_attempt_id IS NOT NULL
+             AND progress_sequence BETWEEN 1 AND 128
+             AND event_kind = 'checkpoint'
+             AND payload - ARRAY['attempt_id', 'progress_sequence', 'stage', 'summary', 'actor'] = '{}'::jsonb
+             AND payload ?& ARRAY['attempt_id', 'progress_sequence', 'stage', 'summary', 'actor']
+             AND jsonb_typeof(payload->'attempt_id') = 'string'
+             AND payload->>'attempt_id' = progress_attempt_id::text
+             AND jsonb_typeof(payload->'progress_sequence') = 'number'
+             AND payload->>'progress_sequence' = progress_sequence::text
+             AND jsonb_typeof(payload->'stage') = 'string'
+             AND ((progress_sequence = 1 AND payload->>'stage' = 'plan')
+                  OR (progress_sequence > 1 AND payload->>'stage' = 'progress'))
+             AND jsonb_typeof(payload->'summary') = 'string'
+             AND octet_length(payload->>'summary') BETWEEN 1 AND 4096
+             AND btrim(payload->>'summary', E' \t\r\n') <> ''
+             AND (payload->>'summary') !~ U&'[\0001-\0008\000B-\001F\007F-\009F]'
+             AND jsonb_typeof(payload->'actor') = 'object'
+             AND (payload->'actor') ?& ARRAY['kind', 'id']
+             AND (payload->'actor'->>'kind') = 'worker'
+             AND octet_length(btrim(payload->'actor'->>'id')) BETWEEN 1 AND 128)) IS TRUE
+    );

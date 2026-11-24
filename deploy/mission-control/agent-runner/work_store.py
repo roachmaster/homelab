@@ -59,11 +59,27 @@ TASK_SCOPES = frozenset({"active", "attention", "history", "all"})
 VALID_LIST_FILTERS = VALID_STATUSES | TASK_SCOPES
 
 
+def _projection_actor(payload, kind):
+    """True when the payload carries no actor, or exactly the expected
+    ``{kind, id}`` actor. Fix 2 adds the actor to every emitted event
+    payload; the public projections validate it like any other field and
+    never expose it."""
+    if "actor" not in payload:
+        return True
+    actor = payload["actor"]
+    return (isinstance(actor, dict) and set(actor) == {"kind", "id"}
+            and actor["kind"] == kind
+            and isinstance(actor["id"], str) and bool(actor["id"])
+            and len(actor["id"]) <= 128)
+
+
 def _public_progress(payload):
     """Project only explicit public reports, never arbitrary event payloads."""
-    if not isinstance(payload, dict) or set(payload) != {
-        "attempt_id", "progress_sequence", "stage", "summary"
-    }:
+    if (not isinstance(payload, dict)
+            or set(payload) - {"actor"} != {
+                "attempt_id", "progress_sequence", "stage", "summary"
+            }
+            or not _projection_actor(payload, "worker")):
         return None
     attempt, ordinal = payload["attempt_id"], payload["progress_sequence"]
     stage, summary = payload["stage"], payload["summary"]
@@ -80,7 +96,9 @@ def _public_progress(payload):
     return ({"attempt_id": attempt, "sequence": ordinal, "stage": stage,
              "summary": summary} if valid else None)
 def _public_external_progress(payload, binding):
-    if not isinstance(payload, dict) or set(payload) != {"provider", "assignment_id", "generation", "summary"} or not isinstance(binding, dict):
+    if (not isinstance(payload, dict)
+            or set(payload) - {"actor"} != {"provider", "assignment_id", "generation", "summary"}
+            or not _projection_actor(payload, "agent") or not isinstance(binding, dict)):
         return None
     try:
         identity = str(UUID(payload["assignment_id"]))
@@ -92,11 +110,14 @@ def _public_external_progress(payload, binding):
                  and all(unicodedata.category(c) != "Cc" or c in "\n\t" for c in summary))
     except (ValueError, TypeError, KeyError, UnicodeError):
         return None
-    return dict(payload) if valid else None
+    return ({"provider": payload["provider"], "assignment_id": payload["assignment_id"],
+             "generation": generation, "summary": summary} if valid else None)
 
 
 def _public_workflow_progress(payload, workflow, related_allowed=False):
-    if not isinstance(payload, dict) or not ({"workflow_id", "phase", "summary"} <= payload.keys() <= {"workflow_id", "phase", "summary", "related_task_id"}) or not isinstance(workflow, dict):
+    if (not isinstance(payload, dict)
+            or not ({"workflow_id", "phase", "summary"} <= payload.keys() - {"actor"} <= {"workflow_id", "phase", "summary", "related_task_id"})
+            or not _projection_actor(payload, "coordinator") or not isinstance(workflow, dict)):
         return None
     try:
         identity = str(UUID(payload["workflow_id"]))
@@ -109,7 +130,12 @@ def _public_workflow_progress(payload, workflow, related_allowed=False):
                  and all(unicodedata.category(c) != "Cc" or c in "\n\t" for c in summary))
     except (ValueError, TypeError, KeyError, UnicodeError):
         return None
-    return dict(payload) if valid else None
+    if not valid:
+        return None
+    projected = {"workflow_id": payload["workflow_id"], "phase": payload["phase"], "summary": summary}
+    if related is not None:
+        projected["related_task_id"] = related
+    return projected
 
 
 NON_RESUMABLE_STATUSES = frozenset({"queued", "running", "cancel_requested", "completed"})
