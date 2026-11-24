@@ -1,4 +1,38 @@
-# Current: Continue verified peer feedback automatically — 2026-11-24
+# Current: Fix reviewer protocol and CLI transport causes — 2026-11-24
+
+The user requests finding and fixing the two actual review failures. Native
+diagram workflow3939 passed candidate CI, then its critic returned `revise`
+with approval-only attestations. Preserve that verdict and all findings; improve
+the prompt and request a new independently valid review through the existing
+bounded superseding-review provider. Do not normalize or accept invalid bytes.
+
+The external Postgres-proxy workflow8c300 exhausted its reviewer-correction
+event at 20/20 after CLI JSON transport parsing failures. A bounded read-only
+supervised diagnostic reproduced the failure after 54.8 seconds: Codex 0.160
+serializes both the outer item ID and web-search ID under the same JSON key.
+The 153-byte rejected record has SHA-256
+`547a2be149ecb96f6dfecf9e172cd3138b8aa9113f9f87b3efdd9537e31a4076`.
+The narrow transport adapter accepts that exact root web-search metadata alias,
+preserves the outer ID, and rejects duplicate control, result and nested fields.
+Its actual-record replay and chunk-boundary regressions pass. Private structured
+failure logging records only a fixed reason, redacted path, size/hash and attempt
+identity. The diagnostic applied no verdict or DB mutation; strict verdict/source
+parsing and frozen execution flags remain unchanged.
+
+After the qualified fix is active, the user's new instruction authorizes one
+explicit private operator recovery review of the exhausted external event.
+Preserve20/20, all original source artifacts and owners, and record the exception
+once through the existing receipt-bound recovery port. It is not another twenty
+automatic attempts. A genuine valid review may resolve the same exhausted event;
+a failed exception leaves it exhausted. No applied SQL edits or new public route.
+
+Root owns integration, exact-source checks, safe idle-worker rollout, publication
+and live proof. Native-review owner fixes the classifier/prompt; transport owner
+proves and fixes the CLI boundary; recovery owner implements the narrow private
+post-fix exception. Each writes a separate worktree. Keep Muse's other active
+work and all running review processes uninterrupted.
+
+# Previous: Continue verified peer feedback automatically — 2026-11-24
 
 The live superseding-review recovery ran Codex through its normal worker and
 obtained a valid `revise` verdict for the original stage-diagram candidate. Its
@@ -23,6 +57,25 @@ Root owns integration, source qualification, safe idle-worker rollout and
 publication. Core owns the narrow pure validator and full provider regression;
 Audit owns the scoped automatic recovery port and actual PostgreSQL regressions.
 Ops stages release and CI configuration only; Root activates qualified artifacts.
+
+## Component: one post-fix external review after transport exhaustion
+
+The user requests finding and fixing the current review failures. The proxy
+Plan's reviewer-correction event is exhausted at20/20 after CLI transport parsing
+failures. Extend only the existing private deployed-fix recovery port: authorize
+one explicitly recorded operator review exception after the qualified fix, with
+all twenty automatic admissions, original Plan/roles and stopped attempt history
+retained. Read and lock the exact terminal event through the already selected
+private grant provider; grant no new SQL/model authority. A valid fresh review
+resolves that same event; failure remains exhausted with no automatic twenty-first
+retry. Preserve the historical one-retry immutable-context recovery unchanged.
+
+The recovery component owns its private provider predicate, actual-role
+PostgreSQL regressions and external workflow documentation. Root owns the real
+transport correction, integrated source qualification, deployment and the actual
+explicit recovery command. The component performs no live state mutation or
+model invocation. A guarded preflight against actual production data reached the
+first write boundary with every guard satisfied and identical before/after state.
 
 # Previous: Recover malformed native reviews automatically — 2026-11-24
 

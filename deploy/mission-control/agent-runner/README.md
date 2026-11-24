@@ -765,6 +765,27 @@ before a successful result; an already-cancelled task launches no CLI.
 Primary contracts: [Headless CLI](https://antigravity.google/docs/cli/headless)
 and [session resumption](https://antigravity.google/docs/cli/commands/resume).
 
+### Codex JSONL transport compatibility and private diagnostics
+
+Codex0.160 serializes both the outer thread-item ID and its flattened web-search
+ID. This follows its pinned [event representation](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/exec/src/exec_events.rs).
+The pure transport decoder accepts exactly two string `id` fields only at the
+root `item` object of `item.started`, `item.updated` and `item.completed` when
+its unique `type` is `web_search`. It retains the outer `item_N` identity and
+ignores the opaque search identity. Other duplicate fields, nested payloads,
+control/session fields and every other backend still fail closed. Final model
+text is preserved verbatim; review artifact validators retain their own strict
+schema and identity checks.
+
+`CodingWorkerFactory` injects a ready `CliDiagnosticReporter` into the normal
+runner. Rejected transport records produce one private `cli_transport_failure`
+log containing fixed structural reason, redacted path, record ordinal, byte
+count, SHA-256 and canonical task/attempt IDs. No raw record, arbitrary object
+key, prompt, tool output or provider diagnostic enters this metadata. Failure
+to log cannot change the original task outcome. Full raw capture is reserved
+for an explicitly authorized, bounded private diagnostic rather than ordinary
+worker execution.
+
 ### Codex warm author sessions and feature controls (policy8 / migration 0017)
 
 This implementation is source support; applying migration `0017_coding_codex_warm_sessions.sql`

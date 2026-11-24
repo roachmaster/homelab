@@ -85,6 +85,22 @@ class NativeReviewerGrantScope:
                             if cursor.fetchone() is None:raise Rejected(409,'not_reviewable')
                             cursor.execute('SELECT receipt_id FROM forge_agent.coding_reconciliation_receipts WHERE attempt_id=%s FOR SHARE',(attempt_id,))
                             if cursor.fetchone() is None:raise Rejected(409,'reconcile_required')
+                        def exhausted_reviewer_event(self,review_id,task_id,attempt_id,target_sha256):
+                            from work_external_review_context import canonical
+                            digest=hashlib.sha256(canonical({'target':target_sha256,'task_id':str(task_id),
+                                'attempt_id':str(attempt_id),'summary':'Native reviewer could not finish: failed'})).hexdigest()
+                            cursor.execute('''SELECT jsonb_build_object('event_id',e.event_id,'kind',e.kind,
+                                'used',e.used,'limit',e.attempt_limit,'status',e.status) FROM forge_agent.coding_retry_events e
+                                JOIN forge_agent.coding_retry_event_observations o ON o.event_id=e.event_id
+                                WHERE(e.owner_id,e.project_alias,e.scope_kind,e.scope_id,e.kind,e.phase_id)=
+                                  (%s,%s,'external_workflow',%s,'reviewer_correction','reviewer_correction')
+                                AND(e.used,e.attempt_limit,e.status)=(20,20,'exhausted')
+                                AND(o.owner_id,o.project_alias,o.scope_kind,o.scope_id,o.kind,o.phase_id,o.source_id,o.source_digest,o.observation_kind)=
+                                  (e.owner_id,e.project_alias,e.scope_kind,e.scope_id,e.kind,e.phase_id,%s,%s,'failure')
+                                AND(SELECT count(*) FROM forge_agent.coding_retry_event_admissions a WHERE a.event_id=e.event_id)=20
+                                FOR SHARE OF e,o''',(owner,project,workflow_id,'reviewer:'+str(review_id),digest))
+                            row=cursor.fetchone()
+                            return row[0] if row else None
                     yield EvidenceLock()
         return scope()
 

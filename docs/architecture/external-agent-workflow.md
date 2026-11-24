@@ -141,4 +141,26 @@ and findings. After correcting the access or scope issue, submit a new Plan with
 the original request, preserved artifact and relevant findings. The old workflow
 remains escalated with its original budget and audit history; this recovery does
 not silently reset its counters, approvals or merge authority. There is currently
-no in-place Resume/Revise action for an escalated external workflow.
+no public in-place Resume/Revise action for an escalated external workflow.
+
+## Private post-fix reviewer continuation
+
+The private `work_external_recovery.py` operator command can authorize one
+source-bound reviewer continuation after a qualified fix is deployed. Its
+historical immutable-context recovery remains limited to its exact setup failure.
+For a malformed CLI transport failure, it requires the actual stopped and
+reconciled reviewer, unchanged external Plan artifact and original roles,
+current grants and policy, no competing work or explicit user cancellation,
+and the exact exhausted reviewer-correction event with twenty real admissions.
+
+The selected private grant provider holds the existing review evidence and
+reads that event through its operator-owned connection. The application and
+model receive no new table grants. The command records an explicit post-fix
+review exception, preserves `used: 20` and the event identity, refreshes trusted
+source, and queues one independent review of the retained Plan. It does not
+reserve a twenty-first automatic attempt or create another failure event. A
+valid review closes the same exhausted event through normal review consumption;
+another failure leaves it exhausted and cannot start an automatic retry loop.
+Replays return the same receipt; another exception is refused. This is a private
+operator action following a human's recovery request, not a model-selected or
+portal approval capability.
