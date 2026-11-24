@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import hashlib
+import psycopg2
 from threading import Barrier
 import unittest
 from unittest.mock import patch
@@ -153,12 +154,11 @@ class PeerVerdictReplayTest(unittest.TestCase):
         self.assertEqual(self.get(child.task_id)["workflow"]["code_revisions"], 1)
 
     def test_unknown_category_changed_hash_and_stale_author_revision_do_not_replay(self):
-        for case in ("unknown_category", "non_alias_category", "approve", "reviewer_hash", "target_hash", "revision"):
+        for case in ("unknown_category", "reviewer_hash", "target_hash", "revision"):
             with self.subTest(case=case):
                 self.setUp()
-                category = {"unknown_category": "unrecognized_future_category", "non_alias_category": "source"}.get(case, "correctness")
-                author, _critic, _checks, _raw, request = self.failed_verdict(category,
-                    decision="approve" if case == "approve" else "revise")
+                category = {"unknown_category": "unrecognized_future_category"}.get(case, "correctness")
+                author, _critic, _checks, _raw, request = self.failed_verdict(category, decision="revise")
                 if case == "reviewer_hash":
                     request["reviewer_result_sha256"] = "0" * 64
                 elif case == "target_hash":
@@ -168,6 +168,25 @@ class PeerVerdictReplayTest(unittest.TestCase):
                 with self.assertRaises(Rejected):
                     self.coordinator.store.retry_peer_verdict(**request)
                 self.assert_no_repair(author)
+
+    def test_fully_valid_verdict_replays_without_correctness_category(self):
+        """Plan §3.3: the correctness-category gate is dropped; a replayable
+        verdict is either fully valid (apply it) or a transcription defect."""
+        author, critic, _checks, raw, request = self.failed_verdict("source", decision="revise")
+        receipt = self.coordinator.store.retry_peer_verdict(**request)
+        self.assertEqual(receipt["status"], "peer_verdict_replay_queued")
+        self.assertTrue(self.coordinator.run_once())
+        self.assert_repair(author, critic, raw)
+        self.setUp()
+        author, _critic, _checks, _raw, request = self.failed_verdict("correctness", decision="approve")
+        receipt = self.coordinator.store.retry_peer_verdict(**request)
+        self.assertEqual(receipt["status"], "peer_verdict_replay_queued")
+        self.assertEqual(self.rows("SELECT status FROM forge_agent.coding_workflow_reviews "
+                                   "WHERE workflow_review_id=%s", (request["workflow_review_id"],))[0][0],
+                         "reviewing")
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE "
+            "workflow_id=(SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s) "
+            "AND source_key LIKE 'peer-verdict-replay:%%'", (author.task_id,))[0][0], 1)
 
     def test_cancel_auth_escalation_and_changed_local_gates_do_not_replay(self):
         for case in ("cancelled", "auth_escalation", "gate_status", "gate_head", "stale_readiness", "revoked_grant"):
@@ -229,3 +248,140 @@ class PeerVerdictReplayTest(unittest.TestCase):
         self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE "
             "workflow_id=(SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s) "
             "AND source_key LIKE 'peer-verdict-replay:%%'", (author.task_id,))[0][0], 1)
+
+
+TRANSCRIPTION_CONTEXT = "11d3542aafe789669496eb6bb667955f51e19f9361b87dfda"
+
+
+@unittest.skipUnless(PG16_AVAILABLE, "Requires owned PostgreSQL16")
+class PeerVerdictCorrectionTest(unittest.TestCase):
+    """A transcription-defective verdict supersedes its review instead of replaying it."""
+    setUp = workflow_fixtures.AutonomousWorkflowTest.setUp
+    submit = workflow_fixtures.AutonomousWorkflowTest.submit
+    claim = workflow_fixtures.AutonomousWorkflowTest.claim
+    publish = workflow_fixtures.AutonomousWorkflowTest.publish
+    get = workflow_fixtures.AutonomousWorkflowTest.get
+    verdict = workflow_fixtures.AutonomousWorkflowTest.verdict
+    finish_plan_round = workflow_fixtures.AutonomousWorkflowTest.finish_plan_round
+    checked_implementation = workflow_fixtures.AutonomousWorkflowTest.checked_implementation
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cluster = DisposablePostgresCluster().start()
+        cls.addClassCleanup(cls.cluster.stop)
+
+    def rows(self, statement, arguments=()):
+        with closing(self.cluster.connect("postgres")) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(statement, arguments)
+                return cursor.fetchall()
+
+    def defective_verdict(self, critic, *, decision="revise"):
+        return self.verdict(critic, decision, findings=[{
+            "finding_id": "timestamp-1", "category": "source",
+            "summary": "Show exact UTC timestamps in the Observed disclosure without hover.",
+        }] if decision == "revise" else [], context_sha256=TRANSCRIPTION_CONTEXT)
+
+    def escalate_with_defect(self, prepared=None):
+        _admitted, author, critic, checks = prepared or self.checked_implementation()
+        envelope = self.db.read_review_target(critic)
+        raw = self.defective_verdict(critic)
+        self.publish(critic, raw)
+        self.assertTrue(self.coordinator.run_once())
+        self.assertEqual(self.get(author.task_id)["workflow"]["escalation_reason"],
+                         "Peer review could not safely continue: PeerReviewError")
+        review = self.rows("SELECT workflow_review_id, status, diagnostics, target_json, target_sha256, "
+                           "verdict_json FROM forge_agent.coding_workflow_reviews "
+                           "WHERE reviewer_task_id=%s", (critic.task_id,))[0]
+        self.assertEqual(review[1], "escalated")
+        self.assertEqual(review[2]["check"], "verdict.identity.context_sha256")
+        self.assertEqual(review[2]["detail"]["expected_length"], 64)
+        self.assertEqual(review[2]["detail"]["actual_length"], 49)
+        request = dict(project_alias="homelab", workflow_review_id=review[0],
+                       expected_revision=self.get(author.task_id)["revision"],
+                       reviewer_attempt_id=UUID(critic.attempt_id),
+                       reviewer_result_sha256=hashlib.sha256(raw.encode()).hexdigest(),
+                       target_sha256=envelope["target_sha256"],
+                       idempotency_key="peer-correction-recovery")
+        return author, critic, raw, review, request
+
+    def test_transcription_defect_supersedes_review_and_requeues_reviewer(self):
+        author, critic, raw, review, request = self.escalate_with_defect()
+        old_id, target_json, target_sha256 = review[0], review[3], review[4]
+        # The evidence-guard trigger still rejects direct target mutation.
+        with self.assertRaises(psycopg2.Error) as caught:
+            self.rows("UPDATE forge_agent.coding_workflow_reviews SET target_json='{}' "
+                      "WHERE workflow_review_id=%s", (old_id,))
+        self.assertEqual(caught.exception.pgcode, "P0009")
+        receipt = self.coordinator.store.retry_peer_verdict(**request)
+        self.assertEqual(receipt["status"], "peer_verdict_correction_queued")
+        new_id = UUID(receipt["superseding_workflow_review_id"])
+        self.assertNotEqual(new_id, old_id)
+        self.assertEqual(receipt["defect"]["check"], "verdict.identity.context_sha256")
+        old = self.rows("SELECT status, target_json, target_sha256, verdict_json, "
+                        "supersedes_workflow_review_id FROM forge_agent.coding_workflow_reviews "
+                        "WHERE workflow_review_id=%s", (old_id,))[0]
+        self.assertEqual(old[0], "superseded")
+        self.assertEqual(old[1], target_json)
+        self.assertEqual(old[2], target_sha256)
+        self.assertIsNone(old[3])
+        self.assertIsNone(old[4])
+        new = self.rows("SELECT status, workflow_id, target_kind, source_task_id, source_attempt_id, "
+                        "source_result_sha256, source_revision, source_review_id, reviewer_task_id, "
+                        "target_sha256, supersedes_workflow_review_id "
+                        "FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s", (new_id,))[0]
+        old_binding = self.rows("SELECT workflow_id, target_kind, source_task_id, source_attempt_id, "
+                                "source_result_sha256, source_revision, source_review_id "
+                                "FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s",
+                                (old_id,))[0]
+        self.assertEqual(new[0], "reviewing")
+        self.assertEqual(new[1:8], old_binding)
+        self.assertEqual(new[10], old_id)
+        self.assertNotEqual(new[9], target_sha256)
+        workflow = self.rows("SELECT phase, enabled, escalation_reason FROM forge_agent.coding_workflows "
+                             "WHERE workflow_id=%s", (new[1],))[0]
+        self.assertEqual(workflow, ("code_review", True, ""))
+        self.assertEqual(self.get(critic.task_id)["status"], "completed")
+        events = self.rows("SELECT event_kind, payload->>'note' FROM forge_agent.coding_events "
+                           "WHERE task_id=%s ORDER BY sequence DESC LIMIT 1", (critic.task_id,))[0]
+        self.assertEqual(events[0], "completed")
+        self.assertIn(str(new_id), events[1])
+        next_critic = self.claim("codex-v2")
+        self.assertIsNotNone(next_critic)
+        self.assertEqual(next_critic.task_id, str(new[8]))
+        self.assertEqual(self.coordinator.store.retry_peer_verdict(**request), receipt)
+        with self.assertRaises(Rejected):
+            self.coordinator.store.retry_peer_verdict(
+                **{**request, "idempotency_key": "changed-correction-intent"})
+
+    def test_second_defect_from_superseding_row_does_not_correct_again(self):
+        author, critic, raw, review, request = self.escalate_with_defect()
+        receipt = self.coordinator.store.retry_peer_verdict(**request)
+        new_id = UUID(receipt["superseding_workflow_review_id"])
+        next_critic = self.claim("codex-v2")
+        self.assertIsNotNone(next_critic)
+        envelope = self.db.read_review_target(next_critic)
+        raw2 = self.defective_verdict(next_critic)
+        self.publish(next_critic, raw2)
+        self.assertTrue(self.coordinator.run_once())
+        self.assertEqual(self.get(author.task_id)["workflow"]["escalation_reason"],
+                         "Peer review could not safely continue: PeerReviewError")
+        request2 = dict(project_alias="homelab", workflow_review_id=new_id,
+                        expected_revision=self.get(author.task_id)["revision"],
+                        reviewer_attempt_id=UUID(next_critic.attempt_id),
+                        reviewer_result_sha256=hashlib.sha256(raw2.encode()).hexdigest(),
+                        target_sha256=envelope["target_sha256"],
+                        idempotency_key="peer-correction-second")
+        with self.assertRaises(Rejected):
+            self.coordinator.store.retry_peer_verdict(**request2)
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_reviews "
+                                   "WHERE supersedes_workflow_review_id=%s", (new_id,))[0][0], 0)
+        workflow_id = self.rows("SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s",
+                                (author.task_id,))[0][0]
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_reviews "
+                                   "WHERE workflow_id=%s AND target_kind='code'", (workflow_id,))[0][0], 2)
+
+    def test_stale_target_sha_does_not_correct(self):
+        _author, _critic, _raw, _review, request = self.escalate_with_defect()
+        with self.assertRaises(Rejected):
+            self.coordinator.store.retry_peer_verdict(**{**request, "target_sha256": "0" * 64})

@@ -467,14 +467,22 @@ class WorkflowStore:
         cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,workflow_review_id,kind,source_key) VALUES(%s,%s,%s,%s,'review',%s) RETURNING action_id",(w['workflow_id'],self.store.owner,review['project_alias'],new_id,str(new_id)))
         review_action_id=cursor.fetchone()['action_id']
         new_review=dict(review);new_review.update(workflow_review_id=new_id,target_json=None,target_sha256=None,reviewer_task_id=None,reviewer_attempt_id=None,reviewer_result_sha256=None,verdict_json=None,verdict_sha256=None,status='pending',diagnostics=None,supersedes_workflow_review_id=review['workflow_review_id'])
-        admission=self._admit_reviewer(cursor,w,new_review,task,validate_target,idempotency_key=correction_key)
+        # Un-escalate BEFORE admitting the fresh reviewer: the role grant
+        # (coding_workflow_role_granted) only allows a workflow whose phase
+        # is not completed/cancelled/escalated, so admitting while still
+        # escalated is always denied. The caller's gates already ran
+        # against the locked rows, so this re-enable is the correction.
+        cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='code_review',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
+        # The correction key ('peer-correction-<id>:1') is the workflow
+        # action's source_key, but a task idempotency_key forbids ':' --
+        # derive the task key with the version separator as '-'.
+        admission=self._admit_reviewer(cursor,w,new_review,task,validate_target,idempotency_key=correction_key.replace(':', '-'))
         cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='completed',finish_receipt=%s WHERE action_id=%s",(Json(admission),review_action_id))
         note=('Peer review superseded by correction '+str(new_id)+': transcription defect '+str(defect['check'])
               +'; the defective verdict was never applied.')
         cursor.execute("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1,updated_at=clock_timestamp() WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,review['project_alias'],critic['id']))
         insert_event(cursor,self.store.owner,review['project_alias'],critic['id'],'completed',
                      {'note':note,'superseding_workflow_review_id':str(new_id)},actor=COORDINATOR_ACTOR)
-        cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='code_review',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
         p=w['snapshot']
         self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
         cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
@@ -572,12 +580,11 @@ class WorkflowStore:
                 return self._correct_peer_verdict(cursor,w,review,task,critic,target,defect,
                     reviewer_attempt_id=reviewer_attempt_id,reviewer_result_sha256=reviewer_result_sha256,
                     correction_key=correction_key,correction_intent=correction_intent,validate_target=validate_review_target)
+            # Plan §3.3: a fully valid verdict is applied, whatever its
+            # decision or finding categories. The correctness-category gate
+            # was written for one finite incompatibility and is dropped.
             try:
-                verdict=parse_review_verdict(result['content'],target)
-                # Only the observed finite wire incompatibility is recoverable.
-                wire=json.loads(result['content'])
-                if verdict['decision']!='revise' or not any(f.get('category')=='correctness' for f in wire['findings']):
-                    raise ValueError('not_compatibility_revision')
+                parse_review_verdict(result['content'],target)
             except (ValueError,KeyError,TypeError):raise Rejected(409,'result_mismatch') from None
             q=self._verify_peer_recovery_source(cursor,project_alias,w,review,task,critic,target)
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND workflow_review_id=%s AND kind='decide' AND source_key=%s FOR UPDATE",

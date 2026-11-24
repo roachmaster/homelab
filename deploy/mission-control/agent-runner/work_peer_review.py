@@ -44,8 +44,17 @@ _IDENTITY_FIELDS = ("workflow_id", "workflow_review_id", "target_kind", "source_
 
 
 class PeerReviewError(ValueError):
-    def __init__(self):
+    """A failed peer-wire check, naming the check and its expected/actual values.
+
+    ``detail`` carries only digests, lengths and field names — never finding or
+    source text. A detail value is included only when it cannot carry a secret:
+    digest fields are hex-only, and any other value is reduced to its length.
+    """
+
+    def __init__(self, check=None, detail=None):
         super().__init__("Invalid or unbound agent review artifact.")
+        self.check = check
+        self.detail = dict(detail) if detail else {}
 
 
 class IncompleteApprovalError(PeerReviewError):
@@ -56,143 +65,189 @@ class IncompleteApprovalError(PeerReviewError):
         self.missing_finding_ids = tuple(sorted(missing_finding_ids))
 
 
-def _require(condition):
+def _digest_detail(expected, actual):
+    """Expected/actual digest detail that can never carry finding/source text."""
+    detail = {"expected": expected if isinstance(expected, str) else None,
+              "expected_length": len(expected) if isinstance(expected, str) else None}
+    if isinstance(actual, str):
+        detail["actual_length"] = len(actual)
+        detail["malformed"] = _DIGEST.fullmatch(actual) is None
+        if re.fullmatch(r"[0-9a-f]{0,64}", actual):
+            detail["actual"] = actual
+    else:
+        detail["actual_length"] = None
+        detail["malformed"] = True
+    return detail
+
+
+def _require(condition, check, detail=None):
     if not condition:
-        raise PeerReviewError()
+        raise PeerReviewError(check, detail)
 
 
-def _uuid(value, *, nullable=False):
+def _uuid(value, check, *, nullable=False):
     if nullable and value is None:
         return
-    _require(isinstance(value, str) and str(UUID(value)) == value)
+    _require(isinstance(value, str) and str(UUID(value)) == value, check)
 
 
-def _pattern(value, expression, *, nullable=False):
-    _require(nullable and value is None or isinstance(value, str) and expression.fullmatch(value))
+def _pattern(value, expression, check, *, nullable=False):
+    _require(nullable and value is None or isinstance(value, str) and expression.fullmatch(value), check)
 
 
-def _text(value, maximum, *, empty=False):
-    _require(isinstance(value, str) and (empty or bool(value.strip())))
+def _text(value, maximum, check, *, empty=False):
+    _require(isinstance(value, str) and (empty or bool(value.strip())), check)
     encoded = value.encode("utf-8")
     _require(len(encoded) <= maximum and _SECRET.search(value) is None
-             and not any(unicodedata.category(c) == "Cc" and c not in "\r\n\t" for c in value))
+             and not any(unicodedata.category(c) == "Cc" and c not in "\r\n\t" for c in value), check)
     return encoded
 
 
-def _raw(value, maximum):
-    _require(isinstance(value, (str, bytes)))
+def _raw(value, maximum, check):
+    _require(isinstance(value, (str, bytes)), check)
     encoded = value.encode("utf-8") if isinstance(value, str) else value
-    _require(0 < len(encoded) <= maximum)
+    _require(0 < len(encoded) <= maximum, check)
     return encoded
 
 
 def _unique(pairs):
     value = {}
     for key, item in pairs:
-        _require(key not in value)
+        _require(key not in value, "artifact.json_duplicate_key")
         value[key] = item
     return value
 
 
 def _json(encoded):
     return json.loads(encoded.decode("utf-8"), object_pairs_hook=_unique,
-                      parse_constant=lambda _value: (_ for _ in ()).throw(PeerReviewError()))
+                      parse_constant=lambda _value: (_ for _ in ()).throw(
+                          PeerReviewError("artifact.json_constant")))
 
 
 def validate_review_target(value):
     """Validate a target BEFORE serialization; no private helper key is accepted."""
     try:
         _require(isinstance(value, dict) and set(value) == TARGET_FIELDS
-                 and type(value["version"]) is int and value["version"] == 1)
+                 and type(value["version"]) is int and value["version"] == 1, "target.fields")
         for field in ("workflow_id", "workflow_review_id", "reviewer_task_id",
                       "source_task_id", "source_attempt_id"):
-            _uuid(value[field])
-        _uuid(value["plan_decision_id"], nullable=True)
-        _pattern(value["policy_digest"], _DIGEST)
-        _pattern(value["source_result_sha256"], _DIGEST)
-        _pattern(value["base_revision"], _COMMIT)
-        _pattern(value["author_profile"], _IDENTIFIER)
-        _pattern(value["reviewer_profile"], _IDENTIFIER)
+            _uuid(value[field], "target.uuid." + field)
+        _uuid(value["plan_decision_id"], "target.uuid.plan_decision_id", nullable=True)
+        _pattern(value["policy_digest"], _DIGEST, "target.digest.policy_digest")
+        _pattern(value["source_result_sha256"], _DIGEST, "target.digest.source_result_sha256")
+        _pattern(value["base_revision"], _COMMIT, "target.commit.base_revision")
+        _pattern(value["author_profile"], _IDENTIFIER, "target.profile.author_profile")
+        _pattern(value["reviewer_profile"], _IDENTIFIER, "target.profile.reviewer_profile")
         _require(value["author_profile"] != value["reviewer_profile"]
                  and value["source_task_id"] != value["reviewer_task_id"]
                  and type(value["source_revision"]) is int and 1 <= value["source_revision"] < 2**53
                  and type(value["plan_revision"]) is int and 0 <= value["plan_revision"] <= 2**32-1
-                 and value["target_kind"] in ("plan", "code"))
-        source = _text(value["source_text"], MAX_ARTIFACT_BYTES)
-        _require(hashlib.sha256(source).hexdigest() == value["source_result_sha256"])
-        _text(value["request_prompt"], 8192)
-        _text(value["acceptance_criteria"], 2048, empty=True)
+                 and value["target_kind"] in ("plan", "code"), "target.binding")
+        source = _text(value["source_text"], MAX_ARTIFACT_BYTES, "target.text.source_text")
+        _require(hashlib.sha256(source).hexdigest() == value["source_result_sha256"],
+                 "target.source_hash",
+                 _digest_detail(value["source_result_sha256"], hashlib.sha256(source).hexdigest()))
+        _text(value["request_prompt"], 8192, "target.text.request_prompt")
+        _text(value["acceptance_criteria"], 2048, "target.text.acceptance_criteria", empty=True)
         findings = validate_findings(value["findings"])
         if value["target_kind"] == "plan":
             _require(all(value[field] is None for field in (
                 "review_id", "candidate_commit", "gate_manifest_sha256", "workspace_digest",
-                "verification", "approved_plan", "integration_base")))
+                "verification", "approved_plan", "integration_base")), "target.plan_nulls")
         else:
-            _uuid(value["review_id"])
-            _uuid(value["plan_decision_id"])
-            _pattern(value["candidate_commit"], _COMMIT)
-            _pattern(value["integration_base"], _COMMIT)
+            _uuid(value["review_id"], "target.code.uuid.review_id")
+            _uuid(value["plan_decision_id"], "target.code.uuid.plan_decision_id")
+            _pattern(value["candidate_commit"], _COMMIT, "target.code.commit.candidate_commit")
+            _pattern(value["integration_base"], _COMMIT, "target.code.commit.integration_base")
             for field in ("gate_manifest_sha256", "workspace_digest"):
-                _pattern(value[field], _DIGEST)
-            _require(value["base_revision"] == value["candidate_commit"])
+                _pattern(value[field], _DIGEST, "target.code.digest." + field)
+            _require(value["base_revision"] == value["candidate_commit"],
+                     "target.code.base_revision")
             verification = value["verification"]
             _require(isinstance(verification, dict) and set(verification) == {
-                "checks_passed", "toolchain", "checks"} and verification["checks_passed"] is True)
-            _text(verification["toolchain"], 128)
+                "checks_passed", "toolchain", "checks"} and verification["checks_passed"] is True,
+                "target.code.verification")
+            _text(verification["toolchain"], 128, "target.code.verification.toolchain")
             checks = verification["checks"]
-            _require(isinstance(checks, list) and 1 <= len(checks) <= 64)
+            _require(isinstance(checks, list) and 1 <= len(checks) <= 64,
+                     "target.code.verification.checks")
             for check in checks:
-                _require(isinstance(check, dict) and set(check) == {"check_id", "status", "head_sha"})
-                _text(check["check_id"], 128)
-                _require(check["status"] == "passed" and check["head_sha"] == value["candidate_commit"])
-            _require(len({check["check_id"] for check in checks}) == len(checks))
+                _require(isinstance(check, dict) and set(check) == {"check_id", "status", "head_sha"},
+                         "target.code.verification.check")
+                _text(check["check_id"], 128, "target.code.verification.check_id")
+                _require(check["status"] == "passed" and check["head_sha"] == value["candidate_commit"],
+                         "target.code.verification.check_status")
+            _require(len({check["check_id"] for check in checks}) == len(checks),
+                     "target.code.verification.check_unique")
             plan = value["approved_plan"]
-            _require(isinstance(plan, dict) and set(plan) == {"attempt_id", "sha256", "content"})
-            _uuid(plan["attempt_id"])
-            _pattern(plan["sha256"], _DIGEST)
-            _require(hashlib.sha256(_text(plan["content"], MAX_ARTIFACT_BYTES)).hexdigest() == plan["sha256"])
+            _require(isinstance(plan, dict) and set(plan) == {"attempt_id", "sha256", "content"},
+                     "target.code.approved_plan")
+            _uuid(plan["attempt_id"], "target.code.approved_plan.uuid")
+            _pattern(plan["sha256"], _DIGEST, "target.code.approved_plan.digest")
+            plan_content = _text(plan["content"], MAX_ARTIFACT_BYTES,
+                                 "target.code.approved_plan.content")
+            _require(hashlib.sha256(plan_content).hexdigest() == plan["sha256"],
+                     "target.code.approved_plan.content_hash",
+                     _digest_detail(plan["sha256"], hashlib.sha256(plan_content).hexdigest()))
         # Validate secrecy and bound all optional finding text with the same
         # sanitizer as the context. No truncation changes a source hash.
         for finding in findings:
             for item in finding.values():
                 if isinstance(item, str):
-                    _require(_SECRET.search(item) is None)
+                    _require(_SECRET.search(item) is None, "target.findings.secret")
         result = deepcopy(value)
         result["findings"] = findings
-        _require(len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")) <= MAX_TARGET_BYTES)
+        _require(len(json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")) <= MAX_TARGET_BYTES,
+                 "target.size")
         return result
-    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
-        raise PeerReviewError() from None
+    except PeerReviewError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError) as error:
+        raise PeerReviewError("target.parse_error", {"error": type(error).__name__}) from None
 
 
 def parse_review_target(raw, sha256):
     """Hash the exact stored text before parsing; never recanonicalize SQL JSON."""
     try:
-        _pattern(sha256, _DIGEST)
-        encoded = _raw(raw, MAX_TARGET_BYTES)
-        _require(hashlib.sha256(encoded).hexdigest() == sha256)
+        _pattern(sha256, _DIGEST, "target.sha256")
+        encoded = _raw(raw, MAX_TARGET_BYTES, "target.raw")
+        _require(hashlib.sha256(encoded).hexdigest() == sha256, "target.hash",
+                 _digest_detail(sha256, hashlib.sha256(encoded).hexdigest()))
         result = validate_review_target(_json(encoded))
         result["_context_sha256"] = sha256
         return result
-    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
-        raise PeerReviewError() from None
+    except PeerReviewError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError) as error:
+        raise PeerReviewError("target.parse_error", {"error": type(error).__name__}) from None
 
 
-def parse_review_verdict(raw, target):
-    """Validate a decision against a previously hash-validated private target."""
+def _parse_verdict(raw, target, *, skip_context_check=False):
+    """Validate a decision against a previously hash-validated private target.
+
+    ``skip_context_check`` exists only for defect classification: a verdict
+    whose context hash is wrong must still prove every other validation
+    passes before it counts as a narrow transcription defect. A verdict
+    parsed with the check skipped is never applied as a decision.
+    """
     try:
-        _require(isinstance(target, dict))
+        _require(isinstance(target, dict), "verdict.target")
         expected = target.get("_context_sha256")
-        _pattern(expected, _DIGEST)
+        _pattern(expected, _DIGEST, "verdict.context")
         binding = validate_review_target({key: item for key, item in target.items()
                                           if key != "_context_sha256"})
-        value = _json(_raw(raw, MAX_VERDICT_BYTES))
+        value = _json(_raw(raw, MAX_VERDICT_BYTES, "verdict.raw"))
         _require(isinstance(value, dict) and set(value) == VERDICT_FIELDS
-                 and type(value["version"]) is int and value["version"] == 1)
-        _require(all(type(value[field]) is type(binding[field]) and value[field] == binding[field]
-                     for field in _IDENTITY_FIELDS) and value["context_sha256"] == expected)
-        _require(value["decision"] in ("approve", "revise", "escalate"))
-        _text(value["summary"], 2048)
+                 and type(value["version"]) is int and value["version"] == 1, "verdict.fields")
+        mismatched = [field for field in _IDENTITY_FIELDS
+                      if not (type(value[field]) is type(binding[field])
+                              and value[field] == binding[field])]
+        _require(not mismatched, "verdict.identity.fields", {"fields": mismatched})
+        if not skip_context_check:
+            _require(value["context_sha256"] == expected, "verdict.identity.context_sha256",
+                     _digest_detail(expected, value["context_sha256"]))
+        _require(value["decision"] in ("approve", "revise", "escalate"), "verdict.decision")
+        _text(value["summary"], 2048, "verdict.text.summary")
         # A finite peer-wire compatibility alias only. Preserve the exact raw
         # verdict for its hash/receipt; shared feedback categories stay strict.
         peer_findings = deepcopy(value["findings"])
@@ -202,20 +257,50 @@ def parse_review_verdict(raw, target):
                     finding["category"] = "source"
         findings = validate_findings(peer_findings, public=True)
         ids = value["attested_finding_ids"]
-        _require(isinstance(ids, list) and len(ids) <= 32)
+        _require(isinstance(ids, list) and len(ids) <= 32, "verdict.attested.shape")
         for identity in ids:
-            _pattern(identity, _IDENTIFIER)
-        _require(len(set(ids)) == len(ids))
+            _pattern(identity, _IDENTIFIER, "verdict.attested.pattern")
+        _require(len(set(ids)) == len(ids), "verdict.attested.unique")
         open_ids = {f["finding_id"] for f in binding["findings"] if f["status"] == "open"}
         _require(set(ids) <= open_ids and (not ids or binding["target_kind"] == "code"
-                                          and value["decision"] == "approve"))
-        _require(value["decision"] != "approve" or not findings)
-        _require(value["decision"] != "revise" or bool(findings))
+                                          and value["decision"] == "approve"),
+                 "verdict.attested.scope")
+        _require(value["decision"] != "approve" or not findings, "verdict.approve_empty")
+        _require(value["decision"] != "revise" or bool(findings), "verdict.revise_nonempty")
         result = deepcopy(value)
         result["findings"] = findings
         return result
-    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
-        raise PeerReviewError() from None
+    except PeerReviewError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError) as error:
+        raise PeerReviewError("verdict.parse_error", {"error": type(error).__name__}) from None
+
+
+def parse_review_verdict(raw, target):
+    """Validate a decision against a previously hash-validated private target."""
+    return _parse_verdict(raw, target)
+
+
+def classify_verdict_defect(raw, target):
+    """Classify a narrow transcription defect, or return None.
+
+    A defect counts only when parsing fails on context_sha256 equality alone:
+    the verdict JSON parses, all seven identity fields match, and every other
+    validation passes when the context check is bypassed. Anything else is
+    not a transcription defect and must not take the correction path.
+    """
+    try:
+        parse_review_verdict(raw, target)
+        return None
+    except PeerReviewError as error:
+        if error.check != "verdict.identity.context_sha256":
+            return None
+        defect = {"check": error.check, "detail": error.detail}
+    try:
+        _parse_verdict(raw, target, skip_context_check=True)
+    except PeerReviewError:
+        return None
+    return defect
 
 
 def validate_live_review_verdict(raw, target):
