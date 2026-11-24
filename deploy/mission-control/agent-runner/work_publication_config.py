@@ -8,7 +8,7 @@ from types import MappingProxyType
 
 from work_worker_config import WorkerConfig, absolute_path, identifier, load_config as load_worker
 from work_verification import DEFAULT_REQUIRED_HOSTED_CHECKS
-from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, CiGateContractFactory
+from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory
 
 CONFIG_ENV = "FORGE_PUBLICATION_CONFIG"
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -79,11 +79,11 @@ def parse_config(raw, worker, *, source_path=None):
     execution_scope = raw.get("jenkins_verification_scope", "branch")
     if not isinstance(execution_scope, str) or execution_scope not in {"branch", "main"}:
         raise ValueError("Invalid Jenkins verification scope")
-    if profile == SCOPED_PROFILE and not {"jenkins_verification_scope", "checks", "required_hosted_checks"} <= raw.keys():
+    if profile in {SCOPED_PROFILE, EVENT_PROFILE} and not {"jenkins_verification_scope", "checks", "required_hosted_checks"} <= raw.keys():
         raise ValueError("Scoped Jenkins checks and hosted policy must be explicitly frozen")
     plan = contract.plan('main' if execution_scope == 'main' else 'detached')
     checks = raw.get("checks", DEFAULT_CHECKS)
-    if not isinstance(checks, (list, tuple)) or not 1 <= len(checks) <= 8:
+    if not isinstance(checks, (list, tuple)) or not 1 <= len(checks) <= (64 if profile == EVENT_PROFILE else 8):
         raise ValueError("Invalid fixed publication checks")
     frozen_checks = []
     for command in checks:
@@ -126,7 +126,7 @@ def parse_config(raw, worker, *, source_path=None):
             or any(not isinstance(row, (tuple, list)) or len(row) != 3
                    or any(not isinstance(value, str) or not value or len(value) > 200
                           or any(ord(char) < 32 for char in value) for value in row)
-                   or not (row[0].startswith("jenkins/") if hosted_provider == "jenkins" and profile == SCOPED_PROFILE
+                   or not (row[0].startswith("jenkins/") if hosted_provider == "jenkins" and profile in {SCOPED_PROFILE, EVENT_PROFILE}
                            else row[0].startswith(".github/workflows/")) or ".." in Path(row[0]).parts
                    for row in required)
             or len({tuple(row) for row in required}) != len(required)
@@ -151,7 +151,7 @@ def parse_config(raw, worker, *, source_path=None):
     actor_digest = raw.get('release_actor_sha256')
     if any(type(value) is not bool for value in (delivery_enabled, observation, release_enabled)):
         raise ValueError('Invalid delivery capability selection')
-    if delivery_enabled and (not post_merge_enabled or profile != SCOPED_PROFILE):
+    if delivery_enabled and (not post_merge_enabled or profile not in {SCOPED_PROFILE, EVENT_PROFILE}):
         raise ValueError('Unified delivery requires scoped main Jenkins verification')
     if observation and not delivery_enabled or type(interval) is not int or interval != 60:
         raise ValueError('Source observation requires the sixty-second delivery policy')

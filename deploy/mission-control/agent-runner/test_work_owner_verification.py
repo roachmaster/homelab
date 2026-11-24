@@ -133,6 +133,43 @@ class OwnerVerificationRetryTest(unittest.TestCase):
         with self.assertRaises(Rejected):
             self.service.review_decide(replace(request, note='Different frozen intent'))
 
+    def test_shared_retry_allowance_preserves_frozen_owner_history_and_spent_counters(self):
+        source, old, request = self.failure()
+        historical = self.state(source, old['review_id'])
+        before_policy = historical[1]['policy']
+        amended_policy = {**before_policy, 'max_rounds': 20, 'max_stagnant_rounds': 20,
+                          'max_infrastructure_retries': 20}
+        # A trusted policy amendment changes allowance, never source/history.
+        # The production amendment uses the separately tested narrow SQL port.
+        self.cluster.admin_exec("UPDATE forge_agent.coding_review_budget SET policy='"
+            + json.dumps(amended_policy).replace("'", "''") + "'::jsonb WHERE root_task_id=(SELECT "
+            "coalesce(repair_root_task_id,id) FROM forge_agent.coding_tasks WHERE id='"
+            + source.task_id + "')", owner=False)
+        amended = self.state(source, old['review_id'])
+        self.assertEqual(amended[0], historical[0])
+        self.assertEqual(amended[1]['repair_rounds'], historical[1]['repair_rounds'])
+        self.assertEqual(amended[1]['stagnant_rounds'], historical[1]['stagnant_rounds'])
+        reply = self.service.review_decide(request)
+        self.assertEqual(self.state(source, old['review_id']), amended)
+        self.assertEqual(self.service.review_decide(request), reply)
+        self.assertIsNone(self.claim('agy-v2'))
+        self.assertEqual(self.get(source.task_id)['workflow']['phase'], 'checks')
+
+    def test_retry_allowance_cannot_change_required_hosted_checks(self):
+        source, old, request = self.failure()
+        policy = self.state(source, old['review_id'])[1]['policy']
+        amended = {**policy, 'max_rounds': 20, 'max_stagnant_rounds': 20,
+                   'max_infrastructure_retries': 20, 'required_hosted_checks': ['different-check']}
+        self.cluster.admin_exec("UPDATE forge_agent.coding_review_budget SET policy='"
+            + json.dumps(amended).replace("'", "''") + "'::jsonb WHERE root_task_id=(SELECT "
+            "coalesce(repair_root_task_id,id) FROM forge_agent.coding_tasks WHERE id='"
+            + source.task_id + "')", owner=False)
+        before = self.state(source, old['review_id'])
+        with self.assertRaises(Rejected):
+            self.service.review_decide(request)
+        self.assertEqual(self.state(source, old['review_id']), before)
+        self.assertIsNone(self.claim('agy-v2'))
+
     def test_changed_failure_scope_stop_or_cap_rejects_without_partial_admission(self):
         for fault in ('build', 'conflicts', 'ran_checks', 'finish', 'stop', 'cap', 'owner', 'revision', 'profile', 'readiness'):
             with self.subTest(fault=fault):

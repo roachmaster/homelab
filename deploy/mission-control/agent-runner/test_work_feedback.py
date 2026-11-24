@@ -31,7 +31,8 @@ class FeedbackStoreTest(unittest.TestCase):
         cls.cluster=DisposablePostgresCluster().start();cls.addClassCleanup(cls.cluster.stop)
     def setUp(self):
         self.cluster.admin_exec('TRUNCATE forge_agent.coding_tasks,forge_agent.coding_worker_grants,forge_agent.coding_worker_readiness CASCADE',owner=False)
-        self.service=WorkServiceFactory(make_v2_config(),lambda:self.cluster.connect('forge_agent')).create()
+        # Explicit historical ledger: these tests retain pre-shared boundary semantics.
+        self.service=WorkServiceFactory(replace(make_v2_config(),repair_policy={'max_rounds':3,'max_stagnant_rounds':2,'max_infrastructure_retries':1}),lambda:self.cluster.connect('forge_agent')).create()
         self.db=WorkerDB(lambda:self.cluster.connect('forge_coding_worker'),'mission-control',reconcile_connect_factory=lambda:self.cluster.connect('forge_coding_reconciler'))
         self.incarnation=str(uuid4());self.cluster.grant_worker('mission-control','homelab','codex-v2')
         self.db.advertise('feedback-worker',self.incarnation,[{'alias':'homelab','base_revision':'a'*40}],
@@ -151,7 +152,7 @@ class FeedbackStoreTest(unittest.TestCase):
 
     def test_linked_children_share_frozen_three_round_budget_and_last_round_success_is_reviewable(self):
         from work_config import freeze_repair_policy
-        self.service=WorkServiceFactory(replace(make_v2_config(),repair_policy=freeze_repair_policy({'max_stagnant_rounds':10})),lambda:self.cluster.connect('forge_agent')).create()
+        self.service=WorkServiceFactory(replace(make_v2_config(),repair_policy=freeze_repair_policy({'max_rounds':3,'max_stagnant_rounds':10,'max_infrastructure_retries':1})),lambda:self.cluster.connect('forge_agent')).create()
         lease,receipt=self.task(auto=True);root=lease.task_id
         for round_no in range(4):
             self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')

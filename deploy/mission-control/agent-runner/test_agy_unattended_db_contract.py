@@ -1,6 +1,7 @@
 """Owned PostgreSQL M23 admission, isolation and unchanged P10 regressions."""
 
 from contextlib import closing
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -186,7 +187,8 @@ class AgYUnattendedDatabaseContractTest(unittest.TestCase):
             historical_registry(legacy, 22)
             cluster = PreUpgradeCluster(legacy).start()
             try:
-                config = make_v2_config()
+                # Reproduce the admission policy that existed on schema22.
+                config = replace(make_v2_config(),repair_policy={'max_rounds':3,'max_stagnant_rounds':2,'max_infrastructure_retries':1})
                 service = WorkServiceFactory(config, lambda: cluster.connect("forge_agent")).create()
                 db = self.worker(cluster=cluster)
                 ready = self.advertise("old-p10", P10_DIGEST, backend="codex", model="gpt-5.4",
@@ -209,7 +211,7 @@ class AgYUnattendedDatabaseContractTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(self.rows(snapshot_query, cluster=cluster), before)
-                self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(29,)])
+                self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(33,)])
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None,
                                            "Owned policy upgrade fixture", proof), receipt)
                 self.assertEqual(service.submit(make_submit(idempotency_key="pre-m23")), submitted)

@@ -94,6 +94,7 @@ pub fn ide_document() -> Document {
                     component!(region "agents-reader"; [
                         component!(heading "agents-task-title", "Task"),
                         component!(status "agents-task-status", ""),
+                        component!(caption "agents-retry-event", ""),
                         component!(caption "agents-task-mode", ""),
                         component!(caption "agents-attempt", ""),
                         component!(caption "agents-task-correlation", ""),

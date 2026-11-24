@@ -137,6 +137,14 @@ class PeerReviewContractTest(unittest.TestCase):
             with self.subTest(category=category), self.assertRaises(PeerReviewError):
                 parse_review_verdict(json.dumps(value), parsed)
 
+    def test_shared_twenty_revision_boundary_and_old_context_are_readable(self):
+        for revision in (0,3,4,20,40,2**32-1):
+            value=target();value['plan_revision']=revision
+            self.assertEqual(bind(value)['plan_revision'],revision)
+        for revision in (2**32,True,-1):
+            value=target();value['plan_revision']=revision
+            with self.assertRaises(PeerReviewError):bind(value)
+
     def test_exact_unicode_plan_and_three_revision_context_remain_intact(self):
         value = target(source="Plan: preserve José’s draft → review → execute.")
         value["plan_revision"] = 3
@@ -239,7 +247,7 @@ class PeerReviewContractTest(unittest.TestCase):
 
     def test_types_resources_and_secrets_fail_closed_without_io(self):
         for key, replacement in (("source_revision", True), ("source_revision", 2**53),
-                                 ("plan_revision", 4), ("source_text", "\ud800"),
+                                 ("plan_revision", 2**32), ("source_text", "\ud800"),
                                  ("acceptance_criteria", "ghp_" + "A" * 36)):
             value = target()
             value[key] = replacement

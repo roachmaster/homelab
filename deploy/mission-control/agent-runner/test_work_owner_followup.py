@@ -122,6 +122,25 @@ class OwnerSourceFollowupTest(unittest.TestCase):
         self.assertEqual(error.exception.code,'idempotency_conflict')
         self.assertEqual(len(self.rows("SELECT 1 FROM forge_agent.coding_workflow_actions WHERE intent->>'policy'=%s",(OWNER_CODE_FOLLOWUP,))),1)
 
+    def test_amended_allowance_followup_preserves_original_snapshot_and_both_receipts(self):
+        author,job,request,_=self.pending()
+        snapshot=self.rows('SELECT snapshot FROM forge_agent.coding_workflows WHERE workflow_id=(SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s)',(author.task_id,))[0][0]
+        self.rows("UPDATE forge_agent.coding_review_budget SET policy=policy||'{\"max_rounds\":20,\"max_stagnant_rounds\":20,\"max_infrastructure_retries\":20}'::jsonb WHERE root_task_id=(SELECT coalesce(repair_root_task_id,id) FROM forge_agent.coding_tasks WHERE id=%s)",(author.task_id,))
+        receipt=self.service.resume(request)
+        amended_action=self.action(author.task_id)
+        self.assertEqual(amended_action['intent']['repair_policy']['max_rounds'],20)
+        following=self.claim('agy-v2');next_job,_=self.revise(following)
+        detail=self.get(following.task_id);rec=self.db.reconcile(following,'b'*64,make_stop_proof(following.unit_name))
+        next_request=replace(request,expected_revision=detail['revision'],reconciliation_receipt_id=UUID(rec),idempotency_key='amended-followup-'+str(uuid4()))
+        before=self.code_handoff_state(following.task_id,next_job['review_id'])
+        next_receipt=self.service.resume(next_request)
+        self.assertEqual(self.code_handoff_state(following.task_id,next_job['review_id'])[2],before[2])
+        self.assertEqual(self.rows('SELECT snapshot FROM forge_agent.coding_workflows WHERE workflow_id=(SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s)',(author.task_id,))[0][0],snapshot)
+        self.assertEqual(self.service.resume(request),receipt)
+        self.assertEqual(self.service.resume(next_request),next_receipt)
+        self.assertEqual(self.service.resume(self.v1_request),self.v1_receipt)
+        self.assertEqual(self.rows('SELECT intent FROM forge_agent.coding_workflow_actions WHERE action_id=%s',(amended_action['action_id'],))[0][0],amended_action['intent'])
+
     def test_one_more_fresh_peer_requires_another_explicit_action_and_keeps_32_bound(self):
         author,job,request,_=self.pending();self.service.resume(request);following=self.claim('agy-v2')
         next_job,_=self.revise(following);self.assertIsNone(self.claim('agy-v2'))

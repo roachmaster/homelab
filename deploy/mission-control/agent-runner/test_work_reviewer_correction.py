@@ -15,6 +15,7 @@ from work_peer_review import PeerReviewError, parse_review_target, validate_live
 from work_pg_fixture import PG16_AVAILABLE
 from test_work_execution_and_usage import make_stop_proof
 import test_work_workflow as workflows
+from work_retry_policy import AGENT_RETRY_LIMIT
 
 
 @unittest.skipUnless(PG16_AVAILABLE, "Requires owned disposable PostgreSQL16")
@@ -193,20 +194,21 @@ class ReviewerCorrectionTest(unittest.TestCase):
         self.assertIsNone(self.db.merge_claim("still-needs-hosted-checks"))
         self.assert_artifact(critic, raw)
 
-    def test_three_corrections_are_bounded_without_resetting_exhausted_source_budget(self):
+    def test_twenty_corrections_are_bounded_without_resetting_exhausted_source_budget(self):
         _admitted, source, critic, review = self.exhausted_code_review()
         before = self.authority_state(source, review)
         envelope, _target = self.target(critic)
-        for round_number in range(1, 5):
+        self.assertEqual(AGENT_RETRY_LIMIT, 20)
+        for round_number in range(1, AGENT_RETRY_LIMIT + 2):
             with self.subTest(round=round_number):
                 raw, _receipt = self.incomplete(critic)
                 self.assertTrue(self.coordinator.run_once())
                 self.assert_artifact(critic, raw)
                 self.assertEqual(self.authority_state(source, review), before)
-                self.assertEqual(self.correction_count(source), min(round_number, 3))
+                self.assertEqual(self.correction_count(source), min(round_number, AGENT_RETRY_LIMIT))
                 self.assert_no_authority()
                 following = self.claim("codex-v2")
-                if round_number == 4:
+                if round_number == AGENT_RETRY_LIMIT + 1:
                     self.assertIsNone(following)
                     self.assertEqual(self.get(source.task_id)["workflow"]["phase"], "escalated")
                 else:
@@ -215,6 +217,27 @@ class ReviewerCorrectionTest(unittest.TestCase):
                     next_envelope, _ = self.target(following)
                     self.assertEqual(next_envelope["target_json"], envelope["target_json"])
                     critic = following
+
+    def test_historical_three_attempt_correction_receipt_replays_under_shared_twenty(self):
+        source, critic, review, _envelope, raw, _stopped, command = self.legacy_escalation()
+        before = self.authority_state(source, review)
+        # Admit an exact old-cap receipt through the ordinary authority path;
+        # this reproduces historical state without modifying its stored bytes.
+        with patch('work_reviewer_correction.MAX_CORRECTIONS', 3):
+            receipt = self.service.resume(command)
+        saved = self.rows("SELECT intent,finish_receipt FROM forge_agent.coding_workflow_actions "
+            "WHERE workflow_id=(SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s) "
+            "AND source_key LIKE 'peer-reviewer-correction:%%'", (source.task_id,))[0]
+        self.assertEqual(saved[0]['max_corrections'], 3)
+        self.assertEqual(self.service.resume(command), receipt)
+        self.cluster.admin_exec('DELETE FROM forge_agent.coding_worker_grants; DELETE FROM forge_agent.coding_worker_readiness', owner=False)
+        self.assertEqual(self.service.resume(command), receipt)
+        self.assertEqual(self.rows("SELECT intent,finish_receipt FROM forge_agent.coding_workflow_actions "
+            "WHERE workflow_id=(SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s) "
+            "AND source_key LIKE 'peer-reviewer-correction:%%'", (source.task_id,))[0], saved)
+        self.assertEqual(self.authority_state(source, review), before)
+        self.assertEqual(self.correction_count(source), 1)
+        self.assert_artifact(critic, raw)
 
     def test_manual_legacy_correction_is_once_and_replay_preserves_saved_evidence(self):
         source, critic, review, envelope, raw, _stopped, command = self.legacy_escalation()

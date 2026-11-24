@@ -16,14 +16,15 @@ import time
 from uuid import UUID, uuid5
 
 from work_executor import unit_name
-from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, CiGateContractFactory, contract_for_config
+from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory, contract_for_config
 from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFactory,
     LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
 from work_publication_checks import VerificationFailure
 from work_publication_clients import PublicationError, branch_name
 from work_review import gate_source_digest
-from work_verification import VerificationMetadata, check_id, gate_manifest_sha256, project_verification
+from work_verification import (VerificationMetadata, check_id, gate_manifest_sha256,
+    project_verification, protected_retry_observation)
 
 LOG = logging.getLogger('forge-native-jenkins')
 VERSION = 'forge-native-jenkins-v1'
@@ -32,7 +33,7 @@ SCOPED_VERSION = 'forge-native-jenkins-v2'
 
 def binding_version(profile):
     CiGateContractFactory(profile)
-    return VERSION if profile == LEGACY_PROFILE else SCOPED_VERSION
+    return VERSION if profile == LEGACY_PROFILE else 'forge-native-jenkins-v3' if profile == EVENT_PROFILE else SCOPED_VERSION
 LOGICAL_CHECKS = ('check', 'real-browser', 'pr-fast-gate')
 IDENTITY = ('owner_id', 'project_alias', 'task_id', 'attempt_id', 'review_id', 'workflow_id', 'correlation_id')
 
@@ -115,7 +116,7 @@ class NativeJenkinsVerification:
         if (value.get('version') != self.version or value.get('request', {}).get('action_id') != action
                 or value.get('transport_sha256') != self._transport_digest()):
             raise PublicationError('native_ci_state_changed')
-        if self.contract.profile == SCOPED_PROFILE:
+        if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE}:
             plan = self._plan(value)
             if plan.checks != self.config.checks or plan.required_hosted_checks != self.config.required_hosted_checks:
                 raise PublicationError('native_ci_configured_scope_changed')
@@ -129,7 +130,7 @@ class NativeJenkinsVerification:
             'job': selected.jenkins_job, 'spool': str(selected.spool_root),
             'results': str(selected.results_root), 'verifier': str(selected.verifier),
         }
-        if self.contract.profile == SCOPED_PROFILE:
+        if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE}:
             identity.update(verification_profile=self.contract.profile,
                 verification_scope=self.config.jenkins_verification_scope)
         return hashlib.sha256(canonical(identity)).hexdigest()
@@ -140,7 +141,7 @@ class NativeJenkinsVerification:
         if binding.get('version') != binding_version(profile):
             raise PublicationError('native_ci_profile_changed')
         plan = CiGateContractFactory(profile).create().plan(request.get('branch_scope', 'detached'))
-        if profile == SCOPED_PROFILE and (binding.get('logical_checks') != list(plan.logical_checks)
+        if profile in {SCOPED_PROFILE, EVENT_PROFILE} and (binding.get('logical_checks') != list(plan.logical_checks)
                 or binding.get('policy_required_hosted_checks') != list(plan.logical_checks)):
             raise PublicationError('native_ci_policy_scope_changed')
         return plan
@@ -369,7 +370,7 @@ class NativeJenkinsVerification:
             raise PublicationError('native_ci_gate_changed')
         files = self._files(repository, head)
         source, helper, gate = (jenkins_gate_manifest(self.delivery.config, files, branch_scope)
-            if self.contract.profile == SCOPED_PROFILE else jenkins_gate_manifest(self.delivery.config, files))
+            if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} else jenkins_gate_manifest(self.delivery.config, files))
         return head, tree, native_gate, source, helper, gate
 
     def _prepare(self, job, repository):
@@ -389,16 +390,16 @@ class NativeJenkinsVerification:
             publication['event_id'] = uid(event['event_id'])
             if publication.get('scope') != scope or publication.get('candidate_commit') != head:
                 raise PublicationError('native_branch_identity_changed')
-        source_branch = (publication['branch'] if self.contract.profile == SCOPED_PROFILE and publication is not None
+        source_branch = (publication['branch'] if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} and publication is not None
                          else 'main' if head == expected_main
                          else publication['branch'] if publication is not None else None)
         branch_scope = derive_branch_scope(
             candidate_commit=head, expected_main=expected_main, source_branch=source_branch,
         )
         plan = self.contract.plan(branch_scope)
-        if self.contract.profile == SCOPED_PROFILE and tuple(job.get('policy', {}).get('required_hosted_checks', ())) != plan.logical_checks:
+        if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} and tuple(job.get('policy', {}).get('required_hosted_checks', ())) != plan.logical_checks:
             raise PublicationError('native_ci_policy_scope_changed')
-        if self.contract.profile == SCOPED_PROFILE and (plan.checks != self.config.checks
+        if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} and (plan.checks != self.config.checks
                 or plan.required_hosted_checks != self.config.required_hosted_checks):
             raise PublicationError('native_ci_configured_scope_changed')
         head, tree, native_gate, source, helper, gate = self._source(job, repository, branch_scope)
@@ -411,12 +412,12 @@ class NativeJenkinsVerification:
             'branch_scope': branch_scope, 'gate_manifest_sha256': gate}
         if source_branch is not None:
             request['source_branch'] = source_branch
-        if self.contract.profile == SCOPED_PROFILE:
+        if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE}:
             request['verification_profile'] = self.contract.profile
         binding = {'version': self.version, 'scope': scope, 'request': request,
             'native_gate_manifest_sha256': native_gate, 'jenkins_gate_source_sha256': source,
             'verifier_sha256': helper, 'transport_sha256': self._transport_digest()}
-        if self.contract.profile == SCOPED_PROFILE:
+        if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE}:
             binding['logical_checks'] = list(plan.logical_checks)
             binding['policy_required_hosted_checks'] = list(job['policy']['required_hosted_checks'])
         if publication is not None:
@@ -542,6 +543,9 @@ class NativeJenkinsVerification:
         # The stdout projector supplies bounded findings, never gate outcomes.
         # Overall failure must not relabel an earlier genuinely completed gate.
         report = replace(report, checks=accounting.checks)
+        if plan.profile == EVENT_PROFILE and schema_valid and accounting.valid and clean:
+            witness = protected_retry_observation(plan, receipt, receipt.get('check_receipt_sha256'))
+            report = replace(report, retry_observation=witness)
         if type(receipt.get('build_number')) is int:
             reference = ('Jenkins build #' + str(receipt['build_number']) + ' (action '
                 + binding['request']['action_id'] + '). ')
@@ -658,10 +662,23 @@ class NativeJenkinsVerification:
                 # commands green, so never persist an all-green hosted set.
                 raise PublicationError('native_ci_failure_outside_fixed_checks')
             status = 'passed' if report.checks_passed else 'failed'
-            states = tuple({'passed':'success','failed':'failure','not_run':'skipped'}[check['status']]
-                for check in report.checks)
-            logical = {check_id(command,index):plan.logical_checks[index]
-                for index,command in enumerate(commands)}
+            if plan.profile == EVENT_PROFILE:
+                states = []
+                for name in plan.logical_checks:
+                    members = [report.checks[index]['status'] for index,phase in enumerate(plan.phases)
+                        if phase.logical_gate == name]
+                    if not members:
+                        raise PublicationError('native_ci_logical_phase_missing')
+                    states.append('failure' if 'failed' in members else
+                        'success' if all(value == 'passed' for value in members) else 'skipped')
+                states = tuple(states)
+                logical = {check_id(command,index):plan.phases[index].logical_gate
+                    for index,command in enumerate(commands)}
+            else:
+                states = tuple({'passed':'success','failed':'failure','not_run':'skipped'}[check['status']]
+                    for check in report.checks)
+                logical = {check_id(command,index):plan.logical_checks[index]
+                    for index,command in enumerate(commands)}
             findings = tuple({**finding,'check_id':logical.get(finding['check_id'],plan.logical_checks[0])}
                 for finding in report.findings)
         else:
@@ -741,7 +758,7 @@ def create_native_jenkins(config, store, git, candidates, supervisor, *, client=
     if (selected.owner != config.worker.owner or selected.github_config_dir != config.github_config_dir
             or tuple(config.checks) != expected_plan.checks
             or (tuple(config.required_hosted_checks) != expected_plan.required_hosted_checks
-                if contract.profile == SCOPED_PROFILE else {x[2] for x in config.required_hosted_checks} != set(LOGICAL_CHECKS))):
+                if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} else {x[2] for x in config.required_hosted_checks} != set(LOGICAL_CHECKS))):
         raise ValueError('Native Jenkins configuration does not match publication scope')
     if (getattr(config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1'
             and selected.jenkins_job != 'forge-native-candidate'):

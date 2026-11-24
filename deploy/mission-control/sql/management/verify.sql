@@ -3,6 +3,18 @@
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
+-- Validate M33 review lineage before exact predecessor normalization.
+\ir verify-superseding-reviews.sql
+
+-- Validate M32 lineage authority before exact predecessor normalization.
+\ir verify-delivery-lineage.sql
+
+-- Validate M31 event authority before exact predecessor normalization.
+\ir verify-retry-events.sql
+
+-- Validate M30 numeric allowances before historical catalog normalization.
+\ir verify-agent-retries.sql
+
 -- Validate the M23 replacement before any historical-catalog normalization.
 \ir verify-owner-continuation.sql
 \ir verify-agy-unattended.sql

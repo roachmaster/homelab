@@ -66,8 +66,8 @@ fn delivery_payload_is_strict_bounded_and_nullable_without_breaking_legacy_data(
             .is_valid());
     }
     let mut invalid = wire.clone();
-    invalid["repair"]["round"] = json!(21);
-    assert!(!serde_json::from_value::<WorkDelivery>(invalid)
+    invalid["repair"]["round"] = json!(40);
+    assert!(serde_json::from_value::<WorkDelivery>(invalid)
         .unwrap()
         .is_valid());
     let mut invalid = wire.clone();
@@ -93,11 +93,11 @@ fn main_repair_accepts_twenty_rounds_and_preserves_older_bounded_projections() {
     let wire = serde_json::to_value(projection()).unwrap();
     for (max_rounds, round, valid) in [
         (20, 20, true),
-        (20, 21, false),
+        (20, 21, true),
         (21, 20, false),
         (0, 0, false),
         (3, 3, true),
-        (3, 4, false),
+        (3, 4, true),
         (1, 1, true),
     ] {
         let mut current = wire.clone();
@@ -120,7 +120,7 @@ fn main_repair_accepts_twenty_rounds_and_preserves_older_bounded_projections() {
         .texts
         .iter()
         .any(|binding| binding.id == "agents-delivery-repair-summary"
-            && binding.text.contains("Round 20/20")));
+            && binding.text.contains("20 repair retries")));
     assert_eq!(state(&view, "agents-workflow-phase").label, "Merged");
 }
 

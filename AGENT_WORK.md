@@ -1,4 +1,164 @@
-# Current: Recover feedback delivery through the event stream — 2026-11-23
+# Current: Continue verified peer feedback automatically — 2026-11-24
+
+The live superseding-review recovery ran Codex through its normal worker and
+obtained a valid `revise` verdict for the original stage-diagram candidate. Its
+reviewer-protocol event resolved at one of twenty attempts. The subsequent
+author setup exposed a distinct defect: a linked child receiving a review of
+itself was incorrectly bound to its parent's older source review. Correct only
+that source relationship; preserve strict parent binding for feedback that
+actually targets the parent and retain every other identity and digest check.
+
+Select a separate peer-feedback recovery provider at the workflow composition
+root. Before normal Resume it must verify the actual stopped attempt,
+reconciliation, unchanged source and feedback, independently valid decided
+peer revision, approved scope, current policy, readiness and idle admission.
+Reuse the server-issued continuation note so the preserved feedback remains
+bound across a setup-only retry. Keep the build-feedback recovery semantics
+unchanged. Repeated recovery consumes the same feedback-delivery event's twenty
+attempt allowance; duplicate or raced admissions consume once. Never rewrite
+the valid verdict, failed attempt, original owner or spent counters. No schema
+change is required; applied migrations1–33 remain immutable.
+
+Root owns integration, source qualification, safe idle-worker rollout and
+publication. Core owns the narrow pure validator and full provider regression;
+Audit owns the scoped automatic recovery port and actual PostgreSQL regressions.
+Ops stages release and CI configuration only; Root activates qualified artifacts.
+
+# Previous: Recover malformed native reviews automatically — 2026-11-24
+
+The user requests actual automated completion of the original stage-diagram task,
+not another status report. Preserve original Gemini/Antigravity author and Codex
+reviewer identities. The native workflow3939c2a5 is disabled after reviewer719aa2b2
+returned a49-character context hash against a64-character immutable target.
+Never repair or accept those result bytes. Add a bounded, factory-selected
+superseding independent review, preserving original artifacts, plan, candidate,
+checks, snapshots and event budgets. Existing immutable review identity uniqueness
+requires additiveM33; migrations1–32 and applied fingerprints stay immutable.
+
+Core owns backend port, schema33, exact source/grant verification and focused
+regressions in this worktree. Audit owns independent PostgreSQL tests in its own
+worktree. Root owns source-qualification/CI protection integration, publication,
+backup/migration/runtime rollout and normal recovery of the exact original task.
+Use20 attempts per logical reviewer-protocol event; superseding review UUIDs must
+not reset the same event. Duplicate and raced recovery admissions consume once.
+Cancelled/revoked/busy/drifted scopes remain fenced. Real independently valid
+review and existing CI/merge gates remain required. Muse tasks retain their original
+owners and dispatch requests; do not claim or restart Muse on its behalf.
+
+The source implementation now selects a narrow superseding-review provider at
+the normal WorkflowStore factory. It classifies only a context-digest fault;
+all other strict verdict fields and attestations must already validate. Original
+verdict bytes are never corrected or accepted. AdditiveM33 enforces immutable
+generations, one successor and one live review per exact source. The replacement
+uses ordinary review actions and a different native reviewer task. Existing
+scoped grant capabilities are reused without widening application/model ACLs.
+The shared reviewer-correction event uses the root review UUID through the
+entire chain. Source/Plan/check evidence and actor identities remain unchanged.
+
+Component verification:24 pure classifier/peer/factory tests and53 owned
+PostgreSQL schema/upgrade/security tests passed with zero skips. Independent
+actual-role recovery and normal legacy lifecycle qualification are recorded
+separately; these source checks do not claim live activation or task completion.
+
+
+# Current follow-up: Preserve repair lineage when the observer wins — 2026-11-23
+
+M31 is live and strict verification passed with unchanged Muse history. M1–31
+are immutable. The independent PostgreSQL ordering probe found a remaining
+normal-repair race: an observer-created verification could keep a fresh lineage
+when its genuine repair merge was confirmed later. Add M32 rather than rewriting
+the applied migration. Adopt only a proven, unused provisional lineage; preserve
+verification identities, receipts and all spent attempts. Conflicting used
+scopes need durable evidence and an admission fence, never counter resets.
+
+Core owns M32/schema compatibility; Audit owns independent PostgreSQL regressions
+and future CI protection. Root owns integration and the exact-source rollout.
+The prior main4da verification retains its frozen installed verifier; no
+candidate may change a running build. Future helper/policy changes require their own immutable pins and
+qualification. Continue Muse through its recorded planning event only after the
+matching runtime and ABI15 portal are verified, retaining its three spent tries.
+
+Component verification passed64 upgrade/security/schema cases,24 delivery
+regressions and4 independent observer-first cases. The latter retain the same
+event UUID through20 normal admissions and refuse21, preserve a prior exact PASS
+and fence conflicting used scopes. Full integrated qualification and the actual
+runtime/deployment receipts remain separately recorded operational evidence.
+
+# Twenty tries for each failure event — 2026-11-23
+
+The user corrected the earlier interpretation: "20 tries per event", for every
+agent. Compilation fixes, tests, and other independently failed phases have
+separate budgets. A task may therefore exceed20 total repairs. Aggregate plan,
+code and delivery counts remain history and must never be reset or used as a
+task-wide20 ceiling.
+
+Use a durable event UUID and an independently verified phase identity. New
+builds, commits, findings text, deliveries and agent handoffs retain the same
+unresolved event. Reserve a retry atomically with work admission; duplicate
+delivery consumes once. Only a protected passing phase receipt closes the event.
+The21st retry for one unresolved event requires attention; another event retains
+its own20. Quota, permission, cancellation and stopped-process guards remain.
+
+Core owns the common factory/DAO, additiveM31 and native integration. External
+owns database-agent orchestration, continuation and ABI15 UI/transport. CI owner
+owns protected v3 phase execution; Root owns delivery lineage integration,
+privileged proof validation, source qualification and release. Use separate
+worktrees and preserve all saved approvals, reviews, hashes, counters and
+receipts. M1–30 are immutable. M30 was applied with no Muse history changes;
+the superseded task-wide runtime/configuration was not activated.
+
+Component checks prove20 compilation repairs followed by20 test repairs in one
+native workflow, external workflow and delivery lineage. The21st retry of the
+same unresolved event stops. All154 core native/upgrade/security tests,38
+external transport/continuation tests,80 CI contracts and30 reviewer/feedback
+event tests pass. The explicit v3 Jenkins installer retains artifact export;
+all15 installer contracts pass. Fresh live-schema30 backup was actually restored
+and upgraded to31 in isolation with strict verification and identical Muse
+history. Full integrated Rust/browser/backend gates and guarded deployment are
+separate recorded operational work; component checks do not claim deployment.
+
+Integrated regressions also retain native workflow IDs in raw/scoped list
+projections, preserve lifetime rounds when an event exhausts, and authorize
+feedback for an existing repair child only through its exact saved peer-review
+event admission. Historical worker feedback branches and grants stay unchanged.
+Freeze source before importing test modules; retain failed integration logs as
+evidence rather than counting a pre-freeze module snapshot as final validation.
+
+# Previous, superseded interpretation: task-wide twenty-attempt policy — 2026-11-23
+
+The user explicitly clarifies that the twenty-attempt allowance is agent-wide,
+including Muse, native authors and independent reviewers. Use one provider-neutral
+retry policy for plan, code and reviewer correction; remove provider-specific
+defaults that stop these loops at three. Preserve frozen delegation/recipe hashes,
+all prior reviews and spent counters. Apply additive schema30 for the existing
+database bounds; never edit migrations1–29. Continue the stopped Muse plan under
+a durable policy-update event, retaining its three spent revisions and original
+Codex feedback. Root owns UI protocol bounds, source qualification and live rollout;
+shared-policy owner owns native/SQL; external owner owns Muse continuation; audit
+owner owns reviewer-correction and manual-history compatibility. Process timeout
+durations and OS rollback limits remain separate from agent revision allowances.
+
+Integrated source checkpoint: shared policy, native amendment sweep, M30,
+external continuation and reviewer/manual-history compatibility are implemented.
+Legacy source-readiness exhaustion uses the frozen or amended threshold while
+retaining its once-only delivery guard. Portal protocol accepts historical and
+20-attempt limits without a new ABI. Component UI verification passed113 native
+tests and28 browser groups; integrated source preflight passed221 tests with zero
+skips. Actual PostgreSQL tests cover20→21, immutable snapshots/counters and raced
+continuation. Final exact-main Jenkins proof and protected deployment are separate
+live gates; no task history or allowance was changed by this source checkpoint.
+
+Follow-up qualification: all206 native UI tests pass, including the complete
+integration targets and zero-budget/20/21 boundary. The additional44 Python
+reviewer, worker and delivery contracts pass without skips. Two pre-release test
+corrections (Rust formatting and the historical upper-bound assertion) retain
+their failed Jenkins receipts; redundant repair tasks were cancelled through
+normal WorkService admission and confirmed stopped. Production policy and
+recipe identities remain as reviewed. M30 live strict verification and backup
+restore evidence are recorded outside Git; matching UI/runtime activation remains
+a separate exact-main gate.
+
+# Previous: Recover feedback delivery through the event stream — 2026-11-23
 
 The user explicitly requests implementing recovery for the stopped diagram
 workflow. Gemini's stale build-results directory was corrected in a versioned

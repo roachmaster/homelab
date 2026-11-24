@@ -150,6 +150,7 @@ fn external_artifact_is_safe_to_read_and_never_admits_native_acceptance() {
 }
 pub(super) fn summary(phase: WorkWorkflowPhase) -> WorkWorkflowSummary {
     WorkWorkflowSummary {
+        retry_event: None,
         kind: WorkWorkflowKind::Native,
         reviewer_task_id: None,
         candidate_commit: None,
@@ -177,6 +178,41 @@ fn autonomous(phase: WorkWorkflowPhase) -> Agents {
     task.workflow_required = true;
     task.workflow = Some(summary(phase));
     agents
+}
+
+#[test]
+fn event_retry_progress_is_independent_of_lifetime_revision_history() {
+    let mut agents = autonomous(WorkWorkflowPhase::Repair);
+    let task = agents.task.as_mut().unwrap();
+    let workflow = task.workflow.as_mut().unwrap();
+    workflow.code_revisions = 40;
+    workflow.max_code_revisions = 3; // Retained historical policy, not a task cap.
+    let event = WorkRetryEvent {
+        event_id: KEY.into(),
+        kind: WorkRetryKind::Tests,
+        used: 4,
+        limit: MAX_AGENT_RETRIES,
+        status: WorkRetryStatus::Open,
+    };
+    workflow.retry_event = Some(event.clone());
+    task.retry_event = Some(event.clone());
+    assert!(task.is_valid());
+    let task_summary = task.summary();
+    assert_eq!(
+        agents.task_summary_badge(&task_summary).label,
+        "Fixing tests · Retry 4/20"
+    );
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert!(view
+        .texts
+        .iter()
+        .any(|binding| binding.id == "agents-retry-event" && binding.text == event.label()));
+    assert!(view
+        .texts
+        .iter()
+        .any(|binding| binding.id == "agents-workflow-revisions"
+            && binding.text == "Plan revisions 1 · Code revisions 40"));
 }
 
 #[test]
@@ -312,7 +348,7 @@ fn autonomous_routine_manual_actions_and_attestations_are_blocked_in_rust() {
         .texts
         .iter()
         .any(|b| b.id == "agents-workflow-revisions"
-            && b.text == "Plan revisions 1/3 · Code revisions 0/3"));
+            && b.text == "Plan revisions 1 · Code revisions 0"));
 }
 #[test]
 fn missing_required_workflow_cannot_enable_legacy_approval_or_cancel() {
@@ -329,6 +365,38 @@ fn missing_required_workflow_cannot_enable_legacy_approval_or_cancel() {
         .texts
         .iter()
         .any(|b| b.id == "agents-workflow-help" && b.text.contains("unavailable")));
+}
+
+#[test]
+fn shared_retry_allowance_displays_preserved_counts_for_native_and_external_agents() {
+    for kind in [WorkWorkflowKind::Native, WorkWorkflowKind::ExternalDatabase] {
+        let mut agents = autonomous(WorkWorkflowPhase::PlanRevision);
+        let task = agents.task.as_mut().unwrap();
+        let workflow = task.workflow.as_mut().unwrap();
+        workflow.kind = kind;
+        workflow.plan_revisions = 4;
+        workflow.max_plan_revisions = MAX_AGENT_RETRIES;
+        workflow.code_revisions = 3;
+        workflow.max_code_revisions = MAX_AGENT_RETRIES;
+        if kind == WorkWorkflowKind::ExternalDatabase {
+            workflow.author_profile = "muse-db-primary".into();
+            task.agent_profile = "muse-db-primary".into();
+        }
+        assert!(workflow.is_valid());
+        let mut view = ViewModel::default();
+        agents.project(&mut view, true, true, true);
+        assert!(view
+            .texts
+            .iter()
+            .any(|binding| binding.id == "agents-workflow-revisions"
+                && binding.text == "Plan revisions 4 · Code revisions 3"));
+        let mut review = review_summary(false);
+        review.round = MAX_AGENT_RETRIES;
+        review.max_rounds = MAX_AGENT_RETRIES;
+        assert!(review.is_valid());
+        review.round += 1;
+        assert!(review.is_valid());
+    }
 }
 #[test]
 fn workflow_review_and_hosted_progress_poll_detail_without_owner_prompts() {

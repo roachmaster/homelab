@@ -5,6 +5,7 @@ from uuid import UUID,uuid4
 from types import SimpleNamespace
 import hashlib,json,unittest
 from unittest.mock import Mock
+from unittest.mock import patch
 from psycopg2.extras import RealDictCursor,Json
 from work_pg_fixture import DisposablePostgresCluster,PG16_AVAILABLE,SQL_DIR
 from work_api import WorkServiceFactory,WorkCancel,WorkAccept,WorkGet
@@ -16,6 +17,7 @@ from work_worker_store import WorkerDB,WorkerAccessError
 from work_external_delivery_store import ExternalDeliveryStoreFactory
 from work_external_workflow import derive_branch_scope
 from queue_store import Rejected
+from work_retry_policy import AGENT_RETRY_LIMIT
 import work_policy
 
 ALIAS='muse-db-primary'
@@ -32,7 +34,7 @@ class ExternalFlowPureTest(unittest.TestCase):
  def test_frozen_v2_delegation_preserves_native_policy(self):
   c=cfg();r=c.catalog().resolve(ALIAS,'implement');self.assertEqual(r.policy_digest,V2_POLICY_DIGEST)
   p=c.external_workflows['homelab'].snapshot(c.catalog());self.assertNotEqual(p['recipes']['reviewer_review']['recipe']['resource_profile'],r.resource_profile)
-  self.assertEqual(p['max_plan_revisions'],3);self.assertEqual(p['max_code_revisions'],3)
+  self.assertEqual(p['max_plan_revisions'],AGENT_RETRY_LIMIT);self.assertEqual(p['max_code_revisions'],AGENT_RETRY_LIMIT)
   with self.assertRaises(ValueError):replace(c,external_workflows={'homelab':{'author_profile':ALIAS,'reviewer_profile':ALIAS}})
  def test_external_review_target_delivers_full_bound_artifact(self):
   content='# A plan\n'+'full context '*2000
@@ -70,7 +72,9 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.inc=str(uuid4());profile=cfg().profiles['codex-v2']
   self.db.advertise('review-worker',self.inc,[{'alias':'homelab','base_revision':'a'*40}],[{'alias':profile.alias,'backend':profile.backend,'model':profile.model,'modes':['review']}],work_policy.POLICY_DIGEST)
   self.delivery=ExternalDeliveryStoreFactory(lambda:self.pg.connect('forge_coding_reconciler'),'test-owner').create()
- def service(self):return WorkServiceFactory(cfg(),self.connect).create()
+ # Historical V2 controller fixtures retain their original opaque CI shape.
+ # Current per-event V3 admission is exercised in test_external_retry_events.
+ def service(self):return WorkServiceFactory(cfg(),self.connect,retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
  def test_exact_schema_helpers_and_delivery_role_boundary(self):
   self.pg.run_sql_script(SQL_DIR/'management/verify-external-workflows.sql')
   self.pg.run_sql_script(SQL_DIR/'management/verify-external-agent.sql')
@@ -175,7 +179,7 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.assertFalse(flow.run_once())
   self.assertEqual(len(self.rows("SELECT * FROM forge_agent.coding_events WHERE task_id=%s AND event_kind='completed'",(root['task_id'],))),1)
 
- def test_three_revisions_then_approval_and_fourth_revision_escalation(self):
+ def test_three_revisions_then_approval(self):
   _,_,flow,_=self.submit_plan()
   for n in range(3):
    self.review(flow,'revise');self.assertEqual(self.rows('SELECT plan_revisions FROM forge_external_workflow.workflows')[0]['plan_revisions'],n+1)
@@ -195,12 +199,12 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.assertTrue(flow.run_once());self.assertEqual(self.rows('SELECT phase FROM forge_external_workflow.workflows')[0]['phase'],'escalated')
   cleanup=self.delivery.claim('owned-delivery');self.assertEqual(cleanup.kind,'cancel');self.assertEqual(cleanup.request['target_action_id'],action.action_id)
   self.delivery.checkpoint(cleanup,{'status':'cancelled','receipt':{'queue_id':1,'building':False},'summary':'Verified owned Jenkins work stopped'})
- def test_fourth_plan_revision_stops_at_human_boundary(self):
+ def test_twenty_first_plan_revision_stops_at_human_boundary(self):
   _,_,flow,_=self.submit_plan()
-  for n in range(3):self.review(flow,'revise');self.author(flow,'Revised bounded plan '+str(n))
+  for n in range(AGENT_RETRY_LIMIT):self.review(flow,'revise');self.author(flow,'Revised bounded plan '+str(n))
   self.review(flow,'revise')
   w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
-  self.assertEqual(w['phase'],'escalated');self.assertEqual(w['plan_revisions'],3)
+  self.assertEqual(w['phase'],'escalated');self.assertEqual(w['plan_revisions'],AGENT_RETRY_LIMIT)
   self.assertIn('budget',w['state']['escalation_reason']);self.assertIsNone(self.call('claim','homelab',ALIAS))
  def test_legacy_v1_artifact_is_adopted_without_native_source_receipt(self):
   legacy=replace(cfg(),profiles={**cfg().profiles,ALIAS:WorkProfile(ALIAS,'muse','external-runner','forge-external-db-v1',execution_enabled=True)},external_workflows={})
@@ -304,10 +308,11 @@ class ExternalFlowPGTest(unittest.TestCase):
     child=self.rows('SELECT prompt FROM forge_agent.coding_tasks WHERE id=%s',(review['reviewer_task_id'],))[0]
     self.assertIn('Correct the JSON contract',child['prompt'])
     self.review(flow);self.assertEqual(self.rows('SELECT phase FROM forge_external_workflow.workflows')[0]['phase'],'implement')
- def test_second_invalid_reviewer_response_escalates_without_author_revision(self):
-  _,_,flow,_=self.submit_plan();self.invalid_review(flow,'malformed');self.invalid_review(flow,'still malformed')
+ def test_twenty_first_invalid_reviewer_response_escalates_without_author_revision(self):
+  _,_,flow,_=self.submit_plan()
+  for _ in range(AGENT_RETRY_LIMIT+1):self.invalid_review(flow,'malformed')
   w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
-  self.assertEqual(w['phase'],'escalated');self.assertEqual(w['plan_revisions'],0)
+  self.assertEqual(w['phase'],'escalated');self.assertEqual(w['plan_revisions'],0);self.assertEqual(w['state']['review_retries'],20)
 
  def test_native_reviewer_cannot_be_manually_accepted_outside_workflow(self):
   service,root,flow,_=self.submit_plan();lease=self.db.claim('review-worker',self.inc,['codex-v2'])
@@ -320,7 +325,7 @@ class ExternalFlowPGTest(unittest.TestCase):
 
  def test_multibyte_budget_escalation_reason_remains_public_dto_compatible(self):
   service,root,flow,_=self.submit_plan()
-  for n in range(3):self.review(flow,'revise');self.author(flow,'Revised plan '+str(n))
+  for n in range(AGENT_RETRY_LIMIT):self.review(flow,'revise');self.author(flow,'Revised plan '+str(n))
   complete_summary='🧭'*512  # Exactly2048 UTF-8 bytes before the server adds its reason prefix.
   self.review(flow,'revise',summary=complete_summary)
   w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
@@ -360,7 +365,10 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.db.reconcile(lease,'b'*64,proof);self.assertTrue(flow.run_once());return lease
  def escalated_setup(self):
   _,root,flow,job=self.submit_plan('# Same immutable legacy plan\n'+'detail '*2400)
-  first=self.failed_setup_review(flow);second=self.failed_setup_review(flow)
+  # Preserve the exact historical one-retry failure consumed by the separate
+  # fixed, operator-only deployed-fix recovery contract. New flows use20.
+  with patch('work_external_workflow.AGENT_RETRY_LIMIT',1):
+   first=self.failed_setup_review(flow);second=self.failed_setup_review(flow)
   w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
   self.assertEqual(w['phase'],'escalated');self.assertEqual(w['state']['review_retries'],1)
   return root,job,first,second,w
@@ -368,7 +376,7 @@ class ExternalFlowPGTest(unittest.TestCase):
   from work_external_recovery import NativeReviewerGrantScope
   from work_external import ExternalWorkProviderFactory
   scope=NativeReviewerGrantScope(lambda:self.pg.connect('postgres'))
-  return WorkServiceFactory(cfg(),self.connect,external_factory=lambda config:ExternalWorkProviderFactory(config,recovery_grant_provider=scope).create()).create()
+  return WorkServiceFactory(cfg(),self.connect,external_factory=lambda config:ExternalWorkProviderFactory(config,recovery_grant_provider=scope).create(),retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
  def recovery_command(self,w,root,**changes):
   from work_external_recovery import ExternalInfrastructureRetry
   revision=self.rows('SELECT revision FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]['revision']
@@ -403,7 +411,9 @@ class ExternalFlowPGTest(unittest.TestCase):
 
   with service._store._transaction() as cursor:public=flow.project(cursor,'homelab',UUID(root['task_id']))
   self.assertIsNone(public['escalation_reason'])
-  self.failed_setup_review(flow)  # no normal retry budget is reset by the rescue
+  # Continue the same historical one-retry fixture; the separate rescue does
+  # not rewrite its saved retry counter or expand operator authority.
+  with patch('work_external_workflow.AGENT_RETRY_LIMIT',1):self.failed_setup_review(flow)
   again=self.rows('SELECT * FROM forge_external_workflow.workflows')[0];self.assertEqual(again['phase'],'escalated')
   with self.assertRaises(Rejected):service.recover_external_review_infrastructure(self.recovery_command(again,root))
   self.assertEqual(len(self.rows('SELECT * FROM forge_agent.coding_attempts')),3)

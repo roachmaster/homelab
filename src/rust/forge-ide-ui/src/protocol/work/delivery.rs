@@ -54,9 +54,11 @@ pub struct WorkVerificationStage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkRepairStage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_event: Option<WorkRetryEvent>,
     pub status: WorkRepairStatus,
-    pub round: u8,
-    pub max_rounds: u8,
+    pub round: u32,
+    pub max_rounds: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
     pub updated_at: String,
@@ -124,8 +126,12 @@ impl WorkDelivery {
             && optional_text(&self.verification.summary, 2048)
             && valid_work_timestamp(&self.repair.updated_at)
             && optional_text(&self.repair.summary, 2048)
-            && (1..=20).contains(&self.repair.max_rounds)
-            && self.repair.round <= self.repair.max_rounds
+            && (1..=MAX_AGENT_RETRIES).contains(&self.repair.max_rounds)
+            && self
+                .repair
+                .retry_event
+                .as_ref()
+                .is_none_or(WorkRetryEvent::is_valid)
             && self.repair.task_id.as_deref().is_none_or(valid_chat_id)
             && valid_work_timestamp(&self.release.updated_at)
             && optional_text(&self.release.summary, 2048)

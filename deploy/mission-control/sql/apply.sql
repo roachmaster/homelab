@@ -278,4 +278,28 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=29)
 \ir migrations/0029_delivery_automation.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(29,'delivery_automation');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=30) AS apply_0030
+\gset
+\if :apply_0030
+\ir migrations/0030_agent_wide_retry_policy.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(30,'agent_wide_retry_policy');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=31) AS apply_0031
+\gset
+\if :apply_0031
+\ir migrations/0031_retry_events.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(31,'retry_events');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=32) AS apply_0032
+\gset
+\if :apply_0032
+\ir migrations/0032_observer_retry_lineage.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(32,'observer_retry_lineage');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=33) AS apply_0033
+\gset
+\if :apply_0033
+\ir migrations/0033_superseding_reviews.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(33,'superseding_reviews');
+\endif
 COMMIT;

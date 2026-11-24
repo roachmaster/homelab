@@ -9,8 +9,8 @@ import { join } from 'node:path';
 const time = '2026-11-19T18:00:00Z';
 const project = 'workspace';
 const base = 'a'.repeat(40);
-const externalWorkflowPolicy={policy_digest:'d'.repeat(64),author_profile:'muse-db-primary',reviewer_profile:'codex-primary',max_plan_revisions:3,max_code_revisions:3,auto_merge:true};
-const workflowPolicy={policy_digest:'c'.repeat(64),author_profile:'agy-primary',reviewer_profile:'codex-primary',max_plan_revisions:3,max_code_revisions:3,auto_merge:true};
+const externalWorkflowPolicy={policy_digest:'d'.repeat(64),author_profile:'muse-db-primary',reviewer_profile:'codex-primary',max_plan_revisions:20,max_code_revisions:20,auto_merge:true};
+const workflowPolicy={policy_digest:'c'.repeat(64),author_profile:'agy-primary',reviewer_profile:'codex-primary',max_plan_revisions:20,max_code_revisions:20,auto_merge:true};
 const publicPlan = '## Public fixture plan\n\n1. Inspect approved files.\n2. Implement the change.\n3. Verify the result.\n\nLiteral <script>window.__forgeProgressExecuted = true</script> stays text.';
 const publicMilestone = 'Public fixture milestone: implementation complete; running verification. <script>window.__forgeProgressExecuted = true</script>';
 const foreignProgress = 'FOREIGN ATTEMPT PROGRESS MUST NOT APPEAR';
@@ -39,7 +39,7 @@ function task(status, number, input = {}) {
   if(input.workflow_policy_digest){
     item.workflow_required=true;
     const policy=input.agent_profile==='muse-db-primary'?externalWorkflowPolicy:workflowPolicy;
-    item.workflow={kind:input.agent_profile==='muse-db-primary'?'external_database':'native',workflow_id:randomUUID(),policy_digest:policy.policy_digest,phase:'plan_review',author_profile:policy.author_profile,reviewer_profile:policy.reviewer_profile,plan_revisions:0,max_plan_revisions:3,code_revisions:0,max_code_revisions:3,escalation_reason:null,can_cancel:true};
+    item.workflow={kind:input.agent_profile==='muse-db-primary'?'external_database':'native',workflow_id:randomUUID(),policy_digest:policy.policy_digest,phase:'plan_review',author_profile:policy.author_profile,reviewer_profile:policy.reviewer_profile,plan_revisions:0,max_plan_revisions:policy.max_plan_revisions,code_revisions:0,max_code_revisions:policy.max_code_revisions,escalation_reason:null,can_cancel:true};
   }
   event(item, 'queued');
   if (status !== 'queued') {
@@ -86,6 +86,7 @@ function summary(t) {
     workflow_required:t.workflow_required===true,
     workflow_phase:t.workflow?.phase??null,
     ...(t.delivery?{delivery:t.delivery}:{}),
+    ...(t.retry_event?{retry_event:t.retry_event}:{}),
   };
 }
 function detail(t) {
@@ -128,7 +129,7 @@ function deliveryProjection(stage) {
   return {verification_id:'77777777-7777-4777-8777-777777777777',source_kind:'native',
     commit_sha:'f'.repeat(40),tree_sha:'c'.repeat(40),updated_at:time,
     verification:{status:activeRepair?'failed':deployed?'passed':stage==='queued'?'queued':'running',updated_at:time,summary:activeRepair?'Main failed; source-bound repair is queued.':deployed?'All exact main gates passed.':'Main checks are running.',build_number:42},
-    repair:{status:activeRepair?'queued':deployed?'completed':'none',round:activeRepair||deployed?1:0,max_rounds:20,task_id:activeRepair?'11111111-1111-4111-8111-111111111111':null,updated_at:time,summary:activeRepair?'Independent author and reviewer policy applies.':'No active repair.'},
+    repair:{...(activeRepair||deployed?{retry_event:{event_id:'99999999-9999-4999-8999-999999999999',kind:'tests',used:1,limit:20,status:activeRepair?'open':'resolved'}}:{}),status:activeRepair?'queued':deployed?'completed':'none',round:activeRepair||deployed?1:0,max_rounds:20,task_id:activeRepair?'11111111-1111-4111-8111-111111111111':null,updated_at:time,summary:activeRepair?'Independent author and reviewer policy applies.':'No active repair.'},
     release:{status:deployed?'deployed':'none',release_id:deployed?'88888888-8888-4888-8888-888888888888':null,receipt_sha256:deployed?'e'.repeat(64):null,updated_at:time,summary:deployed?'Activation receipt and health confirmed.':'No activation receipt.'}};
 }
 
@@ -363,6 +364,12 @@ export async function startAgentsRelay() {
     get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},
     setDelivery(taskId,stage){const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');selected.delivery=deliveryProjection(stage);},
     setProjectDelivery(stage){faults.projectDelivery=deliveryProjection(stage);faults.projectDelivery.source_kind='observed';},
+    retryEvent(taskId,kind,used,{status='open',total=used}={}){
+      const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
+      selected.retry_events??={};const event_id=selected.retry_events[kind]??=randomUUID();
+      selected.retry_event={event_id,kind,used,limit:20,status};selected.workflow.retry_event={...selected.retry_event};
+      selected.workflow.code_revisions=total;selected.revision++;
+    },
     workflowPhase(taskId,phase){
       const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
       selected.workflow.phase=phase;selected.workflow.can_cancel=!['completed','cancelled','merging'].includes(phase);

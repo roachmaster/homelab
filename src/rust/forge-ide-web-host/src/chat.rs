@@ -140,7 +140,9 @@ impl ChatRelay {
         // The native Work relay selects this fixed response capability. Browser
         // headers cannot negotiate a different contract or affect other relays.
         if destination.starts_with("ide.work.") {
-            request = request.header("Forge-Delivery-Version", "1");
+            request = request
+                .header("Forge-Delivery-Version", "1")
+                .header("Forge-Retry-Events-Version", "1");
         }
         self.post(request, body, workspace::MAX_BYTES, true, deadline)
             .map_err(|_| Rejection::Unavailable)

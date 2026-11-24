@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from psycopg2.extras import Json, RealDictCursor, register_uuid
 
+from work_retry_policy import AGENT_RETRY_LIMIT
 from queue_store import Rejected
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
@@ -233,7 +234,8 @@ def _parse_result_cursor(cursor):
 class WorkStore:
     """Owner- and project-scoped durable store for coding jobs, results, and control receipts."""
 
-    def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING,repair_policy=None, external_port=None, delivery_enabled=False):
+    def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING,repair_policy=None, external_port=None, delivery_enabled=False,retry_events=None):
+        self.retry_events=retry_events
         self._repair_policy=freeze_repair_policy(repair_policy or DEFAULT_REPAIR_POLICY)
         self._owner = validate_owner(owner)
         if not isinstance(allowed_projects, (frozenset, set, tuple, list)):
@@ -274,8 +276,9 @@ class WorkStore:
     def _delivery_projection(self, cursor, project_alias, task_id=None):
         if not self._delivery_enabled:
             return None
-        cursor.execute('SELECT forge_agent.delivery_projection(%s,%s)',(project_alias,task_id))
-        return cursor.fetchone()['delivery_projection']
+        function='delivery_retry_projection' if self.retry_events is not None else 'delivery_projection'
+        cursor.execute('SELECT forge_agent.'+function+'(%s,%s) AS value',(project_alias,task_id))
+        return cursor.fetchone()['value']
 
     def _delivery_head(self, cursor, project_alias):
         if not self._delivery_enabled:
@@ -638,6 +641,8 @@ class WorkStore:
                 # reconcile/queue calls are separate commits, so that handoff
                 # is already pending even before the outbox row becomes visible.
                 detail["publication"] = {"status":"pending","summary":"Waiting for trusted publication."}
+            event=self._retry_projection(cursor,row)
+            if event is not None:detail["retry_event"]=event
             review=self._review_projection(cursor,row)
             if review is not None:
                 detail["review"]=review
@@ -685,7 +690,7 @@ class WorkStore:
 
             cursor.execute(f"""
                 SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, t.mode, t.agent_profile,
-                       t.recipe_digest, t.status, t.revision, t.created_at, t.title,
+                       t.recipe_digest, t.status, t.revision, t.created_at, t.title, t.workflow_id,
                        t.workflow_required, w.phase AS workflow_phase
                 FROM forge_agent.coding_tasks t
                 LEFT JOIN forge_agent.coding_workflows w
@@ -704,6 +709,8 @@ class WorkStore:
                 limit + 1,
             ))
             rows = cursor.fetchall()
+            if self.retry_events is not None:
+                for row in rows:row["retry_event"]=self._retry_projection(cursor,row)
             if self._delivery_enabled:
                 for row in rows:row["delivery"]=self._delivery_projection(cursor,project_alias,row["id"])
             projected = {}
@@ -718,6 +725,7 @@ class WorkStore:
         summaries = []
         for row in page:
             item = _summary(row)
+            if row.get("retry_event") is not None:item["retry_event"]=row["retry_event"]
             if row.get("delivery") is not None:item["delivery"]=row["delivery"]
             if str(row["id"]) in projected:
                 item["workflow_required"] = True
@@ -759,10 +767,11 @@ class WorkStore:
                 WHERE (member_link.owner_id,member_link.project_alias,member_link.workflow_id)=
                       (ew.owner_id,ew.project_alias,ew.workflow_id)
             ),t.updated_at)"""
-        delivery = "forge_agent.delivery_projection(t.project_alias,t.id)" if self._delivery_enabled and delivery_visible else "NULL::jsonb"
+        delivery_function = 'delivery_retry_projection' if self.retry_events is not None else 'delivery_projection'
+        delivery = f"forge_agent.{delivery_function}(t.project_alias,t.id)" if self._delivery_enabled and delivery_visible else "NULL::jsonb"
         classified = f"""
             WITH classified AS (
-                SELECT t.id,t.correlation_id,t.project_alias,t.base_revision,t.mode,t.agent_profile,
+                SELECT t.id,t.correlation_id,t.project_alias,t.base_revision,t.mode,t.agent_profile,t.workflow_id,
                        t.recipe_digest,t.status,t.revision,t.created_at,t.title,
                        (t.workflow_required OR {phase} IS NOT NULL) AS workflow_required,
                        {phase} AS workflow_phase, {enabled} AS workflow_enabled,
@@ -813,10 +822,13 @@ class WorkStore:
                   anchor["list_updated_at"] if anchor else None,
                   anchor["list_updated_at"] if anchor else None, cursor_task_id, limit + 1))
             rows = cursor.fetchall()
+            if self.retry_events is not None:
+                for row in rows:row["retry_event"]=self._retry_projection(cursor,row)
             page = rows[:limit]
             summaries = []
             for row in page:
                 item = _summary(row)
+                if row.get("retry_event") is not None:item["retry_event"]=row["retry_event"]
                 if row.get("delivery") is not None:item["delivery"]=row["delivery"]
                 item["updated_at"] = _timestamp(row["list_updated_at"])
                 if row["workflow_enabled"] is not None:
@@ -1435,16 +1447,48 @@ class WorkStore:
         elif task.get("workflow_required"):
             raise Rejected(409,"not_reviewable")
 
+    def _retry_projection(self,cursor,task):
+        if self.retry_events is None:return None
+        from work_retry_events import RetryScope
+        cursor.execute("SELECT to_regprocedure('forge_agent.retry_event_project(text,text,uuid)') IS NOT NULL AS available")
+        if not cursor.fetchone()['available']:return None
+        workflow_id=task.get('workflow_id')
+        if workflow_id is not None:
+            kind,scope='native_workflow',workflow_id
+        else:
+            cursor.execute('SELECT workflow_id FROM forge_external_workflow.tasks WHERE owner_id=%s AND project_alias=%s AND task_id=%s',
+                (self._owner,task['project_alias'],task['id']))
+            external=cursor.fetchone()
+            if external:kind,scope='external_workflow',external['workflow_id']
+            else:
+                cursor.execute('SELECT coalesce(repair_root_task_id,id) AS root FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s',
+                    (self._owner,task['project_alias'],task['id']))
+                root=cursor.fetchone()
+                if not root:return None
+                kind,scope='manual_task',root['root']
+        return self.retry_events.project(cursor,RetryScope(self._owner,task['project_alias'],kind,UUID(str(scope))))
+
     def _workflow_projection(self,cursor,task):
         if task.get("workflow_id") is None:return None
         cursor.execute("SELECT w.*,coalesce(b.repair_rounds,0) AS code_revisions FROM forge_agent.coding_workflows w LEFT JOIN forge_agent.coding_review_budget b ON(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id) WHERE w.owner_id=%s AND w.project_alias=%s AND w.workflow_id=%s",(self._owner,task["project_alias"],task["workflow_id"]))
         w=cursor.fetchone()
         if w is None:return None
         p=w["snapshot"]
-        return {"workflow_id":str(w["workflow_id"]),"policy_digest":w["policy_digest"],"phase":w["phase"],
+        limits={key:p[key] for key in ('max_plan_revisions','max_code_revisions')}
+        cursor.execute("SELECT payload FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND event_kind='checkpoint' AND payload->>'stage'='retry_policy_updated' AND payload->>'policy'='forge-agent-retry-v1' AND payload->>'workflow_id'=%s AND payload->>'snapshot_digest'=%s ORDER BY sequence DESC LIMIT 1",
+            (self._owner,w['project_alias'],w['root_task_id'],str(w['workflow_id']),w['policy_digest']))
+        allowance=cursor.fetchone()
+        if allowance:
+            for key in limits:
+                if allowance['payload'].get(key)==AGENT_RETRY_LIMIT:
+                    limits[key]=AGENT_RETRY_LIMIT
+        result={"workflow_id":str(w["workflow_id"]),"policy_digest":w["policy_digest"],"phase":w["phase"],
             "author_profile":p["author_profile"],"reviewer_profile":p["reviewer_profile"],"plan_revisions":w["plan_revisions"],
-            "max_plan_revisions":p["max_plan_revisions"],"code_revisions":w["code_revisions"],"max_code_revisions":p["max_code_revisions"],
+            "max_plan_revisions":limits["max_plan_revisions"],"code_revisions":w["code_revisions"],"max_code_revisions":limits["max_code_revisions"],
             "escalation_reason":w["escalation_reason"] or None,"can_cancel":w["phase"] not in {"completed","cancelled","merging"}}
+        event=self._retry_projection(cursor,task)
+        if event is not None:result["retry_event"]=event
+        return result
 
     def plan_decide(self, *, project_alias, task_id, expected_revision, plan_attempt_id,
                     plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe,auto_repair=False,_authority=None):
@@ -1564,6 +1608,11 @@ class WorkStore:
             (self._owner,project_alias,p['version'],p['max_rounds'],p['max_stagnant_rounds'],p['max_infrastructure_retries'],list(p['required_hosted_checks'])))
         cursor.execute("""INSERT INTO forge_agent.coding_review_budget(owner_id,project_alias,root_task_id,policy)
             VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING""",(self._owner,project_alias,root_task_id,Json(dict(p))))
+        if self.retry_events is None and all(p[key]==AGENT_RETRY_LIMIT for key in ('max_rounds','max_stagnant_rounds','max_infrastructure_retries')):
+            cursor.execute('SELECT policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
+                (self._owner,project_alias,root_task_id))
+            if cursor.fetchone()['policy']!={**p,'required_hosted_checks':list(p['required_hosted_checks'])}:
+                cursor.execute('SELECT forge_agent.amend_agent_retry_policy(%s,%s,%s)',(project_alias,root_task_id,Json(dict(p))))
 
     def _hosted_green(self,cursor,task):
         cursor.execute("""SELECT h.required_green FROM forge_agent.coding_publications p
@@ -1586,13 +1635,13 @@ class WorkStore:
         if not flags['review_required']:
             cursor.execute('SELECT 1 FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s LIMIT 1',(self._owner,task['project_alias'],task['id']))
             if cursor.fetchone() is None:return None
-        cursor.execute("""SELECT r.*,coalesce((SELECT(b.policy->>'max_rounds')::integer FROM forge_agent.coding_review_budget b JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,coalesce(t.repair_root_task_id,t.id))=(b.owner_id,b.project_alias,b.root_task_id) WHERE t.owner_id=r.owner_id AND t.project_alias=r.project_alias AND t.id=r.task_id),p.max_rounds,3) AS max_rounds FROM forge_agent.coding_reviews r
+        cursor.execute("""SELECT r.*,coalesce((SELECT(b.policy->>'max_rounds')::integer FROM forge_agent.coding_review_budget b JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,coalesce(t.repair_root_task_id,t.id))=(b.owner_id,b.project_alias,b.root_task_id) WHERE t.owner_id=r.owner_id AND t.project_alias=r.project_alias AND t.id=r.task_id),p.max_rounds,%s) AS max_rounds FROM forge_agent.coding_reviews r
             LEFT JOIN forge_agent.coding_review_policy p USING(owner_id,project_alias)
             WHERE r.owner_id=%s AND r.project_alias=%s AND r.task_id=%s ORDER BY r.review_no DESC LIMIT 1""",
-            (self._owner,task['project_alias'],task['id']))
+            (AGENT_RETRY_LIMIT,self._owner,task['project_alias'],task['id']))
         row=cursor.fetchone()
         green=self._hosted_green(cursor,task) if task['latest_attempt_id'] else False
-        value={'stage':'waiting_for_result','review_id':None,'feedback_id':None,'round':0,'max_rounds':3,
+        value={'stage':'waiting_for_result','review_id':None,'feedback_id':None,'round':0,'max_rounds':AGENT_RETRY_LIMIT,
             'open_findings':0,'verified_findings':0,'latest_check_status':None,'toolchain':None,'handoff_reason':None,
             'source_attempt_id':str(task['latest_attempt_id']) if task['latest_attempt_id'] else None,
             'candidate_commit':None,'workspace_digest':None,'gate_manifest_sha256':None,'required_hosted_green':green,
@@ -1619,6 +1668,10 @@ class WorkStore:
                 gate_manifest_sha256=row['gate_manifest_sha256'],can_accept=green and task['status']=='awaiting_review',
                 can_repair=task['status'] in {'completed','awaiting_review'} and row['candidate_commit'] is not None and row['round']<row['max_rounds'],
                 can_retry=task['status']=='awaiting_review' and row['status'] in {'handoff','retry_infrastructure','needs_reconcile'})
+        event=self._retry_projection(cursor,task)
+        if event is not None:
+            value['retry_event']=event
+            value['can_repair']=task['status'] in {'completed','awaiting_review'} and row is not None and row['candidate_commit'] is not None and event['status']=='open' and event['used']<event['limit']
         return value
 
     def _control_task(self,cursor,project_alias,task_id,expected_revision,key,action,intent):

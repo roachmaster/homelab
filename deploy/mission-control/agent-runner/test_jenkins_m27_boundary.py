@@ -287,7 +287,11 @@ DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_portal_release_actor.py': '3e82a752626030b109a7703d80942dda81f947e0d75782125b7a2b95f965a324',
     'deploy/mission-control/agent-runner/test_portal_release_recovery.py': '83fdbff03f32d9403d055ade2fe90530a591dbe0df4cbe8a0e6fd61782b40249',
     'deploy/mission-control/agent-runner/test_portal_release_startup.py': 'e71343b033f13f443393ee605be95a6346b7b43481e502fd34b1ba65b1c50b9f',
+<<<<<<< HEAD
     'deploy/mission-control/agent-runner/test_work_context_recovery.py': '5ce3efc5de97135ab38ef171b341abf41b27124e4092cddcc64110ef7a9950d1',
+=======
+    'deploy/mission-control/agent-runner/test_work_context_recovery.py': 'c8d92523ee270f8e664c46b7c23358efca91005cc32f15352fb3aca9ae0a905c',
+>>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
     'deploy/mission-control/agent-runner/test_work_delivery_automation.py': '5b6bc79250f91e85eab447eb358eb3107b6a6e1a73811055ad79f4965ec95c26',
     'deploy/mission-control/agent-runner/test_work_feedback_delivery.py': '6cabb6e884baf3d8172c7c5b8eff3351cead8a807ee3a6e1a51333d632092541',
     'deploy/mission-control/agent-runner/test_work_muse_intake.py': '94a79619048c5c8fbe599db9ae8f90782884da1652e877f5bcc9f2eeb8cac9c2',
@@ -297,7 +301,11 @@ DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_api.py': 'a3707fae102279bbd2f7abaedc26bf43c0b2f543ab180f1b97cd96e164800898',
     'deploy/mission-control/agent-runner/work_ci_contract.py': '71b55c469064b394ab16aaae9ab336634eb3549417da0e1064dc015c3e59c37d',
     'deploy/mission-control/agent-runner/work_config.py': '1d67059a436ebe3b9bd4c3c470bb43cd0097d161fcf4fbd3a70f1f41e1b53172',
+<<<<<<< HEAD
     'deploy/mission-control/agent-runner/work_context_recovery.py': '2d4893482d1ace07dc6a4a6314b418807d1044d1daf751485892eb3601e71db1',
+=======
+    'deploy/mission-control/agent-runner/work_context_recovery.py': '440d4cfb013ccdb0f028554c7978606a22c3cae3ad5c6500fc80adbb41c26e5c',
+>>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
     'deploy/mission-control/agent-runner/work_context_recovery_contract.py': 'ecda9366299a734492b3837e1f1324e156f5da8eb2256266c18937c7da473071',
     'deploy/mission-control/agent-runner/work_delivery_ops.py': '05fcf5728e9ebbc0cd58a206e0345e24a24ad3151995d351613fc50fffd648da',
     'deploy/mission-control/agent-runner/work_delivery_repair.py': '3d06ea4e5edf6036b31187087c5c48b83d0fcbf021b3d9e259d39e0ce0150c6c',
@@ -332,6 +340,7 @@ DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
 }
 
 
+<<<<<<< HEAD
 # Current additive ABI15 event-stream stage-diagram UI source; historical maps
 # above remain literal provenance. This narrow overlay binds only the UI model,
 # declarative component/emitters, atomic ABI15 metadata, docs, and UI/host tests.
@@ -380,8 +389,203 @@ def qualified_source(relative, expected):
             ),
         ),
     )
+=======
+# Reviewed agent-wide retry overlay. Historical source and authority pins above
+# remain immutable provenance. Only numeric allowance reads change in the three
+# guarded methods below; roles, grants, recipes, source and replay checks remain.
+# These fingerprints qualify source; they confer no CI or deployment authority.
+AGENT_WIDE_RETRY_CONTEXT_SHA256 = {
+    "src/rust/forge-ide-ui/tests/work_review.rs": "0b3bfed9322842760840823fed6589cbf1875b4f3b42cd2c01c9135d8a0d01c1",
+    "deploy/mission-control/agent-runner/setup-runner.sh": "c25bc0c27040d513095c1cdeb31b80748548ba3c3384eef06070d52f40757a30",
+    "deploy/mission-control/agent-runner/test_external_flow.py": "b6fc29b6ef427b06656104b5426bce8f71b1a01fc64f345c8e1c7e30148febdb",
+    "deploy/mission-control/agent-runner/test_work_owner_followup.py": "e7ffcd27aca76da7c1937cc2f5afb8876e58aa25808069b5774048f036d3836e",
+    "deploy/mission-control/agent-runner/test_work_peer_review.py": "9cdddc629df8806cf647ec9f70a71643e31bc461c8c25e7819fd267747f3ebaa",
+    "deploy/mission-control/agent-runner/test_work_reviewer_correction.py": "b607a99b103dd7232edb0d4b78c189deaed30b9d7217f7a8d5d9d218c250905b",
+    "deploy/mission-control/agent-runner/work_config.py": "d70cf089b24d90383504e97aaf2200361a221704f043df6c7ce0d5eab7ba034b",
+    "deploy/mission-control/agent-runner/work_context_recovery.py": "fa7d2f55425659975d9c05c8f85264ec87f6095f3129b5fbecd53bcc3c870f60",
+    "deploy/mission-control/agent-runner/work_external_workflow.py": "4b67f29e2642a4c2c4420561b746e4b98d75acffecbabbee19426c441e79e97c",
+    "deploy/mission-control/agent-runner/work_owner_control.py": "0d3854f87ed0c4cbee1105a50f34496ea09a9d9ca1f4f2e0ce13907c6e099bb6",
+    "deploy/mission-control/agent-runner/work_owner_reverification.py": "0f52cdeea8d8925c86fe5bca8c73810694eda7d701d456733d4d13141bf80784",
+    "deploy/mission-control/agent-runner/work_peer_review.py": "35caedf43d10c81bde72543575eae277002d3e3a201e8926aef6b4813680e8d0",
+    "deploy/mission-control/agent-runner/work_retry_continuation.py": "1f428a5697fe8b01ed7b906068ffd67bd811ad99a3c67339237783021853542e",
+    "deploy/mission-control/agent-runner/work_retry_policy.py": "8542d515cd522f0183f79f7dc697b40bf9e13308410284171756dbd5d4c86640",
+    "deploy/mission-control/agent-runner/work_reviewer_correction.py": "37354a39b14b48a503503480792f7fa76ad806c17bd35d29811e1b51e1ab89c0",
+    "deploy/mission-control/agent-runner/work_store.py": "4f16976f616e0bcca58a22b321615a304cd0fd7a5ccbf98f747f45408771486c",
+    "deploy/mission-control/agent-runner/work_workflow.py": "f4f42d9b49d35e590079bf91932aecc2158b77cebbc0f4bca747cf2ca94a28e3",
+    "deploy/mission-control/backend-suites.py": "4ebeb0107e9b69706fe34dde68b8cc205bc947604973f00c4989cdbbb1271a6f",
+    "deploy/mission-control/sql/apply.sql": "7aef74aa55cc026fe056df383b25c7f93ce898830a6f3642d1dd0ecf2d490258",
+    "deploy/mission-control/sql/management/verify-agent-retries.sql": "19c517c6b84e3b49f5e35a1bd1e0ea9866e3d2cd9360be35d3e94c8b6b1ab2ad",
+    "deploy/mission-control/sql/management/verify-feedback.sql": "56bc19978bfa376f9955b38b15b4df94cc707ce8320fbfbda0b24c4b4f8baf3a",
+    "deploy/mission-control/sql/management/verify.sql": "93d45b86823e4099b690131b3adc58c106fc45f448730e9098af08eb337b38c1",
+    "deploy/mission-control/sql/migrations/0030_agent_wide_retry_policy.sql": "5a2b07a8be9c5835c5ab90d03d2a85c7936a95e01596d4c550c711b0a2122975",
+    "docs/architecture/forge-post-merge-verification.md": "c006f4b60539abf0e4f1f11cfc2a3bc222252fbaf11ac89e35b85d1fac4e6ac1",
+    "docs/design/implementation-status.md": "daaf740b8b28d5226e8ec4f8adb06e65539ff65efc7eec2eec52b3fdb0a0cf8d",
+    "src/rust/forge-ide-ui/src/protocol/work.rs": "b43ff8969476110078009548158e55870809084cfcc24cbc7c7e85c4ad9c3c63",
+    "src/rust/forge-ide-ui/src/protocol/work/delivery.rs": "eddc29ac4734a41df08e7ad16643b93e7da36652e0d1ce80ae8b09b8fdd7b846",
+    "src/rust/forge-ide-web/tests/browser/agents-relay.mjs": "36b85d3b3242040831efc148a810c0910d5f06182c9e30f9ffb126f325483638",
+    "src/rust/forge-ide-web/tests/browser/journey.mjs": "42aeb1c7750614b287ca2023cbd324db85ef12f2bb6fa91e6c63c1f4eceb7766"
+}
+
+AGENT_WIDE_RETRY_GUARD_AST_SHA256 = {
+    "work_owner_control.py::NativeOwnerControl.review_decide": "28beb08baa9ecf29331e7281a94583f79be4e8d79b1482656da217cfd8c0f98d",
+    "work_workflow.py::WorkflowStore.retry_peer_verdict": "8cdec9551d14ac203946d8a856e34d702774a21dd51326e4f004318b8aa497a0",
+    "work_workflow.py::WorkflowStore.retry_preparation": "7ff0c6fc57c9897d65e62b44897fc73dc76465670529560e29736b0831d7312e"
+}
+
+# Reviewed per-event retry context. Task totals are audit history; immutable
+# predecessor source/guard maps remain provenance. These source identities do
+# not grant CI success, publication or privileged deployment authority.
+EVENT_RETRY_CONTEXT_SHA256 = {
+    "deploy/mission-control/agent-runner/test_work_reviewer_correction_events.py": "ba46b09aa9b1917e2872d725210bc504df3ca70cdbacb7f45f897c341547f107",
+    "deploy/mission-control/agent-runner/test_work_delivery_automation.py": "6016a566a6cd85e0f38bf4073f4c495cda4cf62a621086d5b1d43f7b29c509de",
+    "deploy/mission-control/jenkins/setup-ci.py": "99dbe52ff966ec62202c4f3fa16dfab0623b5a6463c0a990f3141026e7925e4a",
+    "deploy/mission-control/agent-runner/test_ci_installer_v3.py": "cff3378161f56c3649f9b827d00d870875e05100dd0bfc0d729e03bc68d0f843",
+    "deploy/mission-control/agent-runner/runner.py": "fa8e8499b8f4e7cdebc2e247883d361e1c034ce71aef24c809e4c9d642c99269",
+    "deploy/mission-control/agent-runner/setup-runner.sh": "52b0281e3d7883404d63b7e645acc00ec71875a0d33cf7bbd3770f8ff11629ec",
+    "deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py": "c162a99ea675880e87e5e52179cca612893cdb3ec7d1bd37bad5316d1689c9bd",
+    "deploy/mission-control/agent-runner/test_ci_supervision.py": "74ae48834d922cd39ea77473f297f535d6a96386c27b5685e66097d7d2a4b0f7",
+    "deploy/mission-control/agent-runner/test_external_flow.py": "32f339f42cdb23f33e3b3d5b5def9a0ecf2546e0a54fbc689ce6ec46d289d8b6",
+    "deploy/mission-control/agent-runner/test_muse_read_access.py": "bbe690cf42053e2c96016ff9b50576dd32102deef290cb8bd4362dda2307a541",
+    "deploy/mission-control/agent-runner/test_portal_release_actor.py": "90ee41284a6dc77acb40f41bf3bbf4ff497366dd97fc4b64902230f1175068a0",
+    "deploy/mission-control/agent-runner/test_work_muse_intake.py": "69690f7f4e6fc3a9145761bb98ac9b72575def23664497cc065171577df37355",
+    "deploy/mission-control/agent-runner/test_work_owner_fence.py": "b63a85dbf0916c99a8c47b80dccd26ddd675e63bdd44d5b5df0f574439b39aae",
+    "deploy/mission-control/agent-runner/test_work_peer_review.py": "8671ac91c081a628710a7c6941002f31aec9c3735d5fb2424f3f64c4b98f580c",
+    "deploy/mission-control/agent-runner/test_work_policy_upgrade.py": "ca6872d237245f98dc554d67899e8b46f82a0f354f172bd782048ca00a5ff81b",
+    "deploy/mission-control/agent-runner/work_api.py": "f1fd9c317fe2c16ad7e5e7fd8fe81c24cee6ec48a36af871ef32c51d05820845",
+    "deploy/mission-control/agent-runner/work_ci_contract.py": "f9b427a05e55bb8c5f52535bfdad13d7b04e9e8d80c6cde41afce67915d25072",
+    "deploy/mission-control/agent-runner/work_ci_phases.py": "2fccd2c704725a05e329b64587377acc2ccded53840487b2acc478bb7a85e368",
+    "deploy/mission-control/agent-runner/work_context_recovery.py": "e1c45a25d308064719aa0d69c9607786bc8923a46aa951addd8b356e2f1b21a8",
+    "deploy/mission-control/agent-runner/work_external_delivery.py": "48a522a2e6dcbc4a77adeb84bc383053636878d6f1e2e35b5a0736d65f03e251",
+    "deploy/mission-control/agent-runner/work_external_workflow.py": "e4d437e1059e7003940ab2abb7f3ebe1c72282a561696ee4556c4b07b73c66cf",
+    "deploy/mission-control/agent-runner/work_native_jenkins.py": "f5a21ced3a46f3e26fb00ce89df51aaba32c5797b15162fd617657e182f8ca4b",
+    "deploy/mission-control/agent-runner/work_peer_review.py": "7149ea2ce2695044304c82bf67107b03619cb57cdc6e272ec90112022c2711e5",
+    "deploy/mission-control/agent-runner/work_post_merge.py": "5956dca2dfa6f63a5c77ec76c056e906c8f0223c744b6100fcd9d56ef94b229b",
+    "deploy/mission-control/agent-runner/work_post_merge_provider.py": "8d6fb012d5df68f440803ecd0c1ba653417cf38abc8ff68a3a30a6ee072d0df8",
+    "deploy/mission-control/agent-runner/work_publication.py": "c7005095f2f7da285b8a3ef9c7b408402bbce93e28e8b92a0399974538c0c8b7",
+    "deploy/mission-control/agent-runner/work_publication_config.py": "9f96505e090b141aaa222dac50d6030e0b19abd1463012c889ff73205fe458bf",
+    "deploy/mission-control/agent-runner/work_retry_continuation.py": "d149e3062836b020cd30f0acc0910ddd58ebd744f271c4db0030a9189cb40b17",
+    "deploy/mission-control/agent-runner/work_retry_events.py": "4acbf3e6d349fe14f397ed85b4f4eb3c48b944815a17144f8c759866ece846ce",
+    "deploy/mission-control/agent-runner/work_review.py": "fcc2a693568907b8d5caddc6d4f4a171c2c63356c021f8189e52153949bb35ea",
+    "deploy/mission-control/agent-runner/work_reviewer_correction.py": "d7ab9c6169fe78bf4ce68816c4dfc22acba96fe86f7d0f8e9f6f1168bf38a614",
+    "deploy/mission-control/agent-runner/work_store.py": "e620c92f1ff21af79c2fc64be08963971e28d694e0d7657e1af52deb087f1ad1",
+    "deploy/mission-control/agent-runner/work_workflow.py": "71ef104c1ea457bdd2e9ee05772592b3fd11428c1eaeb82b5260c40c02cfbfa3",
+    "deploy/mission-control/jenkins/verify-candidate.py": "7cf0c893614f85bbbc2f8e43bbe15e8a0792120be05163681d603ded827a317a",
+    "deploy/mission-control/portal_release_actor.py": "87a36d555a25c861d9af541dd4d5186a9c8ca60c9ffccd260941b5289e0bb23c",
+    "deploy/mission-control/sql/apply.sql": "7b0ae2a3a9c356d73f58afece7d6c82f53b9b86697a7ebfad0eacb759f94c105",
+    "deploy/mission-control/sql/fragments/0031_ci_stage_receipts.sql": "4aed05a59da74265333dab2ff925edfeaa013cd1e8c08465f8a92a750b179230",
+    "deploy/mission-control/sql/fragments/0031_delivery_retry_events.sql": "e13ff88d320fc28f8391ce85444ad65233fcae50dc6a85531ef4e6b33d3d63f1",
+    "deploy/mission-control/sql/fragments/0031_native_retry_events.sql": "638897abacd36c3841f80ef8021a217dd026018b88fa636af07e18f1aed931a1",
+    "deploy/mission-control/sql/fragments/0031_retry_event_fingerprints.sql": "fe04b42d8e956745ad979d7219343f99713eaf2018a0e1fd1fe28c661d0af9e5",
+    "deploy/mission-control/sql/management/verify-agent-retries.sql": "065d986c62ca47c1b5fae6e3b64c7b51c1eea8b57a183649f3f46eb34121affc",
+    "deploy/mission-control/sql/management/verify-delivery.sql": "358e3f07059cca044adb2a94cc63f57701019e38ea5d96af575baed2f9d244f7",
+    "deploy/mission-control/sql/management/verify-feedback.sql": "098a45773217ed011af84a22db4512d22dd190fa589481d22d9f2fc8897005f0",
+    "deploy/mission-control/sql/management/verify-owner-continuation.sql": "4835f574c275a0884eb3bf16be9deedbe7a7f950abcf00bd8a24622e2fa08d7e",
+    "deploy/mission-control/sql/management/verify-post-merge.sql": "177f2da332366b620f6efbac13630b29c304e5d142a243a20081d59c6c7480c8",
+    "deploy/mission-control/sql/management/verify-retry-events.sql": "c3f4661bff96052acc33ac96f1ed64ce3cd7248c885c98b98eeebc8c015d03c6",
+    "deploy/mission-control/sql/management/verify.sql": "d5adc6e08d278eb9d7ce180a92b82c3ca6780d1ad353529929ed6c2abe1939ab",
+    "deploy/mission-control/sql/migrations/0031_retry_events.sql": "bf6adff966e9f6610ac3e5dd31650b3427b8af5324cd5945f2a22284a9116c41",
+    "docs/architecture/forge-post-merge-verification.md": "db9887fee35cd3ebcbf7a2f1cfbc2452c8e163374e3840a8160deea04c2967c5",
+    "docs/design/implementation-status.md": "e0b487762cffdf7d32ebe9cc68260d6786d935a2d34b1544d61ff9a60b050b9c",
+    "src/rust/forge-ide-ui/src/model/agents.rs": "df4f384d4fccd8afedb01dcff5317e0b675de7d33f9dd943ae6639df33d0777e",
+    "src/rust/forge-ide-ui/src/model/agents/delivery.rs": "a32081673201aedffd18bf0937243b2dd71cb41edd3ffbe2bd2796a12a3d3efd",
+    "src/rust/forge-ide-ui/src/model/agents/tests.rs": "8a84dbe37b6489edf580674a0d7b48d73f3a8d357414c575071387ee15c55284",
+    "src/rust/forge-ide-ui/src/model/agents/tests/delivery.rs": "eaf72e886fbd80e3c78bfe0e4ee8bd1960dae9e20e4f01f58e3f9c6995bd60b4",
+    "src/rust/forge-ide-ui/src/model/agents/workflow.rs": "bc24fadbd6254b4885d665de9cbdbb23489ec1fa9283baf7601613f05a5e503d",
+    "src/rust/forge-ide-ui/src/protocol/work.rs": "c1fd35bd4ca84cd696a723c83b0ee2e53dc3339079a81a86cc2ddbe0d4855253",
+    "src/rust/forge-ide-ui/src/protocol/work/delivery.rs": "afd99590187b2c6e2a2bd4d1315333e4f622e376ac0a898cdb7ff0d2907f7b6f",
+    "src/rust/forge-ide-ui/tests/wasm_abi.mjs": "65e17657d542e26f89b87ab67a484e61950f4a273330807005ae577c47b0ff16",
+    "src/rust/forge-ide-ui/tests/work_review.rs": "2d636f315778c4b05b3391f7f73d13769ea553a54a86dfb128e3792fda8eda67",
+    "src/rust/forge-ide-web-host/src/assets.rs": "0d4a1e8e990229276345223a5ddb6a5ef8100d865dce004da1a8581561d4af3d",
+    "src/rust/forge-ide-web-host/src/chat.rs": "f1294d442317b6163c1e13388580adbea0aee427d99d1440a6d8c7eccaced15f",
+    "src/rust/forge-ide-web-host/tests/consumer.rs": "b99d76c127795092f790854c410a8bc11d9af8499b4dd8588b0c82f4551baf56",
+    "src/rust/forge-ide-web-host/tests/consumer/work.rs": "12d67cf7768e7cc513fce2a11c4dc51aad1d53da847010c5aed072a37f6b05f1",
+    "src/rust/forge-ide-web/src/generate/application.rs": "610dbfa80bb17352250bb28927765ec1dbc7a3d02dc37da0c8ecff3fb4ab9b3a",
+    "src/rust/forge-ide-web/src/generate/javascript.rs": "b08025b0c9d5e34551c5e5eef55fc2f16704328f4b3d866424b14da1ef6c3804",
+    "src/rust/forge-ide-web/src/generate/mod.rs": "e1bc357350d0b302c972baa47ded9d0fd32a743f7f7a0c20507aaec7972363d8",
+    "src/rust/forge-ide-web/src/wasm.rs": "8d2667307a56ecfdb38ff5c4ff7470983feda2364997c47cc6d5d8191c086aaa",
+    "src/rust/forge-ide-web/tests/browser/agents-relay.mjs": "b22e7128f3bb4126c2f6f91160b35594d36392a844f837030c95f52bb87778e0",
+    "src/rust/forge-ide-web/tests/browser/journey.mjs": "b8aeeac03349d36312a0646b5de369c229e5c2875b55dfacd8a35ec76840dda7",
+    "src/rust/forge-ide-web/tests/generation.rs": "e099773f1bf06525cc92dada0bc8d9ed5597b533a85919f6757ad9c9bffbbc0f",
+    "src/rust/forge-ide-web/tests/playtest-wire.mjs": "048817854abba0d5dff68dc42df4e3abae8b5768b13ad3b3bac945fff71df1f5"
+}
+
+EVENT_RETRY_GUARD_AST_SHA256 = {
+    "work_workflow.py::WorkflowStore.retry_peer_verdict": "23b6f5343d55f5e7fa387b4fbffee92caef63a2a6814edc4fa5366d9ecc3b8a2"
+}
+
+# Exact additive M32 source; predecessor maps remain historical provenance.
+# Source identities never substitute for real CI or deployment receipts.
+LINEAGE_RETRY_CONTEXT_SHA256 = {
+    'AGENT_WORK.md': '01e68b6a41f72847fb6e9a70fad7d2c3f2aabdeaa603d16fa12180edd2a28515',
+    'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '2b1c724ce4520d577004ab2cfb451b2d89581052aff001a4bccc4a7b11852143',
+    'deploy/mission-control/agent-runner/test_ci_event_phases.py': 'ce2a2595160ef3bdefef48cc3691013a11146de5977c0c81f09677a717527c04',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_events.py': 'f2f6f2639976d6ca6d2e43779c3be44f76fee7bbef46c8fd1fd2789301036a42',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '21151b2f6f948243a04b43c3639df0959a718b5f52fdb2d437daa961a297f86f',
+    'deploy/mission-control/agent-runner/test_muse_read_access.py': 'f86f55d35ef8ad4d27b57dd69a89fd6d53dc839485c5bdc941fcaed4bf789c14',
+    'deploy/mission-control/agent-runner/test_work_muse_intake.py': 'edf3c9a5d911251eb31a51078b58ef04ffb8cbfce63e18d7de82282fbe5ace8a',
+    'deploy/mission-control/agent-runner/test_work_owner_fence.py': '1f7ab99858ef7ead05d531b9c85fa2a5377834850f0fe5a1ab0aa669c42509f3',
+    'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': 'de99aabf23334e84baf38c7258c1cafe308a51535fb51596aea8159293317121',
+    'deploy/mission-control/agent-runner/work_ci_contract.py': '2ca9f31ecb7b9c0f2ad2238e7e577fbe693ed28c93e65b5809fd32cec82e2b6e',
+    'deploy/mission-control/jenkins/verify-candidate.py': 'e438b506c12d108de13ef8c272a5b6c58ae613708bb82a6b622d1322fd29d60a',
+    'deploy/mission-control/sql/apply.sql': '074f4f938b8bd108e165285a2380f417dfa34e7ab59daf4a1e0038d44ae45516',
+    'deploy/mission-control/sql/fragments/0032_observer_retry_lineage.sql': '2313c56322a9f339ca46163d443fc036be18d92a7d807831d9bb4b59a788d0d5',
+    'deploy/mission-control/sql/management/verify-delivery-lineage.sql': '61facd8165eef6cf478bd2d12d60bb937c48c5c548dad8a21acf3750bf11b67b',
+    'deploy/mission-control/sql/management/verify-delivery.sql': '6f4241976a6b5f802e5841ed96f0989c4a8db8819a84def148e46b1742efc56f',
+    'deploy/mission-control/sql/management/verify-retry-events.sql': 'edc86b38c191252ca643965a9a753f03a8d32031c80f308f51b16b8faeb9dc73',
+    'deploy/mission-control/sql/management/verify.sql': '215ea6880b3b356f1f2a3756d53ce01681f94dd7315a6ed1f9e4b278d5ce28aa',
+    'deploy/mission-control/sql/migrations/0032_observer_retry_lineage.sql': '88705c12ceb94b3264d5af084e0cf08bb095a10ec74460099c54da3dfe64bfbf',
+    'docs/architecture/ci-stage-evidence.md': '976d0728e0522e967363559adeadcf033738e86f156e668e54f228c293944966',
+}
+
+# Exact additive M33 source; every predecessor pin remains historical authority.
+SUPERSEDING_REVIEW_CONTEXT_SHA256 = {'AGENT_WORK.md': '7bc6d4ee90235797dcbb0ab75a0759943cc3e230a9b9f7febd6490d809d7fdb1',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': '4982edf6698c318f72d3cc06285448326ea090ba84dfffd1a74ef257691265ef',
+ 'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '2a17322ef5c3776e374dbb5e631fc89d1c7d83b484ea195a7286d37b3675b1b1',
+ 'deploy/mission-control/agent-runner/test_ci_event_phases.py': 'd39fd595d4ba86d13aaa5b99621e8b9e87bbd5aa9504bf290f47436f5c4645e0',
+ 'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '2022edb53c6347b2d498b6a8abbac8583e8ed92b7be0331bd2b1b2a297c5a237',
+ 'deploy/mission-control/agent-runner/test_muse_read_access.py': 'b05ffd90e71452efc62a0ef01d7fcce7581b2d5e792a442892285305ab016aba',
+ 'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'fca3c6b7c9cdeb22bde4af3bc91bd25b9b8725f7a0c9a352c0169abfb453e0a7',
+ 'deploy/mission-control/agent-runner/test_work_muse_intake.py': 'afef02c708f844467c734d8b9e02aac0b67f36a2d6e59a61bbade727086d7463',
+ 'deploy/mission-control/agent-runner/test_work_owner_fence.py': 'e8312f05f22e85d1bf11e4b44d2ac21d5b407fb8d17a79c545ed7c3c0fb1bfeb',
+ 'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '6224514db83428e9127eeccda3bc2c73aa08416a817e618d26ca2cf50d784a45',
+ 'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '5b445814289746635e888a1abb35da00d00453e08289f4f90c1a8709f984a749',
+ 'deploy/mission-control/agent-runner/test_work_review_transcription.py': '5013c229831d18f392b8936ccc2708cd1faed277c3bdb570a658ea7464a4b680',
+ 'deploy/mission-control/agent-runner/work_ci_contract.py': '05cc57f0a30694d75f57767a1988f4bb265c76d890f670930e6edae3a9677299',
+ 'deploy/mission-control/agent-runner/work_superseding_review.py': 'e792a42c7245ef76025aa7810cf7570a772d755d55c78d12adba9f361f5a252d',
+ 'deploy/mission-control/agent-runner/work_workflow.py': '12de226b95b1e6d4b1e24d86011be94c89dfe80225d008a1d07f31f7e472e400',
+ 'deploy/mission-control/jenkins/verify-candidate.py': '2100f323f4c264ddf9f55621c103853ebce4e75f2eeab7cc0f283f0d3b41a472',
+ 'deploy/mission-control/sql/apply.sql': '9f12bc3e12e7429c070e6401e0c9062d5e6cba382aaac2b6dd4f98f825ac0dc5',
+ 'deploy/mission-control/sql/fragments/0033_superseding_reviews.sql': '3bc5b801a55f1ab636f898f3ca9c6f0b541e0e5e62efc4f56b743c005f9b0a57',
+ 'deploy/mission-control/sql/management/verify-autonomy.sql': '4aeaed6664c9f8434164361cd1dd6cc967d764af443c633b38b8c02c32eaa269',
+ 'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '8ddacae0bdb2b1d0a7eba53c3f18bb9c789a894704d5d94daa520b48deab19c7',
+ 'deploy/mission-control/sql/management/verify.sql': '6db57578a4f6b436120fb48ca9e160d3c9fe21047dfbe6aa87b69b2fa6191f09',
+ 'deploy/mission-control/sql/migrations/0033_superseding_reviews.sql': 'c8cc28b5e0aeb618ffe43725452935024ce66973420120181f01b3d887edf30e',
+ 'docs/architecture/proposals/forge-autonomous-agent-workflow.md': '7f2383cd89be8a5549a3ddd391d21ffc5d4970624a125450dbd26484e4d9cef7'}
+
+# Exact peer-feedback correction; all applied SQL and predecessor pins remain immutable.
+PEER_FEEDBACK_CONTEXT_SHA256 = {'AGENT_WORK.md': '5b2736ec7bbb7502c3a8ecaa9a8b99637dd8dfc0f8151758e90186a5404dc877',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'f7035d6ed8070811cbdc430af94bf08f16adb74019de4eca44db16f8c2f6e73d',
+ 'deploy/mission-control/agent-runner/test_ci_event_phases.py': 'fb8d24dd8427d660281a597f535de374519e595d6328198f5458613c2fac7b72',
+ 'deploy/mission-control/agent-runner/test_work_linked_child_feedback.py': '54bf5a07a1864ef1d17c2eb4e791a677f1241d34a388ca02f6cf8996f6e591ec',
+ 'deploy/mission-control/agent-runner/test_work_peer_context.py': '0d01c0eb9b5a7f40761add138db5098b587713b2330b1a53552e62b931be021e',
+ 'deploy/mission-control/agent-runner/test_work_peer_feedback_recovery.py': '498a27d4c63143d6cfdd17130ccadc1c24ab6ba30607b857c44ccf11f4855b4e',
+ 'deploy/mission-control/agent-runner/work_ci_contract.py': '97bb410ae046980f03ac20d4659ca5f717afedd2b56e205e2825724cec3e13d6',
+ 'deploy/mission-control/agent-runner/work_context_recovery.py': '218a27d07d7516d19461a17214141a75970bdedf8470706d842a21761c58124c',
+ 'deploy/mission-control/agent-runner/work_peer_context.py': '23d524b418ca2aafe9484aacc812093860d3eb66e4e7ad65e716571cf698f4bb',
+ 'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py': '5cf99d4949f63f151ab3d99a496a7cd3899576cd5d5628e5fa612645c382c3aa',
+ 'deploy/mission-control/agent-runner/work_workflow.py': 'e8b63ac0a6d236f9a5effe10c6d4c7465f34c358280e84528f3cbc162aff1a69',
+ 'deploy/mission-control/jenkins/verify-candidate.py': 'ee759e4406f428134c111c617c8fbb7fb2c0eabe916611345b4c6a3bb75abcb8',
+ 'docs/architecture/proposals/forge-autonomous-agent-workflow.md': 'dd604a82143980feaa9a4591987516d823685aa7413af2c56e8ab5877aa22210'}
+
+def qualified_source(relative, expected):
+    return PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected))))))))
+>>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
 
 STRICT_VERIFIER_FILES = {
+    "verify-superseding-reviews.sql",
+    "verify-delivery-lineage.sql",
+    "verify-retry-events.sql",
+    "verify-agent-retries.sql",
     "verify-delivery.sql",
     "verify-post-merge.sql",
     "verify.sql",
@@ -458,6 +662,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     self.assertTrue(relative.endswith('0029_delivery_automation.sql'))
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
 
+<<<<<<< HEAD
     def test_stage_diagram_ui_overlay_is_scoped_to_abi15_ui_source(self):
         self.assertEqual(len(UI_STAGE_DIAGRAM_CONTEXT_SHA256), 28)
         for relative, expected in UI_STAGE_DIAGRAM_CONTEXT_SHA256.items():
@@ -466,7 +671,76 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     relative.startswith(('src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/'))
                     or relative == 'docs/design/implementation-status.md'
                 )
+=======
+    def test_shared_retry_overlay_preserves_historical_authority_boundaries(self):
+        self.assertEqual(set(AGENT_WIDE_RETRY_GUARD_AST_SHA256), {
+            'work_owner_control.py::NativeOwnerControl.review_decide',
+            'work_workflow.py::WorkflowStore.retry_peer_verdict',
+            'work_workflow.py::WorkflowStore.retry_preparation',
+        })
+        for relative, expected in AGENT_WIDE_RETRY_CONTEXT_SHA256.items():
+            with self.subTest(shared_retry_source=relative):
+                self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/'))
+                    or relative in {'docs/architecture/forge-post-merge-verification.md', 'docs/design/implementation-status.md'})
+                if '/migrations/' in relative:
+                    self.assertTrue(relative.endswith('0030_agent_wide_retry_policy.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_event_retry_overlay_is_explicit_and_preserves_applied_migrations(self):
+        self.assertEqual(set(EVENT_RETRY_GUARD_AST_SHA256), {
+            'work_workflow.py::WorkflowStore.retry_peer_verdict'})
+        for relative, expected in EVENT_RETRY_CONTEXT_SHA256.items():
+            with self.subTest(event_retry_source=relative):
+                self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/'))
+                    or relative in {'docs/architecture/forge-post-merge-verification.md',
+                        'docs/design/implementation-status.md'})
+                if '/migrations/' in relative:
+                    self.assertTrue(relative.endswith('0031_retry_events.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_lineage_overlay_preserves_applied_migrations_and_exact_source(self):
+        for relative, expected in LINEAGE_RETRY_CONTEXT_SHA256.items():
+            with self.subTest(lineage_source=relative):
+                self.assertTrue(relative.startswith('deploy/mission-control/') or relative in {
+                    'AGENT_WORK.md', 'docs/architecture/ci-stage-evidence.md'})
+                if '/migrations/' in relative:
+                    self.assertTrue(relative.endswith('0032_observer_retry_lineage.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+        for relative, expected in EVENT_RETRY_CONTEXT_SHA256.items():
+            if '/migrations/0031_' in relative or '/fragments/0031_' in relative:
+                with self.subTest(applied_m31=relative):
+                    self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_superseding_review_overlay_preserves_applied_schema_and_exact_source(self):
+        self.assertIn('deploy/mission-control/agent-runner/work_superseding_review.py', SUPERSEDING_REVIEW_CONTEXT_SHA256)
+        for relative, expected in SUPERSEDING_REVIEW_CONTEXT_SHA256.items():
+            with self.subTest(superseding_review_source=relative):
+                self.assertTrue(relative.startswith('deploy/mission-control/') or relative in {
+                    'AGENT_WORK.md', 'docs/architecture/proposals/forge-autonomous-agent-workflow.md'})
+                if '/migrations/' in relative or '/fragments/' in relative:
+                    self.assertTrue(relative.endswith('0033_superseding_reviews.sql'))
+                actual = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
+                self.assertEqual(actual, expected if '/sql/' in relative else qualified_source(relative, expected))
+        # The new context cannot qualify edits to any previously applied SQL.
+        for pins in (EVENT_RETRY_CONTEXT_SHA256, LINEAGE_RETRY_CONTEXT_SHA256):
+            for relative, expected in pins.items():
+                if '/migrations/' in relative or '/fragments/' in relative:
+                    with self.subTest(immutable_pre_m33=relative):
+                        self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_peer_feedback_overlay_is_exact_and_cannot_qualify_applied_sql(self):
+        self.assertEqual(set(PEER_FEEDBACK_CONTEXT_SHA256), {'docs/architecture/proposals/forge-autonomous-agent-workflow.md', 'deploy/mission-control/jenkins/verify-candidate.py', 'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py', 'AGENT_WORK.md', 'deploy/mission-control/agent-runner/work_workflow.py', 'deploy/mission-control/agent-runner/test_work_peer_context.py', 'deploy/mission-control/agent-runner/test_work_peer_feedback_recovery.py', 'deploy/mission-control/agent-runner/work_peer_context.py', 'deploy/mission-control/agent-runner/test_ci_event_phases.py', 'deploy/mission-control/agent-runner/work_ci_contract.py', 'deploy/mission-control/agent-runner/work_context_recovery.py', 'deploy/mission-control/agent-runner/setup-runner.sh', 'deploy/mission-control/agent-runner/test_work_linked_child_feedback.py'})
+        for relative, expected in PEER_FEEDBACK_CONTEXT_SHA256.items():
+            with self.subTest(peer_feedback_source=relative):
+                self.assertNotIn('/sql/', relative)
+>>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+        for pins in (EVENT_RETRY_CONTEXT_SHA256, LINEAGE_RETRY_CONTEXT_SHA256, SUPERSEDING_REVIEW_CONTEXT_SHA256):
+            for relative, expected in pins.items():
+                if '/sql/' in relative:
+                    with self.subTest(immutable_applied_sql=relative):
+                        current = expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected)
+                        self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), current)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
@@ -475,6 +749,8 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
 
     def test_legacy_owner_and_publication_guards_remain_ast_identical(self):
         for identity, expected in UNCHANGED_LEGACY_GUARD_AST_SHA256.items():
+            expected = AGENT_WIDE_RETRY_GUARD_AST_SHA256.get(identity, expected)
+            expected = EVENT_RETRY_GUARD_AST_SHA256.get(identity, expected)
             filename, qualified = identity.split('::')
             node = ast.parse((RUNNER / filename).read_text())
             for name in qualified.split('.'):
@@ -504,7 +780,8 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         required = (
             "work_owner_control.py", "work_owner_reverification.py", "work_publication_clients.py", "work_review.py",
-            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py",
+            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py", "work_superseding_review.py",
+            "work_peer_feedback_recovery.py",
             "work_post_merge.py", "work_post_merge_provider.py", "jenkins_events.py", "jenkins_config.py",
             "jenkins_codec.py", "jenkins_store.py", "jenkins_consumer.py",
             "jenkins_api.py", "jenkins_emitter.py", "jenkins_emit_tool.py",

@@ -26,7 +26,8 @@ LOG = logging.getLogger("forge-review")
 SNAPSHOT_ACQUISITION_WAIT_SECONDS = 30
 
 
-from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, V2_PROTECTED_PATHS
+from work_ci_contract import (LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE,
+    V2_PROTECTED_PATHS, protected_event_policy_path)
 
 def validate_review(config, job):
     if not isinstance(job, dict):
@@ -45,7 +46,7 @@ def validate_review(config, job):
                 or not DIGEST.fullmatch(job["parent_result_sha256"])):
             raise PublicationError("invalid_review_lease")
         for key in ("round", "stagnant_rounds", "infrastructure_retries"):
-            if type(job.get(key, 0)) is not int or not 0 <= job.get(key, 0) <= 100:
+            if type(job.get(key, 0)) is not int or not 0 <= job.get(key, 0) <= 2**32-1:
                 raise PublicationError("invalid_review_lease")
         if type(job.get("auto_repair", False)) is not bool:
             raise PublicationError("invalid_review_lease")
@@ -80,12 +81,41 @@ def validate_review(config, job):
         raise PublicationError("invalid_review_lease") from None
 
 
+def event_observation(job,report=None,*,outcome=None,allow_pass=True):
+    if job.get('retry_policy')!='event-v1':return None
+    observation=getattr(report,'retry_observation',None) if report is not None else None
+    if observation is not None:
+        result=dict(observation)
+        if not allow_pass:result.update(passed_kinds=[],passed_phase_ids=[])
+        return result
+    verification=(outcome or {}).get('verification',{})
+    passed=(bool(getattr(report,'checks_passed',False)) if report is not None else
+        verification.get('checks_passed') is True and bool(verification.get('checks')) and verification.get('hosted_status')!='pending')
+    category=getattr(report,'category',None)
+    kind='infrastructure' if category=='infrastructure' or (outcome or {}).get('reason') in {'review_unavailable','workspace_busy','publication_command_failed'} else 'verification'
+    digest=getattr(report,'evidence_digest',None) if report is not None else None
+    if not isinstance(digest,str) or not DIGEST.fullmatch(digest):
+        digest=hashlib.sha256(json.dumps({'review_id':job['review_id'],'verification':verification,'reason':(outcome or {}).get('reason')},sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+    return {'failure_kind':None if passed else kind,'passed_kinds':['verification'] if passed and allow_pass else [],
+        'phase_id':kind,'passed_phase_ids':[],'stage_evidence_digest':digest}
+
+def event_used(job,observation):
+    if not observation:return job.get('round',0)
+    kind=observation.get('failure_kind');phase=observation.get('phase_id') or kind
+    for event in job.get('retry_events',[]):
+        if event.get('kind')==kind and (event.get('phase_id') or event.get('kind'))==phase:
+            used=event.get('used')
+            if type(used) is not int or not 0<=used<=20:raise PublicationError('invalid_retry_event')
+            return used
+    return 0
+
 def verification_job(job):
     return {**job, "publication_id": job["review_id"], "status": "checking",
             "branch": None, "commit_sha": None, "pr_url": None}
 
 
 def repair_policy(job):
+    if job.get('retry_policy')=='event-v1':return RepairPolicy(20,20,20)
     return RepairPolicy(**{key: job["policy"][key] for key in
         ("max_rounds", "max_stagnant_rounds", "max_infrastructure_retries")})
 
@@ -134,7 +164,8 @@ def protected_gate_path(path, *, profile=LEGACY_PROFILE):
                 "rustfmt.toml", ".rustfmt.toml", "deny.toml",
                 "work_publication_checks.py", "work_verification.py", "work_verification_init.py", "work_policy.py"}
             or path == 'deploy/mission-control/agent-runner/work_ci_contract.py'
-            or profile == SCOPED_PROFILE and path in V2_PROTECTED_PATHS)
+            or profile in {SCOPED_PROFILE, EVENT_PROFILE} and path in V2_PROTECTED_PATHS
+            or profile == EVENT_PROFILE and protected_event_policy_path(path))
 
 
 def gate_source_digest(git, repository, head, *, profile=LEGACY_PROFILE):
@@ -260,6 +291,8 @@ class ReviewWorker:
         self.repair_sources = repair_sources
 
     def _finish(self, job, outcome):
+        if job.get('retry_policy')=='event-v1' and 'retry_observation' not in outcome:
+            outcome={**outcome,'retry_observation':event_observation(job,outcome=outcome)}
         try:
             return self.store.review_finish(job, outcome)
 
@@ -405,9 +438,11 @@ class ReviewWorker:
                                  if report.checks_passed and not gate_changes else set())
                 verified = [finding["finding_id"] for finding in job.get("open_findings", [])
                             if finding.get("status", "open") == "open" and finding.get("check_id") in passed_checks]
-                observation = RepairObservation(report.category, repair_round=job.get("round", 0),
-                    stagnant_rounds=job.get("stagnant_rounds", 0),
-                    infrastructure_retries=job.get("infrastructure_retries", 0),
+                retry_observation=event_observation(job,report,allow_pass=not gate_changes and report.cleanup_confirmed)
+                used=event_used(job,retry_observation)
+                observation = RepairObservation(report.category, repair_round=used,
+                    stagnant_rounds=0 if retry_observation else job.get("stagnant_rounds", 0),
+                    infrastructure_retries=used if retry_observation else job.get("infrastructure_retries", 0),
                     verified_progress=bool(verified), checks_passed=report.checks_passed,
                     cleanup_confirmed=report.cleanup_confirmed)
                 decision = self.policy_decider(observation, policy)
@@ -443,6 +478,7 @@ class ReviewWorker:
                         "integration_base": integration_base, "cleanup_confirmed": report.cleanup_confirmed,
                         "gate_changes_require_review": gate_changes,
                         "checks": [{**check, "head_sha": tested_head or head} for check in report.checks]}}
+                if retry_observation is not None:outcome['retry_observation']=retry_observation
                 if delivery_failure is not None:
                     outcome['verification']['delivery_failure'] = delivery_failure
                 require_lease()
@@ -492,12 +528,14 @@ class ReviewWorker:
             'repair_requires_new_workspace':True,'integration_base':conflict.integration_base,'checks_passed':False,
             'source_integration':details}
         self.candidates.record(job,manifest)
-        observation=RepairObservation('source',repair_round=job.get('round',0),stagnant_rounds=job.get('stagnant_rounds',0),
-            infrastructure_retries=job.get('infrastructure_retries',0),verified_progress=False,checks_passed=False,cleanup_confirmed=True)
+        retry_observation=({'failure_kind':'merge','phase_id':'main-integration','passed_kinds':[],'passed_phase_ids':[],'stage_evidence_digest':evidence}
+            if job.get('retry_policy')=='event-v1' else None)
+        observation=RepairObservation('source',repair_round=event_used(job,retry_observation),stagnant_rounds=0 if retry_observation else job.get('stagnant_rounds',0),
+            infrastructure_retries=0 if retry_observation else job.get('infrastructure_retries',0),verified_progress=False,checks_passed=False,cleanup_confirmed=True)
         disposition=self.policy_decider(observation,repair_policy(job)).disposition
         if disposition=='repair'and not job.get('auto_repair',False):disposition='handoff'
         require_lease()
-        self._finish(job,{'disposition':disposition,'reason':'main_merge_conflict','candidate_commit':head,
+        self._finish(job,{**({'retry_observation':retry_observation} if retry_observation else {}),'disposition':disposition,'reason':'main_merge_conflict','candidate_commit':head,
             'gate_manifest_sha256':gate,'findings':[finding],'verified_finding_ids':[],
             'fingerprint':failure_fingerprint('main-integration','main_merge_conflict',finding['path'],finding['summary']),
             'summary':finding['summary'],'verification':{'checks_passed':False,'candidate_workspace_digest':digest,
@@ -620,9 +658,11 @@ class ReviewWorker:
                     disposition, reason = "awaiting_review", "hosted_pending"
                 else:
                     category = "pass" if passed else report.findings[0]["category"] if report.findings else "infrastructure"
+                    retry_observation=event_observation(job,outcome={'verification':{'checks_passed':passed,'checks':list(report.checks),'hosted_status':report.status}})
+                    used=event_used(job,retry_observation)
                     decision = self.policy_decider(RepairObservation(category, checks_passed=passed,
-                        repair_round=job.get("round", 0), stagnant_rounds=job.get("stagnant_rounds", 0),
-                        infrastructure_retries=job.get("infrastructure_retries", 0),
+                        repair_round=used, stagnant_rounds=0 if retry_observation else job.get("stagnant_rounds", 0),
+                        infrastructure_retries=used if retry_observation else job.get("infrastructure_retries", 0),
                         verified_progress=bool(verified)), policy)
                     disposition, reason = decision.disposition, decision.reason
                     if disposition == "repair" and not job.get("auto_repair", False):

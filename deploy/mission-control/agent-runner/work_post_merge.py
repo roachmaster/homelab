@@ -9,7 +9,7 @@ import re
 import threading
 from uuid import UUID, uuid5
 
-from work_ci_contract import SCOPED_PROFILE, CiGateContractFactory
+from work_ci_contract import SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory
 from work_publication_clients import PublicationError
 from work_verification import diagnostic_text
 
@@ -25,12 +25,15 @@ MAIN_PLAN = CiGateContractFactory(SCOPED_PROFILE).create().plan('main')
 def validate_request(job, request):
     if not isinstance(request, dict) or set(request) != REQUEST_KEYS:
         raise ValueError('Invalid post-merge request shape')
+    profile = request.get('verification_profile')
+    if profile not in {SCOPED_PROFILE, EVENT_PROFILE}:
+        raise ValueError('Unsupported post-merge verification profile')
     expected = {'action_id': job['post_merge_id'],
         'prepare_action_id': str(uuid5(UUID(job['post_merge_id']), 'prepare-v1')),
         'workflow_id': job['workflow_id'], 'project_alias': job['project_alias'],
         'candidate_commit': job['merge_commit'], 'candidate_tree': job['merge_tree'],
         'integration_base': job['merge_commit'], 'branch_scope': 'main',
-        'source_branch': 'main', 'verification_profile': SCOPED_PROFILE,
+        'source_branch': 'main', 'verification_profile': profile,
         'correlation_id': job['correlation_id']}
     if any(request.get(key) != value for key, value in expected.items()):
         raise ValueError('Post-merge request identity changed')
@@ -42,22 +45,26 @@ def passed_receipt(request, receipt):
     """A Jenkins status alone cannot establish a source-bound main proof."""
     if not isinstance(receipt, dict):
         return False
+    profile = request.get('verification_profile')
+    if profile not in {SCOPED_PROFILE, EVENT_PROFILE}:
+        return False
+    plan = CiGateContractFactory(profile).create().plan('main')
     expected = {'action_id': request['action_id'], 'workflow_id': request['workflow_id'],
         'project_alias': request['project_alias'], 'candidate_commit': request['candidate_commit'],
         'candidate_tree': request['candidate_tree'], 'expected_main': request['integration_base'],
         'gate_manifest_sha256': request['gate_manifest_sha256'],
-        'verification_profile': SCOPED_PROFILE, 'branch_scope': 'main',
+        'verification_profile': profile, 'branch_scope': 'main',
         'correlation_id': request['correlation_id'], 'provider': 'jenkins',
-        'result': 'SUCCESS', 'coverage': MAIN_PLAN.coverage}
+        'result': 'SUCCESS', 'coverage': plan.coverage}
     return (all(receipt.get(key) == value for key, value in expected.items())
-        and type(receipt.get('version')) is int and receipt['version'] == 2
-        and type(receipt.get('result_version')) is int and receipt['result_version'] == 2
+        and type(receipt.get('version')) is int and receipt['version'] == plan.result_version
+        and type(receipt.get('result_version')) is int and receipt['result_version'] == plan.result_version
         and receipt.get('cleanup_confirmed') is True
         and all(isinstance(receipt.get(key), str) and HEX64.fullmatch(receipt[key])
                 for key in ('check_receipt_sha256', 'log_sha256', 'bundle_sha256'))
         and receipt.get('checks') == [
             {'index': index, 'argv': list(command), 'returncode': 0}
-            for index, command in enumerate(MAIN_PLAN.checks)]
+            for index, command in enumerate(plan.checks)]
         and all(type(row.get('index')) is int and type(row.get('returncode')) is int
                 for row in receipt.get('checks', [])))
 
@@ -65,6 +72,9 @@ def passed_receipt(request, receipt):
 def stopped_receipt(request, receipt):
     """Cleanup for another action cannot release this action's ownership."""
     if not isinstance(receipt, dict) or receipt.get('provider') != 'jenkins':
+        return False
+    profile = request.get('verification_profile')
+    if profile not in {SCOPED_PROFILE, EVENT_PROFILE}:
         return False
     proof = (receipt.get('cleanup_confirmed') is True
              and isinstance(receipt.get('check_receipt_sha256'), str)
@@ -75,9 +85,10 @@ def stopped_receipt(request, receipt):
         'project_alias': request['project_alias'], 'candidate_commit': request['candidate_commit'],
         'candidate_tree': request['candidate_tree'], 'expected_main': request['integration_base'],
         'gate_manifest_sha256': request['gate_manifest_sha256'],
-        'verification_profile': SCOPED_PROFILE, 'branch_scope': 'main',
+        'verification_profile': profile, 'branch_scope': 'main',
         'correlation_id': request['correlation_id']}
-    return (bool(proof) and type(receipt.get('version')) is int and receipt['version'] == 2
+    version = 3 if profile == EVENT_PROFILE else 2
+    return (bool(proof) and type(receipt.get('version')) is int and receipt['version'] == version
             and all(receipt.get(key) == value for key, value in expected.items()))
 
 

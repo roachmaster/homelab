@@ -1,5 +1,6 @@
 """Actual PostgreSQL owner-continuation authority and automatic-writer fences."""
 from contextlib import closing
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -256,7 +257,7 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                 execute('CREATE ROLE muse_events LOGIN NOINHERIT')
                 cluster._run('psql','-h',cluster.root,'-U','postgres','-X','-v','ON_ERROR_STOP=1','-d','forge_agent',
                     '-c','SET ROLE forge_agent_owner','-f',SQL_DIR/'management/grant-muse-read-access.sql')
-                service=WorkServiceFactory(make_v2_config(),lambda:cluster.connect('forge_agent')).create()
+                service=WorkServiceFactory(replace(make_v2_config(),repair_policy={'max_rounds':3,'max_stagnant_rounds':2,'max_infrastructure_retries':1}),lambda:cluster.connect('forge_agent')).create()
                 service.submit(make_submit(idempotency_key='before-owner26'))
                 tables=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND relname<>'schema_migrations' ORDER BY relname")]
                 # Snapshot every original relation, including its exact ACL.
@@ -272,7 +273,7 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                         hba=hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest())
                 before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
-                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(29,)])
+                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(33,)])
                 self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(27,)])
                 self.assertEqual(execute("SELECT has_function_privilege('muse_events','forge_agent._coding_owner_continuation_fenced(uuid)','EXECUTE')"),[(False,)])
             finally:cluster.stop()

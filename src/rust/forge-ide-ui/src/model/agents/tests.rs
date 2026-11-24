@@ -50,6 +50,7 @@ fn step(agents: &mut Agents, event: UiEvent, id: &str) -> Vec<UiEffect> {
 }
 fn detail(status: WorkStatus) -> WorkTaskDetail {
     WorkTaskDetail {
+        retry_event: None,
         delivery: None,
         task_id: TASK.into(),
         correlation_id: "99999999-9999-4999-8999-999999999999".into(),
@@ -987,6 +988,7 @@ fn plan_event(decision: WorkPlanDecision) -> UiEvent {
 }
 fn review_summary(green: bool) -> WorkReviewSummary {
     WorkReviewSummary {
+        retry_event: None,
         auto_repair: false,
         stage: if green { "passed" } else { "awaiting_decision" }.into(),
         review_id: Some(KEY.into()),

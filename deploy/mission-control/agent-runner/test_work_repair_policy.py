@@ -24,9 +24,9 @@ from work_repair_policy import (
 class RepairPolicyValidationTest(unittest.TestCase):
     def test_defaults_and_frozen_dataclasses(self):
         policy = RepairPolicy()
-        self.assertEqual(policy.max_rounds, 3)
-        self.assertEqual(policy.max_stagnant_rounds, 2)
-        self.assertEqual(policy.max_infrastructure_retries, 1)
+        self.assertEqual(policy.max_rounds, 20)
+        self.assertEqual(policy.max_stagnant_rounds, 20)
+        self.assertEqual(policy.max_infrastructure_retries, 20)
 
         obs = RepairObservation("source")
         self.assertEqual(obs.category, "source")
@@ -159,6 +159,11 @@ class RepairPolicyValidationTest(unittest.TestCase):
         )
 
 
+def decide_legacy_repair(observation, policy=RepairPolicy(3, 2, 1)):
+    """Retain coverage of persisted pre-shared-policy repair ledgers."""
+    return decide_repair(observation, policy)
+
+
 class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
     def test_unconfirmed_cleanup_always_needs_reconcile_even_after_cancellation(self):
         cases = [
@@ -171,7 +176,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         ]
         for obs in cases:
             with self.subTest(obs=obs):
-                decision = decide_repair(obs)
+                decision = decide_legacy_repair(obs)
                 self.assertEqual(decision.disposition, "needs_reconcile")
                 self.assertEqual(decision.reason, "cleanup_unconfirmed")
                 self.assertFalse(decision.consume_round)
@@ -186,7 +191,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         ]
         for obs in cases:
             with self.subTest(obs=obs):
-                decision = decide_repair(obs)
+                decision = decide_legacy_repair(obs)
                 self.assertEqual(decision.disposition, "cancelled")
                 self.assertEqual(decision.reason, "cancelled")
                 self.assertFalse(decision.consume_round)
@@ -202,7 +207,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         ]
         for obs, expected_reason in cases:
             with self.subTest(obs=obs):
-                decision = decide_repair(obs)
+                decision = decide_legacy_repair(obs)
                 self.assertEqual(decision.disposition, "handoff")
                 self.assertEqual(decision.reason, expected_reason)
                 self.assertFalse(decision.consume_round)
@@ -216,7 +221,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         ]
         for obs in cases:
             with self.subTest(obs=obs):
-                decision = decide_repair(obs)
+                decision = decide_legacy_repair(obs)
                 self.assertEqual(decision.disposition, "revise_plan")
                 self.assertEqual(decision.reason, "scope_changed")
                 self.assertFalse(decision.consume_round)
@@ -225,7 +230,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         # Verified pass enters awaiting_review (not auto-accepted), even after final repair round.
         for completed_rounds in (0, 1, 2, 3):
             with self.subTest(completed_rounds=completed_rounds):
-                decision = decide_repair(
+                decision = decide_legacy_repair(
                     RepairObservation(
                         category="pass",
                         repair_round=completed_rounds,
@@ -237,7 +242,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
                 self.assertFalse(decision.consume_round)
 
         # Unverified pass (checks_passed=False) cannot advance to awaiting_review.
-        unverified = decide_repair(RepairObservation(category="pass", checks_passed=False))
+        unverified = decide_legacy_repair(RepairObservation(category="pass", checks_passed=False))
         self.assertEqual(unverified.disposition, "handoff")
         self.assertEqual(unverified.reason, "checks_not_passed")
         self.assertFalse(unverified.consume_round)
@@ -245,7 +250,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
     def test_wall_budget_exhaustion_hands_off_failures(self):
         for category in ("source", "infrastructure"):
             with self.subTest(category=category):
-                decision = decide_repair(
+                decision = decide_legacy_repair(
                     RepairObservation(category=category, budget_exhausted=True)
                 )
                 self.assertEqual(decision.disposition, "handoff")
@@ -253,13 +258,13 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
                 self.assertFalse(decision.consume_round)
 
     def test_infrastructure_retries_bounded_without_consuming_model_round(self):
-        first = decide_repair(
+        first = decide_legacy_repair(
             RepairObservation(category="infrastructure", repair_round=0, infrastructure_retries=0)
         )
         self.assertEqual(first, RepairDecision("retry_infrastructure", "infrastructure_retry", False))
 
         # Still allowed on the final repair round's artifact without consuming a model round.
-        on_last_round = decide_repair(
+        on_last_round = decide_legacy_repair(
             RepairObservation(category="infrastructure", repair_round=3, infrastructure_retries=0)
         )
         self.assertEqual(
@@ -268,7 +273,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         )
 
         # Exhausted after 1 retry under default policy.
-        second = decide_repair(
+        second = decide_legacy_repair(
             RepairObservation(category="infrastructure", repair_round=0, infrastructure_retries=1)
         )
         self.assertEqual(
@@ -277,7 +282,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         )
 
         # Zero retry policy hands off immediately.
-        no_retry = decide_repair(
+        no_retry = decide_legacy_repair(
             RepairObservation(category="infrastructure", infrastructure_retries=0),
             policy=RepairPolicy(max_infrastructure_retries=0),
         )
@@ -288,19 +293,19 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         # Completed rounds 0, 1, 2 are allowed when max_rounds=3 (3 repair rounds total).
         for completed in (0, 1, 2):
             with self.subTest(completed=completed):
-                decision = decide_repair(
+                decision = decide_legacy_repair(
                     RepairObservation(category="source", repair_round=completed, verified_progress=True)
                 )
                 self.assertEqual(decision, RepairDecision("repair", "source_repair", True))
 
         # After 3 completed repairs, round budget is exhausted.
-        exhausted = decide_repair(
+        exhausted = decide_legacy_repair(
             RepairObservation(category="source", repair_round=3, verified_progress=True)
         )
         self.assertEqual(exhausted, RepairDecision("handoff", "max_rounds_exhausted", False))
 
         # Policy with max_rounds=0 disables automatic repair.
-        disabled = decide_repair(
+        disabled = decide_legacy_repair(
             RepairObservation(category="source", repair_round=0),
             policy=RepairPolicy(max_rounds=0),
         )
@@ -308,25 +313,25 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
 
     def test_two_successive_stagnant_rounds_trigger_handoff_unless_verified_progress(self):
         # Initial attempt (0 repairs completed) -> repair round 1.
-        r0 = decide_repair(
+        r0 = decide_legacy_repair(
             RepairObservation(category="source", repair_round=0, stagnant_rounds=0, verified_progress=False)
         )
         self.assertEqual(r0, RepairDecision("repair", "source_repair", True))
 
         # First repair round with no verified progress (1 stagnant round < 2) -> repair round 2.
-        r1 = decide_repair(
+        r1 = decide_legacy_repair(
             RepairObservation(category="source", repair_round=1, stagnant_rounds=1, verified_progress=False)
         )
         self.assertEqual(r1, RepairDecision("repair", "source_repair", True))
 
         # Second successive repair round without verified progress (2 >= 2) -> handoff.
-        r2_stagnant = decide_repair(
+        r2_stagnant = decide_legacy_repair(
             RepairObservation(category="source", repair_round=2, stagnant_rounds=2, verified_progress=False)
         )
         self.assertEqual(r2_stagnant, RepairDecision("handoff", "no_progress", False))
 
         # Independently verified progress resets stagnation and allows the remaining round.
-        r2_progress = decide_repair(
+        r2_progress = decide_legacy_repair(
             RepairObservation(category="source", repair_round=2, stagnant_rounds=2, verified_progress=True)
         )
         self.assertEqual(r2_progress, RepairDecision("repair", "source_repair", True))
@@ -352,7 +357,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         open_after_r1 = {finding_a_repeat}
         verified_r1 = bool(open_before - open_after_r1)
         self.assertFalse(verified_r1)
-        d1 = decide_repair(
+        d1 = decide_legacy_repair(
             RepairObservation(
                 category="source",
                 repair_round=1,
@@ -365,7 +370,7 @@ class DecideRepairPrecedenceAndBoundaryTest(unittest.TestCase):
         open_after_r2 = {finding_a_repeat}
         verified_r2 = bool(open_after_r1 - open_after_r2)
         self.assertFalse(verified_r2)
-        d2 = decide_repair(
+        d2 = decide_legacy_repair(
             RepairObservation(
                 category="source",
                 repair_round=2,
@@ -451,7 +456,7 @@ class PureModuleNoIoTest(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported_roots.add(node.module.split(".")[0])
 
-        allowed_pure_stdlib = {"__future__", "dataclasses", "hashlib", "json", "re"}
+        allowed_pure_stdlib = {"__future__", "dataclasses", "hashlib", "json", "re", "work_retry_policy"}
         self.assertTrue(
             imported_roots.issubset(allowed_pure_stdlib),
             f"unexpected imports in pure policy module: {sorted(imported_roots - allowed_pure_stdlib)}",

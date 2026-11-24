@@ -73,7 +73,7 @@ def validate_feedback(value):
         if not isinstance(value[name],str) or not SHA.fullmatch(value[name]):
             raise ValueError('Invalid feedback source')
     if (type(value['source_revision']) is not int or not 1<=value['source_revision']<2**53
-            or type(value['round']) is not int or not 0<=value['round']<=32
+            or type(value['round']) is not int or not 0<=value['round']<=2**32-1
             or not isinstance(value['disposition'],str) or value['disposition'] not in DISPOSITIONS
             or not isinstance(value['agent_profile'],str) or not IDENTIFIER.fullmatch(value['agent_profile'])):
         raise ValueError('Invalid feedback authority')

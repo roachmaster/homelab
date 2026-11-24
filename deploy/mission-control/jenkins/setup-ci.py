@@ -140,7 +140,7 @@ def qualify_remoting(path, expected_sha256, account):
 
 
 def selected_verification_profile(value):
-    if not isinstance(value, str) or value not in {'forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2'}:
+    if not isinstance(value, str) or value not in {'forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'}:
         raise ValueError('Unsupported Jenkins verification profile')
     return value
 
@@ -160,7 +160,7 @@ def render_pipeline_config(*, operator, spool, state_root, toolchain, registry, 
         'node_modules': str(modules),
         'projects': ['homelab'],
         'verification_profile': verification_profile,
-        'portal_artifact_export': verification_profile == 'forge-sdlc-jenkins-v2',
+        'portal_artifact_export': verification_profile in {'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'},
         'timeout_seconds': DEFAULT_TIMEOUT_SECONDS,
         'verifier_sha256': verifier_sha256,
         'cargo_cache': {
@@ -211,7 +211,7 @@ def native_installation_plan(pipeline, verifier, *, verification_profile=None):
     """Pure selection: legacy helper/config/job bytes are never changed."""
     if (not isinstance(pipeline, dict) or type(pipeline.get('version')) is not int or pipeline['version'] != 1
             or pipeline.get('build_user') != 'forge_ci'
-            or pipeline.get('verification_profile') not in {'forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2'}
+            or pipeline.get('verification_profile') not in {'forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'}
             or pipeline.get('projects') != ['homelab']
             or type(pipeline.get('require_main_ancestor', False)) is not bool):
         raise ValueError('Expected the existing typed isolated CI pipeline')
@@ -221,11 +221,11 @@ def native_installation_plan(pipeline, verifier, *, verification_profile=None):
     native = verifier.replace(original, b"CONFIG = Path('/etc/forge-ci/native-pipeline.json')")
     digest = hashlib.sha256(native).hexdigest()
     profile = pipeline['verification_profile'] if verification_profile is None else verification_profile
-    if profile not in {'forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2'}:
+    if profile not in {'forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'}:
         raise ValueError('Unsupported Jenkins verification profile')
     selected = {**pipeline, 'verification_profile': profile, 'require_main_ancestor': True,
-                'portal_artifact_export': profile == 'forge-sdlc-jenkins-v2', 'verifier_sha256': digest}
-    if profile == 'forge-sdlc-jenkins-v2':
+                'portal_artifact_export': profile in {'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'}, 'verifier_sha256': digest}
+    if profile in {'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'}:
         selected['results_root'] = str(NATIVE_RESULTS)
     return {'helper': native, 'helper_sha256': digest, 'pipeline': selected,
             'release': BASE / ('native-verifier-' + digest[:16]),
@@ -266,7 +266,7 @@ def execute_native(client_path, operator, *, verification_profile=None):
     # Root-controlled fixed paths only. Existing remoting, node, legacy job,
     # pipeline.json, wrapper and external delivery configuration are untouched.
     directory(PRIVATE, mode=0o700)
-    if selected['pipeline']['verification_profile'] == 'forge-sdlc-jenkins-v2':
+    if selected['pipeline']['verification_profile'] in {'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'}:
         directory(NATIVE_RESULTS, group=user.pw_gid, mode=0o750)
     directory(selected['release'])
     install(selected['release'] / 'verify-candidate.py', selected['helper'], mode=0o755)
@@ -402,7 +402,7 @@ if __name__ == '__main__':
     parser.add_argument('--operator', default='lrocha')
     parser.add_argument('--native-only', action='store_true',
                         help='Add the separate branch-first job; preserve the installed legacy executor/job')
-    parser.add_argument('--verification-profile', choices=('forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2'),
+    parser.add_argument('--verification-profile', choices=('forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'),
         help='Select a new version explicitly; native-only otherwise inherits its installed profile')
     options = parser.parse_args()
     if not options.execute:

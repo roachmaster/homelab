@@ -192,6 +192,50 @@ class PeerContextTest(unittest.TestCase):
                 with self.subTest(field=field), self.assertRaises(PeerReviewError):
                     validate_workflow_feedback(changed, envelope, plan_context=context, feedback_context=feedback)
 
+    def test_linked_child_later_same_task_code_revision_uses_current_review(self):
+        with TemporaryDirectory(prefix="forge-child-feedback-") as root:
+            _config, value, _workspace, _ = fixture(root)
+            subject = target("code")
+            subject.update(source_task_id=value["task_id"], author_profile=value["agent_profile"],
+                           reviewer_profile="independent-critic")
+            parsed = bind(subject)
+            response = json.dumps(verdict(parsed, "revise"))
+            parent = str(uuid4())
+            original_parent_review = str(uuid4())
+            self.assertNotEqual(original_parent_review, subject["review_id"])
+            value.update(mode="implement", parent_task_id=parent,
+                workflow_id=subject["workflow_id"], workflow_feedback_review_id=subject["workflow_review_id"],
+                workflow_feedback_sha256=hashlib.sha256(response.encode()).hexdigest(),
+                repair_source_review_id=original_parent_review)
+            value.pop("workflow_review_id")
+            value.pop("review_target_sha256")
+            previous = {"parent_attempt_id": subject["source_attempt_id"],
+                "parent_result_sha256": subject["source_result_sha256"], "candidate_commit": subject["candidate_commit"],
+                "gate_manifest_sha256": subject["gate_manifest_sha256"]}
+            content = json.dumps(previous).encode()
+            feedback = ReviewContext(content, hashlib.sha256(content).hexdigest(), str(uuid4()), ())
+            plan = {"plan_attempt_id": subject["approved_plan"]["attempt_id"],
+                    "plan_sha256": subject["approved_plan"]["sha256"]}
+            envelope = {"target_json": json.dumps(subject), "target_sha256": parsed["_context_sha256"],
+                        "verdict_json": response, "verdict_sha256": value["workflow_feedback_sha256"]}
+            store = Mock()
+            store.read_workflow_feedback.return_value = envelope
+            provider = PeerReviewContextProvider(store)
+            self.assertEqual(provider.acquire_feedback(value, plan_context=plan, feedback_context=feedback).content,
+                             response.encode())
+            # A child retains its original parent/repair-source identity while a
+            # later review is bound to the child itself. Ordinary same-task
+            # feedback with no parent also retains its existing semantics.
+            ordinary = {**value, "parent_task_id": None, "repair_source_review_id": None}
+            self.assertEqual(provider.acquire_feedback(ordinary, plan_context=plan, feedback_context=feedback).content,
+                             response.encode())
+            for field in ("parent_attempt_id", "parent_result_sha256", "candidate_commit", "gate_manifest_sha256"):
+                changed = {**previous, field: str(uuid4()) if field == "parent_attempt_id" else "0" * len(previous[field])}
+                damaged = json.dumps(changed).encode()
+                altered = ReviewContext(damaged, hashlib.sha256(damaged).hexdigest(), feedback.feedback_id, ())
+                with self.subTest(field=field), self.assertRaises(PeerReviewError):
+                    provider.acquire_feedback(value, plan_context=plan, feedback_context=altered)
+
     def test_exact_context_is_bound_readonly_without_author_session_reuse(self):
         with TemporaryDirectory(prefix="forge-peer-context-") as root:
             config, value, workspace, envelope = fixture(root, "code")

@@ -3405,7 +3405,7 @@ async function agentsJourney() {
       await check(page.locator('#agents-workflow-phase')).toHaveText(phaseLabel);
     }
     await check(page.locator('#agents-delivery')).toBeHidden();
-    for(const [stage,label] of [['queued','Main verification queued'],['running','Verifying main'],['repair','Repair queued'],['deployed','Deployed']]){
+    for(const [stage,label] of [['queued','Main verification queued'],['running','Verifying main'],['repair','Fixing tests · Retry 1/20'],['deployed','Deployed']]){
       relay.setDelivery(workflowTaskId,stage);
       await page.locator('#agents-refresh').click();
       await check(page.locator('#agents-workflow-phase')).toHaveText('Merged');
@@ -3422,7 +3422,7 @@ async function agentsJourney() {
       }
       await page.setViewportSize({width:390,height:844});
       if(stage==='repair'){
-        await check(page.locator('#agents-delivery-repair-summary')).toContainText('Round 1/20');
+        await check(page.locator('#agents-delivery-repair-summary')).toContainText('Fixing tests · Retry 1/20');
         await check(page.locator('#agents-delivery-repair-task')).toBeEnabled();
         await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-branch-id="delivery_repair"]')).toContainText('Round 1/20');
       }
@@ -3598,6 +3598,7 @@ async function agentsJourney() {
     await page.locator('#agents-new').click();
     await page.locator('#agents-profile').selectOption('muse-db-primary');
     await check(page.locator('#agents-compose-help')).toContainText('advance this assignment automatically');
+    await check(page.locator('#agents-assignment-policy')).toContainText('Each failure event allows up to 20 retries');
     await page.locator('#agents-prompt').fill('Run the external database workflow through independent review and verified merge.');
     await page.locator('#agents-criteria').fill('Preserve the envelope history and source receipts with no manual approvals.');
     await page.locator('#agents-send').click();
@@ -3610,12 +3611,26 @@ async function agentsJourney() {
       'external Muse workflow renders Code review before Checks without fabricating Publish/Hosted',
     );
     const externalWorkflowTask=relay.latestWorkflowTaskId;
+    relay.retryEvent(externalWorkflowTask,'compilation',20,{total:20});await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-retry-event')).toHaveText('Fixing compilation · Retry 20/20');
+    relay.retryEvent(externalWorkflowTask,'tests',1,{total:21});await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-retry-event')).toHaveText('Fixing tests · Retry 1/20');
+    await check(page.locator('#agents-workflow-revisions')).toContainText('Code revisions 21');
+    relay.retryEvent(externalWorkflowTask,'tests',20,{total:40});await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-retry-event')).toHaveText('Fixing tests · Retry 20/20');
+    await check(page.locator('#agents-workflow-revisions')).toContainText('Code revisions 40');
+    relay.retryEvent(externalWorkflowTask,'tests',20,{status:'resolved',total:40});
     for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
       relay.workflowPhase(externalWorkflowTask,phase);await page.locator('#agents-refresh').click();
       await check(page.locator('#agents-workflow-phase')).toHaveText(label);
+<<<<<<< HEAD
       if(phase==='plan_revision'){
         await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-branch-id="branch-plan-revision"]')).toBeVisible();
       }
+=======
+      await check(page.locator('#agents-workflow-revisions')).toContainText('Code revisions 40');
+      assert.equal((await page.locator('#agents-workflow-revisions').textContent()).includes('/20'),false,'lifetime revision totals are not an event budget');
+>>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
       if(phase==='code_review'){
         await check(page.locator('#agents-workflow-reviewer')).toBeVisible();
         const linkedEvent=page.locator('#agents-history > li').filter({hasText:'Trusted fixture workflow: code_review.'});

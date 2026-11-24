@@ -87,12 +87,46 @@ class VerificationReport:
     findings: tuple
     evidence_digest: str
     cleanup_confirmed: bool
+    # Supplied only after validating a protected, command-scoped CI receipt.
+    # Diagnostic stdout and model text never construct this witness.
+    retry_observation: dict | None = None
 
     def to_dict(self):
-        return {"checks_passed": self.checks_passed, "category": self.category, "code": self.code,
+        value = {"checks_passed": self.checks_passed, "category": self.category, "code": self.code,
                 "summary": self.summary, "toolchain": self.toolchain, "checks": list(self.checks),
                 "findings": list(self.findings), "evidence_digest": self.evidence_digest,
                 "cleanup_confirmed": self.cleanup_confirmed}
+        if self.retry_observation is not None:
+            value["retry_observation"] = dict(self.retry_observation)
+        return value
+
+
+def protected_retry_observation(plan, receipt, receipt_digest):
+    """Bind retry identity to directly executed protected CI phases.
+
+    The caller has already verified the protected file, request/source identity
+    and cleanup. No diagnostic output participates in this classification.
+    """
+    if plan.profile != 'forge-sdlc-jenkins-v3':
+        return None
+    from work_ci_phases import event_stage_evidence
+    if (not isinstance(receipt, dict) or receipt.get('cleanup_confirmed') is not True
+            or receipt.get('verification_profile') != plan.profile
+            or type(receipt.get('result_version', receipt.get('version'))) is not int
+            or receipt.get('result_version', receipt.get('version')) != 3
+            or not isinstance(receipt_digest, str)
+            or re.fullmatch(r'[0-9a-f]{64}', receipt_digest) is None):
+        raise ValueError('Retry stage lacks a protected receipt binding')
+    expected = event_stage_evidence(plan.scope, receipt.get('checks'), receipt.get('failure'))
+    if any(receipt.get(key) != value for key, value in expected.items()):
+        raise ValueError('Protected retry stage changed')
+    failed = next((row for row in expected['phase_results'] if row['returncode'] != 0), None)
+    return {'failure_kind': expected['failure_kind'],
+        'passed_kinds': list(expected['passed_kinds']),
+        'phase_id': failed['phase_id'] if failed is not None else '',
+        'passed_phase_ids': [] if receipt.get('failure') == 'source_changed_during_checks' else
+            [row['phase_id'] for row in expected['phase_results'] if row['returncode'] == 0],
+        'stage_evidence_digest': receipt_digest}
 
 
 def project_verification(commands, *, code, returncode, output, evidence_digest, cleanup_confirmed, metadata=None):

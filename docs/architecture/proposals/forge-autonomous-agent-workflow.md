@@ -46,6 +46,29 @@ workers do not reach into global registries. The API process hosts a DB-only
 coordinator; existing coding and publication workers retain their separate
 process ownership. Construction stays effect-free until validated creation.
 
+### Context-digest transcription recovery
+
+Additive schema33 and the factory-selected `SupersedingReviewProvider` support a
+narrow automatic recovery: the reviewer returned a wrong `context_sha256`, while
+every other identity, decision, finding and required attestation passes the strict
+verdict contract. A pure classifier validates an in-memory counterfactual copy;
+that copy is never stored, accepted or used to authorize an implementation.
+Malformed JSON, another wrong identity, incomplete approval or an invalid source
+retain their existing guarded escalation behavior.
+
+The provider validates the exact stopped and reconciled source/reviewer attempts,
+approved Plan, protected candidate/check receipt, current grants and policy. It
+appends a new immutable review generation and queues an ordinary independent
+reviewer task through the existing coordinator. The prior target, result and
+handoff stay intact. One live review per immutable source and one successor per
+review prevent duplicate or raced admissions. The root review UUID owns the
+logical reviewer-correction event, so replacement UUIDs share its twenty-attempt
+budget. Only a genuinely valid subsequent verdict resolves that event. Legacy
+context-digest handoffs are discovered by the same normal coordinator after the
+compatible schema/runtime is activated. Quota, cancellation, permission and source
+drift remain fences, and recovery never fabricates a source approval or reruns an
+author command.
+
 The selected supervisor owns execution isolation. Codex 0.160's nested
 Bubblewrap sandbox cannot initialize its loopback interface in Forge's existing
 capability-free process scope. Policy 7 therefore selects Codex's supported
@@ -447,3 +470,21 @@ verified progress resets the ordinary stagnation counter. The newly corrected
 candidate can still pass fresh fixed checks and independent review and proceed
 through the existing exact-head hosted checks and trusted merge. The owner turn
 is never an approval, successful build, stopped process or merge receipt.
+
+# Valid peer feedback on an existing linked child
+
+The coordinator selects `PeerFeedbackRecoveryFactory` separately from the build
+feedback consumer. It recovers the specific stopped setup failure in which a
+genuine current peer revision targets the linked child itself while that child
+still retains its original parent-review identity. The unchanged build consumer
+continues to require failed checks and trusted build evidence.
+
+Both consumers share the exact stopped/reconciled receipt, immutable packet,
+source, policy, grant, readiness and normal Resume engine. Peer recovery also
+requires the actual decided independent code verdict, its stopped result, the
+approved Plan, and successful validation of the complete preserved feedback.
+The server-issued recovery note binds the newest stopped setup attempt to the
+older immutable feedback parent without changing either. The same feedback
+event retains its twenty attempts across consumer action prefixes; duplicate or
+raced admission emits one recovery and one Resume. A new worker claim must pass
+both normal feedback providers before the model runs.

@@ -4,8 +4,22 @@ Updated 23 November 2026.
 Active navigation is **Agents, Workbench, Home and Design**,
 with Agents as the default admitted view. Chat is temporarily inactive;
 Mail remains retired. Their PostgreSQL history and supported inert local
+<<<<<<< HEAD
 snapshots remain preserved. The current browser contract is **ABI15**; the
+=======
+snapshots remain preserved. The current source browser contract is **ABI15**; the
+>>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
 native HTTP protocol remains version1.
+
+The retry implementation uses **20 attempts for each unresolved failure event**
+across native and external agents. Compilation, test phases, reviews and feedback
+delivery have independent counters. Migration31 records event identity and atomic
+admissions; task and lineage totals may exceed20. Passing an independently
+verified phase closes its event; builds, commits and agent handoffs never reset
+it. The portal shows event progress separately from revision history. A stopped
+legacy plan can adopt its actual spent retries and continue with its retained
+plan and review. This source description is not a live activation receipt;
+the delivery panel and protected rollout records establish the deployed version.
 
 The retained pre-delivery live checkpoint is main `95651a5` (tree `6d380c5a`) on
 23 November 2026. Its Rust/UI artifacts and native/browser qualification retain
@@ -23,7 +37,7 @@ had **no Studio relay**, and the `homelab` source project had neither managed-wr
 opt-in nor write grants. Protected activation and bridge receipts are retained
 under `/var/lib/forge-provisioning/portal-web-activation/operator-main-release/`.
 
-The current delivery implementation adds migration29, unified verification,
+The current delivery implementation adds migrations29–31, unified verification,
 automatic normal-policy repairs, observed-main capture and guarded web deployment.
 The Agents project/task delivery panel and protected Root receipts are the runtime
 authority for the latest source, checks and activation. This historical checkpoint
@@ -63,8 +77,13 @@ Earlier observations below are dated history, not current readiness claims.
 | Agents | Catalog-backed autonomous assignments with configured independent author/reviewer roles, bounded revisions/repairs, exact-head checks and trusted automatic publication/merge; legacy assignments retain their manual lifecycle. Task/usage cards use semantic badges, readable times, precise token metrics and scoped refresh. | Independent Work/Usage grants and supervised workers remain required. Quota blocks never automatically rotate accounts or purchase credits. Runtime activation is recorded separately from source UI delivery. |
 | Grok provider | Pinned native 1.0.92 adapter, explicit fresh sessions, bound terminal cache accounting, instruction-only project trust and owned credential cleanup. Typed cards render supplied catalog/usage data. | Execution defaults off in API and worker config. Usage-only visibility reports Not reported; no quota polling, inferred allowance, paid fallback or change to Gemini/Codex roles. Historical M18/P9 qualification remains distinct from schema26/P10/ABI13 source support and separately verified runtime enablement. |
 | Muse database workflow | A scoped `muse-db-primary` external runner authors Plan/Implement through PostgreSQL. The API coordinator queues actual independent native Codex reviews, bounded revisions and trusted Jenkins delivery; the root envelope displays phase, reviewer links and verified candidate/merge receipts. | Muse owns its process. No Mission Control Muse CLI or email runner is used. External artifacts supply no native attempt, stop proof or inferred allowance. Activation requires the matching schema22 scopes, `external_reviews:true`, delivery service and Jenkins job. |
+<<<<<<< HEAD
 | Main delivery | Negotiated read-only projections keep merged history separate from main verification, bounded repair and release. Compact semantic pills, relative times and source disclosures appear on task rows/readers; project delivery also covers observed main changes without a fabricated task. | The native relay selects `Forge-Delivery-Version: 1`; legacy responses may omit delivery. A main pass is not deployment: the Deployed label requires a release receipt. ABI14 host/assets/WASM must be activated together with matching backend support. |
 | Task envelopes and history | Every task has an immutable correlation UUID; every event has its own UUID and derives correlation from its owning task. One task row opens a visual event-stream stage diagram (current stage, workflow-specific path, loops/halts, post-merge delivery and bounded observed transitions) alongside paged lifecycle/progress history with exact identities in disclosures. | Rust retains one 50-event page, a 256KiB summary budget, 64 cursor bookmarks and a bounded 32-hop monotonic stage trace. Native current-attempt milestones keep their separate 21-entry bound. Foreign attempt/assignment/workflow summaries are omitted. |
+=======
+| Main delivery | Negotiated projections separate merged history, main verification, per-event repairs and release. Project delivery covers observed main changes without a fabricated task. | The native relay selects delivery and retry-event version1 headers. A main pass is not deployment: Deployed requires a healthy release receipt. ABI15 host/assets/WASM must be activated with matching backend support. |
+| Task envelopes and history | Every task has an immutable correlation UUID; every event has its own UUID and derives correlation from its owning task. One task row opens paged lifecycle/progress history with exact identities in disclosures. | Rust retains one 50-event page, a 256KiB summary budget and 64 cursor bookmarks. Native current-attempt milestones keep their separate 21-entry bound. Foreign attempt/assignment/workflow summaries are omitted. |
+>>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
 | Editing | Direct textarea editing, Undo and status reconciliation are implemented for admitted managed projects. Chat questions and model-generated proposal controls are inactive; backend contracts remain preserved. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. They were not enabled for the last checked live `homelab` project. A rendered button is not write authority. |
 
 The current [implementation captures](/design/wireframes) use disposable acceptance fixtures. Some fixtures contain partial inspection results or mask editable controls. Chat and Mail wireframes are dated historical references; they do not show the current active navigation. All captures use controlled data, not private operator data.

@@ -5,6 +5,7 @@ it never imports this source file from a candidate checkout.
 """
 from dataclasses import dataclass
 import re
+from work_ci_phases import EVENT_PROFILE, event_phases_for_scope
 
 LEGACY_PROFILE = 'forge-sdlc-jenkins-v1'
 SCOPED_PROFILE = 'forge-sdlc-jenkins-v2'
@@ -59,6 +60,29 @@ V2_PROTECTED_PATHS = frozenset({
     'deploy/mission-control/jenkins/verify-candidate.py',
     'deploy/mission-control/jenkins/setup-ci.py',
 })
+V3_PROTECTED_PATHS = frozenset({
+    'deploy/mission-control/agent-runner/work_ci_phases.py',
+    'deploy/mission-control/agent-runner/work_retry_policy.py',
+    'deploy/mission-control/agent-runner/work_retry_events.py',
+    'deploy/mission-control/agent-runner/work_reviewer_correction.py',
+    'deploy/mission-control/agent-runner/work_superseding_review.py',
+    'deploy/mission-control/agent-runner/work_retry_continuation.py',
+    'deploy/mission-control/agent-runner/work_context_recovery.py',
+    'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py',
+    'deploy/mission-control/sql/management/verify-retry-events.sql',
+    'deploy/mission-control/sql/management/verify-delivery-lineage.sql',
+    'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
+})
+
+
+def protected_event_policy_path(path):
+    return (path in V3_PROTECTED_PATHS
+        or path.startswith('deploy/mission-control/sql/migrations/0031_')
+        or path.startswith('deploy/mission-control/sql/fragments/0031_')
+        or path.startswith('deploy/mission-control/sql/migrations/0032_')
+        or path.startswith('deploy/mission-control/sql/fragments/0032_')
+        or path.startswith('deploy/mission-control/sql/migrations/0033_')
+        or path.startswith('deploy/mission-control/sql/fragments/0033_'))
 
 
 def scope_kind(scope):
@@ -77,10 +101,11 @@ class CiGatePlan:
     checks: tuple
     labels: tuple
     logical_checks: tuple
+    phases: tuple = ()
 
     @property
     def result_version(self):
-        return 1 if self.profile == LEGACY_PROFILE else 2
+        return 1 if self.profile == LEGACY_PROFILE else 3 if self.profile == EVENT_PROFILE else 2
 
     @property
     def coverage(self):
@@ -97,7 +122,8 @@ class CiGatePlan:
             return (('.github/workflows/rust.yml', 'Rust CI', 'check'),
                     ('.github/workflows/rust.yml', 'Rust CI', 'pr-fast-gate'),
                     ('.github/workflows/ide-ui-browser.yml', 'IDE browser acceptance', 'real-browser'))
-        return tuple(('jenkins/' + self.scope, 'Forge ' + self.scope + ' CI v2', name)
+        version = 3 if self.profile == EVENT_PROFILE else 2
+        return tuple(('jenkins/' + self.scope, 'Forge ' + self.scope + ' CI v' + str(version), name)
                      for name in self.logical_checks)
 
 
@@ -110,6 +136,11 @@ class CiGateContract:
         if self.profile == LEGACY_PROFILE:
             return CiGatePlan(self.profile, kind, LEGACY_CHECKS,
                 ('make ci', 'make ui-qa', 'unittest'), ('check', 'real-browser', 'pr-fast-gate'))
+        if self.profile == EVENT_PROFILE:
+            phases = event_phases_for_scope(branch_scope)
+            logical = ('check','real-browser','backend-suites') if kind == 'main' else ('source-preflight','check','in-memory-backend')
+            return CiGatePlan(self.profile,kind,tuple(p.argv for p in phases),
+                tuple(p.phase_id for p in phases),logical,phases)
         if kind == 'main':
             return CiGatePlan(self.profile, kind, SCOPED_MAIN_CHECKS,
                 ('source preflight and make ci', 'make ui-qa', 'all backend suites'),
@@ -122,12 +153,15 @@ class CiGateContract:
     def cache_checks(self):
         # The compiled-code identity contains the entire versioned graph.
         # Cache storage itself remains isolated by its validated branch scope.
+        if self.profile == EVENT_PROFILE:
+            return tuple(p.argv for scope in ('branch/cache','main') for p in event_phases_for_scope(scope))
         return LEGACY_CHECKS if self.profile == LEGACY_PROFILE else SCOPED_BRANCH_CHECKS + SCOPED_MAIN_CHECKS
 
     def protects(self, path, legacy_predicate):
         return (legacy_predicate(path)
                 or path == 'deploy/mission-control/agent-runner/work_ci_contract.py'
-                or self.profile == SCOPED_PROFILE and path in V2_PROTECTED_PATHS)
+                or self.profile == EVENT_PROFILE and protected_event_policy_path(path)
+                or self.profile in {SCOPED_PROFILE,EVENT_PROFILE} and path in V2_PROTECTED_PATHS)
 
 
 @dataclass(frozen=True)
@@ -135,7 +169,7 @@ class CiGateContractFactory:
     profile: str = LEGACY_PROFILE
 
     def __post_init__(self):
-        if not isinstance(self.profile, str) or self.profile not in {LEGACY_PROFILE, SCOPED_PROFILE}:
+        if not isinstance(self.profile, str) or self.profile not in {LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE}:
             raise ValueError('Unsupported Jenkins verification profile')
 
     def create(self):

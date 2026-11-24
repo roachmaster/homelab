@@ -3,8 +3,10 @@ use super::{valid_chat_id, valid_chat_text};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 mod delivery;
+mod retry;
 mod workflow;
 pub use delivery::*;
+pub use retry::*;
 pub use workflow::*;
 
 pub const MAX_WORK_PROMPT_BYTES: usize = 8192;
@@ -12,6 +14,7 @@ pub const MAX_WORK_CRITERIA_BYTES: usize = 2048;
 pub const MAX_WORK_RESULT_PAGE_BYTES: usize = 16384;
 pub const MAX_WORK_RESULT_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_WORK_INTEGER: u64 = 9_007_199_254_740_991;
+pub const MAX_AGENT_RETRIES: u32 = 20;
 
 pub fn valid_work_name(value: &str, max: usize) -> bool {
     !value.is_empty()
@@ -198,6 +201,8 @@ impl WorkFinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkReviewSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_event: Option<WorkRetryEvent>,
     #[serde(default)]
     pub auto_repair: bool,
     pub stage: String,
@@ -236,9 +241,12 @@ pub struct WorkReviewSummary {
 }
 impl WorkReviewSummary {
     pub fn is_valid(&self) -> bool {
-        valid_work_name(&self.stage, 64)
-            && self.max_rounds <= 10
-            && self.round <= self.max_rounds
+        self.retry_event
+            .as_ref()
+            .is_none_or(WorkRetryEvent::is_valid)
+            && valid_work_name(&self.stage, 64)
+            && self.max_rounds <= MAX_AGENT_RETRIES
+            && (self.max_rounds != 0 || self.round == 0 || self.retry_event.is_some())
             && self.review_id.as_deref().is_none_or(valid_chat_id)
             && self.feedback_id.as_deref().is_none_or(valid_chat_id)
             && self.repair_task_id.as_deref().is_none_or(valid_chat_id)
@@ -672,6 +680,8 @@ impl WorkCatalog {
 #[serde(deny_unknown_fields)]
 pub struct WorkTaskSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_event: Option<WorkRetryEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery: Option<WorkDelivery>,
     pub task_id: String,
     pub correlation_id: String,
@@ -697,7 +707,10 @@ pub struct WorkTaskSummary {
 }
 impl WorkTaskSummary {
     pub fn is_valid(&self) -> bool {
-        self.delivery.as_ref().is_none_or(WorkDelivery::is_valid)
+        self.retry_event
+            .as_ref()
+            .is_none_or(WorkRetryEvent::is_valid)
+            && self.delivery.as_ref().is_none_or(WorkDelivery::is_valid)
             && valid_chat_id(&self.task_id)
             && valid_chat_id(&self.correlation_id)
             && valid_work_name(&self.project_alias, 64)
@@ -754,6 +767,8 @@ impl WorkResultManifest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkTaskDetail {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_event: Option<WorkRetryEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery: Option<WorkDelivery>,
     pub task_id: String,
@@ -815,6 +830,7 @@ impl WorkExternalResult {
 impl WorkTaskDetail {
     pub fn summary(&self) -> WorkTaskSummary {
         WorkTaskSummary {
+            retry_event: self.retry_event.clone(),
             delivery: self.delivery.clone(),
             task_id: self.task_id.clone(),
             correlation_id: self.correlation_id.clone(),

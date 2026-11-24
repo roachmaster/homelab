@@ -5,6 +5,7 @@ import hashlib
 import json
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 from uuid import UUID,uuid4
 import psycopg2
 from queue_store import Rejected
@@ -23,9 +24,13 @@ class AutonomousWorkflowTest(unittest.TestCase):
  def setUpClass(cls):
   cls.cluster=DisposablePostgresCluster().start();cls.addClassCleanup(cls.cluster.stop)
  def setUp(self):
+  self.cluster.reset_retry_events()
   self.cluster.admin_exec('TRUNCATE forge_agent.coding_tasks,forge_agent.coding_worker_grants,forge_agent.coding_worker_readiness CASCADE',owner=False)
-  self.config=replace(make_v2_config(),project_workflows={'homelab':WorkflowPolicy('agy-v2','codex-v2')})
-  self.service=WorkServiceFactory(self.config,lambda:self.cluster.connect('forge_agent')).create()
+  self.config=replace(make_v2_config(),project_workflows={'homelab':WorkflowPolicy('agy-v2','codex-v2',max_plan_revisions=3)})
+  # These historical fixtures keep their original finite allowance; shared-policy
+  # migration/boundary tests select twenty explicitly.
+  self.config=replace(self.config,repair_policy={**dict(self.config.repair_policy),'max_rounds':3,'max_stagnant_rounds':2,'max_infrastructure_retries':1})
+  self.service=WorkServiceFactory(self.config,lambda:self.cluster.connect('forge_agent'),retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
   self.coordinator=self.service.workflow_worker
   self.db=WorkerDB(lambda:self.cluster.connect('forge_coding_worker'),'mission-control',reconcile_connect_factory=lambda:self.cluster.connect('forge_coding_reconciler'))
   self.incarnation=str(uuid4())

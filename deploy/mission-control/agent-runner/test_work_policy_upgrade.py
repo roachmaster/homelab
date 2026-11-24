@@ -1,6 +1,7 @@
 """Disposable PostgreSQL policy-version upgrade and immutable receipt regressions."""
 
 from contextlib import closing
+from dataclasses import replace
 import hashlib
 from pathlib import Path
 import re
@@ -177,8 +178,8 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
             cursor.execute(statement, parameters)
             return cursor.fetchall()
 
-    def store(self, cluster):
-        return WorkStore("mission-control", ("homelab",), lambda: cluster.connect("forge_agent"))
+    def store(self, cluster, *, repair_policy=None):
+        return WorkStore("mission-control", ("homelab",), lambda: cluster.connect("forge_agent"),repair_policy=repair_policy)
 
     def service(self, cluster):
         return WorkServiceFactory(make_v2_config(), lambda: cluster.connect("forge_agent")).create()
@@ -226,7 +227,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
             # seeds that historic admission surface; the migrated replay below
             # deliberately exercises the current production store.
             if version>=15:
-                return self.store(cluster).submit(**vars(command),resolve_recipe=lambda:self.old_recipe(policy))
+                return self.store(cluster,repair_policy={'max_rounds':3,'max_stagnant_rounds':2,'max_infrastructure_retries':1}).submit(**vars(command),resolve_recipe=lambda:self.old_recipe(policy))
             recipe=self.old_recipe(policy);task_id=uuid4()
             receipt={'task_id':str(task_id),'project_alias':'homelab','revision':1,'status':'queued','recipe_digest':recipe.digest}
             intent=_submit_intent_digest(project_alias=command.project_alias,base_revision=command.base_revision,mode=command.mode,
@@ -328,7 +329,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 29)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 33)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -467,7 +468,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 29)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 33)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -527,7 +528,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 29)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 33)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -587,7 +588,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 29)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 33)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -968,7 +969,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
     def test_fresh_reapply_roles_and_untrusted_event_storage_have_no_coding_effect(self):
         self.cluster.apply_and_verify()
         self.event()
-        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(29,)])
+        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(33,)])
         self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_hosted_checks"), [(0,)])
         self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_workflow_actions"), [(0,)])
         for role in ("forge_gpu_worker", "forge_coding_worker", "forge_coding_reconciler"):
@@ -1057,7 +1058,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 self.execute("CREATE ROLE muse_events LOGIN NOINHERIT", cluster=cluster)
                 result = cluster._run("psql", "-h", cluster.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1",
                     "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", SQL_DIR/"management/grant-muse-read-access.sql")
-                service = WorkServiceFactory(make_v2_config(), lambda:cluster.connect("forge_agent")).create()
+                service = WorkServiceFactory(replace(make_v2_config(),repair_policy={'max_rounds':3,'max_stagnant_rounds':2,'max_infrastructure_retries':1}), lambda:cluster.connect("forge_agent")).create()
                 admitted = service.submit(make_submit(idempotency_key="before-jenkins27"))
                 previous_tables = [row[0] for row in self.execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND relname<>'schema_migrations' ORDER BY relname", cluster=cluster)]
                 # Compare the complete pre-upgrade inventory. New M27/M28
@@ -1065,6 +1066,12 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 old_relations = [row[0] for row in self.execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace ORDER BY relname", cluster=cluster)]
                 old_functions = [row[0] for row in self.execute("SELECT p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') ORDER BY 1", cluster=cluster)]
                 def snapshot():
+                    # M31 pins the complete replacement definitions separately;
+                    # reverse only its exact known native source amendments when
+                    # comparing this M26 historical function inventory.
+                    definition="pg_get_functiondef(p.oid)"
+                    if self.execute("SELECT to_regprocedure('forge_agent._retry_legacy_source(oid,text)') IS NOT NULL",cluster=cluster)[0][0]:
+                        definition="replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,p.prosrc))"
                     return (
                         self.execute("SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=26 ORDER BY version", cluster=cluster),
                         {table:self.execute("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM forge_agent."+table+" t", cluster=cluster) for table in previous_tables},
@@ -1072,7 +1079,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                         self.execute("SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r", cluster=cluster),
                         self.execute("SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid", cluster=cluster),
                         self.execute("SELECT relname,relowner,relacl FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname=ANY(%s) ORDER BY relname", (old_relations,), cluster=cluster),
-                        self.execute("SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),pg_get_functiondef(p.oid),p.proowner,p.proacl FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') AND p.oid::regprocedure::text=ANY(%s) ORDER BY n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)", (old_functions,), cluster=cluster),
+                        self.execute("SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),"+definition+",p.proowner,p.proacl FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') AND p.oid::regprocedure::text=ANY(%s) ORDER BY n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)", (old_functions,), cluster=cluster),
                         hashlib.sha256((cluster.data/"pg_hba.conf").read_bytes()).hexdigest(),
                     )
                 before = snapshot()
@@ -1082,7 +1089,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 for table in ("jenkins_events", "jenkins_event_deliveries", "jenkins_observations"):
                     self.assertEqual(self.execute("SELECT has_table_privilege('muse_events',%s,'SELECT'),has_table_privilege('muse_events',%s,'INSERT,UPDATE,DELETE')",
                         ("forge_agent."+table,"forge_agent."+table),cluster=cluster), [(True, False)])
-                self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(29,)])
+                self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(33,)])
             finally: cluster.stop()
 
 

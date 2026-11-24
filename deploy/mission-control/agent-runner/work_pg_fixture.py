@@ -120,7 +120,15 @@ class DisposablePostgresCluster:
                 for statement in statements:
                     cursor.execute(statement)
 
+    def reset_retry_events(self):
+        self.admin_exec("""DO $reset$ BEGIN
+          IF to_regclass('forge_agent.coding_retry_events') IS NOT NULL THEN
+            EXECUTE 'TRUNCATE forge_agent.coding_retry_events CASCADE';
+          END IF;
+        END;$reset$;""",owner=False)
+
     def reset_coding_tables(self):
+        self.reset_retry_events()
         self.admin_exec(
             "TRUNCATE forge_agent.coding_tasks, forge_agent.coding_worker_grants, "
             "forge_agent.coding_worker_readiness, forge_agent.coding_provider_usage, "
@@ -129,6 +137,7 @@ class DisposablePostgresCluster:
         )
 
     def reset_jenkins_tables(self):
+        self.reset_retry_events()
         self.admin_exec(
             "TRUNCATE forge_agent.jenkins_events, forge_agent.jenkins_event_deliveries, "
             "forge_agent.jenkins_observations CASCADE", owner=False)

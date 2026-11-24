@@ -23,7 +23,7 @@ export ALLOW_GLOBAL ?= 0
 export REFRESH_AST ?= 1
 export AFFECTED_PLAN_OUT ?=
 
-.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast check-imports build-affected check-affected test-affected lint test test-release doc check-deps ci ci-preflight ci-verified ci-main backend-suites run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
+.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast check-imports build-affected check-affected test-affected lint test test-release test-compile test-release-compile ci-ui-compile doc check-deps ci ci-preflight ci-verified ci-main backend-suites run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
 
 help:
 	@printf '%s\n' \
@@ -89,6 +89,15 @@ test:
 	$(call cargo-selected,,test,)
 test-release:
 	$(call cargo-selected,,test,--release)
+test-compile:
+	$(call cargo-selected,,test,--no-run)
+test-release-compile:
+	$(call cargo-selected,,test,--release --no-run)
+ci-ui-compile:
+	@cargo build --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked -p forge-ide-web --lib --release --no-default-features --target wasm32-unknown-unknown
+	@cargo build --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked -p forge-ide-web --features build-assets --bin forge-ui-assets
+	@cargo build --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked -p forge-agent --bin forge-agent
+	@cargo build --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked -p forge-ide-web-host --example loopback_fixture
 doc:
 	$(call cargo-selected,RUSTDOCFLAGS="-D warnings",doc,--no-deps)
 fmt:

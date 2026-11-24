@@ -2,6 +2,14 @@
 use super::*;
 
 pub(super) fn delivery_badge(d: &WorkDelivery) -> BadgeView {
+    if let Some(event) = d.repair.retry_event.as_ref().filter(|event| {
+        matches!(
+            event.status,
+            WorkRetryStatus::Open | WorkRetryStatus::Exhausted
+        )
+    }) {
+        return workflow::retry_badge(event);
+    }
     match d.repair.status {
         WorkRepairStatus::Queued => return badge("Repair queued", BadgeTone::Accent),
         WorkRepairStatus::Running => return badge("Repairing main", BadgeTone::Accent),
@@ -150,9 +158,11 @@ impl Agents {
                         .map_or_else(String::new, |n| format!(" · Build {n}"))
                 );
                 repair_summary = format!(
-                    "Round {}/{} · {} · {}",
-                    d.repair.round,
-                    d.repair.max_rounds,
+                    "{} · {} · {}",
+                    d.repair.retry_event.as_ref().map_or_else(
+                        || format!("{} repair retries", d.repair.round),
+                        WorkRetryEvent::label
+                    ),
                     relative_time(&d.repair.updated_at, self.now_ms),
                     d.repair.summary
                 );

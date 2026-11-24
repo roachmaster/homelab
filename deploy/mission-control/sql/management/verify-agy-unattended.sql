@@ -22,8 +22,13 @@ BEGIN
   ('forge_coding_reconciler_api.review_claim(text)','bea9f804d670dc5c905b85dc60d660853d811083851b7fd7a1adae0348d9415e'),
   ('forge_coding_worker_api.claim(text,uuid,text[])','b5a1beec34b55a73998f37a3c09805b8421ec912f1719ba9543be5ca703d2916')
  )x(signature,sha256) LOOP
+  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
+  SELECT encode(sha256(convert_to(jsonb_build_array(replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,p.prosrc)),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
+  INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
+  ELSE
   SELECT encode(sha256(convert_to(jsonb_build_array(pg_get_functiondef(p.oid),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
   INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
+  END IF;
   IF actual IS DISTINCT FROM expected.sha256 THEN RAISE EXCEPTION 'Unattended AGY function drift: %',expected.signature;END IF;
  END LOOP;
 END;
