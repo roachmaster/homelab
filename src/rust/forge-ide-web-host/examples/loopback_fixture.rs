@@ -233,6 +233,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let signal = Arc::clone(&stop);
     ctrlc::set_handler(move || signal.store(true, Ordering::Release))?;
+    // The Markdown preview fixture needs an absolute image URL to exercise
+    // real <img> rendering; the host origin is only known once it starts.
+    // Append it after the relative-URL line, which keeps rendering as alt
+    // text. Source reads happen after READY, so the agent serves the update.
+    {
+        let readme = fixture.root.join("workspace").join("README <safe>.md");
+        let mut content = fs::read(&readme)?;
+        content.extend_from_slice(
+            format!(
+                "\n![Fixture diagram]({}/design/portal-navigation-sequence.svg)\n",
+                host.origin()
+            )
+            .as_bytes(),
+        );
+        fs::write(readme, content)?;
+    }
     println!("READY {}", host.origin());
     println!("PAIRING {}", host.pairing_code().ok_or("pairing")?);
     std::io::stdout().flush()?;

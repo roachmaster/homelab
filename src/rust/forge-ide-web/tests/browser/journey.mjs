@@ -1423,9 +1423,12 @@ async function checkMarkdownSource(page, traffic) {
   const rawView = page.locator('#source-view');
   const rawLines = rawView.locator('.fg-source-text');
   const preview = page.getByRole('region', { name: 'Markdown display', exact: true });
+  const origin = new URL(page.url()).origin;
+  const diagramSrc = `${origin}/design/portal-navigation-sequence.svg`;
   const lines = [
     '## Fixture overview', '', '**Readable detail**', '', 'Fixture <script> text is never HTML.', '',
-    '![Fixture image alternative](/fixture-diagram.png)',
+    '![Fixture image alternative](/fixture-diagram.png)', '',
+    `![Fixture diagram](${diagramSrc})`,
   ];
   async function checkRaw() {
     await check(raw).toHaveAttribute('aria-pressed', 'true');
@@ -1446,7 +1449,15 @@ async function checkMarkdownSource(page, traffic) {
   await check(preview.locator('strong')).toHaveText('Readable detail');
   await check(preview).toContainText('Fixture <script> text is never HTML.');
   await check(preview).toContainText('Fixture image alternative');
-  await check(preview.locator('script,img,svg')).toHaveCount(0);
+  await check(preview.locator('script,svg')).toHaveCount(0);
+  const diagram = preview.locator('img');
+  await check(diagram).toHaveCount(1);
+  await check(diagram).toHaveAttribute('src', diagramSrc);
+  await check(diagram).toHaveAttribute('alt', 'Fixture diagram');
+  await check.poll(() => diagram.evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+  assert.equal(await diagram.evaluate(img => img.outerHTML),
+    `<img src="${diagramSrc}" alt="Fixture diagram">`,
+    'the rendered image carries only src and alt');
   await check(preview).not.toContainText('## Fixture overview');
   await check(preview).not.toContainText('**Readable detail**');
   await raw.press('Enter');
