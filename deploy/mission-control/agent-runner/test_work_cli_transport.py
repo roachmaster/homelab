@@ -74,6 +74,16 @@ class CodexWireRecordTest(unittest.TestCase):
         self.assertNotIn('private_fixture_secret', str(caught.exception))
         self.assertNotIn('token-value', str(caught.exception))
 
+    def test_json_integer_conversion_bound_remains_a_controlled_transport_failure(self):
+        raw = b'{"type":"turn.completed","usage":{"input_tokens":' + b'1'*5000 + b'}}'
+        with self.assertRaises(CliTransportError) as decoded:
+            parse_record(raw, 'codex')
+        self.assertEqual(decoded.exception.reason, 'invalid_json')
+        with self.assertRaises(ExecutionError) as parsed:
+            CliParser('codex').feed(raw + b'\n')
+        self.assertEqual(parsed.exception.outcome, 'failed')
+        self.assertEqual(parsed.exception.transport_diagnostic['reason'], 'invalid_json')
+
 
 class CodexSearchStreamTest(unittest.TestCase):
     def test_full_chunked_search_stream_keeps_real_response_usage_and_session(self):

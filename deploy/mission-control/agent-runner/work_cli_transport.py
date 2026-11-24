@@ -75,7 +75,9 @@ def parse_record(record, backend):
         if not isinstance(value, _ObjectPairs):
             raise CliTransportError('nonobject_record')
         return _value(value, backend=backend, event_type=_discriminator(value))
-    except json.JSONDecodeError:
+    except CliTransportError:
+        raise
+    except ValueError:
         raise CliTransportError('invalid_json') from None
     except RecursionError:
         raise CliTransportError('nesting_bound') from None
