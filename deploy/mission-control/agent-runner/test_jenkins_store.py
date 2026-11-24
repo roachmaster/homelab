@@ -100,7 +100,7 @@ class JenkinsStorePostgresTest(unittest.TestCase):
             event_kind=JenkinsEventKind.STAGE_STARTED, stage_name='check',
             summary='Stage check started'))
         self.assertFalse(receipt['deduplicated'])
-        event = store.get_event(project_alias='homelab', event_id=receipt['event_id'])
+        event = store.get_event(project_alias='homelab', event_id=receipt['event_id'])['event']
         self.assertEqual(event['event_kind'], 'stage_started')
         self.assertEqual(event['stage_name'], 'check')
         self.assertIsNone(event['stage_status'])

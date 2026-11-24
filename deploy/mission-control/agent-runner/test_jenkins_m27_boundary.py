@@ -580,13 +580,19 @@ PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/jenkins_events.py': 'e1b7cf6bab521404be16683642069227485f9d5525993630cd889da08a38cb45',
     'deploy/mission-control/agent-runner/runner.py': '27eaa28a5ceca354b2ea78b855ea00e42de1ae7bdd6f5c0bd95652d1bdde5684',
     'deploy/mission-control/agent-runner/setup-runner.sh': '23e8ae9dd7c67c1664d4ec49096f6c50316df185276809ea67a45fc95b7b03a1',
+    'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '4fec044415fe7223b783cd81c9462f2865025a7a386028475251d591bea62d04',
+    'deploy/mission-control/agent-runner/test_ci_supervision.py': '6b7bce43f2f7f38c938a00e5c280e4060e62ca861cf797a4fd2b99d0aabde6db',
     'deploy/mission-control/agent-runner/test_jenkins_api.py': 'c66ef69224bc5792321f8343bd27b98c9439d1347793eeb8dd8021c21faac494',
     'deploy/mission-control/agent-runner/test_jenkins_codec.py': 'e3c94bc68e875f27875d4b078517472edda6ee9609e4a94bf15f036c76d49e4a',
     'deploy/mission-control/agent-runner/test_jenkins_pipeline_lifecycle.py': 'bad9c600c09f61c0d1611ea6cba3aa3d3bce9c8d57b829968984c440c092b082',
     'deploy/mission-control/agent-runner/test_jenkins_stage_emitter.py': 'c0c2fb868da60f4e8e5721c26b9f8046482d712699656376b5fbf6b76b8e8e10',
-    'deploy/mission-control/agent-runner/test_jenkins_store.py': '5489e07b4fae09f610e379e26f62e85b5def06f2dc5278de3729be7b3ea65ffc',
+    'deploy/mission-control/agent-runner/test_jenkins_store.py': '2b32f15b606cbb7267fe802640dd7cff0d0e3841ccc0675fa4f29b8776235384',
+    'deploy/mission-control/agent-runner/test_muse_read_access.py': '49908bdbfdeb11ae2d4e23654b064a0f508aabbd4e7ff01a2131e60dd7ec0515',
     'deploy/mission-control/agent-runner/test_pipeline_projection.py': 'f2de8675e3a259a6d7eee53855d1216144eac0382c863ae8d8795c22f4005ab4',
+    'deploy/mission-control/agent-runner/test_work_muse_intake.py': 'ba3447e676ad158896fcb8eac0db0530bd7e7e271689baeadea320642f9f4349',
     'deploy/mission-control/agent-runner/test_work_native_jenkins.py': '31394ee6b3e410ca980719018b4d1247205dcf3fd8d2040a26235291c3240fe7',
+    'deploy/mission-control/agent-runner/test_work_owner_fence.py': 'bd8c5e617748505e1cefe3a39f392aa9713b26bf26b80b772d10b682a33d74ef',
+    'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': 'dacd4d4177548f6c0045ed1d2ef9a009950080075c9f127deb5deaf2395fbcf0',
     'deploy/mission-control/agent-runner/work_external_delivery.py': '6998e121574cb46eedf9b32e32f507aff4d37ee491a1c32327e3dc71387a33ac',
     'deploy/mission-control/agent-runner/work_jenkins_lifecycle.py': '809259f4fa4f7c1945a6282aaba6fa7841bc4e158118375b491301d0d14ddd04',
     'deploy/mission-control/agent-runner/work_native_jenkins.py': 'd396b6d46eafba8fa62cc1c7c20afc87bbd9d2b05626c32d5b17776dbabf54bc',
@@ -803,7 +809,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_pipeline_diagram_overlay_is_scoped_and_exact(self):
-        self.assertEqual(len(PIPELINE_DIAGRAM_CONTEXT_SHA256), 45)
+        self.assertEqual(len(PIPELINE_DIAGRAM_CONTEXT_SHA256), 51)
         for relative, expected in PIPELINE_DIAGRAM_CONTEXT_SHA256.items():
             with self.subTest(pipeline_source=relative):
                 self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/')))

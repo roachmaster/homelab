@@ -724,6 +724,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
              patch.object(SETUP.pwd, 'getpwnam', return_value=user), \
              patch.object(SETUP, 'read_owned', return_value=b'{}'), \
              patch.object(SETUP, 'read_pipeline', return_value=pipeline), \
+             patch.object(SETUP, 'qualify_stage_token', return_value='systemd-credential'), \
              patch.object(SETUP, 'directory'), \
              patch.object(SETUP, 'install', side_effect=lambda p, *args, **kwargs: installed.append(p)), \
              patch.object(SETUP, 'request', return_value=json.dumps(info).encode()) as request, \
@@ -753,6 +754,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
              patch.object(SETUP, 'read_owned', return_value=b'{}'), \
              patch.object(SETUP.Path, 'exists', return_value=True), \
              patch.object(SETUP, 'read_pipeline', return_value=cached) as read_pipeline, \
+             patch.object(SETUP, 'qualify_stage_token', return_value='systemd-credential'), \
              patch.object(SETUP, 'directory') as directory, \
              patch.object(SETUP, 'install', side_effect=lambda path, raw, **kw: installed.update({path: raw})), \
              patch.object(SETUP, 'request', return_value=json.dumps(info).encode()), \
