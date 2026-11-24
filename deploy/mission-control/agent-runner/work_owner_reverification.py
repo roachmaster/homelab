@@ -14,6 +14,7 @@ from queue_store import Rejected
 from work_config import sha256_canonical
 from work_store import _resume_intent_digest
 from work_retry_policy import budget_compatible_repair_policy, effective_repair_policy
+from work_events import operator_actor
 from work_workflow import BoundPreparationRetryAuthority, recipe_from_snapshot, _ready_for_recipe, NATIVE_POLICIES
 
 POLICY = 'forge-owner-verification-recovery-v2'
@@ -331,7 +332,7 @@ def recover(flow, cursor, task, owner, command, request, digest):
     authority = BoundOwnerVerificationAuthority(store, cursor, w['workflow_id'], task['id'], task['latest_attempt_id'], task['revision'], q['review_id'],
         store.owner, task['project_alias'], q['infrastructure_retries'], q['candidate_commit'], q['gate_manifest_sha256'],
         sha256_canonical(q['verification']), tuple(q[k] for k in SOURCE), _OWNER_ADMISSION)
-    receipt = store.review_decide(**vars(command), _authority=authority)
+    receipt = store.review_decide(**vars(command), _authority=authority, actor=operator_actor(store.owner))
     cursor.execute("UPDATE forge_agent.coding_reviews SET candidate_commit=NULL,gate_manifest_sha256=NULL,verification='{}'::jsonb,owner_decision=NULL WHERE review_id=%s AND status='pending' AND previous_review_id=%s", (receipt['review_id'], q['review_id']))
     if cursor.rowcount != 1:
         raise Rejected(409, 'reconcile_required')

@@ -21,6 +21,7 @@ from work_config import PinnedRecipe,sha256_canonical,prepare_title
 from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_matches
 from work_store import ADVISORY_LOCK_SALT
 from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
+from work_events import COORDINATOR_ACTOR, insert_event
 
 LOG=logging.getLogger('forge-workflow')
 _INHERIT_RETRY_EVENTS=object()
@@ -28,6 +29,7 @@ MAX_TARGET_BYTES=64*1024*1024+65536
 NATIVE_DEADLINE_POLICY='forge-native-deadline-recovery-v1'
 NATIVE_DEADLINE_RETRIES=1
 PEER_WIRE_REPLAY_POLICY='forge-peer-wire-replay-v1'
+PEER_CORRECTION_POLICY='forge-peer-correction-v1'
 PEER_WIRE_ERROR='Peer review could not safely continue: PeerReviewError'
 NATIVE_DEADLINE_NOTE=(
     'The previous writer stopped at its deadline; the reconciled workspace is preserved. '
@@ -270,8 +272,18 @@ class WorkflowStore:
     def _escalate(self,cursor,w,reason):
         reason=reason[:2048]
         cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=false,phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
+        cursor.execute("SELECT id,project_alias,status,revision FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running') FOR UPDATE",(w['workflow_id'],))
+        affected=cursor.fetchall()
         cursor.execute("UPDATE forge_agent.coding_tasks SET cancelled_at=CASE WHEN status='queued' THEN clock_timestamp() ELSE NULL END,status=CASE WHEN status='queued' THEN 'cancelled' ELSE 'cancel_requested' END,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('queued','running')",(w['workflow_id'],))
         cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='handoff',lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('pending','leased')",(w['workflow_id'],))
+        # The escalation reason stays on the workflow row; each affected task
+        # also gets one event carrying the escalating actor and cause (4.2).
+        for affected_task in affected:
+            affected_target='cancelled' if affected_task['status']=='queued' else 'cancel_requested'
+            insert_event(cursor,self.store.owner,affected_task['project_alias'],affected_task['id'],affected_target,
+                         {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
+                          'workflow_id':str(w['workflow_id'])},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
+                         cause_detail=reason)
 
     def retry_native_timeout(self,*,project_alias,task_id,expected_revision,reconciliation_receipt_id,idempotency_key,note=''):
         """Supported private operator/automatic ingress; never a browser override.
@@ -367,7 +379,7 @@ class WorkflowStore:
             resume_note=NATIVE_DEADLINE_NOTE+('\nOperator context: '+note if note else '')
             receipt=self.store.resume(project_alias=project_alias,task_id=task_id,expected_revision=expected_revision,
                 idempotency_key=idempotency_key,agent_profile=p['author_profile'],reconciliation_receipt_id=reconciliation_receipt_id,
-                note=resume_note,allowed_modes={'implement'},resolve_recipe=lambda _:recipe,_authority=authority)
+                note=resume_note,allowed_modes={'implement'},resolve_recipe=lambda _:recipe,_authority=authority,actor=COORDINATOR_ACTOR)
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
                 (w['workflow_id'],self.store.owner,project_alias,key,Json(intent),Json({'status':'native_deadline_retried','receipt':receipt})))
             return receipt
@@ -406,14 +418,90 @@ class WorkflowStore:
                 # exceptions retain the existing escalation behavior.
                 pass
 
+    def _verify_peer_recovery_source(self,cursor,project_alias,w,review,task,critic,target):
+        """Shared source binding, review-row and quiescence checks for peer recovery.
+
+        Used by both the compatibility replay and the transcription-defect
+        correction. Returns the awaiting-review coding_reviews row.
+        """
+        if (target['reviewer_task_id']!=str(critic['id']) or target['source_task_id']!=str(task['id'])
+            or target['source_attempt_id']!=str(task['latest_attempt_id']) or target['source_revision']!=task['revision']
+            or target['workflow_id']!=str(w['workflow_id']) or target['workflow_review_id']!=str(review['workflow_review_id'])
+            or target['policy_digest']!=w['policy_digest'] or target['plan_decision_id']!=str(task['plan_decision_id'] or task['scope_plan_decision_id'])
+            or target['review_id']!=str(review['source_review_id'])):raise Rejected(409,'result_mismatch')
+        cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s FOR UPDATE',(review['source_review_id'],));q=cursor.fetchone()
+        if (not q or q['owner_id']!=self.store.owner or q['project_alias']!=project_alias or q['task_id']!=task['id']
+            or q['attempt_id']!=task['latest_attempt_id'] or q['status']!='awaiting_review'
+            or q['candidate_commit']!=target['candidate_commit'] or q['gate_manifest_sha256']!=target['gate_manifest_sha256']
+            or q['verification'].get('checks_passed') is not True or q['verification'].get('cleanup_confirmed') is not True
+            or q['verification'].get('candidate_workspace_digest')!=target['workspace_digest']
+            or q['verification'].get('integration_base')!=target['integration_base']
+            or {'checks_passed':True,'toolchain':q['verification'].get('toolchain','Not reported'),
+                'checks':[{k:x[k] for k in ('check_id','status','head_sha')} for x in q['verification'].get('checks',[])]}!=target['verification']):
+            raise Rejected(409,'not_reviewable')
+        cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",(w['workflow_id'],)*5)
+        if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
+        return q
+
+    def _correct_peer_verdict(self,cursor,w,review,task,critic,target,defect,*,reviewer_attempt_id,reviewer_result_sha256,correction_key,correction_intent,validate_target):
+        """Supersede a transcription-defective review with a fresh reviewer round.
+
+        The defective verdict is never applied. The old row keeps its target
+        and verdict bytes untouched and only flips to 'superseded'; the new
+        row reuses the same source binding verbatim under a fresh target built
+        by the ordinary admission construction. Only a root row may be
+        superseded, enforced atomically under the row lock held by the caller.
+        The repair budget is not consumed here: it still gates the revision
+        that the fresh review may request.
+        """
+        if review['supersedes_workflow_review_id'] is not None:
+            raise Rejected(409,'not_reviewable')
+        self._verify_peer_recovery_source(cursor,review['project_alias'],w,review,task,critic,target)
+        # Supersede first: the partial unique index frees the source binding
+        # for the new row in this same transaction.
+        cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='superseded',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
+        cursor.execute("""INSERT INTO forge_agent.coding_workflow_reviews(workflow_id,owner_id,project_alias,target_kind,source_task_id,source_attempt_id,source_result_sha256,source_revision,source_review_id,candidate_commit,gate_manifest_sha256,supersedes_workflow_review_id)
+          VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING workflow_review_id""",
+          (review['workflow_id'],review['owner_id'],review['project_alias'],review['target_kind'],review['source_task_id'],review['source_attempt_id'],review['source_result_sha256'],review['source_revision'],review['source_review_id'],review['candidate_commit'],review['gate_manifest_sha256'],review['workflow_review_id']))
+        new_id=cursor.fetchone()['workflow_review_id']
+        cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,workflow_review_id,kind,source_key) VALUES(%s,%s,%s,%s,'review',%s) RETURNING action_id",(w['workflow_id'],self.store.owner,review['project_alias'],new_id,str(new_id)))
+        review_action_id=cursor.fetchone()['action_id']
+        new_review=dict(review);new_review.update(workflow_review_id=new_id,target_json=None,target_sha256=None,reviewer_task_id=None,reviewer_attempt_id=None,reviewer_result_sha256=None,verdict_json=None,verdict_sha256=None,status='pending',diagnostics=None,supersedes_workflow_review_id=review['workflow_review_id'])
+        admission=self._admit_reviewer(cursor,w,new_review,task,validate_target,idempotency_key=correction_key)
+        cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='completed',finish_receipt=%s WHERE action_id=%s",(Json(admission),review_action_id))
+        note=('Peer review superseded by correction '+str(new_id)+': transcription defect '+str(defect['check'])
+              +'; the defective verdict was never applied.')
+        cursor.execute("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1,updated_at=clock_timestamp() WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,review['project_alias'],critic['id']))
+        insert_event(cursor,self.store.owner,review['project_alias'],critic['id'],'completed',
+                     {'note':note,'superseding_workflow_review_id':str(new_id)},actor=COORDINATOR_ACTOR)
+        cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='code_review',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
+        p=w['snapshot']
+        self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
+        cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
+        for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
+            recipe=recipe_from_snapshot(p,entry)
+            if not _ready_for_recipe(ready,review['project_alias'],profile,mode,recipe):
+                raise Rejected(503,'unavailable')
+        receipt={'status':'peer_verdict_correction_queued','workflow_id':str(w['workflow_id']),'workflow_review_id':str(review['workflow_review_id']),
+                 'superseding_workflow_review_id':str(new_id),'reviewer_task_id':str(admission['task_id']),
+                 'source_task_id':str(task['id']),'reviewer_attempt_id':str(reviewer_attempt_id),
+                 'reviewer_result_sha256':reviewer_result_sha256,'target_sha256':review['target_sha256'],
+                 'defect':defect}
+        cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
+                       (w['workflow_id'],self.store.owner,review['project_alias'],correction_key,Json(correction_intent),Json({'status':'peer_verdict_correction_queued','receipt':receipt})))
+        cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
+        return receipt
+
     def retry_peer_verdict(self,*,project_alias,workflow_review_id,expected_revision,
                            reviewer_attempt_id,reviewer_result_sha256,target_sha256,idempotency_key):
         """Replay one exact saved code revision through the ordinary controller.
 
         This private factory-owned compatibility recovery never creates a verdict
         or approves code. The original result bytes remain the source authority.
+        A verdict that fails parsing only on context_sha256 equality instead
+        takes the superseding-review correction path.
         """
-        from work_peer_review import parse_review_target,parse_review_verdict
+        from work_peer_review import classify_verdict_defect,parse_review_target,parse_review_verdict,validate_review_target
         self.store._require_project(project_alias)
         if (not isinstance(workflow_review_id,UUID) or not isinstance(reviewer_attempt_id,UUID)
             or type(expected_revision) is not int or expected_revision<1
@@ -425,6 +513,15 @@ class WorkflowStore:
             cursor.execute('SELECT * FROM forge_agent.coding_workflow_reviews WHERE owner_id=%s AND project_alias=%s AND workflow_review_id=%s',
                            (self.store.owner,project_alias,workflow_review_id));r=cursor.fetchone()
             if not r:raise Rejected(404,'not_found')
+            correction_key='peer-correction-'+str(workflow_review_id)+':1'
+            correction_intent={'policy':PEER_CORRECTION_POLICY,'workflow_review_id':str(workflow_review_id),
+                    'source_revision':expected_revision,'reviewer_attempt_id':str(reviewer_attempt_id),
+                    'reviewer_result_sha256':reviewer_result_sha256,'target_sha256':target_sha256,'idempotency_key':idempotency_key}
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",(r['workflow_id'],correction_key));prior=cursor.fetchone()
+            if prior:
+                if prior['intent']!=correction_intent:raise Rejected(409,'idempotency_conflict')
+                if prior['status']!='completed' or not prior['finish_receipt']:raise Rejected(409,'reconcile_required')
+                return dict(prior['finish_receipt']['receipt'])
             key='peer-verdict-replay:'+str(workflow_review_id)+':'+str(reviewer_attempt_id)
             intent={'policy':PEER_WIRE_REPLAY_POLICY,'max_replays':1,'workflow_review_id':str(workflow_review_id),
                     'source_revision':expected_revision,'reviewer_attempt_id':str(reviewer_attempt_id),
@@ -469,33 +566,24 @@ class WorkflowStore:
                 raise Rejected(409,'result_mismatch')
             try:
                 target=parse_review_target(review['target_json'],target_sha256)
+            except (ValueError,KeyError,TypeError):raise Rejected(409,'result_mismatch') from None
+            defect=classify_verdict_defect(result['content'],target)
+            if defect is not None:
+                return self._correct_peer_verdict(cursor,w,review,task,critic,target,defect,
+                    reviewer_attempt_id=reviewer_attempt_id,reviewer_result_sha256=reviewer_result_sha256,
+                    correction_key=correction_key,correction_intent=correction_intent,validate_target=validate_review_target)
+            try:
                 verdict=parse_review_verdict(result['content'],target)
                 # Only the observed finite wire incompatibility is recoverable.
                 wire=json.loads(result['content'])
                 if verdict['decision']!='revise' or not any(f.get('category')=='correctness' for f in wire['findings']):
                     raise ValueError('not_compatibility_revision')
             except (ValueError,KeyError,TypeError):raise Rejected(409,'result_mismatch') from None
-            if (target['reviewer_task_id']!=str(critic['id']) or target['source_task_id']!=str(task['id'])
-                or target['source_attempt_id']!=str(task['latest_attempt_id']) or target['source_revision']!=task['revision']
-                or target['workflow_id']!=str(w['workflow_id']) or target['workflow_review_id']!=str(workflow_review_id)
-                or target['policy_digest']!=w['policy_digest'] or target['plan_decision_id']!=str(task['plan_decision_id'] or task['scope_plan_decision_id'])
-                or target['review_id']!=str(review['source_review_id'])):raise Rejected(409,'result_mismatch')
-            cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s FOR UPDATE',(review['source_review_id'],));q=cursor.fetchone()
-            if (not q or q['owner_id']!=self.store.owner or q['project_alias']!=project_alias or q['task_id']!=task['id']
-                or q['attempt_id']!=task['latest_attempt_id'] or q['status']!='awaiting_review'
-                or q['candidate_commit']!=target['candidate_commit'] or q['gate_manifest_sha256']!=target['gate_manifest_sha256']
-                or q['verification'].get('checks_passed') is not True or q['verification'].get('cleanup_confirmed') is not True
-                or q['verification'].get('candidate_workspace_digest')!=target['workspace_digest']
-                or q['verification'].get('integration_base')!=target['integration_base']
-                or {'checks_passed':True,'toolchain':q['verification'].get('toolchain','Not reported'),
-                    'checks':[{k:x[k] for k in ('check_id','status','head_sha')} for x in q['verification'].get('checks',[])]}!=target['verification']):
-                raise Rejected(409,'not_reviewable')
+            q=self._verify_peer_recovery_source(cursor,project_alias,w,review,task,critic,target)
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND workflow_review_id=%s AND kind='decide' AND source_key=%s FOR UPDATE",
                            (w['workflow_id'],workflow_review_id,str(reviewer_attempt_id)+':'+reviewer_result_sha256));action=cursor.fetchone()
             if not action or action['status']!='handoff' or action['finish_receipt'] is not None or action['intent'] is not None:
                 raise Rejected(409,'not_reviewable')
-            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",(w['workflow_id'],)*5)
-            if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
             cursor.execute("SELECT count(*) AS used FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE 'peer-verdict-replay:%%'",(w['workflow_id'],))
             if cursor.fetchone()['used']:raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT repair_rounds,stagnant_rounds,policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
@@ -614,7 +702,7 @@ class WorkflowStore:
                 if not _ready_for_recipe(ready,project_alias,profile,mode,required):raise Rejected(503,'unavailable')
             authority=BoundPreparationRetryAuthority(self.store,cursor,w['workflow_id'],task_id,task['latest_attempt_id'],task['revision'],review_id)
             return self.store.review_decide(project_alias=project_alias,task_id=task_id,expected_revision=expected_revision,
-                review_id=review_id,decision='retry_infrastructure',agent_profile=None,note=note,idempotency_key=idempotency_key,_authority=authority)
+                review_id=review_id,decision='retry_infrastructure',agent_profile=None,note=note,idempotency_key=idempotency_key,_authority=authority,actor=COORDINATOR_ACTOR)
 
     def _recover_preparations(self):
         with self.store._transaction(read_only=True) as cursor:
@@ -732,8 +820,7 @@ class WorkflowStore:
                      'infrastructure_retries':q['infrastructure_retries'],'delivery_count':1}
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
                            (w['workflow_id'],self.store.owner,project_alias,key,Json(intent),Json({'status':'source_readiness_delivered','receipt':receipt})))
-            cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'checkpoint',%s FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s",
-                           (self.store.owner,project_alias,task_id,Json(receipt),self.store.owner,project_alias,task_id))
+            insert_event(cursor,self.store.owner,project_alias,task_id,'checkpoint',receipt,actor=COORDINATOR_ACTOR)
             cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
             return receipt
 
@@ -854,7 +941,7 @@ class WorkflowStore:
         return a
 
     def process(self,job):
-        from work_peer_review import validate_review_target,parse_review_target,validate_live_review_verdict
+        from work_peer_review import PeerReviewError,validate_review_target,parse_review_target,validate_live_review_verdict
         with self._transaction() as cursor:
             self._project_lock(cursor,job["project_alias"])
             # Task -> peer review -> action is shared with owner/cancel paths.
@@ -883,11 +970,14 @@ class WorkflowStore:
                 cursor.execute('ROLLBACK TO SAVEPOINT workflow_action')
                 if isinstance(error,Rejected) and (error.code=='reconcile_required' or error.status>=500):return
                 self._escalate(cursor,w,'Peer review could not safely continue: '+(getattr(error,'code',None) or type(error).__name__))
-                cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
+                diagnostics=None
+                if isinstance(error,PeerReviewError) and error.check is not None:
+                    diagnostics={"check":error.check,"detail":error.detail}
+                cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',diagnostics=%s,updated_at=clock_timestamp() WHERE workflow_review_id=%s",(Json(diagnostics) if diagnostics is not None else None,review['workflow_review_id']))
                 return
             cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='completed',finish_token=%s,finish_receipt=%s,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE action_id=%s",(action['lease_token'],Json(receipt),action['action_id']))
 
-    def _admit_reviewer(self,cursor,w,review,task,validate_target):
+    def _admit_reviewer(self,cursor,w,review,task,validate_target,*,idempotency_key=None):
         p=w['snapshot'];self._grant(cursor,w,p['reviewer_profile'],'review')
         source=self._artifact(cursor,task['id'],review['source_attempt_id']);reviewer_id=uuid4()
         cursor.execute("SELECT prompt,acceptance_criteria FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,w['project_alias'],w['root_task_id']));assignment=cursor.fetchone()
@@ -920,9 +1010,9 @@ class WorkflowStore:
         receipt={'task_id':str(reviewer_id),'project_alias':w['project_alias'],'revision':1,'status':'queued','recipe_digest':recipe.digest}
         cursor.execute("""INSERT INTO forge_agent.coding_tasks(owner_id,project_alias,id,idempotency_key,intent_digest,base_revision,mode,agent_profile,title,prompt,acceptance_criteria,pinned_recipe,recipe_digest,status,revision,auto_repair,review_required,workflow_required,workflow_id,workflow_review_id,review_target_sha256)
           VALUES(%s,%s,%s,%s,%s,%s,'review',%s,%s,%s,%s,%s,%s,'queued',1,false,false,true,%s,%s,%s)""",
-          (self.store.owner,w['project_alias'],reviewer_id,'peer-'+str(review['workflow_review_id']),sha256_canonical(target),target['base_revision'],p['reviewer_profile'],prepare_title('Review '+task['title']),prompt,'Return a strict source-bound verdict only.',Json(recipe.to_dict()),recipe.digest,w['workflow_id'],review['workflow_review_id'],digest))
+          (self.store.owner,w['project_alias'],reviewer_id,idempotency_key or 'peer-'+str(review['workflow_review_id']),sha256_canonical(target),target['base_revision'],p['reviewer_profile'],prepare_title('Review '+task['title']),prompt,'Return a strict source-bound verdict only.',Json(recipe.to_dict()),recipe.digest,w['workflow_id'],review['workflow_review_id'],digest))
         cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET target_json=%s,target_sha256=%s,reviewer_task_id=%s,status='reviewing',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(raw,digest,reviewer_id,review['workflow_review_id']))
-        cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) VALUES(%s,%s,%s,1,'queued',%s)",(self.store.owner,w['project_alias'],reviewer_id,Json(receipt)))
+        insert_event(cursor,self.store.owner,w['project_alias'],reviewer_id,'queued',receipt,actor=COORDINATOR_ACTOR,first=True)
         cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
         return receipt
 
@@ -1009,7 +1099,7 @@ class WorkflowStore:
             note=verdict['summary']
             if verdict['findings']:note+='\n'+json.dumps(verdict['findings'],ensure_ascii=False,separators=(',',':'))
             if len(note.encode())>2048:note=verdict['summary'] # full source-bound verdict remains in readonly Plan feedback below
-            receipt=self.store.plan_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],plan_attempt_id=review['source_attempt_id'],plan_sha256=review['source_result_sha256'],decision='resume' if decision=='approve' else 'revise',agent_profile=p['author_profile'],idempotency_key=key,note=note,resolve_recipe=lambda _:recipe_from_snapshot(p,'author_implement' if decision=='approve' else 'author_plan'),auto_repair=True,_authority=authority)
+            receipt=self.store.plan_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],plan_attempt_id=review['source_attempt_id'],plan_sha256=review['source_result_sha256'],decision='resume' if decision=='approve' else 'revise',agent_profile=p['author_profile'],idempotency_key=key,note=note,resolve_recipe=lambda _:recipe_from_snapshot(p,'author_implement' if decision=='approve' else 'author_plan'),auto_repair=True,_authority=authority,actor=COORDINATOR_ACTOR)
             cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,plan_revisions=plan_revisions+%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('implement' if decision=='approve' else 'plan_revision',0 if decision=='approve' else 1,w['workflow_id']))
         else:
             source=self._code_review_source(cursor,review,task,authority)
@@ -1029,7 +1119,7 @@ class WorkflowStore:
                 # maps it and loses the genuine immutable peer verdict.
                 cursor.execute('SAVEPOINT peer_code_decision')
                 try:
-                    receipt=self.store.review_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],review_id=review['source_review_id'],decision='approve' if decision=='approve' else 'repair',agent_profile=p['author_profile'],note=verdict['summary'],idempotency_key=key,findings=verdict['findings'],verified_finding_ids=verdict['attested_finding_ids'],resolve_recipe=lambda:recipe_from_snapshot(p,'author_implement'),_authority=authority)
+                    receipt=self.store.review_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],review_id=review['source_review_id'],decision='approve' if decision=='approve' else 'repair',agent_profile=p['author_profile'],note=verdict['summary'],idempotency_key=key,findings=verdict['findings'],verified_finding_ids=verdict['attested_finding_ids'],resolve_recipe=lambda:recipe_from_snapshot(p,'author_implement'),_authority=authority,actor=COORDINATOR_ACTOR)
                 except psycopg2.Error as error:
                     if error.pgcode!='P0009':raise
                     cursor.execute('ROLLBACK TO SAVEPOINT peer_code_decision')
