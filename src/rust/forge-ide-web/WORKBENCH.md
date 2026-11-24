@@ -136,7 +136,7 @@ runtimes. Non-IDE component fixtures exercise the same primitives.
 
 **ABI15 requires an atomic matching host/generated asset/WASM deployment.** It
 includes guarded source/direct-edit events, source windows, Agents workflows,
-event-stream stage diagrams, unified search and pane reveal metadata. Legacy Chat/Mail snapshots remain inert;
+event-stream stage diagrams, pipeline stage diagrams, unified search and pane reveal metadata. Legacy Chat/Mail snapshots remain inert;
 their retired controls/effects cannot run. Older workers/WASM, including ABI12,
 cannot be mixed with this bundle. Source callers and serialized event producers
 must use matching contracts. The separately dated

@@ -198,6 +198,73 @@ impl WorkFinding {
     }
 }
 
+/// One Jenkins pipeline stage's projected state. The server projection
+/// derives these from the frozen gate plan, the run's Jenkins events, and
+/// the terminal hosted observation; `unknown` means the records cannot
+/// establish the stage's state, never a guess.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineStageState {
+    Waiting,
+    Running,
+    Passed,
+    Failed,
+    Skipped,
+    NotRun,
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineAvailability {
+    #[default]
+    NoRun,
+    StageDataUnavailable,
+    Partial,
+    Available,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelinePhase {
+    Preparing,
+    Running,
+    Finalizing,
+    Complete,
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PipelineStageStatus {
+    pub id: String,
+    pub label: String,
+    pub status: PipelineStageState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+impl PipelineStageStatus {
+    pub fn is_valid(&self) -> bool {
+        valid_work_name(&self.id, 64)
+            && valid_work_label(&self.label, 128)
+            && self
+                .finding_id
+                .as_deref()
+                .is_none_or(|v| valid_work_name(v, 64))
+            && self
+                .finding_summary
+                .as_deref()
+                .is_none_or(|v| valid_chat_text(v, 2048))
+            && self.detail.as_deref().is_none_or(|v| optional_text(v, 512))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkReviewSummary {
@@ -238,6 +305,12 @@ pub struct WorkReviewSummary {
     pub can_retry: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<WorkFinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pipeline_stages: Vec<PipelineStageStatus>,
+    #[serde(default)]
+    pub pipeline_availability: PipelineAvailability,
+    #[serde(default)]
+    pub pipeline_phase: PipelinePhase,
 }
 impl WorkReviewSummary {
     pub fn is_valid(&self) -> bool {
@@ -280,6 +353,18 @@ impl WorkReviewSummary {
             && (!self.can_repair || self.candidate_commit.is_some())
             && self.findings.len() <= 32
             && self.findings.iter().all(WorkFinding::is_valid)
+            && self.pipeline_stages.len() <= 16
+            && self
+                .pipeline_stages
+                .iter()
+                .all(PipelineStageStatus::is_valid)
+            && self
+                .pipeline_stages
+                .iter()
+                .map(|s| &s.id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                == self.pipeline_stages.len()
             && self
                 .findings
                 .iter()
@@ -2053,6 +2138,78 @@ mod tests {
         };
         assert!(reply.valid_for(&request, 200));
         assert!(!reply.valid_for(&request, 202));
+    }
+    fn pipeline_review_json() -> serde_json::Value {
+        serde_json::json!({
+            "auto_repair": false,
+            "stage": "awaiting_decision",
+            "round": 1,
+            "max_rounds": 3,
+            "open_findings": 0,
+            "verified_findings": 0,
+            "required_hosted_green": false,
+            "can_accept": false,
+            "can_repair": true,
+            "can_retry": false,
+            "candidate_commit": "e7a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+            "pipeline_stages": [
+                {"id": "check", "label": "make ci", "status": "passed"},
+                {"id": "real-browser", "label": "make ui-qa", "status": "running"},
+                {"id": "backend-suites", "label": "all backend suites", "status": "waiting",
+                 "finding_id": null, "finding_summary": null, "detail": null}
+            ],
+            "pipeline_availability": "partial",
+            "pipeline_phase": "running"
+        })
+    }
+    #[test]
+    fn pipeline_stages_serialize_and_parse_with_new_fields() {
+        let review: WorkReviewSummary = serde_json::from_value(pipeline_review_json()).unwrap();
+        assert!(review.is_valid());
+        assert_eq!(review.pipeline_stages.len(), 3);
+        assert_eq!(review.pipeline_stages[0].status, PipelineStageState::Passed);
+        assert_eq!(review.pipeline_availability, PipelineAvailability::Partial);
+        assert_eq!(review.pipeline_phase, PipelinePhase::Running);
+        let round_tripped: WorkReviewSummary =
+            serde_json::from_str(&serde_json::to_string(&review).unwrap()).unwrap();
+        assert_eq!(round_tripped, review);
+    }
+    #[test]
+    fn old_review_snapshots_parse_without_pipeline_fields() {
+        let mut legacy = pipeline_review_json();
+        let object = legacy.as_object_mut().unwrap();
+        object.remove("pipeline_stages");
+        object.remove("pipeline_availability");
+        object.remove("pipeline_phase");
+        let review: WorkReviewSummary = serde_json::from_value(legacy).unwrap();
+        assert!(review.is_valid());
+        assert!(review.pipeline_stages.is_empty());
+        assert_eq!(review.pipeline_availability, PipelineAvailability::NoRun);
+        assert_eq!(review.pipeline_phase, PipelinePhase::Unknown);
+        // Serializing an old snapshot omits the empty/defaulted fields.
+        let serialized = serde_json::to_value(&review).unwrap();
+        assert!(serialized.get("pipeline_stages").is_none());
+    }
+    #[test]
+    fn pipeline_stage_validation_bounds() {
+        let mut review: WorkReviewSummary = serde_json::from_value(pipeline_review_json()).unwrap();
+        assert!(review.is_valid());
+        review.pipeline_stages = (0..17)
+            .map(|i| PipelineStageStatus {
+                id: format!("s{i:02}"),
+                label: format!("Stage {i}"),
+                status: PipelineStageState::Waiting,
+                finding_id: None,
+                finding_summary: None,
+                detail: None,
+            })
+            .collect();
+        assert!(!review.is_valid());
+        review.pipeline_stages.truncate(2);
+        review.pipeline_stages[1].id = review.pipeline_stages[0].id.clone();
+        assert!(!review.is_valid());
+        review.pipeline_stages[1].id = "bad id!".into();
+        assert!(!review.is_valid());
     }
 }
 

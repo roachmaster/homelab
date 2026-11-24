@@ -309,6 +309,9 @@ fn standalone_implement_plan_review_and_external_tracks_are_truthful() {
         can_repair: true,
         can_retry: false,
         findings: vec![],
+        pipeline_stages: vec![],
+        pipeline_availability: PipelineAvailability::NoRun,
+        pipeline_phase: PipelinePhase::Unknown,
     });
     impl_task.publication = Some(WorkPublication {
         publication_id: Some(KEY.into()),
@@ -981,6 +984,9 @@ fn linked_repair_child_task_tracks_own_implement_lifecycle_instead_of_parent_wor
         can_repair: false,
         can_retry: false,
         findings: vec![],
+        pipeline_stages: vec![],
+        pipeline_availability: PipelineAvailability::NoRun,
+        pipeline_phase: PipelinePhase::Unknown,
     });
     let mut agents = reader_with(task);
     agents.events_loaded = true;

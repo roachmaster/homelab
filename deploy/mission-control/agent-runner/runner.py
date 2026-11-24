@@ -684,8 +684,8 @@ def build_jenkins_service(environ=None, connect_factory=store.connect, *,
     """Freeze optional config before selecting and creating the ready service."""
     env = os.environ if environ is None else environ
     selected = jenkins_config.load_jenkins_config(env.get(jenkins_config.CONFIG_ENV_VAR))
-    return jenkins_api.JenkinsServiceFactory(selected, connect_factory,
-        handler_factories=handler_factories).create()
+    return jenkins_api.create_jenkins_service(selected, connect_factory,
+        handler_factories=handler_factories)
 
 
 @contextmanager

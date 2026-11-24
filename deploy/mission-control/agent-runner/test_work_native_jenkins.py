@@ -9,12 +9,15 @@ import subprocess
 from tempfile import TemporaryDirectory
 from types import MappingProxyType, SimpleNamespace
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+from test_jenkins_pipeline_lifecycle import RecordingEmitter
 from test_work_executor import raw_config
 from work_external_delivery import CHECKS, PROFILE, canonical, durable_json, read_private
+from work_jenkins_lifecycle import IntentDrain
 from work_native_jenkins import NativeJenkinsVerification, VERSION
 from work_publication import PublicationWorker, PublicationWorkerFactory
 from work_publication_checks import VerificationFailure
@@ -118,6 +121,57 @@ class NativeJenkinsTest(unittest.TestCase):
         self.hosted = {**self.job, 'review_id':str(uuid4()), 'source_review_id':self.scope['review_id'],
             'target_publication_id':str(uuid4()), 'pr_url':'https://github.com/fixture/project/pull/1'}
         return binding
+
+    def test_lifecycle_build_started_is_delivered_before_verification_returns(self):
+        # The drain thread delivers lifecycle intents concurrently with the
+        # verification poll loop: build_started must already be emitted
+        # while run() is still polling, not after it returns. The final
+        # poll asserts the delivery from inside the loop.
+        emitter = RecordingEmitter()
+        self.provider = NativeJenkinsVerification(self.config, self.store, self.git, self.candidates,
+            self.driver, self.supervisor, client=self.client, wait=lambda _: None, cleanup_timeout=0,
+            emitter=emitter, event_lookup=lambda *args: [], jenkins_instance='ci-primary')
+        drain = IntentDrain(self.driver.config.state_root / 'actions', emitter, interval_seconds=0.01)
+        stop = threading.Event()
+        drain.start(stop)
+        polls = {'n': 0}
+        def staged_verify(request, require):
+            require()
+            polls['n'] += 1
+            path = self.driver.config.state_root / 'actions' / request['action_id'] / 'jenkins.json'
+            if not path.exists():
+                durable_json(path, {'post_started': True})
+                self.driver.submissions += 1
+            self.driver.observations += 1
+            if polls['n'] == 1:
+                return {'status': 'pending', 'summary': 'Queued.',
+                        'receipt': {'queue_id': 7}}
+            if polls['n'] <= 5:
+                time.sleep(0.05)
+                return {'status': 'pending', 'summary': 'Building.',
+                        'receipt': {'queue_id': 7, 'build_number': 4}}
+            deadline = time.monotonic() + 5
+            while 'build_started' not in emitter.kinds():
+                self.assertLess(time.monotonic(), deadline,
+                                'build_started was not delivered before verification returned')
+                time.sleep(0.01)
+            return {'status': 'passed', 'summary': 'Actual fixture gates passed.',
+                'receipt': {'cleanup_confirmed': True, 'queue_id': 7, 'build_number': 4,
+                            'checks': [{'index': i, 'argv': list(x), 'returncode': 0} for i, x in enumerate(CHECKS)]}}
+        self.driver.verify = staged_verify
+        try:
+            report = self.provider.run(self.job, self.repository, threading.Event())
+        finally:
+            stop.set()
+            self.assertTrue(drain.join(timeout=10))
+        self.assertTrue(report.checks_passed)
+        self.assertEqual(polls['n'], 6)
+        self.assertIn('build_queued', emitter.kinds())
+        self.assertIn('build_started', emitter.kinds())
+        # The completion intent is recorded on the terminal poll; a final
+        # sweep delivers it after the run returns.
+        drain.sweep_once()
+        self.assertIn('build_completed', emitter.kinds())
 
     def test_one_real_candidate_action_is_reused_by_hosted_and_merge_observation(self):
         binding = self.local_pass()

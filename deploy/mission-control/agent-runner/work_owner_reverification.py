@@ -14,6 +14,7 @@ from queue_store import Rejected
 from work_config import sha256_canonical
 from work_store import _resume_intent_digest
 from work_retry_policy import budget_compatible_repair_policy, effective_repair_policy
+from work_events import operator_actor
 from work_workflow import BoundPreparationRetryAuthority, recipe_from_snapshot, _ready_for_recipe, NATIVE_POLICIES
 
 POLICY = 'forge-owner-verification-recovery-v2'
@@ -47,7 +48,8 @@ def replay(cursor, store, task, action, request, digest):
         raise Rejected(409, 'idempotency_conflict')
     saved = _object(finish.get('receipt'), 'reconcile_required')
     try:
-        valid = (set(saved) == {'project_alias', 'task_id', 'base_revision', 'revision', 'status', 'review_id'}
+        valid = (set(saved) - {'actor'} == {'project_alias', 'task_id', 'base_revision', 'revision', 'status', 'review_id'}
+            and ('actor' not in saved or saved['actor'] == {'kind': 'operator', 'id': task['owner_id']})
             and saved['project_alias'] == task['project_alias'] and saved['task_id'] == str(task['id'])
             and type(saved['base_revision']) is int and saved['base_revision'] == request['expected_revision']
             and type(saved['revision']) is int and saved['revision'] == request['expected_revision'] + 1
@@ -192,7 +194,8 @@ def _review_chain(cursor, task, workflow, latest, rec, owner):
         policy = intent.get('policy')
         expected_key = 'owner-verification-retry:' + str(workflow['workflow_id']) if policy == V1 else source_key(workflow['workflow_id'], previous['review_id'])
         expected = dict(project_alias=task['project_alias'], task_id=str(task['id']), base_revision=previous['source_revision'],
-                        revision=q['source_revision'], status='awaiting_review', review_id=str(q['review_id']))
+                        revision=q['source_revision'], status='awaiting_review', review_id=str(q['review_id']),
+                        actor={'kind': 'operator', 'id': task['owner_id']})
         if (a['status'] != 'completed' or a['source_key'] != expected_key or finish.get('status') != STATUS or finish.get('receipt') != expected
                 or intent.get('workflow_id') != str(workflow['workflow_id'])
                 or request.get('project_alias') != task['project_alias'] or request.get('task_id') != str(task['id'])
@@ -331,7 +334,7 @@ def recover(flow, cursor, task, owner, command, request, digest):
     authority = BoundOwnerVerificationAuthority(store, cursor, w['workflow_id'], task['id'], task['latest_attempt_id'], task['revision'], q['review_id'],
         store.owner, task['project_alias'], q['infrastructure_retries'], q['candidate_commit'], q['gate_manifest_sha256'],
         sha256_canonical(q['verification']), tuple(q[k] for k in SOURCE), _OWNER_ADMISSION)
-    receipt = store.review_decide(**vars(command), _authority=authority)
+    receipt = store.review_decide(**vars(command), _authority=authority, actor=operator_actor(store.owner))
     cursor.execute("UPDATE forge_agent.coding_reviews SET candidate_commit=NULL,gate_manifest_sha256=NULL,verification='{}'::jsonb,owner_decision=NULL WHERE review_id=%s AND status='pending' AND previous_review_id=%s", (receipt['review_id'], q['review_id']))
     if cursor.rowcount != 1:
         raise Rejected(409, 'reconcile_required')

@@ -1103,7 +1103,7 @@ class CommandRunnerProvider:
                 raise ValueError("Muse executable does not match its pinned adapter version")
 
     def invocation(self, lease, workspace, *, progress=False, plan_context=None, feedback_context=None, peer_context=None,
-                   peer_feedback_context=None, external_context=None):
+                   peer_feedback_context=None, external_context=None, verdict_retry_note=None):
         if not verify_recipe(self.config, lease):
             raise ExecutionError("failed", "Assignment execution policy is unavailable or changed.")
         backend = lease["recipe"]["backend"]
@@ -1209,6 +1209,8 @@ class CommandRunnerProvider:
                 "For every revise or escalate decision, attested_finding_ids MUST be an empty array, "
                 "even when some earlier findings were fixed; describe that progress in summary instead. "
                 "You cannot choose another agent, alter the merge target or perform publication.")
+            if verdict_retry_note:
+                prompt += "\n\n" + verdict_retry_note
         elif peer_context is not None:
             raise ExecutionError("needs_reconcile", "An unbound peer review target was supplied.")
         external_file = None
@@ -1442,10 +1444,11 @@ class CommandRunnerProvider:
                           external_sandbox if backend == "codex" else False, native_auth)
 
     def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None, peer_context=None,
-            peer_feedback_context=None, external_context=None):
+            peer_feedback_context=None, external_context=None, verdict_retry_note=None):
         invocation = self.invocation(lease, workspace, progress=report_progress is not None,
                                      plan_context=plan_context, feedback_context=feedback_context, peer_context=peer_context,
-                                     peer_feedback_context=peer_feedback_context, external_context=external_context)
+                                     peer_feedback_context=peer_feedback_context, external_context=external_context,
+                                     verdict_retry_note=verdict_retry_note)
         session_provider = self._session_provider(invocation.backend)
         active_invocation = invocation
         conversation = active_invocation.session.conversation_id if active_invocation.session is not None else None

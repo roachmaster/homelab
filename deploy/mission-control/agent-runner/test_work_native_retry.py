@@ -54,7 +54,7 @@ class NativeTimeoutRetryTest(unittest.TestCase):
             " WHERE attempt_id='" + implementation.attempt_id + "'", owner=False)
         self.assertEqual(self.db.expire_leases(), 1)
         proof = make_stop_proof(implementation.unit_name)
-        self.db.record_stop(implementation, proof, "Trusted fixture scope stopped after its bound.")
+        self.db.record_stop(implementation, proof, "Trusted fixture scope stopped after its bound.", "scope_stopped")
         receipt = self.db.reconcile(implementation, "c" * 64, proof) if reconcile else None
         return receipt, self.get(implementation.task_id)
 
@@ -64,7 +64,7 @@ class NativeTimeoutRetryTest(unittest.TestCase):
             "UPDATE forge_agent.coding_attempts SET deadline_at=clock_timestamp()-interval '1 second'"
             " WHERE attempt_id='" + implementation.attempt_id + "'", owner=False)
         proof = make_stop_proof(implementation.unit_name)
-        self.db.record_stop(implementation, proof, "Unpublished scope stopped by the trusted launcher.")
+        self.db.record_stop(implementation, proof, "Unpublished scope stopped by the trusted launcher.", "scope_stopped")
         receipt = self.db.reconcile(implementation, "c" * 64, proof)
         reasons = self.rows("SELECT payload->>'reason' FROM forge_agent.coding_events WHERE task_id=%s AND payload->>'attempt_id'=%s",
                             (implementation.task_id, implementation.attempt_id))
@@ -153,7 +153,7 @@ class NativeTimeoutRetryTest(unittest.TestCase):
                 if status == "lease_expired":
                     receipt, detail = self.expire(implementation, deadline=False)
                 elif status == "early_stop":
-                    self.db.record_stop(implementation, proof, "Not a deadline failure.")
+                    self.db.record_stop(implementation, proof, "Not a deadline failure.", "interrupted")
                     receipt = self.db.reconcile(implementation, "c" * 64, proof)
                     detail = self.get(implementation.task_id)
                 elif status == "cancelled":

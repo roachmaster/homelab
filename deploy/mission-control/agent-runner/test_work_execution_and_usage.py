@@ -409,7 +409,7 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
         with self.assertRaises(WorkerAccessError):
             db.publish(bad_lease, "failed", None, None, "spoofed", make_stop_proof(lease.unit_name))
         with self.assertRaises(WorkerAccessError):
-            db.record_stop(bad_lease, make_stop_proof(lease.unit_name), "spoofed")
+            db.record_stop(bad_lease, make_stop_proof(lease.unit_name), "spoofed", "interrupted")
 
         # Expire lease -> renew fails, checkpoint/append/publish fail, record_stop STILL works without reopening.
         self.cluster.admin_exec(
@@ -427,7 +427,7 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
 
         # Expire into needs_reconcile, then record_stop safely marks attempt stopped without reopening task.
         self.assertEqual(db.expire_leases(), 1)
-        db.record_stop(lease, make_stop_proof(lease.unit_name, stopped=True), "stopped after expiry")
+        db.record_stop(lease, make_stop_proof(lease.unit_name, stopped=True), "stopped after expiry", "scope_stopped")
         detail = service.get(work_api.WorkGet("homelab", task_id))
         self.assertEqual(detail["status"], "needs_reconcile")
         self.assertEqual(detail["attempt"]["phase"], "stopped")
@@ -586,6 +586,7 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
             "base_revision": 2,
             "revision": 3,
             "status": "cancel_requested",
+            "actor": {"kind": "operator", "id": "mission-control"},
         })
         self.assertTrue(db.cancellation_requested(lease))
 

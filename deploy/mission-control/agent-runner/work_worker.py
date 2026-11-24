@@ -33,6 +33,7 @@ LOG = logging.getLogger("forge-coding-worker")
 FEEDBACK_INTEGRITY_SUMMARY = "Review feedback integrity could not be verified; explicit review is required."
 SCAN_SECONDS = 5
 ADVERTISE_SECONDS = 30
+VERDICT_SELF_CHECK_RETRIES = 2
 
 
 def _lease(value):
@@ -165,6 +166,48 @@ class CodingWorker:
             # Missing telemetry never changes a coherent coding result.
             LOG.warning("Coding usage observation unavailable")
             return None
+
+    def _run_review(self, lease, workspace, stop, arguments):
+        """Run a review-mode attempt, validating its verdict before publication.
+
+        The reviewer harness validates the verdict against the admitted target
+        with parse_review_verdict before publishing. A failed self-check is
+        recorded as a checkpoint event (stage verdict_self_check_failed, with
+        the failing check id) and the agent retries within the same attempt,
+        bounded to two retries and told which check failed; the last outcome
+        is published either way, and the workflow escalation plus correction
+        path remains the backstop for a verdict that never becomes valid.
+        """
+        from work_peer_review import PeerReviewError, parse_review_target, parse_review_verdict
+        peer_context = arguments.get("peer_context")
+        outcome = self.runner.run(lease, workspace, stop, **arguments)
+        if peer_context is None or outcome.status != "awaiting_review" or not outcome.text:
+            return outcome
+        try:
+            target = parse_review_target(peer_context.content.decode("utf-8"), peer_context.sha256)
+        except PeerReviewError:
+            return outcome
+        for attempt in range(1 + VERDICT_SELF_CHECK_RETRIES):
+            try:
+                parse_review_verdict(outcome.text, target)
+                return outcome
+            except PeerReviewError as error:
+                check = error.check or "verdict.parse_error"
+                if attempt == VERDICT_SELF_CHECK_RETRIES or stop.is_set():
+                    return outcome
+                try:
+                    self.store.checkpoint(lease, "verdict_self_check_failed: check=" + check
+                                          + " (attempt " + str(attempt + 1) + " of "
+                                          + str(1 + VERDICT_SELF_CHECK_RETRIES) + ")")
+                except Exception:
+                    LOG.warning("Reviewer verdict self-check checkpoint unavailable")
+                arguments = {**arguments, "verdict_retry_note": (
+                    "VERDICT CORRECTION: Your previous verdict failed its own validity check (" + check + "). "
+                    "Return a corrected verdict with the exact identity fields and context hash from the target.")}
+                outcome = self.runner.run(lease, workspace, stop, **arguments)
+                if outcome.status != "awaiting_review" or not outcome.text:
+                    return outcome
+        return outcome
 
     def _publish(self, lease, outcome, *, usage):
         manifest = None
@@ -338,13 +381,16 @@ class CodingWorker:
                             if context is not None:arguments["external_context"]=context
                         except Exception:
                             raise ExecutionError("needs_reconcile","The complete external review context is unavailable.") from None
-                    outcome = self.runner.run(lease, workspace, stop, **arguments)
+                    if lease.get("workflow_review_id") is not None:
+                        outcome = self._run_review(lease, workspace, stop, arguments)
+                    else:
+                        outcome = self.runner.run(lease, workspace, stop, **arguments)
                     proof = outcome.stop_proof
                 if self.stop.is_set() and not cancelled.is_set():
                     outcome = replace(outcome, status="needs_reconcile", text="", stop_proof=proof,
                                       summary="Worker shutdown requires review before any replacement attempt.")
                 if lost.is_set():
-                    self.store.record_stop(lease, proof, "Prior agent scope stopped after its lease was lost.")
+                    self.store.record_stop(lease, proof, "Prior agent scope stopped after its lease was lost.", "lease_lost")
                     return
                 if not proof["scope_stopped"]:
                     outcome = replace(outcome, status="needs_reconcile", text="", stop_proof=proof,
@@ -360,7 +406,7 @@ class CodingWorker:
         except ExecutionError as error:
             proof = proof or self.supervisor.stop(lease["unit_name"])
             if lost.is_set():
-                self.store.record_stop(lease, proof, error.summary)
+                self.store.record_stop(lease, proof, error.summary, "lease_lost")
             else:
                 status = error.outcome if proof["scope_stopped"] else "needs_reconcile"
                 outcome = CliOutcome(status, "", None, None, error.summary, proof)
@@ -368,7 +414,11 @@ class CodingWorker:
         except Exception:
             proof = proof or self.supervisor.stop(lease["unit_name"])
             try:
-                self.store.record_stop(lease, proof, "Worker lost publication certainty; review is required.")
+                # The stop cause is the worker's own stop reason (plan 4.3):
+                # a stopped scope reports scope_stopped, any other
+                # interruption reports interrupted.
+                self.store.record_stop(lease, proof, "Worker lost publication certainty; review is required.",
+                                       "scope_stopped" if proof.get("scope_stopped") else "interrupted")
             except Exception:
                 pass
             raise

@@ -123,7 +123,8 @@ class WorkProgressTest(unittest.TestCase):
             kind, payload, attempt_id, sequence = row
             self.assertEqual(kind, "checkpoint")
             self.assertEqual(attempt_id, UUID(lease.attempt_id))
-            self.assertEqual(set(payload), {"attempt_id", "progress_sequence", "stage", "summary"})
+            self.assertEqual(set(payload), {"attempt_id", "progress_sequence", "stage", "summary", "actor"})
+            self.assertEqual(payload["actor"], {"kind": "worker", "id": "progress-worker"})
             self.assertEqual(payload["attempt_id"], lease.attempt_id)
             self.assertEqual(payload["progress_sequence"], sequence)
             self.assertEqual(payload["stage"], "plan" if ordinal == 1 else "progress")

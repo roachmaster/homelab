@@ -11,7 +11,7 @@ import psycopg2
 
 from jenkins_config import parse_jenkins_config
 from jenkins_events import JenkinsEventEmit, JenkinsEventKind
-from jenkins_store import JenkinsStore
+from jenkins_store import ADVISORY_LOCK_SALT, JenkinsStore
 from queue_store import Rejected
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE
 
@@ -93,6 +93,61 @@ class JenkinsStorePostgresTest(unittest.TestCase):
         self.assertIsNone(selected.claim_next(('observation',),'scoped-consumer'))
         after = broad_store.get_event(project_alias=(denied or {}).get('project_alias','homelab'),event_id=old['event_id'])
         self.assertEqual(after,before,'Revoked deliveries remain intact and unclaimed, not failed or deleted')
+
+    def test_stage_started_emits_and_persists_under_migration_0034(self):
+        store = self.make_store()
+        receipt = store.emit(sample_event(delivery_id='del-stage-1',
+            event_kind=JenkinsEventKind.STAGE_STARTED, stage_name='check',
+            summary='Stage check started'))
+        self.assertFalse(receipt['deduplicated'])
+        event = store.get_event(project_alias='homelab', event_id=receipt['event_id'])['event']
+        self.assertEqual(event['event_kind'], 'stage_started')
+        self.assertEqual(event['stage_name'], 'check')
+        self.assertIsNone(event['stage_status'])
+        self.assertIsNone(event['build_result'])
+        # The 0034 field constraint is a DB backstop: a stage_started row
+        # carrying a result or a stage status is rejected even bypassing
+        # emit validation.
+        with closing(self.cluster.connect()) as conn:
+            conn.autocommit = True
+            with conn.cursor() as cursor:
+                for extra in ({'build_result': 'success'}, {'stage_status': 'success'}):
+                    row = dict(owner_id='mission-control', project_alias='homelab', sequence=99,
+                        jenkins_instance='ci-primary', job_name='forge/ci-main',
+                        delivery_id='del-stage-bad-' + list(extra)[0], event_kind='stage_started',
+                        build_number=1, commit_sha=SHA1, stage_name='check',
+                        summary='bad row', occurred_at=OCCURRED_AT, payload_sha256='b' * 64)
+                    row.update(extra)
+                    columns = ','.join(row)
+                    placeholders = ','.join('%s' for _ in row)
+                    with self.subTest(extra=extra):
+                        with self.assertRaises(psycopg2.errors.CheckViolation):
+                            cursor.execute(
+                                f'INSERT INTO forge_agent.jenkins_events ({columns}) '
+                                f'VALUES ({placeholders})', list(row.values()))
+
+    def test_emit_fails_fast_when_the_owner_lock_is_held(self):
+        # The round-6 contention case: emit takes blocking advisory locks, so
+        # a held lock must fail on the 4s lock timeout, never block the
+        # verification poll loop indefinitely.
+        locker = self.cluster.connect()
+        locker.autocommit = True
+        try:
+            with locker.cursor() as cursor:
+                cursor.execute(
+                    'SELECT pg_advisory_lock(hashtextextended(%s::text, %s::bigint))',
+                    ('mission-control\n', ADVISORY_LOCK_SALT))
+            store = self.make_store()
+            started = time.monotonic()
+            with self.assertRaises(psycopg2.errors.LockNotAvailable):
+                store.emit(sample_event(delivery_id='del-blocked'))
+            self.assertLess(time.monotonic() - started, 10)
+        finally:
+            with locker.cursor() as cursor:
+                cursor.execute(
+                    'SELECT pg_advisory_unlock(hashtextextended(%s::text, %s::bigint))',
+                    ('mission-control\n', ADVISORY_LOCK_SALT))
+            locker.close()
 
     def test_claim_respects_current_project_allowlist(self):
         self._assert_narrowed_delivery_is_preserved(narrowed={'allowed_projects':['homelab'],

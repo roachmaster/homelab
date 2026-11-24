@@ -9,6 +9,7 @@ from queue_store import Rejected
 from work_feedback import parse_feedback_json
 from work_context_recovery_contract import POLICY, RECOVERY_SUMMARY, LEGACY_SUMMARY, make_recovery_note
 from work_retry_policy import AGENT_RETRY_LIMIT
+from work_events import CONTEXT_RECOVERY_ACTOR, insert_event
 
 MAX_RECOVERIES = AGENT_RETRY_LIMIT
 BACKOFF_SECONDS = 60
@@ -213,7 +214,7 @@ class FeedbackRecovery:
                     raise Rejected(409, 'not_reviewable')
             receipt = self.store.resume(project_alias=project_alias, task_id=task_id, expected_revision=expected_revision,
                 idempotency_key=idempotency_key, agent_profile=p['author_profile'], reconciliation_receipt_id=reconciliation_receipt_id,
-                note=note, allowed_modes={'implement'}, resolve_recipe=lambda _: recipe, _authority=authority)
+                note=note, allowed_modes={'implement'}, resolve_recipe=lambda _: recipe, _authority=authority, actor=CONTEXT_RECOVERY_ACTOR)
             intent = dict(policy=self.POLICY_ID, request=request, source_attempt_id=str(attempt['attempt_id']),
                 source_event_id=str(witness['event_id']), feedback_id=str(task['feedback_id']),
                 feedback_sha256=task['feedback_sha256'], workspace_digest=rec['workspace_digest'], max_recoveries=MAX_RECOVERIES)
@@ -221,12 +222,12 @@ class FeedbackRecovery:
                 intent['retry_event'] = event
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
                 (w['workflow_id'], self.store.owner, project_alias, key, Json(intent), Json({'status': self.AUDIT_STAGE, 'receipt': receipt})))
-            cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'checkpoint',%s FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s",
-                (self.store.owner, project_alias, task_id, Json(dict(stage=self.AUDIT_STAGE, policy=self.POLICY_ID,
+            insert_event(cursor, self.store.owner, project_alias, task_id, 'checkpoint',
+                         dict(stage=self.AUDIT_STAGE, policy=self.POLICY_ID,
                     source_attempt_id=str(attempt['attempt_id']), source_event_id=str(witness['event_id']),
                     reconciliation_receipt_id=str(rec['receipt_id']), feedback_id=str(task['feedback_id']),
-                    summary=self.RECOVERY_DESCRIPTION, receipt=receipt)),
-                 self.store.owner, project_alias, task_id))
+                    summary=self.RECOVERY_DESCRIPTION, receipt=receipt),
+                         actor=CONTEXT_RECOVERY_ACTOR)
             return receipt
 
     def run_once(self):

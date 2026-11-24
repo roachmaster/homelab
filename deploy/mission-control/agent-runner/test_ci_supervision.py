@@ -724,6 +724,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
              patch.object(SETUP.pwd, 'getpwnam', return_value=user), \
              patch.object(SETUP, 'read_owned', return_value=b'{}'), \
              patch.object(SETUP, 'read_pipeline', return_value=pipeline), \
+             patch.object(SETUP, 'qualify_stage_token', return_value='systemd-credential'), \
              patch.object(SETUP, 'directory'), \
              patch.object(SETUP, 'install', side_effect=lambda p, *args, **kwargs: installed.append(p)), \
              patch.object(SETUP, 'request', return_value=json.dumps(info).encode()) as request, \
@@ -753,6 +754,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
              patch.object(SETUP, 'read_owned', return_value=b'{}'), \
              patch.object(SETUP.Path, 'exists', return_value=True), \
              patch.object(SETUP, 'read_pipeline', return_value=cached) as read_pipeline, \
+             patch.object(SETUP, 'qualify_stage_token', return_value='systemd-credential'), \
              patch.object(SETUP, 'directory') as directory, \
              patch.object(SETUP, 'install', side_effect=lambda path, raw, **kw: installed.update({path: raw})), \
              patch.object(SETUP, 'request', return_value=json.dumps(info).encode()), \
@@ -1013,6 +1015,14 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             with patch.object(CI.os, 'fchown'):
                 return orig_open_log(path, reader_group)
 
+        # Same root-only treatment as the log: the progress channel is
+        # created root-owned in production; the harness mocks the chown
+        # while the real creation (O_EXCL, mode, validation) still runs.
+        orig_open_progress = CI.open_progress
+        def test_open_progress(path, reader_group):
+            with patch.object(CI.os, 'fchown'):
+                return orig_open_progress(path, reader_group)
+
         with patch.object(CI, 'CHECKS', checks), \
              patch.object(CI, 'BRANCH_CHECKS', branch_checks), \
              patch.object(CI, 'SCOPED_BRANCH_CHECKS', branch_checks), \
@@ -1025,6 +1035,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
              patch.object(CI, 'read_file', side_effect=test_read_file), \
              patch.object(CI, 'write_result', side_effect=test_write_result), \
              patch.object(CI, 'open_log', side_effect=test_open_log), \
+             patch.object(CI, 'open_progress', side_effect=test_open_progress), \
              patch.object(CI, 'kill_build_user', side_effect=kill_build_user_override), \
              patch.object(CI, 'run_child', side_effect=run_child_override or local_run_child):
             # If extra_env is supplied, also inject it into resolve_key's compiler env observation.
@@ -2250,6 +2261,11 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
                 with patch.object(CI.os, 'fchown'):
                     return orig_log(p, g)
 
+            orig_progress = CI.open_progress
+            def test_progress(p, g):
+                with patch.object(CI.os, 'fchown'):
+                    return orig_progress(p, g)
+
             with patch.object(CI, 'CHECKS', checks), \
                  patch.object(CI, 'BRANCH_CHECKS', branch_checks), \
              patch.object(CI, 'SCOPED_BRANCH_CHECKS', branch_checks), \
@@ -2262,6 +2278,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
                  patch.object(CI, 'read_file', side_effect=lambda p, *, owner, maximum: orig_ci_read(p, owner=uid_now, maximum=maximum)), \
                  patch.object(CI, 'write_result', side_effect=test_write), \
                  patch.object(CI, 'open_log', side_effect=test_log), \
+                 patch.object(CI, 'open_progress', side_effect=test_progress), \
                  patch.object(CI, 'kill_build_user'), \
                  patch.object(CI, 'run_child', side_effect=lambda argv, *, cwd, env, account, log, timeout, cancelled: subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=False).returncode):
                 result = CI.execute_locked(verify_action, cfg, cache_port=cache_port)

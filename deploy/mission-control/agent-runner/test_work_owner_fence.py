@@ -262,7 +262,12 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                 tables=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND relname<>'schema_migrations' ORDER BY relname")]
                 # Snapshot every original relation, including its exact ACL.
                 # New M27/M28 tables are checked by the strict current verifier.
-                original_relations=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace ORDER BY relname")]
+                # Migration 0035 replaces the old unique index on
+                # coding_workflow_reviews with the partial
+                # coding_workflow_reviews_source_binding_unique index (a
+                # superseded row and its replacement would violate the old
+                # constraint), so the old index name is carved out here.
+                original_relations=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname<>'coding_workflow_reviews_workflow_id_target_kind_source_atte_key' ORDER BY relname")]
                 def snapshot():
                     return dict(
                         history=execute('SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=25 ORDER BY version'),
@@ -273,7 +278,7 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                         hba=hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest())
                 before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
-                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(33,)])
+                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(37,)])
                 self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(27,)])
                 self.assertEqual(execute("SELECT has_function_privilege('muse_events','forge_agent._coding_owner_continuation_fenced(uuid)','EXECUTE')"),[(False,)])
             finally:cluster.stop()

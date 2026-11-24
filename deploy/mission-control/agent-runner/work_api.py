@@ -10,6 +10,7 @@ from uuid import UUID
 
 import chat_history_api as common
 from queue_store import Rejected
+from work_events import COORDINATOR_ACTOR, operator_actor
 from work_config import VALID_MODES, WorkCatalog, WorkConfig
 from work_external_policy import MODES as EXTERNAL_MODES
 from work_store import (
@@ -259,6 +260,9 @@ class WorkService:
             auto_repair=command.auto_repair,
             workflow_policy_digest=command.workflow_policy_digest,
             delivery_admission=command.delivery_admission,
+            # The submitter (plan section 4.2): the operator via portal/CLI,
+            # or the coordinator for auto-repair submissions.
+            actor=COORDINATOR_ACTOR if command.auto_repair else operator_actor(self._store.owner),
             resolve_workflow=lambda:self._workflow_snapshot(command.project_alias,command.mode,command.agent_profile,command.workflow_policy_digest),
         )
 
@@ -309,13 +313,16 @@ class WorkService:
         self._require_project(command.project_alias)
         flow=self._external_workflow
         if flow is not None:
-            receipt=flow.cancel(project_alias=command.project_alias,task_id=command.task_id,expected_revision=command.expected_revision,idempotency_key=command.idempotency_key)
+            receipt=flow.cancel(project_alias=command.project_alias,task_id=command.task_id,expected_revision=command.expected_revision,idempotency_key=command.idempotency_key,
+                                actor=operator_actor(self._store.owner),cause="operator_request")
             if receipt is not None:return receipt
         return self._store.cancel(
             project_alias=command.project_alias,
             task_id=command.task_id,
             expected_revision=command.expected_revision,
             idempotency_key=command.idempotency_key,
+            actor=operator_actor(self._store.owner),
+            cause="operator_request",
         )
 
     def result(self, command):
@@ -348,6 +355,7 @@ class WorkService:
             expected_revision=command.expected_revision,
             idempotency_key=command.idempotency_key,
             review_note=command.review_note,
+            actor=operator_actor(self._store.owner),
         )
 
     def resume(self, command):
@@ -379,6 +387,7 @@ class WorkService:
             note=command.note,
             allowed_modes=self._config.allowed_modes,
             resolve_recipe=resolve_recipe,
+            actor=operator_actor(self._store.owner),
         )
 
 
@@ -396,7 +405,7 @@ class WorkService:
             except KeyError:
                 raise Rejected(503, "unavailable") from None
 
-        return self._store.plan_decide(**vars(command), resolve_recipe=resolve_recipe)
+        return self._store.plan_decide(**vars(command), resolve_recipe=resolve_recipe, actor=operator_actor(self._store.owner))
 
     def review_decide(self, command):
         self._require_project(command.project_alias)
@@ -415,7 +424,7 @@ class WorkService:
                 return self._catalog.resolve(command.agent_profile,"implement")
             except KeyError:
                 raise Rejected(503,"unavailable") from None
-        return self._store.review_decide(**vars(command),resolve_recipe=resolve_recipe)
+        return self._store.review_decide(**vars(command),resolve_recipe=resolve_recipe,actor=operator_actor(self._store.owner))
 
     def repair(self, command):
         self._require_project(command.project_alias)
@@ -431,11 +440,11 @@ class WorkService:
                 return self._catalog.resolve(command.agent_profile, "implement")
             except KeyError:
                 raise Rejected(503, "unavailable") from None
-        return self._store.repair(**vars(command), resolve_recipe=resolve_recipe)
+        return self._store.repair(**vars(command), resolve_recipe=resolve_recipe, actor=operator_actor(self._store.owner))
 
     def publication_retry(self, command):
         self._require_project(command.project_alias)
-        return self._store.publication_retry(**vars(command))
+        return self._store.publication_retry(**vars(command), actor=operator_actor(self._store.owner))
 
 
 class WorkServiceFactory:

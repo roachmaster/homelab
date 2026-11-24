@@ -6,9 +6,11 @@ from pathlib import Path
 import re
 from types import MappingProxyType
 
-from work_worker_config import WorkerConfig, absolute_path, identifier, load_config as load_worker
+from work_worker_config import (DatabaseConfig, WorkerConfig, absolute_path, identifier,
+                                load_config as load_worker)
 from work_verification import DEFAULT_REQUIRED_HOSTED_CHECKS
 from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory
+from jenkins_events import validate_identifier as validate_jenkins_identifier
 
 CONFIG_ENV = "FORGE_PUBLICATION_CONFIG"
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -18,6 +20,22 @@ DEFAULT_CHECKS = (
     ("/usr/bin/python3", "-B", "-m", "unittest", "discover", "-s",
      "deploy/mission-control/agent-runner", "-p", "test_*.py", "-v"),
 )
+
+
+@dataclass(frozen=True)
+class JenkinsEventsConfig:
+    """Validated Jenkins events configuration for the lifecycle producer.
+
+    ``config_path`` is the deployment's Jenkins config file (allowed
+    instances/jobs/projects); ``instance`` is the instance alias this worker
+    emits as; ``database`` is the credential reference for the Jenkins store
+    connection -- the publication worker's own database roles are
+    EXECUTE-only and cannot write the events table, so the events store
+    connects with its own credential.
+    """
+    config_path: Path
+    instance: str
+    database: DatabaseConfig
 
 
 @dataclass(frozen=True)
@@ -44,6 +62,7 @@ class PublicationConfig:
     source_observation_interval_seconds: int = 60
     release_enabled: bool = False
     release_actor_sha256: str | None = None
+    jenkins_events: JenkinsEventsConfig | None = None
 
     @property
     def state_root(self):
@@ -58,7 +77,7 @@ def parse_config(raw, worker, *, source_path=None):
         "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode", "jenkins_verification_profile", "jenkins_verification_scope",
         "post_merge_enabled", "post_merge_jenkins_delivery_config", "delivery_enabled",
         "source_observation_enabled", "source_observation_interval_seconds", "release_enabled",
-        "release_actor_sha256"
+        "release_actor_sha256", "jenkins_events"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -163,13 +182,37 @@ def parse_config(raw, worker, *, source_path=None):
             raise ValueError('Portal release requires the scoped pinned Root actor')
     elif actor_digest is not None:
         raise ValueError('Unused portal release actor')
+    jenkins_events = _parse_jenkins_events(raw.get("jenkins_events"), hosted_provider)
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
                              absolute_path(source_path) if source_path else None,
                              tuple(tuple(row) for row in required), merge_enabled, merge_method,
                              hosted_provider, delivery_path, delivery_mode, profile, execution_scope,
                              post_merge_enabled, post_merge_delivery, delivery_enabled,
-                             observation, interval, release_enabled, actor_digest)
+                             observation, interval, release_enabled, actor_digest, jenkins_events)
+
+
+def _parse_jenkins_events(raw, hosted_provider):
+    """Shape validation only; the factory validates against the JenkinsConfig."""
+    if raw is None:
+        return None
+    if hosted_provider != "jenkins":
+        raise ValueError("Unused Jenkins events configuration")
+    if not isinstance(raw, dict) or set(raw) != {"config", "instance", "database"}:
+        raise ValueError("Invalid Jenkins events configuration fields")
+    instance = validate_jenkins_identifier(raw["instance"], "jenkins_instance")
+    db = raw["database"]
+    if not isinstance(db, dict) or not {"host", "port", "name", "user"} <= set(db) <= {
+            "host", "port", "name", "user", "passfile"}:
+        raise ValueError("Invalid Jenkins events database configuration")
+    if type(db["port"]) is not int or not 1 <= db["port"] <= 65535:
+        raise ValueError("Invalid Jenkins events database port")
+    database = DatabaseConfig(
+        absolute_path(db["host"]), db["port"], identifier(db["name"]), identifier(db["user"]),
+        "forge_coding_reconciler",
+        absolute_path(db["passfile"]) if db.get("passfile") is not None else None,
+    )
+    return JenkinsEventsConfig(absolute_path(raw["config"]), instance, database)
 
 
 def _object(pairs):

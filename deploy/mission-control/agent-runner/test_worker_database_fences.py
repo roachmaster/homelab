@@ -197,7 +197,7 @@ class WorkerDatabaseFencesTest(unittest.TestCase):
                 if cancelled:
                     self.service.cancel(WorkCancel("homelab", UUID(lease.task_id), 2, "stop-cancel"))
                 before = self.event_count(lease)
-                self.db.record_stop(lease, make_stop_proof(lease.unit_name), "Publication was interrupted")
+                self.db.record_stop(lease, make_stop_proof(lease.unit_name), "Publication was interrupted", "interrupted")
                 expected = "cancelled" if cancelled else "needs_reconcile"
                 self.assertEqual(self.detail(lease)["status"], expected)
                 self.assertEqual(self.event_count(lease), before + 1)
@@ -205,7 +205,7 @@ class WorkerDatabaseFencesTest(unittest.TestCase):
                 if not cancelled:
                     self.assertIn(lease.task_id, [item["task_id"] for item in self.db.pending_reconciliations()])
                 # Stop acknowledgements may repeat; they must not repeat state transitions.
-                self.db.record_stop(lease, make_stop_proof(lease.unit_name), "Repeated stop observation")
+                self.db.record_stop(lease, make_stop_proof(lease.unit_name), "Repeated stop observation", "interrupted")
                 self.assertEqual(self.detail(lease)["status"], expected)
                 self.assertEqual(self.event_count(lease), before + 1)
 
@@ -219,7 +219,7 @@ class WorkerDatabaseFencesTest(unittest.TestCase):
         self.service.accept(WorkAccept("homelab", UUID(lease.task_id), receipt["revision"], "accept-final", ""))
         before = self.detail(lease)
         count = self.event_count(lease)
-        self.db.record_stop(lease, proof, "Late cleanup must not overwrite the publication")
+        self.db.record_stop(lease, proof, "Late cleanup must not overwrite the publication", "interrupted")
         self.assertEqual(self.detail(lease), before)
         self.assertEqual(self.event_count(lease), count)
         self.assertEqual(self.db.publish(lease, "awaiting_review", manifest, None, "Accepted agent result", proof), receipt)

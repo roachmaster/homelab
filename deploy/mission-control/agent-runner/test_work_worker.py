@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import hashlib
+import json
 from dataclasses import fields
 from types import MappingProxyType
 from pathlib import Path
@@ -11,7 +12,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 from test_work_executor import lease, proof, raw_config
+from test_work_peer_review import parse_review_target, sha, target as peer_target, verdict as peer_verdict
 from work_executor import CliOutcome, ExecutionError
+from work_peer_context import PeerReviewContext
 from work_worker import CodingWorkerFactory, CodingWorker, default_collector_factory
 from work_worker_config import parse_config
 from work_worker_store import Lease
@@ -393,6 +396,88 @@ class WorkerLifecycleTest(unittest.TestCase):
             store.claimed = value
             self.assertTrue(worker.run_once())
             self.assertEqual(collector.run_once.call_count, 2)
+
+
+class ScriptedReviewRunner:
+    """Return canned review outcomes in order, recording each call's kwargs."""
+
+    def __init__(self):
+        self.outcomes = []
+        self.calls = []
+
+    def run(self, lease, workspace, stop, **kwargs):
+        self.calls.append(dict(kwargs))
+        return self.outcomes[len(self.calls) - 1]
+
+
+class ReviewVerdictSelfCheckTest(unittest.TestCase):
+    """Plan §3.2/§8: a malformed first verdict is retried inside the attempt."""
+
+    def _worker(self, root):
+        config = parse_config(raw_config(root))
+        events = []
+        store = FakeStore(events)
+        worker = CodingWorker(config, store, FakeRunner(events), FakeWorkspaces(events), Mock(),
+                              usage_normalizer=lambda *a, **k: {"total_tokens": "5"})
+        scripted = ScriptedReviewRunner()
+        worker.runner = scripted
+        summaries = []
+        store.checkpoint = lambda lease_value, summary: summaries.append(summary)
+        value = lease(config)
+        value["incarnation"] = worker.incarnation
+        return worker, value, scripted, summaries
+
+    def _peer_context(self):
+        raw = peer_target("code")
+        raw_json = json.dumps(raw)
+        parsed = parse_review_target(raw_json, sha(raw_json))
+        valid = peer_verdict(parsed, "revise")
+        malformed = dict(valid)
+        malformed["context_sha256"] = valid["context_sha256"][:49]
+        context = PeerReviewContext(raw_json.encode("utf-8"), sha(raw_json),
+                                    parsed["workflow_id"], parsed["workflow_review_id"],
+                                    parsed["target_kind"])
+        return context, json.dumps(valid), json.dumps(malformed)
+
+    def _make_outcome(self, value, text):
+        return CliOutcome("awaiting_review", text, "c" * 36, {"input_tokens": 5},
+                          "Fixture ready", proof(value["unit_name"]))
+
+    def test_malformed_first_verdict_is_retried_and_never_published(self):
+        with TemporaryDirectory(prefix="forge-verdict-self-check-") as root:
+            context, valid_text, malformed_text = self._peer_context()
+            worker, value, scripted, summaries = self._worker(root)
+            scripted.outcomes = [self._make_outcome(value, malformed_text),
+                                 self._make_outcome(value, valid_text)]
+            outcome = worker._run_review(value, FakeWorkspace(), threading.Event(),
+                                         {"peer_context": context})
+            self.assertEqual(outcome.text, valid_text)
+            self.assertEqual(len(scripted.calls), 2)
+            self.assertNotIn("verdict_retry_note", scripted.calls[0])
+            self.assertIn("verdict.identity.context_sha256",
+                          scripted.calls[1]["verdict_retry_note"])
+            self.assertEqual(len(summaries), 1)
+            self.assertTrue(summaries[0].startswith(
+                "verdict_self_check_failed: check=verdict.identity.context_sha256"))
+
+    def test_never_valid_verdict_returns_last_outcome_after_two_retries(self):
+        """Documents the §3.2 divergence: once the retry budget is spent the
+        last outcome is published, so the coordinator escalation plus the
+        correction path remains the backstop for a verdict that never
+        becomes valid (the plan's acceptance says 'not with a coordinator
+        escalation'; the harness keeps the audit trail and the recovery)."""
+        with TemporaryDirectory(prefix="forge-verdict-self-check-") as root:
+            context, _valid_text, malformed_text = self._peer_context()
+            worker, value, scripted, summaries = self._worker(root)
+            scripted.outcomes = [self._make_outcome(value, malformed_text) for _ in range(3)]
+            outcome = worker._run_review(value, FakeWorkspace(), threading.Event(),
+                                         {"peer_context": context})
+            self.assertEqual(outcome.text, malformed_text)
+            self.assertEqual(len(scripted.calls), 3)
+            self.assertEqual(len(summaries), 2)
+            self.assertTrue(all(summary.startswith(
+                "verdict_self_check_failed: check=verdict.identity.context_sha256")
+                for summary in summaries))
 
 
 if __name__ == "__main__":

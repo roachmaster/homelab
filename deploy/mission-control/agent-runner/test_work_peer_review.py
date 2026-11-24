@@ -3,11 +3,12 @@
 from copy import deepcopy
 import hashlib
 import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from work_peer_review import (PeerReviewError, parse_review_target,
+from work_peer_review import (PeerReviewError, classify_verdict_defect, parse_review_target,
                               parse_review_verdict, validate_review_target,
                               IncompleteApprovalError, validate_live_review_verdict)
 
@@ -258,6 +259,58 @@ class PeerReviewContractTest(unittest.TestCase):
             parse_review_verdict(" " * 65537, parsed)
         with patch("builtins.open", side_effect=AssertionError("No parser I/O")):
             self.assertEqual(parse_review_verdict(json.dumps(verdict(parsed)), parsed)["decision"], "approve")
+
+
+class VerdictDiagnosticsTest(unittest.TestCase):
+    """The 719aa2b2 transcription defect names its check and expected/actual digests."""
+
+    @classmethod
+    def setUpClass(cls):
+        fixtures = Path(__file__).resolve().parent / "fixtures"
+        cls.target_raw = (fixtures / "peer-target-351b8c41.json").read_bytes()
+        cls.verdict_raw = (fixtures / "peer-verdict-719aa2b2.json").read_bytes()
+        cls.target = parse_review_target(cls.target_raw, sha(cls.target_raw.decode()))
+
+    def test_real_transcription_defect_names_context_check_with_lengths(self):
+        with self.assertRaises(PeerReviewError) as caught:
+            parse_review_verdict(self.verdict_raw, self.target)
+        error = caught.exception
+        self.assertEqual(error.check, "verdict.identity.context_sha256")
+        self.assertEqual(error.detail["expected_length"], 64)
+        self.assertEqual(error.detail["actual_length"], 49)
+        self.assertTrue(error.detail["malformed"])
+        self.assertEqual(error.detail["actual"], "11d3542aafe789669496eb6bb667955f51e19f9361b87dfda")
+        self.assertEqual(error.detail["expected"], self.target["_context_sha256"])
+
+    def test_defect_classification_requires_only_context_equality_to_fail(self):
+        defect = classify_verdict_defect(self.verdict_raw, self.target)
+        self.assertEqual(defect["check"], "verdict.identity.context_sha256")
+        self.assertEqual(defect["detail"]["actual_length"], 49)
+        fixed = json.loads(self.verdict_raw)
+        fixed["context_sha256"] = self.target["_context_sha256"]
+        self.assertEqual(parse_review_verdict(json.dumps(fixed), self.target)["decision"], "revise")
+        self.assertIsNone(classify_verdict_defect(json.dumps(fixed), self.target))
+        wrong_identity = json.loads(self.verdict_raw)
+        wrong_identity["source_revision"] = 999
+        self.assertIsNone(classify_verdict_defect(json.dumps(wrong_identity), self.target))
+        wrong_decision = json.loads(self.verdict_raw)
+        wrong_decision["context_sha256"] = self.target["_context_sha256"]
+        wrong_decision["decision"] = "approve"
+        self.assertIsNone(classify_verdict_defect(json.dumps(wrong_decision), self.target))
+
+    def test_diagnostics_never_carry_finding_or_source_text(self):
+        parsed = bind(target())
+        value = verdict(parsed, "revise")
+        value["context_sha256"] = "ghp_" + "A" * 36
+        with self.assertRaises(PeerReviewError) as caught:
+            parse_review_verdict(json.dumps(value), parsed)
+        self.assertEqual(caught.exception.check, "verdict.identity.context_sha256")
+        self.assertNotIn("actual", caught.exception.detail)
+        self.assertEqual(caught.exception.detail["actual_length"], 40)
+        self.assertTrue(caught.exception.detail["malformed"])
+        defect = classify_verdict_defect(json.dumps(value), parsed)
+        self.assertIsNotNone(defect)
+        self.assertNotIn("actual", defect["detail"])
 
 
 if __name__ == "__main__":

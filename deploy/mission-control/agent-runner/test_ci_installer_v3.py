@@ -57,6 +57,7 @@ class V3InstallerTest(unittest.TestCase):
         with patch.object(SETUP.os,'geteuid',return_value=0), \
              patch.object(SETUP.pwd,'getpwnam',return_value=user), \
              patch.object(SETUP,'read_owned',return_value=b'{}'), \
+             patch.object(SETUP,'qualify_stage_token',return_value='systemd-credential'), \
              patch.object(SETUP.Path,'exists',return_value=True), \
              patch.object(SETUP,'read_pipeline',return_value=original), \
              patch.object(SETUP,'directory') as directory, \

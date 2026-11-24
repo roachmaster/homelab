@@ -302,4 +302,28 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=33)
 \ir migrations/0033_superseding_reviews.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(33,'superseding_reviews');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=34) AS apply_0034
+\gset
+\if :apply_0034
+\ir migrations/0034_jenkins_stage_started.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(34,'jenkins_stage_started');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=35) AS apply_0035
+\gset
+\if :apply_0035
+\ir migrations/0035_event_stream_peer_review_diagnostics.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(35,'event_stream_peer_review_diagnostics');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=36) AS apply_0036
+\gset
+\if :apply_0036
+\ir migrations/0036_event_stream_actor_cause.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(36,'event_stream_actor_cause');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=37) AS apply_0037
+\gset
+\if :apply_0037
+\ir migrations/0037_event_stream_jenkins_producer.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(37,'event_stream_jenkins_producer');
+\endif
 COMMIT;

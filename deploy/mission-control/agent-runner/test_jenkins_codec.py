@@ -57,6 +57,33 @@ class JenkinsCodecTest(unittest.TestCase):
             verify_hmac_sha256(SECRET, oversized, compute_hmac_sha256(SECRET, oversized))
         self.assertEqual(ctx.exception.code, "payload_too_large")
 
+    def test_stage_started_phase_is_rejected_by_webhook_codec(self):
+        # stage_started is verifier-emitted only (loopback dispatch with the
+        # dispatch bearer token). A webhook claiming that phase must not
+        # decode: webhooks carry no stage-start identity.
+        body = json.dumps({
+            "name": "forge/ci-main",
+            "build": {
+                "phase": "STAGE_STARTED",
+                "number": 108,
+                "full_url": f"{ORIGIN}/job/forge/job/ci-main/108/",
+                "timestamp": "2026-11-21T05:10:00Z",
+                "scm": {"commit": SHA1_UPPER, "branch": "origin/main"},
+            },
+        }).encode("utf-8")
+        sig = compute_hmac_sha256(SECRET, body)
+        with self.assertRaises(JenkinsCodecError) as ctx:
+            translate_jenkins_webhook(
+                body,
+                project_alias="homelab",
+                jenkins_instance="ci-primary",
+                expected_origin=ORIGIN,
+                delivery_id="hdr-delivery-stage",
+                signature_header=sig,
+                hmac_secret=SECRET,
+            )
+        self.assertEqual(ctx.exception.code, "invalid_webhook_payload")
+
     def test_translate_completed_and_stage_and_queued_events(self):
         completed_body = json.dumps({
             "name": "forge/ci-main",

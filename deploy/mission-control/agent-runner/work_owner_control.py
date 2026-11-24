@@ -17,6 +17,7 @@ from work_peer_review import parse_review_target, parse_review_verdict
 from work_config import sha256_canonical
 from work_store import _resume_intent_digest
 from work_retry_policy import budget_compatible_repair_policy, effective_repair_policy
+from work_events import insert_event, operator_actor
 
 OWNER_CODE_RESUME = 'forge-owner-code-resume-v1'
 OWNER_CODE_FOLLOWUP = 'forge-owner-code-resume-v2'
@@ -406,7 +407,7 @@ class NativeOwnerControl:
             if not _ready_for_recipe(cursor.fetchall(), command.project_alias, p['reviewer_profile'], 'review', recipe_from_snapshot(p, 'reviewer_review')):
                 raise Rejected(503, 'unavailable')
             authority = BoundPreparationRetryAuthority(store, cursor, w['workflow_id'], task['id'], task['latest_attempt_id'], task['revision'], q['review_id'])
-            receipt = store.review_decide(**vars(command), _authority=authority)
+            receipt = store.review_decide(**vars(command), _authority=authority, actor=operator_actor(store.owner))
             # Only this new pending row changes: old failed candidate, seed,
             # build, findings and finish receipt remain immutable evidence.
             cursor.execute("UPDATE forge_agent.coding_reviews SET candidate_commit=NULL,gate_manifest_sha256=NULL,verification='{}'::jsonb,owner_decision=NULL WHERE review_id=%s AND status='pending' AND previous_review_id=%s", (receipt['review_id'], q['review_id']))
@@ -686,8 +687,8 @@ class NativeOwnerControl:
             payload = dict(receipt, policy=policy, workflow_id=str(w['workflow_id']), review_id=str(q['review_id']),
                 verdict_sha256=peer['verdict_sha256'], feedback_id=str(feedback_id), reconciliation_receipt_id=str(rec['receipt_id']),
                 workspace_digest=q['workspace_digest'], spent_budget=exhausted, auto_repair=False)
-            cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'resumed',%s FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s",
-                (store.owner, command.project_alias, task['id'], Json(payload), store.owner, command.project_alias, task['id']))
+            insert_event(cursor, store.owner, command.project_alias, task['id'], 'resumed',
+                         payload, actor=operator_actor(store.owner))
             cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
             return receipt
 

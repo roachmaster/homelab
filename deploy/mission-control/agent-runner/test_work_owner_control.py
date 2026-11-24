@@ -94,7 +94,7 @@ class OwnerContinuationTest(unittest.TestCase):
   source,checks,command,before,_=self.exhausted();self.service.resume(command);new=self.claim('agy-v2')
   self.cluster.admin_exec("UPDATE forge_agent.coding_attempts SET deadline_at=clock_timestamp()-interval '1 second' WHERE attempt_id='"+new.attempt_id+"'",owner=False)
   self.assertEqual(self.db.expire_leases(),1);proof=make_stop_proof(new.unit_name)
-  self.db.record_stop(new,proof,'Owner continuation reached its real deadline.');rec=self.db.reconcile(new,'c'*64,proof)
+  self.db.record_stop(new,proof,'Owner continuation reached its real deadline.', "interrupted");rec=self.db.reconcile(new,'c'*64,proof)
   self.coordinator.run_once();detail=self.get(new.task_id)
   with self.assertRaises(Rejected):
    self.coordinator.retry_native_timeout(project_alias='homelab',task_id=UUID(new.task_id),expected_revision=detail['revision'],reconciliation_receipt_id=UUID(rec),idempotency_key='owner-no-auto-deadline')

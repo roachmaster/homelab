@@ -205,7 +205,7 @@ class OwnerSourceFollowupTest(unittest.TestCase):
         author,job,request,_=self.pending();self.service.resume(request);following=self.claim('agy-v2')
         self.cluster.admin_exec("UPDATE forge_agent.coding_attempts SET deadline_at=clock_timestamp()-interval '1 second' WHERE attempt_id='"+following.attempt_id+"'",owner=False)
         self.assertEqual(self.db.expire_leases(),1);proof=make_stop_proof(following.unit_name)
-        self.db.record_stop(following,proof,'Real owner follow-up deadline.');rec=self.db.reconcile(following,'b'*64,proof)
+        self.db.record_stop(following,proof,'Real owner follow-up deadline.', "interrupted");rec=self.db.reconcile(following,'b'*64,proof)
         self.coordinator.run_once();detail=self.get(following.task_id)
         with self.assertRaises(Rejected):self.service.resume(replace(request,expected_revision=detail['revision'],reconciliation_receipt_id=UUID(rec),idempotency_key='no-peer-'+str(uuid4())))
         self.assertIsNone(self.claim('agy-v2'))

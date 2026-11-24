@@ -20,7 +20,7 @@ BEGIN
   ('forge_agent.coding_make_feedback(uuid,uuid,text,text,jsonb)','31fe8ac18e8e5b8a38b8bd7534e7d783327e5d4b785702098c9f89f45248cca3'),
   ('forge_coding_reconciler_api.publication_claim(text)','0636bf07b9355e7019de93164c2e913a341690cc80db37357d0e44e3cec9c8ac'),
   ('forge_coding_reconciler_api.review_claim(text)','bea9f804d670dc5c905b85dc60d660853d811083851b7fd7a1adae0348d9415e'),
-  ('forge_coding_worker_api.claim(text,uuid,text[])','b5a1beec34b55a73998f37a3c09805b8421ec912f1719ba9543be5ca703d2916')
+  ('forge_coding_worker_api.claim(text,uuid,text[])','25030544388d1d4fe200b3d68542375073c2f960279a759fcaf24bf5fd0ac5af')
  )x(signature,sha256) LOOP
   IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
   SELECT encode(sha256(convert_to(jsonb_build_array(replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,p.prosrc)),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
