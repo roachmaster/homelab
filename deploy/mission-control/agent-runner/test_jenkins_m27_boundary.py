@@ -654,7 +654,7 @@ MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_work_peer_diagnostics_schema.py': '6669fd97ab41d7408727c0b4c71e99d1cb8982c19894b8be9ef73e403b5a2024',
     'deploy/mission-control/agent-runner/test_work_peer_replay.py': '6f4cc5f4d160fa67301c827fa49d36aad0efe49f4d8ea1816820931b6fc5dbeb',
     'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '639b83bb28b870c7931f28041d8690a189b87be02bd68284cfcf2111cff58dd1',
-    'deploy/mission-control/agent-runner/work_workflow.py': '0c82c3b4135af650c7358cbfd3b36f85b5a4693f8288057bc84a856d92c59a39',
+    'deploy/mission-control/agent-runner/work_workflow.py': '98aae238dec240803a3d2dff223be145b340243e55423b7c004befa74091397b',
     'deploy/mission-control/sql/management/verify-autonomy.sql': 'd4ea5e110f74934f3a8b7626b444436c2cf17cb7ae538c49aa65829beffc1c11',
     'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '27ba8c6b9594fb0e607e60a551ea0aa4d15cf11809b077e1027c8e936da0b77f',
     'deploy/mission-control/sql/migrations/0035_event_stream_peer_review_diagnostics.sql': 'bb30872c207b9dd7b510430dde93761567c03c46b72424b305025923c6c07957',
