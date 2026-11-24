@@ -3582,8 +3582,13 @@ async function agentsJourney() {
       },width<640),true,'stage track stacks vertically on phones and flows horizontally on desktop');
     }
     await page.setViewportSize({width:390,height:844});
-    // Verify touch-target sizing and direct tap/click toggle on phone without hover.
+    // Verify touch-target sizing, reduced-motion cascade, and direct tap/click toggle on phone without hover.
     assert.equal(await stageTrace.locator('summary').evaluate(node=>node.getBoundingClientRect().height>=44),true,'stage trace disclosure meets 44px touch target');
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await check.poll(()=>page.locator('#agents-stage-diagram .fg-flow-node').first().evaluate(node=>getComputedStyle(node).transitionDuration.split(',').every(value=>Number.parseFloat(value)===0))).toBe(true);
+    await check.poll(()=>stageTrace.locator(':scope > summary').evaluate(node=>getComputedStyle(node).transitionDuration)).toBe('0s');
+    await check.poll(()=>stageTrace.locator(':scope > summary').evaluate(node=>getComputedStyle(node,'::after').transitionDuration)).toBe('0s');
+    await page.emulateMedia({reducedMotion:'no-preference'});
     await stageTrace.locator('summary').click();
     await check(stageTrace).toHaveJSProperty('open',false);
     await stageTrace.locator('summary').click();

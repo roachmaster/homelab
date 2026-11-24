@@ -519,7 +519,24 @@ PEER_FEEDBACK_CONTEXT_SHA256 = {'AGENT_WORK.md': '5b2736ec7bbb7502c3a8ecaa9a8b99
  'deploy/mission-control/jenkins/verify-candidate.py': 'ee759e4406f428134c111c617c8fbb7fb2c0eabe916611345b4c6a3bb75abcb8',
  'docs/architecture/proposals/forge-autonomous-agent-workflow.md': 'dd604a82143980feaa9a4591987516d823685aa7413af2c56e8ab5877aa22210'}
 
-<<<<<<< HEAD
+# Exact reviewer protocol and transport fix; predecessor authority and applied SQL stay immutable.
+REVIEW_PROTOCOL_CONTEXT_SHA256 = {'AGENT_WORK.md': '74187a9baa76afbd6aae600a2b89ccadd2f95b55d6c3f8e8f71b63d512c4b0c0',
+ 'deploy/mission-control/agent-runner/README.md': '28969daa3708e10984efb830fc442a6d6784a0c18e5969a4ffff6fed2bb89845',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'd83849731062476c4eeac6eabe873947c79dfc7a0c4d527acd2c6f133dd0765c',
+ 'deploy/mission-control/agent-runner/test_ci_event_phases.py': '105deceff4ad241e0dcf2527c0db2dc7a74363e6d3af6e3271b342a254413c6e',
+ 'deploy/mission-control/agent-runner/test_external_transport_recovery.py': 'b0c4a451b07731dfb47c78ea0b871f78e6a652ffa3505bb2f42e5a45c2619aba',
+ 'deploy/mission-control/agent-runner/test_work_cli_transport.py': 'f0e44d7c7121ca08bf8935ed65205c9f9cf8b42c76f1359a23ed74ed458fde40',
+ 'deploy/mission-control/agent-runner/test_work_review_revision_attestations.py': 'ec59bc12275322938a4fa6caa7c4443870d6e27e35c7536cc0dbd7a42a0feea5',
+ 'deploy/mission-control/agent-runner/work_ci_contract.py': 'cdbb4aaa14af50e3e00d2bca43414f86cc9dece38b53d3be2bd0b314635a867a',
+ 'deploy/mission-control/agent-runner/work_cli_transport.py': 'ef7040213c882906c8c39ff45e6a8fca8b8d2b212586e7caa3828b90ef1451f4',
+ 'deploy/mission-control/agent-runner/work_executor.py': '4f98a0bdc9775252a2c7a7e5d1a922cbff4751ef4ac0d480afb37b9413f40469',
+ 'deploy/mission-control/agent-runner/work_external_recovery.py': '2678b27800d3342e7cb9c1962513fce50876f097707e4230a0605544b1e565a6',
+ 'deploy/mission-control/agent-runner/work_external_workflow.py': '42884bfa990a0585ad713916174e0457d597a09d19334f63a9db3480d964ef4e',
+ 'deploy/mission-control/agent-runner/work_superseding_review.py': 'ca6b13e6f2e84ebc9c25b02687d2c9910f9c8185953b11c074cb3bcd26a6e382',
+ 'deploy/mission-control/agent-runner/work_worker.py': '481913abcf226869b745fc6ae698760b0f4d0dad8f2a7dda52265230584967d3',
+ 'deploy/mission-control/jenkins/verify-candidate.py': 'e73b78425f9d14e16b064777d2a02722345919c93093476cea9c116135c81912',
+ 'docs/architecture/external-agent-workflow.md': 'c4811902a3ebabde6271f67e6ea3f0a7a443bb35d17e378ea5ccddfd721e21ef'}
+
 # Current additive ABI15 event-stream stage-diagram UI source; historical maps
 # above remain literal provenance. This narrow overlay binds only the UI model,
 # declarative component/emitters, atomic ABI15 metadata, docs, and UI/host tests.
@@ -545,36 +562,14 @@ UI_STAGE_DIAGRAM_CONTEXT_SHA256 = {
     'src/rust/forge-ide-web/src/generate/html.rs': 'ad0cd101d75d0ff8ff72b1c0af0255536089d29bfa23dc65751d0ac946254e99',
     'src/rust/forge-ide-web/src/generate/javascript.rs': '737465499080e9bd5e3b7132200eb2f5c6d7da9590ceedc244a93f3be35b9b9a',
     'src/rust/forge-ide-web/src/wasm.rs': 'b7a455568ebd2e66f7b1ac14fac1e9071ca05c689ea32c4f29a4d5b38ccaa5b3',
-    'src/rust/forge-ide-web/tests/browser/journey.mjs': '7069cb8f07fe8300fdc12cd36fc515d4efee5a01d13980464a11e475f34bf76d',
-    'src/rust/forge-ide-web/tests/generation.rs': '85883feb3a79e5bc1242aaad5904ea58c5ebfeb7878efd3e6e901d452b159ee3',
+    'src/rust/forge-ide-web/tests/browser/journey.mjs': 'e6a5a7d8dace636de757ce6ae779bc9b61cab8eea302e9cb922eb334984ed3d7',
+    'src/rust/forge-ide-web/tests/generation.rs': 'd76abe1dd440806fe0de94d88286b8da9c5af467f8ca2508c9a6305cde4fbab0',
     'src/rust/forge-ide-web/tests/input-presentation.mjs': '8533c2c2f2ed0d1d591e1a115631819ea7548ae7f838c5dad483b8accbbff31a',
-    'src/rust/forge-ide-web/ui/styles.yaml': 'fd2bd48b0ae059a36d7e86fc7a23c8b80d7f822b5af6196a7ebef5cbe6e0ed16',
+    'src/rust/forge-ide-web/ui/styles.yaml': '33a1696b367038ef2534f3200d8656aa3f61e856431b91fa78b90cdd4d149def',
 }
 
 def qualified_source(relative, expected):
-    return UI_STAGE_DIAGRAM_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))))))
-=======
-# Exact reviewer protocol and transport fix; predecessor authority and applied SQL stay immutable.
-REVIEW_PROTOCOL_CONTEXT_SHA256 = {'AGENT_WORK.md': '74187a9baa76afbd6aae600a2b89ccadd2f95b55d6c3f8e8f71b63d512c4b0c0',
- 'deploy/mission-control/agent-runner/README.md': '28969daa3708e10984efb830fc442a6d6784a0c18e5969a4ffff6fed2bb89845',
- 'deploy/mission-control/agent-runner/setup-runner.sh': 'd83849731062476c4eeac6eabe873947c79dfc7a0c4d527acd2c6f133dd0765c',
- 'deploy/mission-control/agent-runner/test_ci_event_phases.py': '105deceff4ad241e0dcf2527c0db2dc7a74363e6d3af6e3271b342a254413c6e',
- 'deploy/mission-control/agent-runner/test_external_transport_recovery.py': 'b0c4a451b07731dfb47c78ea0b871f78e6a652ffa3505bb2f42e5a45c2619aba',
- 'deploy/mission-control/agent-runner/test_work_cli_transport.py': 'f0e44d7c7121ca08bf8935ed65205c9f9cf8b42c76f1359a23ed74ed458fde40',
- 'deploy/mission-control/agent-runner/test_work_review_revision_attestations.py': 'ec59bc12275322938a4fa6caa7c4443870d6e27e35c7536cc0dbd7a42a0feea5',
- 'deploy/mission-control/agent-runner/work_ci_contract.py': 'cdbb4aaa14af50e3e00d2bca43414f86cc9dece38b53d3be2bd0b314635a867a',
- 'deploy/mission-control/agent-runner/work_cli_transport.py': 'ef7040213c882906c8c39ff45e6a8fca8b8d2b212586e7caa3828b90ef1451f4',
- 'deploy/mission-control/agent-runner/work_executor.py': '4f98a0bdc9775252a2c7a7e5d1a922cbff4751ef4ac0d480afb37b9413f40469',
- 'deploy/mission-control/agent-runner/work_external_recovery.py': '2678b27800d3342e7cb9c1962513fce50876f097707e4230a0605544b1e565a6',
- 'deploy/mission-control/agent-runner/work_external_workflow.py': '42884bfa990a0585ad713916174e0457d597a09d19334f63a9db3480d964ef4e',
- 'deploy/mission-control/agent-runner/work_superseding_review.py': 'ca6b13e6f2e84ebc9c25b02687d2c9910f9c8185953b11c074cb3bcd26a6e382',
- 'deploy/mission-control/agent-runner/work_worker.py': '481913abcf226869b745fc6ae698760b0f4d0dad8f2a7dda52265230584967d3',
- 'deploy/mission-control/jenkins/verify-candidate.py': 'e73b78425f9d14e16b064777d2a02722345919c93093476cea9c116135c81912',
- 'docs/architecture/external-agent-workflow.md': 'c4811902a3ebabde6271f67e6ea3f0a7a443bb35d17e378ea5ccddfd721e21ef'}
-
-def qualified_source(relative, expected):
-    return REVIEW_PROTOCOL_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))))))
->>>>>>> caa6b1474714a825c2ff1593a96929a8d0d78d2f
+    return UI_STAGE_DIAGRAM_CONTEXT_SHA256.get(relative, REVIEW_PROTOCOL_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected))))))))))
 
 STRICT_VERIFIER_FILES = {
     "verify-superseding-reviews.sql",
@@ -726,17 +721,6 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                         current = expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected)
                         self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), current)
 
-<<<<<<< HEAD
-    def test_stage_diagram_ui_overlay_is_scoped_to_abi15_ui_source(self):
-        self.assertEqual(len(UI_STAGE_DIAGRAM_CONTEXT_SHA256), 23)
-        for relative, expected in UI_STAGE_DIAGRAM_CONTEXT_SHA256.items():
-            with self.subTest(stage_diagram_ui=relative):
-                self.assertTrue(
-                    relative.startswith(('src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/'))
-                    or relative == 'docs/design/implementation-status.md'
-                )
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
-=======
     def test_review_protocol_overlay_is_exact_and_preserves_applied_authority(self):
         self.assertEqual(set(REVIEW_PROTOCOL_CONTEXT_SHA256), {'deploy/mission-control/agent-runner/work_external_recovery.py', 'deploy/mission-control/agent-runner/work_executor.py', 'deploy/mission-control/agent-runner/work_superseding_review.py', 'deploy/mission-control/agent-runner/test_external_transport_recovery.py', 'deploy/mission-control/agent-runner/work_external_workflow.py', 'deploy/mission-control/agent-runner/test_ci_event_phases.py', 'docs/architecture/external-agent-workflow.md', 'AGENT_WORK.md', 'deploy/mission-control/jenkins/verify-candidate.py', 'deploy/mission-control/agent-runner/test_work_cli_transport.py', 'deploy/mission-control/agent-runner/test_work_review_revision_attestations.py', 'deploy/mission-control/agent-runner/setup-runner.sh', 'deploy/mission-control/agent-runner/work_worker.py', 'deploy/mission-control/agent-runner/README.md', 'deploy/mission-control/agent-runner/work_ci_contract.py', 'deploy/mission-control/agent-runner/work_cli_transport.py'})
         for relative, expected in REVIEW_PROTOCOL_CONTEXT_SHA256.items():
@@ -748,7 +732,16 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 if '/migrations/' in relative or '/fragments/' in relative:
                     with self.subTest(applied_schema=relative):
                         self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
->>>>>>> caa6b1474714a825c2ff1593a96929a8d0d78d2f
+
+    def test_stage_diagram_ui_overlay_is_scoped_to_abi15_ui_source(self):
+        self.assertEqual(len(UI_STAGE_DIAGRAM_CONTEXT_SHA256), 23)
+        for relative, expected in UI_STAGE_DIAGRAM_CONTEXT_SHA256.items():
+            with self.subTest(stage_diagram_ui=relative):
+                self.assertTrue(
+                    relative.startswith(('src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/'))
+                    or relative == 'docs/design/implementation-status.md'
+                )
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:

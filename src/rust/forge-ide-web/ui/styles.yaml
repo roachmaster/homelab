@@ -2782,7 +2782,7 @@
         - ["max-width", "48rem"]
 - media: "(prefers-reduced-motion:reduce)"
   rules:
-    - selector: ".fg-metric-card,.fg-metric-select,.fg-metric-refresh,.fg-metric-details>summary,.fg-metric-details>summary::after,#agents .fg-row-select,.fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after"
+    - selector: ".fg-metric-card,.fg-metric-select,.fg-metric-refresh,.fg-metric-details>summary,.fg-metric-details>summary::after,#agents .fg-row-select"
       declarations:
         - ["transition", "none"]
 
@@ -3234,3 +3234,8 @@
     - selector: ".fg-flow-connector svg"
       declarations:
         - ["transform", "rotate(90deg)"]
+- media: "(prefers-reduced-motion:reduce)"
+  rules:
+    - selector: ".fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after"
+      declarations:
+        - ["transition", "none"]

@@ -1080,7 +1080,23 @@ fn flow_diagram_component_validates_renders_deterministically_and_clears_on_tear
     assert!(css.contains(".fg-flow-track"));
     assert!(css.contains(".fg-flow-hop-exact"));
     assert!(css.contains("@media (max-width:639px)"));
-    assert!(css.contains(".fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after"));
+    let reduced_motion_rule = "@media (prefers-reduced-motion:reduce){\n.fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after{\ntransition:none;}\n}";
+    let reduced_pos = css
+        .rfind(reduced_motion_rule)
+        .expect("flow reduced-motion override rule present");
+    for base_rule in [
+        "\n.fg-flow-node{\n",
+        "\n.fg-flow-trace>summary{\n",
+        "\n.fg-flow-trace>summary::after{\n",
+    ] {
+        let base_pos = css
+            .rfind(base_rule)
+            .unwrap_or_else(|| panic!("missing base flow rule {base_rule}"));
+        assert!(
+            reduced_pos > base_pos,
+            "reduced-motion override must follow base rule {base_rule} to win the cascade"
+        );
+    }
     assert!(main.contains("function renderFlowDiagram(binding)"));
     assert!(main.contains("fg-flow-hop-exact"));
     assert!(main.contains(".fg-flow-diagram"));
