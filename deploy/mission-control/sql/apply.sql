@@ -326,4 +326,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=37)
 \ir migrations/0037_event_stream_jenkins_producer.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(37,'event_stream_jenkins_producer');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=38) AS apply_0038
+\gset
+\if :apply_0038
+\ir migrations/0038_external_plan_approve_override.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(38,'external_plan_approve_override');
+\endif
 COMMIT;

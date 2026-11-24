@@ -1,9 +1,11 @@
 # Design: Authorized Plan Approve-Override for External (`muse-db`) Workflows
 
-**Status: proposal, drafted 2026-11-24. Design only — not implemented. This
-proposal introduces this document only, with no code, SQL migration, privilege,
-installer, or test changes. Other repository changes do not activate this
-design.**
+**Status: implemented (Phase 1 private operator surface), 2026-11-24. Migration
+`0038_external_plan_approve_override.sql`, `work_external_plan_override.py`,
+bootstrap provider wiring, installer publication, protected-path coverage, and
+disposable PostgreSQL verification tests are implemented per this approved
+design. Phase 2 optional Portal HTTP surface remains unimplemented until
+explicitly requested.**
 
 This design defines a single, narrow, audited operator contract—`ExternalPlanApproveOverride`—that allows an external `muse-db` workflow stranded in plan-revision exhaustion (e.g., `phase = 'escalated'`, `enabled = false`, last plan review `status = 'revise'`, planning retry event `used = 20 / exhausted`) to proceed to `implement` when the human owner has explicitly accepted the latest plan artifact as-is.
 

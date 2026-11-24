@@ -109,14 +109,16 @@ class ExternalWorkDAO:
 
 class ExternalWorkProviderFactory:
     """Effect-free selection; acquisition uses the owning store's cursor."""
-    def __init__(self, config, *, recovery_grant_provider=None):
+    def __init__(self, config, *, recovery_grant_provider=None, plan_override_grant_provider=None):
         if recovery_grant_provider is not None and not callable(getattr(recovery_grant_provider,'acquire',None)):raise TypeError('Expected scoped recovery grant provider')
+        if plan_override_grant_provider is not None and not callable(getattr(plan_override_grant_provider,'acquire',None)):raise TypeError('Expected scoped plan override grant provider')
         self.recovery_grant_provider=recovery_grant_provider
+        self.plan_override_grant_provider=plan_override_grant_provider
         if not isinstance(config, WorkConfig) or not any(p.is_external for p in config.profiles.values()):
             raise TypeError("External provider requires selected external profiles")
         self.config = config
 
     def create(self):
         from work_external_workflow import ExternalWorkflowStore
-        flow=ExternalWorkflowStore(self.config,self.config.catalog(),recovery_grant_provider=self.recovery_grant_provider) if self.config.external_workflows else None
+        flow=ExternalWorkflowStore(self.config,self.config.catalog(),recovery_grant_provider=self.recovery_grant_provider,plan_override_grant_provider=self.plan_override_grant_provider) if self.config.external_workflows else None
         return ExternalWorkDAO(self.config.owner, (p.alias for p in self.config.profiles.values() if p.is_external),flow)
