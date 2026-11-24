@@ -37,6 +37,35 @@ RUNNER_TOKEN_SYSTEMD_PATH = Path('/run/credentials/forge-agent-runner.service/ru
 RUNNER_TOKEN_COPY_PATH = CONFIG / 'runner.token'
 RUNNER_TOKEN_RE = re.compile(r'[a-fA-F0-9]{32,128}')
 
+# Command-scoped preservation for stage-event build identity ONLY: exactly
+# BUILD_NUMBER and JOB_NAME survive sudo, for the native wrapper command
+# alone. The legacy rule is untouched.
+NATIVE_SUDOERS_RULE = (b'Defaults!/usr/local/libexec/forge-native-ci-check env_keep += "BUILD_NUMBER JOB_NAME"\n'
+                       b'jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-native-ci-check *\n')
+
+
+def qualify_stage_token(systemd_path=RUNNER_TOKEN_SYSTEMD_PATH, copy_path=RUNNER_TOKEN_COPY_PATH):
+    """Requalify the dispatch bearer token for stage emission.
+
+    The verifier (root via the pinned sudo rule) reads the token from the
+    runner's systemd credential path at emission time, falling back to a
+    root-owned 0600 copy at /etc/forge-ci/runner.token. Returns the
+    provisioned source ('systemd-credential' or 'provisioned-copy'); raises
+    ValueError when neither path holds a valid token -- the install cannot
+    qualify stage emission, and a copy cannot be provisioned from an
+    unreadable source.
+    """
+    for candidate in (systemd_path, copy_path):
+        try:
+            raw_token = candidate.read_text().strip()
+        except OSError:
+            continue
+        if RUNNER_TOKEN_RE.fullmatch(raw_token):
+            return 'systemd-credential' if candidate == systemd_path else 'provisioned-copy'
+    raise ValueError('Runner dispatch token is not readable from the verifier context; '
+                     'fix the runner credential path or provision a root-owned 0600 copy at '
+                     '/etc/forge-ci/runner.token')
+
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args, **_kwargs):
@@ -285,34 +314,15 @@ def execute_native(client_path, operator, *, verification_profile=None):
     # Command-scoped preservation for stage-event build identity ONLY: exactly
     # BUILD_NUMBER and JOB_NAME survive sudo, for the native wrapper command
     # alone. The legacy rule is untouched.
-    rule = (b'Defaults!/usr/local/libexec/forge-native-ci-check env_keep += "BUILD_NUMBER JOB_NAME"\n'
-            b'jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-native-ci-check *\n')
+    rule = NATIVE_SUDOERS_RULE
     staged = PRIVATE / 'sudoers-native-check'
     install(staged, rule, mode=0o440)
     subprocess.run(['/usr/sbin/visudo', '-cf', str(staged)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     install(Path('/etc/sudoers.d/forge-native-ci-check'), rule, mode=0o440)
-    # Stage-event credential requalification: the verifier (root via the pinned
-    # sudo rule) reads the dispatch bearer token from the runner's systemd
-    # credential path at emission time, falling back to a root-owned 0600 copy
-    # at /etc/forge-ci/runner.token. The install qualifies when either path
-    # holds a valid token; it fails closed when neither does -- the install
-    # cannot qualify stage emission, and a copy cannot be provisioned from an
-    # unreadable source.
-    stage_token_source = None
-    for candidate in (RUNNER_TOKEN_SYSTEMD_PATH, RUNNER_TOKEN_COPY_PATH):
-        try:
-            raw_token = candidate.read_text().strip()
-        except OSError:
-            continue
-        if RUNNER_TOKEN_RE.fullmatch(raw_token):
-            stage_token_source = ('systemd-credential' if candidate == RUNNER_TOKEN_SYSTEMD_PATH
-                                  else 'provisioned-copy')
-            break
-    if stage_token_source is None:
-        raise ValueError('Runner dispatch token is not readable from the verifier context; '
-                         'fix the runner credential path or provision a root-owned 0600 copy at '
-                         '/etc/forge-ci/runner.token')
+    # Stage-event credential requalification: the install qualifies when
+    # either token path holds a valid token, and fails closed otherwise.
+    stage_token_source = qualify_stage_token()
     script = (HERE / 'native-ci-job.groovy').read_text()
     info = json.loads(request(client, 'scriptText', body=urllib.parse.urlencode({'script': script}).encode()))
     if (info.get('job') != selected['job'] or info.get('node') != 'forge-mission-control-ci'

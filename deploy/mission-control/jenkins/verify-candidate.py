@@ -444,12 +444,14 @@ class StageEmitter:
 
     def emit_started(self, index):
         if 0 <= index < len(self._logical_names):
-            self._emit('stage_started', self._logical_names[index])
+            return self._emit('stage_started', self._logical_names[index])
+        return False
 
     def emit_completed(self, index, passed):
         if 0 <= index < len(self._logical_names):
-            self._emit('stage_completed', self._logical_names[index],
-                       'success' if passed else 'failure')
+            return self._emit('stage_completed', self._logical_names[index],
+                              'success' if passed else 'failure')
+        return False
 
 
 def build_stage_emitter(action, request, config):
