@@ -198,6 +198,73 @@ impl WorkFinding {
     }
 }
 
+/// One Jenkins pipeline stage's projected state. The server projection
+/// derives these from the frozen gate plan, the run's Jenkins events, and
+/// the terminal hosted observation; `unknown` means the records cannot
+/// establish the stage's state, never a guess.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineStageState {
+    Waiting,
+    Running,
+    Passed,
+    Failed,
+    Skipped,
+    NotRun,
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineAvailability {
+    #[default]
+    NoRun,
+    StageDataUnavailable,
+    Partial,
+    Available,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelinePhase {
+    Preparing,
+    Running,
+    Finalizing,
+    Complete,
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PipelineStageStatus {
+    pub id: String,
+    pub label: String,
+    pub status: PipelineStageState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+impl PipelineStageStatus {
+    pub fn is_valid(&self) -> bool {
+        valid_work_name(&self.id, 64)
+            && valid_work_label(&self.label, 128)
+            && self
+                .finding_id
+                .as_deref()
+                .is_none_or(|v| valid_work_name(v, 64))
+            && self
+                .finding_summary
+                .as_deref()
+                .is_none_or(|v| valid_chat_text(v, 2048))
+            && self.detail.as_deref().is_none_or(|v| optional_text(v, 512))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkReviewSummary {
@@ -238,6 +305,12 @@ pub struct WorkReviewSummary {
     pub can_retry: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<WorkFinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pipeline_stages: Vec<PipelineStageStatus>,
+    #[serde(default)]
+    pub pipeline_availability: PipelineAvailability,
+    #[serde(default)]
+    pub pipeline_phase: PipelinePhase,
 }
 impl WorkReviewSummary {
     pub fn is_valid(&self) -> bool {
@@ -280,6 +353,18 @@ impl WorkReviewSummary {
             && (!self.can_repair || self.candidate_commit.is_some())
             && self.findings.len() <= 32
             && self.findings.iter().all(WorkFinding::is_valid)
+            && self.pipeline_stages.len() <= 16
+            && self
+                .pipeline_stages
+                .iter()
+                .all(PipelineStageStatus::is_valid)
+            && self
+                .pipeline_stages
+                .iter()
+                .map(|s| &s.id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                == self.pipeline_stages.len()
             && self
                 .findings
                 .iter()

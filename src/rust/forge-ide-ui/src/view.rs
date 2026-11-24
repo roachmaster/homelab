@@ -21,8 +21,9 @@ pub struct ViewModel {
     pub timelines: Vec<TimelineBinding>,
     pub flow_diagrams: Vec<FlowDiagramBinding>,
 }
-/// Bounded, presentation-only event-stream stage diagram. Rust owns all stage
-/// mapping, provenance filtering, and timestamp formatting.
+/// Bounded, presentation-only flow diagram. Rust owns all stage mapping,
+/// provenance filtering, and timestamp formatting. The pipeline diagram and
+/// the stage diagram share this binding shape.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FlowDiagramBinding {
     pub id: &'static str,

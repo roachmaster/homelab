@@ -3,9 +3,11 @@ use super::*;
 use crate::markdown::render_markdown;
 mod delivery;
 mod history;
+mod pipeline_diagram;
 mod presentation;
 mod stage_diagram;
 mod workflow;
+use pipeline_diagram::project_pipeline_diagram;
 use presentation::{compact_counter, group_counter, model_title, relative_time, short_time};
 const USAGE_PAGE: usize = 6;
 use std::collections::BTreeSet;
@@ -1842,6 +1844,10 @@ impl Agents {
                 active && reader && self.task.as_ref().is_some_and(|t| t.review.is_some()),
             ),
             visible(
+                "agents-verification-pipeline",
+                active && reader && self.task.as_ref().is_some_and(|t| t.review.is_some()),
+            ),
+            visible(
                 "agents-progress-panel",
                 active && reader && self.task.as_ref().is_some_and(|t| t.attempt.is_some()),
             ),
@@ -2109,6 +2115,7 @@ impl Agents {
                     .collect()
             }),
         });
+        project_pipeline_diagram(view, review);
         view.texts.extend([
             text("agents-status", &self.status),
             text("agents-usage-status", &self.usage_status),
