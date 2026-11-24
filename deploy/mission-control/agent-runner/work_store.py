@@ -12,6 +12,7 @@ from psycopg2.extras import Json, RealDictCursor, register_uuid
 
 from work_retry_policy import AGENT_RETRY_LIMIT
 from queue_store import Rejected
+from work_events import insert_event, require_actor, require_cancel_cause
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
     DEFAULT_MAX_PENDING,
@@ -438,7 +439,7 @@ class WorkStore:
 
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
                prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False,
-               workflow_policy_digest=None,resolve_workflow=lambda:None,delivery_admission=None):
+               workflow_policy_digest=None,resolve_workflow=lambda:None,delivery_admission=None,actor=None):
         self._require_project(project_alias)
         if type(auto_repair) is not bool:
             raise Rejected(400,"invalid_request")
@@ -532,12 +533,8 @@ class WorkStore:
                 cursor.execute("INSERT INTO forge_agent.coding_workflows(owner_id,project_alias,root_task_id,policy_digest,snapshot) VALUES(%s,%s,%s,%s,%s) RETURNING workflow_id",(self._owner,project_alias,task_id,workflow["policy_digest"],Json(workflow)))
                 workflow_id=cursor.fetchone()["workflow_id"]
                 cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_required=true,workflow_id=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(workflow_id,self._owner,project_alias,task_id))
-            cursor.execute("""
-                INSERT INTO forge_agent.coding_events (
-                    owner_id, project_alias, task_id, sequence, event_kind, payload
-                )
-                VALUES (%s, %s, %s, 1, 'queued', %s)
-            """, (self._owner, project_alias, task_id, Json(receipt)))
+            insert_event(cursor, self._owner, project_alias, task_id, "queued",
+                         receipt, actor=require_actor(actor, self._owner), first=True)
             if recipe.resource_profile in EXTERNAL_POLICIES:
                 if self._external is None or agent_profile not in self._external.profiles:
                     raise Rejected(503, "unavailable")
@@ -1010,7 +1007,7 @@ class WorkStore:
             "total_bytes": total_bytes,
         }
 
-    def cancel(self, *, project_alias, task_id, expected_revision, idempotency_key):
+    def cancel(self, *, project_alias, task_id, expected_revision, idempotency_key, actor=None, cause=None):
         self._require_project(project_alias)
         if (not isinstance(task_id, UUID)
                 or type(expected_revision) is not int
@@ -1054,11 +1051,22 @@ class WorkStore:
                 cursor.execute("SELECT phase FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(task["workflow_id"],))
                 workflow=cursor.fetchone()
                 if not workflow or workflow["phase"] in {"completed","cancelled","merging"}:raise Rejected(409,"not_cancellable")
+                actor=require_actor(actor,self._owner);cause=require_cancel_cause(cause)
+                cursor.execute("SELECT id,project_alias,status,revision FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status NOT IN('completed','cancelled') FOR UPDATE",(task["workflow_id"],))
+                affected=cursor.fetchall()
                 cursor.execute("UPDATE forge_agent.coding_workflows SET phase='cancelled',enabled=false,updated_at=clock_timestamp() WHERE workflow_id=%s",(task["workflow_id"],))
                 cursor.execute("UPDATE forge_agent.coding_tasks SET cancelled_at=CASE WHEN status IN('running','cancel_requested') THEN NULL ELSE clock_timestamp() END,status=CASE WHEN status IN('running','cancel_requested') THEN 'cancel_requested' ELSE 'cancelled' END,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND status NOT IN('completed','cancelled')",(task["workflow_id"],))
                 cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='cancelled',lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('pending','leased')",(task["workflow_id"],))
                 target='cancel_requested' if task['status'] in {'running','cancel_requested'} else 'cancelled'
-                receipt={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,'status':target}
+                receipt={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,'status':target,'actor':actor}
+                for affected_task in affected:
+                    affected_target='cancel_requested' if affected_task['status'] in {'running','cancel_requested'} else 'cancelled'
+                    # The directly cancelled task carries the caller's cause;
+                    # sibling tasks are cancelled because the workflow was.
+                    affected_cause=cause if affected_task['id']==task_id else 'workflow_cancelled'
+                    insert_event(cursor,self._owner,affected_task['project_alias'],affected_task['id'],affected_target,
+                                 {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
+                                  'workflow_id':str(task["workflow_id"])},actor=actor,cause=affected_cause)
                 cursor.execute("INSERT INTO forge_agent.coding_control_receipts(owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json) VALUES(%s,%s,%s,'cancel',%s,%s,%s,%s,%s)",(self._owner,project_alias,task_id,idempotency_key,intent_digest,expected_revision,expected_revision+1,Json(receipt)))
                 cursor.execute("SELECT pg_notify(%s,'')",(NOTIFY_CHANNEL,))
                 return receipt
@@ -1098,25 +1106,18 @@ class WorkStore:
                 raise Rejected(409, "revision_conflict")
             new_revision = updated["revision"]
 
+            actor=require_actor(actor,self._owner);cause=require_cancel_cause(cause)
             receipt = {
                 "project_alias": task["project_alias"],
                 "task_id": str(task["id"]),
                 "base_revision": expected_revision,
                 "revision": new_revision,
                 "status": target_status,
+                "actor": actor,
             }
-            cursor.execute("""
-                INSERT INTO forge_agent.coding_events (
-                    owner_id, project_alias, task_id, sequence, event_kind, payload
-                )
-                SELECT %s, %s, %s, coalesce(max(sequence), 0) + 1, %s, %s
-                FROM forge_agent.coding_events
-                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
-            """, (
-                self._owner, project_alias, task_id, event_kind,
-                Json({"base_revision": expected_revision, "revision": new_revision}),
-                self._owner, project_alias, task_id,
-            ))
+            insert_event(cursor, self._owner, project_alias, task_id, event_kind,
+                         {"base_revision": expected_revision, "revision": new_revision},
+                         actor=actor, cause=cause)
             cursor.execute("""
                 INSERT INTO forge_agent.coding_control_receipts (
                     owner_id, project_alias, task_id, action, idempotency_key,
@@ -1155,7 +1156,7 @@ class WorkStore:
             (self._owner,task["project_alias"],task["id"],task["latest_attempt_id"]))
         return cursor.fetchone() is None
 
-    def accept(self, *, project_alias, task_id, expected_revision, idempotency_key, review_note=""):
+    def accept(self, *, project_alias, task_id, expected_revision, idempotency_key, review_note="", actor=None):
         self._require_project(project_alias)
         if (not isinstance(task_id, UUID)
                 or type(expected_revision) is not int
@@ -1240,18 +1241,9 @@ class WorkStore:
                 "revision": new_revision,
                 "status": "completed",
             }
-            cursor.execute("""
-                INSERT INTO forge_agent.coding_events (
-                    owner_id, project_alias, task_id, sequence, event_kind, payload
-                )
-                SELECT %s, %s, %s, coalesce(max(sequence), 0) + 1, 'completed', %s
-                FROM forge_agent.coding_events
-                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
-            """, (
-                self._owner, project_alias, task_id,
-                Json({"base_revision": expected_revision, "revision": new_revision, "review_note": review_note}),
-                self._owner, project_alias, task_id,
-            ))
+            insert_event(cursor, self._owner, project_alias, task_id, "completed",
+                         {"base_revision": expected_revision, "revision": new_revision, "review_note": review_note},
+                         actor=require_actor(actor, self._owner))
             cursor.execute("""
                 INSERT INTO forge_agent.coding_control_receipts (
                     owner_id, project_alias, task_id, action, idempotency_key,
@@ -1265,7 +1257,7 @@ class WorkStore:
             return receipt
 
     def resume(self, *, project_alias, task_id, expected_revision, idempotency_key,
-               agent_profile, reconciliation_receipt_id, note="", allowed_modes, resolve_recipe,_authority=None):
+               agent_profile, reconciliation_receipt_id, note="", allowed_modes, resolve_recipe,_authority=None,actor=None):
         self._require_project(project_alias)
         if (not isinstance(task_id, UUID)
                 or not isinstance(reconciliation_receipt_id, UUID)
@@ -1406,17 +1398,8 @@ class WorkStore:
             }
             if note:
                 event_payload["note"] = note
-            cursor.execute("""
-                INSERT INTO forge_agent.coding_events (
-                    owner_id, project_alias, task_id, sequence, event_kind, payload
-                )
-                SELECT %s, %s, %s, coalesce(max(sequence), 0) + 1, 'resumed', %s
-                FROM forge_agent.coding_events
-                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
-            """, (
-                self._owner, project_alias, task_id, Json(event_payload),
-                self._owner, project_alias, task_id,
-            ))
+            insert_event(cursor, self._owner, project_alias, task_id, "resumed",
+                         event_payload, actor=require_actor(actor, self._owner))
             cursor.execute("""
                 INSERT INTO forge_agent.coding_control_receipts (
                     owner_id, project_alias, task_id, action, idempotency_key,
@@ -1491,7 +1474,7 @@ class WorkStore:
         return result
 
     def plan_decide(self, *, project_alias, task_id, expected_revision, plan_attempt_id,
-                    plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe,auto_repair=False,_authority=None):
+                    plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe,auto_repair=False,_authority=None,actor=None,cause=None):
         """Atomically decide one exact immutable Plan and pin the next stage."""
         self._require_project(project_alias)
         try:
@@ -1590,12 +1573,21 @@ class WorkStore:
                 (owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json)
                 VALUES (%s,%s,%s,'plan_decide',%s,%s,%s,%s,%s)""",
                 (self._owner,project_alias,task_id,idempotency_key,intent,expected_revision,revision,Json(receipt)))
-            cursor.execute("""INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
-                SELECT %s,%s,%s,coalesce(max(sequence),0)+1,%s,%s FROM forge_agent.coding_events
-                WHERE owner_id=%s AND project_alias=%s AND task_id=%s""",
-                (self._owner,project_alias,task_id,"cancelled" if decision == "cancel" else "resumed",
-                 Json({**receipt,"decision_id":str(decision_id),"decision":decision,"plan_attempt_id":str(plan_attempt_id),
-                       "plan_sha256":plan_sha256}),self._owner,project_alias,task_id))
+            decision_payload={**receipt,"decision_id":str(decision_id),"decision":decision,"plan_attempt_id":str(plan_attempt_id),
+                              "plan_sha256":plan_sha256}
+            actor=require_actor(actor,self._owner)
+            if decision == "cancel":
+                # The plan decision and the cancellation are separate events:
+                # the decision is a checkpoint, the cancellation carries cause.
+                insert_event(cursor,self._owner,project_alias,task_id,"checkpoint",
+                             decision_payload,actor=actor)
+                insert_event(cursor,self._owner,project_alias,task_id,"cancelled",
+                             {"base_revision":expected_revision,"revision":revision,
+                              "decision_id":str(decision_id),"decision":decision},
+                             actor=actor,cause=require_cancel_cause(cause))
+            else:
+                insert_event(cursor,self._owner,project_alias,task_id,"resumed",
+                             decision_payload,actor=actor)
             if decision != "cancel":
                 cursor.execute("SELECT pg_notify(%s,'')", (NOTIFY_CHANNEL,))
             return receipt
@@ -1732,7 +1724,11 @@ class WorkStore:
             raise Rejected(409,'not_reviewable')
         return task,None
 
-    def _control_record(self,cursor,task,expected_revision,key,action,intent,receipt):
+    def _control_record(self,cursor,task,expected_revision,key,action,intent,receipt,actor=None):
+        actor=require_actor(actor,self._owner)
+        # The control receipt gains the actor (section 4.2); the same dict is
+        # stored, emitted as the checkpoint payload, and returned to the caller.
+        receipt["actor"]=actor
         cursor.execute("UPDATE forge_agent.coding_tasks SET revision=%s,updated_at=clock_timestamp() WHERE owner_id=%s AND project_alias=%s AND id=%s AND revision=%s",
             (expected_revision+1,self._owner,task['project_alias'],task['id'],expected_revision))
         # same-task repair may already have advanced exactly this revision.
@@ -1743,14 +1739,11 @@ class WorkStore:
         cursor.execute("""INSERT INTO forge_agent.coding_control_receipts(owner_id,project_alias,task_id,action,idempotency_key,
             intent_digest,base_revision,result_revision,receipt_json) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (self._owner,task['project_alias'],task['id'],action,key,intent,expected_revision,expected_revision+1,Json(receipt)))
-        cursor.execute("""INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
-            SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'checkpoint',%s FROM forge_agent.coding_events
-            WHERE owner_id=%s AND project_alias=%s AND task_id=%s""",
-            (self._owner,task['project_alias'],task['id'],Json(receipt),self._owner,task['project_alias'],task['id']))
+        insert_event(cursor,self._owner,task['project_alias'],task['id'],'checkpoint',receipt,actor=actor)
         cursor.execute("SELECT pg_notify(%s,'')",(NOTIFY_CHANNEL,))
 
     def review_decide(self,*,project_alias,task_id,expected_revision,review_id,decision,agent_profile,note,idempotency_key,
-                      findings=(),verified_finding_ids=(),recipe=None,resolve_recipe=None,_authority=None):
+                      findings=(),verified_finding_ids=(),recipe=None,resolve_recipe=None,_authority=None,actor=None):
         if not isinstance(review_id,UUID) or not isinstance(decision,str) or decision not in {'approve','repair','escalate','retry_infrastructure','cancel'}:
             raise Rejected(400,'invalid_request')
         try:
@@ -1817,7 +1810,7 @@ class WorkStore:
                 if task['status']=='completed':raise Rejected(409,'not_cancellable')
                 cursor.execute("UPDATE forge_agent.coding_reviews SET status='cancelled',reason=%s WHERE review_id=%s",(note,review_id))
                 cursor.execute("UPDATE forge_agent.coding_tasks SET status='cancelled',cancelled_at=clock_timestamp() WHERE owner_id=%s AND project_alias=%s AND id=%s",(self._owner,project_alias,task_id));result['status']='cancelled'
-            self._control_record(cursor,task,expected_revision,idempotency_key,'review_decide',intent,result)
+            self._control_record(cursor,task,expected_revision,idempotency_key,'review_decide',intent,result,actor=actor)
             return result
 
     def _append_review_retry(self,cursor,task,review,note,*,authority=None):
@@ -1837,7 +1830,7 @@ class WorkStore:
             (task['revision']+1,self._owner,task['project_alias'],task['id'],note,review['review_id']))
         return cursor.fetchone()['review_id']
 
-    def repair(self,*,project_alias,task_id,expected_revision,candidate_commit,agent_profile,note,findings,idempotency_key,recipe=None,resolve_recipe=None):
+    def repair(self,*,project_alias,task_id,expected_revision,candidate_commit,agent_profile,note,findings,idempotency_key,recipe=None,resolve_recipe=None,actor=None):
         try:
             findings=validate_findings(list(findings),public=True)
             if not isinstance(note,str) or len(note.encode())>2048 or not isinstance(candidate_commit,str) or not SHA1_HEX_RE.fullmatch(candidate_commit):raise ValueError()
@@ -1886,7 +1879,7 @@ class WorkStore:
                 source_review_id=cursor.fetchone()['review_id']
                 result={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,
                         'status':'completed','repair_task_id':None,'review_id':str(source_review_id)}
-                self._control_record(cursor,task,expected_revision,idempotency_key,'repair',intent,result)
+                self._control_record(cursor,task,expected_revision,idempotency_key,'repair',intent,result,actor=actor)
                 return result
             if not findings:findings=[x for x in review['findings'] if x.get('status','open')=='open']
             if not findings:
@@ -1902,10 +1895,10 @@ class WorkStore:
             cursor.execute("UPDATE forge_agent.coding_tasks SET agent_profile=%s,pinned_recipe=%s,recipe_digest=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",
                 (task['agent_profile'],Json(task['pinned_recipe']),task['recipe_digest'],self._owner,project_alias,task_id))
             result={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,'status':'completed','repair_task_id':str(child)}
-            self._control_record(cursor,task,expected_revision,idempotency_key,'repair',intent,result)
+            self._control_record(cursor,task,expected_revision,idempotency_key,'repair',intent,result,actor=actor)
             return result
 
-    def publication_retry(self,*,project_alias,task_id,expected_revision,publication_id,candidate_commit,note,idempotency_key):
+    def publication_retry(self,*,project_alias,task_id,expected_revision,publication_id,candidate_commit,note,idempotency_key,actor=None):
         if not isinstance(publication_id,UUID) or not isinstance(note,str) or len(note.encode())>2048:
             raise Rejected(400,'invalid_request')
         intent=sha256_canonical({'action':'publication_retry','project_alias':project_alias,'task_id':str(task_id),'expected_revision':expected_revision,
@@ -1923,5 +1916,5 @@ class WorkStore:
             review_id=self._append_review_retry(cursor,task,review,note)
             result={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,
                     'status':task['status'],'publication_id':str(publication_id),'review_id':str(review_id)}
-            self._control_record(cursor,task,expected_revision,idempotency_key,'publication_retry',intent,result)
+            self._control_record(cursor,task,expected_revision,idempotency_key,'publication_retry',intent,result,actor=actor)
             return result
