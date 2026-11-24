@@ -296,4 +296,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=32)
 \ir migrations/0032_observer_retry_lineage.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(32,'observer_retry_lineage');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=33) AS apply_0033
+\gset
+\if :apply_0033
+\ir migrations/0033_superseding_reviews.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(33,'superseding_reviews');
+\endif
 COMMIT;
