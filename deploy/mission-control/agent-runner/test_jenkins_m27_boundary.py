@@ -605,6 +605,9 @@ PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
     'src/rust/forge-ide-ui/src/model/projection.rs': 'b5f993da9d2d0a4ddc59da43f4f948df85f84a69a1330f65aa221bfce4cc5138',
     'src/rust/forge-ide-ui/src/protocol/work.rs': 'a78e03ee429cb25b00336771dfced0cbf0f08a258a82acf520decd2443193267',
     'src/rust/forge-ide-ui/src/view.rs': '85156fe7301b359e98f6537782bb7cd61684ef4779bb12aac2f033422c1a05ab',
+    'src/rust/forge-ide-ui/tests/wasm_abi.mjs': '65e17657d542e26f89b87ab67a484e61950f4a273330807005ae577c47b0ff16',
+    'src/rust/forge-ide-web-host/src/assets.rs': '0d4a1e8e990229276345223a5ddb6a5ef8100d865dce004da1a8581561d4af3d',
+    'src/rust/forge-ide-web-host/tests/consumer.rs': 'b99d76c127795092f790854c410a8bc11d9af8499b4dd8588b0c82f4551baf56',
     'src/rust/forge-ide-web/README.md': '2feb9e100fa0368ebe3963b3865ede6bc5be8af5f672acbfa57c4eba919323a4',
     'src/rust/forge-ide-web/WORKBENCH.md': '9495eab741f88ba8c1b4ebfaf007de2a6c6795f14d9d3efc20c54fcc4528c33e',
     'src/rust/forge-ide-web/src/generate/application.rs': 'f70a061ee157b4a050421d6be78926f2e32ed9332c9b9b5173d16b348485ae97',
@@ -615,6 +618,7 @@ PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
     'src/rust/forge-ide-web/src/wasm.rs': '503ddfbdf1c3f2b3d5de3888da3d882b0b5926ed1e64fa71b049ffd6726e8819',
     'src/rust/forge-ide-web/tests/browser/agents-relay.mjs': '7b1a58cfd22bd720d709de37eb26638e7a40f443e2510a999b57ed00722e9666',
     'src/rust/forge-ide-web/tests/browser/journey.mjs': 'f7c0f496bc27f83ea5d96017d4223a671ded6e908b03a98080a80374fc1518d8',
+    'src/rust/forge-ide-web/tests/generation.rs': 'e099773f1bf06525cc92dada0bc8d9ed5597b533a85919f6757ad9c9bffbbc0f',
     'src/rust/forge-ide-web/tests/playtest-wire.mjs': '048817854abba0d5dff68dc42df4e3abae8b5768b13ad3b3bac945fff71df1f5',
     'src/rust/forge-ide-web/ui/styles.yaml': '58410a04dc87fa16667e6316f12437a63661b171c43fae7e130bc738b6e3503b',
 }
@@ -799,7 +803,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_pipeline_diagram_overlay_is_scoped_and_exact(self):
-        self.assertEqual(len(PIPELINE_DIAGRAM_CONTEXT_SHA256), 41)
+        self.assertEqual(len(PIPELINE_DIAGRAM_CONTEXT_SHA256), 45)
         for relative, expected in PIPELINE_DIAGRAM_CONTEXT_SHA256.items():
             with self.subTest(pipeline_source=relative):
                 self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/')))
