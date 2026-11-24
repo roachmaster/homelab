@@ -1479,6 +1479,10 @@ $function$;
 
 -- coding_events_progress_check: restate migration 0012's exact-keys
 -- check with the worker 'actor' allowed (report_progress carries it now).
+-- NOT VALID by design: legacy progress rows predate the actor field and
+-- are grandfathered untouched (audit history stays byte-identical); the
+-- constraint enforces the shape on every new row. verify.sql exempts
+-- this constraint from the convalidated requirement for exactly this reason.
 ALTER TABLE forge_agent.coding_events
     DROP CONSTRAINT IF EXISTS coding_events_progress_check,
     ADD CONSTRAINT coding_events_progress_check CHECK (
@@ -1503,4 +1507,4 @@ ALTER TABLE forge_agent.coding_events
              AND (payload->'actor') ?& ARRAY['kind', 'id']
              AND (payload->'actor'->>'kind') = 'worker'
              AND octet_length(btrim(payload->'actor'->>'id')) BETWEEN 1 AND 128)) IS TRUE
-    );
+    ) NOT VALID;

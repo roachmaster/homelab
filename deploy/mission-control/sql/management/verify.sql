@@ -512,7 +512,10 @@ BEGIN
         WHERE c.conrelid = ('forge_agent.' || expected.relname)::regclass
           AND c.conname = expected.conname
           AND c.contype::text = expected.contype
-          AND c.convalidated;
+          -- M36's progress check is intentionally NOT VALID: legacy progress
+          -- rows predate the actor field and are grandfathered untouched.
+          AND (c.convalidated OR (expected.relname = 'coding_events'
+              AND expected.conname = 'coding_events_progress_check'));
         IF NOT FOUND THEN
             RAISE EXCEPTION 'Missing or unvalidated constraint % on forge_agent.%',
                 expected.conname, expected.relname;
@@ -531,6 +534,12 @@ BEGIN
         IF expected.relname='coding_attempts' AND expected.conname='coding_attempts_pinned_recipe_check'
            AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=23) THEN
             actual_expression:=replace(actual_expression, ', ''forge-coding-agy-unattended-v1''::text', '');
+        END IF;
+        -- M36's progress check reports its definition with a trailing
+        -- ' NOT VALID'; strip it so the token comparison sees the pinned
+        -- expression (the exemption above already gates its validity).
+        IF expected.relname='coding_events' AND expected.conname='coding_events_progress_check' THEN
+            actual_expression:=regexp_replace(actual_expression, ' NOT VALID$', '');
         END IF;
         IF expected.definition IS NOT NULL THEN
             actual_tokens := ARRAY(
