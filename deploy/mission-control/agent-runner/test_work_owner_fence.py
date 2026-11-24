@@ -262,7 +262,12 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                 tables=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND relname<>'schema_migrations' ORDER BY relname")]
                 # Snapshot every original relation, including its exact ACL.
                 # New M27/M28 tables are checked by the strict current verifier.
-                original_relations=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace ORDER BY relname")]
+                # Migration 0032 replaces the old unique index on
+                # coding_workflow_reviews with the partial
+                # coding_workflow_reviews_source_binding_unique index (a
+                # superseded row and its replacement would violate the old
+                # constraint), so the old index name is carved out here.
+                original_relations=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname<>'coding_workflow_reviews_workflow_id_target_kind_source_atte_key' ORDER BY relname")]
                 def snapshot():
                     return dict(
                         history=execute('SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=25 ORDER BY version'),

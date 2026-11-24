@@ -43,13 +43,20 @@ GRANT EXECUTE ON FUNCTION
     forge_coding_worker_api.queue_publication(uuid, uuid, uuid),
     forge_coding_worker_api.append_result(uuid, uuid, integer, text),
     forge_coding_worker_api.publish(uuid, uuid, text, jsonb, jsonb, text, jsonb),
-    forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text, text),
     forge_coding_worker_api.cancellation_requested(uuid, uuid),
     forge_coding_worker_api.begin_usage_poll(text),
     forge_coding_worker_api.next_refresh(),
     forge_coding_worker_api.record_usage(text, bigint, bigint, jsonb),
     forge_coding_worker_api.fail_usage_poll(text, bigint, bigint, text)
 TO forge_coding_worker;
+-- M33: record_stop gained a cause argument (5-arg); grant it only when
+-- migration 33 is applied, so this file stays safe on older schemas
+-- where the 4-arg form still holds its historical grant.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=33) AS has_record_stop_cause
+\gset
+\if :has_record_stop_cause
+GRANT EXECUTE ON FUNCTION forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text, text) TO forge_coding_worker;
+\endif
 GRANT USAGE ON SCHEMA forge_coding_reconciler_api TO forge_coding_reconciler;
 GRANT EXECUTE ON FUNCTION
     forge_coding_reconciler_api.expire_leases(),
