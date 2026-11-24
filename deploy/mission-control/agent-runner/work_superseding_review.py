@@ -1,9 +1,10 @@
-"""Scoped, source-preserving replacement of a context-digest transcription error.
+"""Scoped, source-preserving replacement of classified reviewer wire errors.
 
 Only the coordinator owns these transitions. A counterfactual strict parse is a
 classifier, never a verdict: the original bytes stay immutable and a different
 read-only reviewer task must produce a genuinely bound result.
 """
+from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -50,6 +51,42 @@ def classify_context_transcription(raw, target):
         return {'check': 'verdict.identity.context_sha256', 'reason': 'context_digest_transcription',
             'expected_length': 64, 'actual_length': len(actual),
             'actual_is_lowercase_hex': bool(re.fullmatch(r'[0-9a-f]{64}', actual))}
+    except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
+        return None
+
+
+def classify_revision_attestations(raw, target):
+    """Recognize misplaced known IDs; never return or accept a changed verdict."""
+    try:
+        if not isinstance(raw, str) or not 0 < len(raw.encode('utf-8')) <= MAX_VERDICT_BYTES:
+            return None
+        def unique(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise PeerReviewError()
+                value[key] = item
+            return value
+        value = json.loads(raw, object_pairs_hook=unique,
+            parse_constant=lambda _: (_ for _ in ()).throw(PeerReviewError()))
+        if (not isinstance(value, dict) or set(value) != VERDICT_FIELDS
+                or target['target_kind'] != 'code' or value['decision'] != 'revise'
+                or value['context_sha256'] != target['_context_sha256']):
+            return None
+        ids = value['attested_finding_ids']
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 32
+                or any(not isinstance(identity, str) for identity in ids)
+                or len(set(ids)) != len(ids)):
+            return None
+        open_ids = {finding['finding_id'] for finding in target['findings'] if finding['status'] == 'open'}
+        if not set(ids) <= open_ids:
+            return None
+        hypothetical = deepcopy(value)
+        hypothetical['attested_finding_ids'] = []
+        validate_live_review_verdict(json.dumps(hypothetical, ensure_ascii=False,
+            separators=(',', ':'), allow_nan=False), target)
+        return {'check': 'verdict.attested_finding_ids', 'reason': 'revision_attestations_not_empty',
+            'actual_count': len(ids), 'required_count': 0}
     except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
         return None
 
@@ -196,7 +233,8 @@ class SupersedingReviewProvider:
                     or plan['plan_sha256'] != target['approved_plan']['sha256']
                     or self.flow._artifact(cursor, plan['task_id'], plan['plan_attempt_id'])['content'] != target['approved_plan']['content']):
                 raise Rejected(409, 'result_mismatch')
-        diagnostics = classify_context_transcription(result['content'], target)
+        diagnostics = (classify_context_transcription(result['content'], target)
+            or classify_revision_attestations(result['content'], target))
         if diagnostics is None:
             return None
         cursor.execute("SELECT EXISTS(SELECT FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.phase<>'stopped' OR a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) OR EXISTS(SELECT FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s) OR EXISTS(SELECT FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy", (w['workflow_id'],) * 4)

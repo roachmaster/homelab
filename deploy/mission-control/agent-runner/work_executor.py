@@ -1199,6 +1199,8 @@ class CommandRunnerProvider:
                 "including integration and CI-related findings. You cannot forge, change or waive check results. "
                 "If any open finding cannot be independently validated, return revise or escalate, never a partial approval. "
                 "For Plan approval, attested_finding_ids must remain empty. "
+                "For every revise or escalate decision, attested_finding_ids MUST be an empty array, "
+                "even when some earlier findings were fixed; describe that progress in summary instead. "
                 "You cannot choose another agent, alter the merge target or perform publication.")
         elif peer_context is not None:
             raise ExecutionError("needs_reconcile", "An unbound peer review target was supplied.")
