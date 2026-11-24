@@ -7,11 +7,16 @@ the prompt and request a new independently valid review through the existing
 bounded superseding-review provider. Do not normalize or accept invalid bytes.
 
 The external Postgres-proxy workflow8c300 exhausted its reviewer-correction
-event20/20 after CLI JSON transport parsing failures. The old offending bytes
-were not retained. Diagnose with a single bounded read-only supervised capture
-using a clearly separate diagnostic target; never apply its verdict or reset a
-live event. Require observed output and a discriminating regression before
-claiming a transport fix. Strict verdict/source parsing remains unchanged.
+event20/20 after CLI JSON transport parsing failures. A bounded read-only
+supervised diagnostic reproduced the failure after54.8seconds: Codex0.160
+serializes both the outer item ID and web-search ID under the same JSON key.
+The153-byte rejected record has SHA256547a2be149ecb96f6dfecf9e172cd3138b8aa9113f9f87b3efdd9537e31a4076.
+The narrow transport adapter accepts that exact root web-search metadata alias,
+preserves the outer ID, and rejects duplicate control, result and nested fields.
+Its actual-record replay and chunk-boundary regressions pass. Private structured
+failure logging records only a fixed reason, redacted path, size/hash and attempt
+identity. The diagnostic applied no verdict or DB mutation; strict verdict/source
+parsing and frozen execution flags remain unchanged.
 
 After the qualified fix is active, the user's new instruction authorizes one
 explicit private operator recovery review of the exhausted external event.
