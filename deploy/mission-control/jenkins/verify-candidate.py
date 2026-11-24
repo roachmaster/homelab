@@ -2793,6 +2793,44 @@ def open_log(path, reader_group):
         raise
 
 
+def open_progress(path, reader_group):
+    """Create the verifier-owned stage progress channel (fix 3, plan 5.2).
+
+    Same creation pattern as the log: O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW,
+    mode 0640, root-owned, group = the reader group. Children never see
+    the fd (run_child uses close_fds=True and passes only the log fd) and
+    cannot write the file: they run as the build UID, which is not in the
+    reader group, and the results dir (0750) and file (0640) deny it.
+    """
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o640)
+    try:
+        os.fchown(fd, 0, reader_group)
+        os.fchmod(fd, 0o640)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def append_progress(path, record):
+    """Append one JSON record durably to an existing progress file.
+
+    The file is opened O_APPEND|O_NOFOLLOW per record so no fd is held
+    across the check loop; each record is fsynced before returning, so a
+    verifier crash never loses a stage transition the log already shows.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or info.st_mode & 0o022 or info.st_nlink != 1):
+            raise ValueError('Unsafe CI progress file')
+        os.write(fd, (json.dumps(record, sort_keys=True) + '\n').encode('utf-8'))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _read_ui_qa_stages(qa_root, *, expected_uid):
     """Safely extract ui-qa stage durations from build-owned QA_OUTPUT_ROOT after quiescence."""
     try:
@@ -3192,6 +3230,19 @@ def _execute_locked(action, config, *, cache_port):
         cancelled = directory / 'cancelled'
         log_path = results / (action + '.log')
         fd = open_log(log_path, submitter.pw_gid)
+        # The progress channel binds the run before any check starts: the
+        # header carries the action id and the frozen gate manifest, and
+        # the reader validates both before trusting any stage record.
+        progress_path = results / (action + '.progress.jsonl')
+        progress_fd = open_progress(progress_path, submitter.pw_gid)
+        try:
+            os.write(progress_fd, (json.dumps(
+                {'action_id': action,
+                 'gate_manifest_sha256': request['gate_manifest_sha256']},
+                sort_keys=True) + '\n').encode('utf-8'))
+            os.fsync(progress_fd)
+        finally:
+            os.close(progress_fd)
         checks = []
         stages = []
         check_log_spans = {}
@@ -3357,12 +3408,26 @@ def _execute_locked(action, config, *, cache_port):
                     log.flush()
                     if stage_emitter is not None:
                         stage_emitter.emit_started(index)
+                    # The log markers are candidate-visible; the progress
+                    # file is the producer's only stage evidence.
+                    append_progress(progress_path, {
+                        'action_id': action,
+                        'gate_manifest_sha256': request['gate_manifest_sha256'],
+                        'index': index, 'kind': 'stage_started',
+                        'rc': None, 'elapsed_ms': None,
+                        'monotonic_ms': int(time.monotonic() * 1000)})
                     span_start = log.tell()
                     check_started = time.monotonic()
                     code = run_child(argv, cwd=source, env=environment, account=account,
                                      log=log, timeout=remaining, cancelled=cancelled)
                     check_elapsed_ms = int((time.monotonic() - check_started) * 1000)
                     log.flush()
+                    append_progress(progress_path, {
+                        'action_id': action,
+                        'gate_manifest_sha256': request['gate_manifest_sha256'],
+                        'index': index, 'kind': 'stage_completed',
+                        'rc': code, 'elapsed_ms': check_elapsed_ms,
+                        'monotonic_ms': int(time.monotonic() * 1000)})
                     span_end = log.tell()
                     check_log_spans[index] = (span_start, span_end)
                     log.write((

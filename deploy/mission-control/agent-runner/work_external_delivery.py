@@ -210,13 +210,18 @@ class DeliveryConfig:
     verifier: Path
     jenkins_job: str = 'forge-exact-candidate'
     verification_profile: str = PROFILE
+    # Fix 3 (plan 5.3): the Jenkins instance alias this delivery client
+    # submits to. The publication worker journals it at submit time and the
+    # lifecycle producer uses it as the events' jenkins_instance; it is
+    # validated against the Jenkins event config at producer construction.
+    jenkins_instance: str | None = None
 
     @classmethod
     def parse(cls, raw):
         required = {'owner', 'worker_id', 'database', 'projects', 'state_root', 'spool_root',
             'results_root', 'github_config_dir', 'jenkins_binary', 'jenkins_binary_sha256',
             'jenkins_config', 'verifier'}
-        if not isinstance(raw, dict) or not required <= set(raw) <= required | {'jenkins_job', 'verification_profile'}:
+        if not isinstance(raw, dict) or not required <= set(raw) <= required | {'jenkins_job', 'verification_profile', 'jenkins_instance'}:
             raise ValueError('Invalid delivery configuration fields')
         if not isinstance(raw['owner'], str) or not 1 <= len(raw['owner']) <= 128:
             raise ValueError('Invalid delivery owner')
@@ -248,9 +253,14 @@ class DeliveryConfig:
         job = raw.get('jenkins_job', 'forge-exact-candidate')
         if not isinstance(job, str) or job not in {'forge-exact-candidate', 'forge-native-candidate'}:
             raise ValueError('Invalid fixed Jenkins job')
+        instance = raw.get('jenkins_instance')
+        if instance is not None and (not isinstance(instance, str)
+                or not re.fullmatch('[A-Za-z0-9_.-]{1,64}', instance)):
+            raise ValueError('Invalid delivery Jenkins instance alias')
         profile = CiGateContractFactory(raw.get('verification_profile', PROFILE)).create().profile
         return cls(raw['owner'], raw['worker_id'], MappingProxyType(dict(database)),
-            MappingProxyType(frozen), **values, jenkins_binary_sha256=raw['jenkins_binary_sha256'], jenkins_job=job, verification_profile=profile)
+            MappingProxyType(frozen), **values, jenkins_binary_sha256=raw['jenkins_binary_sha256'], jenkins_job=job, verification_profile=profile,
+            jenkins_instance=instance)
 
 
 class ForgeJenkinsPort:
@@ -630,6 +640,8 @@ class TrustedDeliveryPort:
         return path, record
 
     def verify(self, request, require_lease):
+        # DeliveryConfig.parse supplies this; test doubles may not.
+        instance = getattr(self.config, 'jenkins_instance', None)
         directory = self.directory(request)
         parameters = self._parameters(request)
         submission, record = self._submission(request)
@@ -647,11 +659,15 @@ class TrustedDeliveryPort:
             if previous is not None:
                 return {'status': 'pending', 'receipt': {**receipt, 'submission': 'reconciling'},
                         'summary': 'Reconciling the durable Jenkins submission; no duplicate was sent.'}
-            durable_json(journal, {'parameters': parameters, 'post_started': True})
+            journal_record = {'parameters': parameters, 'post_started': True}
+            if instance is not None:
+                journal_record['jenkins_instance'] = instance
+            durable_json(journal, journal_record)
             require_lease()
             try:
                 number = self.jenkins.submit(parameters)
-                durable_json(journal, {'parameters': parameters, 'post_started': True, 'queue_id': number})
+                journal_record = {**journal_record, 'queue_id': number}
+                durable_json(journal, journal_record)
                 receipt['queue_id'] = number
             except (PublicationError, ValueError):
                 receipt['submission'] = 'uncertain'
@@ -662,6 +678,16 @@ class TrustedDeliveryPort:
             return {'status': 'pending', 'receipt': receipt, 'summary': 'Jenkins verification is queued.'}
         receipt['build_number'] = value['number']
         receipt['queue_id'] = value.get('queue_id')
+        # First build observation for the action: the journaled build
+        # number becomes the trusted binding (plan 5.3). Later
+        # observations must equal it; the producer enforces that.
+        journal_record = dict(previous) if isinstance(previous, dict) else {'parameters': parameters, 'post_started': True}
+        if instance is not None:
+            journal_record.setdefault('jenkins_instance', instance)
+        if journal_record.get('build_number') != value['number'] or journal_record.get('queue_id') != value.get('queue_id'):
+            journal_record['build_number'] = value['number']
+            journal_record['queue_id'] = value.get('queue_id')
+            durable_json(journal, journal_record)
         if value['building']:
             return {'status': 'pending', 'receipt': receipt, 'summary': 'Jenkins is running the fixed verification gates.'}
         # The Jenkins result is recorded for every finished build, not only
@@ -671,6 +697,7 @@ class TrustedDeliveryPort:
         require_lease()
         result_file = self.config.results_root / (request['action_id'] + '.json')
         if not result_file.exists():
+            receipt['jenkins_result'] = value['result']
             return {'status': 'failed', 'receipt': receipt, 'summary': 'The finished Jenkins build has no trusted verification receipt.'}
         raw = read_private(result_file, owner=0, maximum=262144)
         result = json.loads(raw)
@@ -707,11 +734,17 @@ class TrustedDeliveryPort:
                     for index, (check, argv) in enumerate(zip(checks, plan.checks))))
         if (value['result'] == 'SUCCESS' and result.get('status') == 'passed'
                 and result.get('cleanup_confirmed') is True and complete):
+            receipt['result'] = 'SUCCESS'
+            # The event reports the Jenkins build outcome, not the
+            # verification outcome; record the observed result on every
+            # terminal path so the producer always has it (plan 5.1).
+            receipt['jenkins_result'] = value['result']
             summary = ('All fixed Jenkins gates passed on the exact reviewed candidate.'
                 if plan.profile == LEGACY_PROFILE else
                 'Exact branch in-memory gates passed; browser/database were not run.' if plan.scope == 'branch' else
                 'Exact main gates passed, including real browser and all four zero-skip backend suites.')
             return {'status': 'passed', 'receipt': receipt, 'summary': summary}
+        receipt['jenkins_result'] = value['result']
         summary = 'Jenkins verification failed: ' + str(result.get('failure', 'checks_failed'))[:128]
         for check in checks if isinstance(checks, list) else []:
             if check.get('returncode'):
