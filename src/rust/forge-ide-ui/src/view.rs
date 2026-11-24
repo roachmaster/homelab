@@ -19,6 +19,69 @@ pub struct ViewModel {
     pub badges: Vec<BadgeBinding>,
     pub metric_cards: Vec<MetricCardsBinding>,
     pub timelines: Vec<TimelineBinding>,
+    pub flow_diagrams: Vec<FlowDiagramBinding>,
+}
+/// Bounded, presentation-only event-stream stage diagram. Rust owns all stage
+/// mapping, provenance filtering, and timestamp formatting.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FlowDiagramBinding {
+    pub id: &'static str,
+    pub track_label: String,
+    pub current_badge: BadgeView,
+    pub summary: String,
+    pub nodes: Vec<FlowStageNode>,
+    pub branches: Vec<FlowBranch>,
+    pub trace_label: String,
+    pub trace_hops: Vec<FlowTraceHop>,
+    pub empty_message: String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowStageState {
+    Completed,
+    Current,
+    Upcoming,
+    Skipped,
+    Warning,
+    Error,
+    Cancelled,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FlowStageNode {
+    pub id: String,
+    pub label: String,
+    pub state: FlowStageState,
+    pub current: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count_label: Option<String>,
+    pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<TimeView>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowBranchKind {
+    Loop,
+    Exception,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FlowBranch {
+    pub id: String,
+    pub kind: FlowBranchKind,
+    pub from_stage_label: String,
+    pub label: String,
+    pub state: FlowStageState,
+    pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<TimeView>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FlowTraceHop {
+    pub id: String,
+    pub sequence_label: String,
+    pub badge: BadgeView,
+    pub time: TimeView,
+    pub detail: String,
 }
 /// Keyed, presentation-only event rows. Rust owns identity, state and paging.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

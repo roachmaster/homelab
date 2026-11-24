@@ -2871,3 +2871,371 @@
       declarations:
         - ["white-space", "pre-wrap"]
         - ["overflow-wrap", "anywhere"]
+
+    - selector: "#agents-stage-panel"
+      declarations:
+        - ["margin-block", "12px 16px"]
+        - ["padding", "14px"]
+        - ["border", "1px solid rgba(255,255,255,.09)"]
+        - ["border-radius", "14px"]
+        - ["background", "var(--surface)"]
+        - ["display", "grid"]
+        - ["gap", "10px"]
+        - ["min-width", "0"]
+    - selector: "#agents-stage-heading"
+      declarations:
+        - ["margin", "0"]
+        - ["font-size", ".75rem"]
+        - ["font-weight", "600"]
+        - ["letter-spacing", ".08em"]
+        - ["text-transform", "uppercase"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-flow-diagram"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "12px"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-header"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "4px"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-header-meta"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "8px"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-track-label"
+      declarations:
+        - ["font-size", ".875rem"]
+        - ["font-weight", "650"]
+        - ["color", "var(--text)"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-flow-summary"
+      declarations:
+        - ["font-size", ".75rem"]
+        - ["color", "var(--muted)"]
+        - ["margin", "0"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-flow-track"
+      declarations:
+        - ["list-style", "none"]
+        - ["margin", "0"]
+        - ["padding", "2px 0"]
+        - ["display", "flex"]
+        - ["flex-wrap", "wrap"]
+        - ["align-items", "stretch"]
+        - ["gap", "10px 0"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-step"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["min-width", "0"]
+        - ["max-width", "100%"]
+    - selector: ".fg-flow-node"
+      declarations:
+        - ["display", "grid"]
+        - ["align-content", "start"]
+        - ["gap", "4px"]
+        - ["min-width", "112px"]
+        - ["max-width", "210px"]
+        - ["padding", "10px 12px"]
+        - ["border", "1px solid rgba(255,255,255,.12)"]
+        - ["border-radius", "var(--radius)"]
+        - ["background", "var(--bg)"]
+        - ["color", "var(--text)"]
+        - ["transition", "border-color 150ms ease,background 150ms ease"]
+    - selector: ".fg-flow-node[data-state=completed]"
+      declarations:
+        - ["border-color", "rgba(67,174,110,.55)"]
+        - ["background", "rgba(67,174,110,.08)"]
+    - selector: ".fg-flow-node[data-state=completed][aria-current=step]"
+      declarations:
+        - ["border", "2px solid #94e8b5"]
+        - ["background", "rgba(67,174,110,.14)"]
+    - selector: ".fg-flow-node[data-state=current]"
+      declarations:
+        - ["border", "2px solid var(--accent)"]
+        - ["background", "var(--raised)"]
+        - ["box-shadow", "0 0 0 1px rgba(96,165,250,.28)"]
+    - selector: ".fg-flow-node[data-state=upcoming]"
+      declarations:
+        - ["border-color", "rgba(255,255,255,.12)"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-flow-node[data-state=skipped]"
+      declarations:
+        - ["border-style", "dashed"]
+        - ["border-color", "rgba(255,255,255,.18)"]
+        - ["color", "var(--muted)"]
+        - ["opacity", ".82"]
+    - selector: ".fg-flow-node[data-state=warning]"
+      declarations:
+        - ["border", "2px solid var(--warning)"]
+        - ["background", "rgba(242,200,121,.1)"]
+    - selector: ".fg-flow-node[data-state=error]"
+      declarations:
+        - ["border", "2px solid var(--error)"]
+        - ["background", "rgba(255,176,173,.1)"]
+    - selector: ".fg-flow-node[data-state=cancelled]"
+      declarations:
+        - ["border", "2px solid rgba(154,166,184,.5)"]
+        - ["background", "rgba(154,166,184,.1)"]
+    - selector: ".fg-flow-node-head"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "6px"]
+        - ["flex-wrap", "wrap"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-marker"
+      declarations:
+        - ["font-size", ".8125rem"]
+        - ["font-weight", "700"]
+        - ["line-height", "1"]
+        - ["flex", "none"]
+    - selector: ".fg-flow-node[data-state=completed] .fg-flow-marker"
+      declarations:
+        - ["color", "#94e8b5"]
+    - selector: ".fg-flow-node[data-state=current] .fg-flow-marker"
+      declarations:
+        - ["color", "var(--accent)"]
+    - selector: ".fg-flow-node[data-state=warning] .fg-flow-marker"
+      declarations:
+        - ["color", "var(--warning)"]
+    - selector: ".fg-flow-node[data-state=error] .fg-flow-marker"
+      declarations:
+        - ["color", "var(--error)"]
+    - selector: ".fg-flow-label"
+      declarations:
+        - ["font-size", ".8125rem"]
+        - ["font-weight", "650"]
+        - ["line-height", "1.3"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-flow-count"
+      declarations:
+        - ["font-size", ".6875rem"]
+        - ["font-weight", "600"]
+        - ["padding", "1px 6px"]
+        - ["border-radius", "999px"]
+        - ["background", "rgba(96,165,250,.15)"]
+        - ["color", "var(--accent)"]
+        - ["white-space", "nowrap"]
+    - selector: ".fg-flow-detail"
+      declarations:
+        - ["font-size", ".75rem"]
+        - ["color", "var(--muted)"]
+        - ["line-height", "1.35"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-flow-time"
+      declarations:
+        - ["font-size", ".6875rem"]
+        - ["color", "var(--muted)"]
+        - ["font-variant-numeric", "tabular-nums"]
+    - selector: ".fg-flow-connector"
+      declarations:
+        - ["display", "inline-flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "center"]
+        - ["padding", "0 3px"]
+        - ["flex", "none"]
+        - ["color", "rgba(154,166,184,.5)"]
+    - selector: ".fg-flow-connector[data-edge=traversed]"
+      declarations:
+        - ["color", "#94e8b5"]
+    - selector: ".fg-flow-connector[data-edge=active]"
+      declarations:
+        - ["color", "var(--accent)"]
+    - selector: ".fg-flow-connector[data-edge=alert]"
+      declarations:
+        - ["color", "var(--warning)"]
+    - selector: ".fg-flow-branches"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "8px"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-branch"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "20px minmax(0,1fr)"]
+        - ["align-items", "start"]
+        - ["gap", "8px"]
+        - ["padding", "8px 12px"]
+        - ["border", "1px solid rgba(255,255,255,.12)"]
+        - ["border-radius", "var(--radius)"]
+        - ["background", "var(--bg)"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-branch[data-state=current]"
+      declarations:
+        - ["border-color", "var(--accent)"]
+        - ["background", "var(--raised)"]
+    - selector: ".fg-flow-branch[data-state=warning]"
+      declarations:
+        - ["border-color", "var(--warning)"]
+        - ["background", "rgba(242,200,121,.08)"]
+    - selector: ".fg-flow-branch[data-state=error]"
+      declarations:
+        - ["border-color", "var(--error)"]
+        - ["background", "rgba(255,176,173,.08)"]
+    - selector: ".fg-flow-branch-icon"
+      declarations:
+        - ["display", "inline-flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "center"]
+        - ["padding-top", "2px"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-flow-branch[data-state=current] .fg-flow-branch-icon"
+      declarations:
+        - ["color", "var(--accent)"]
+    - selector: ".fg-flow-branch[data-state=warning] .fg-flow-branch-icon"
+      declarations:
+        - ["color", "var(--warning)"]
+    - selector: ".fg-flow-branch[data-state=error] .fg-flow-branch-icon"
+      declarations:
+        - ["color", "var(--error)"]
+    - selector: ".fg-flow-branch-body"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "2px"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-branch-head"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "baseline"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "4px 8px"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-branch-label"
+      declarations:
+        - ["font-size", ".8125rem"]
+        - ["font-weight", "650"]
+        - ["color", "var(--text)"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-flow-branch-origin"
+      declarations:
+        - ["font-size", ".75rem"]
+        - ["color", "var(--muted)"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-flow-branch-detail"
+      declarations:
+        - ["font-size", ".75rem"]
+        - ["color", "var(--muted)"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-flow-trace"
+      declarations:
+        - ["min-width", "0"]
+        - ["padding-top", "6px"]
+        - ["border-top", "1px solid rgba(255,255,255,.08)"]
+    - selector: ".fg-flow-trace>summary"
+      declarations:
+        - ["min-height", "44px"]
+        - ["line-height", "1.5"]
+        - ["font-size", ".8125rem"]
+        - ["font-weight", "500"]
+        - ["color", "var(--muted)"]
+        - ["cursor", "pointer"]
+        - ["border-radius", "5px"]
+        - ["list-style", "none"]
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["gap", "8px"]
+        - ["padding", "6px 2px"]
+        - ["transition", "color 150ms ease"]
+    - selector: ".fg-flow-trace>summary:hover,.fg-flow-trace[open]>summary"
+      declarations:
+        - ["color", "var(--text)"]
+    - selector: ".fg-flow-trace>summary:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "3px"]
+    - selector: ".fg-flow-trace>summary::-webkit-details-marker"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-flow-trace>summary::after"
+      declarations:
+        - ["content", "''"]
+        - ["flex", "none"]
+        - ["width", "6px"]
+        - ["height", "6px"]
+        - ["margin-inline-end", "4px"]
+        - ["border", "solid currentColor"]
+        - ["border-width", "0 1.5px 1.5px 0"]
+        - ["transform", "rotate(45deg)"]
+        - ["transition", "transform 150ms ease"]
+    - selector: ".fg-flow-trace[open]>summary::after"
+      declarations:
+        - ["transform", "rotate(-135deg)"]
+    - selector: ".fg-flow-hops"
+      declarations:
+        - ["list-style", "none"]
+        - ["margin", "6px 0 0"]
+        - ["padding", "0"]
+        - ["display", "grid"]
+        - ["gap", "6px"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-hop"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "6px 8px"]
+        - ["padding", "6px 8px"]
+        - ["border-radius", "8px"]
+        - ["background", "var(--bg)"]
+        - ["border", "1px solid rgba(255,255,255,.06)"]
+        - ["min-width", "0"]
+    - selector: ".fg-flow-hop-seq"
+      declarations:
+        - ["font", ".75rem ui-monospace,SFMono-Regular,monospace"]
+        - ["color", "var(--muted)"]
+        - ["font-variant-numeric", "tabular-nums"]
+    - selector: ".fg-flow-hop-exact"
+      declarations:
+        - ["font", ".6875rem ui-monospace,SFMono-Regular,monospace"]
+        - ["color", "var(--muted)"]
+        - ["font-variant-numeric", "tabular-nums"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-flow-hop-detail"
+      declarations:
+        - ["font-size", ".75rem"]
+        - ["color", "var(--muted)"]
+        - ["overflow-wrap", "anywhere"]
+        - ["flex", "1 1 160px"]
+        - ["min-width", "0"]
+- media: "(max-width:639px)"
+  rules:
+    - selector: "#agents-stage-panel"
+      declarations:
+        - ["padding", "12px"]
+    - selector: ".fg-flow-track"
+      declarations:
+        - ["flex-direction", "column"]
+        - ["align-items", "stretch"]
+        - ["gap", "0"]
+    - selector: ".fg-flow-step"
+      declarations:
+        - ["flex-direction", "column"]
+        - ["align-items", "stretch"]
+        - ["width", "100%"]
+    - selector: ".fg-flow-node"
+      declarations:
+        - ["width", "100%"]
+        - ["min-width", "0"]
+        - ["max-width", "none"]
+    - selector: ".fg-flow-connector"
+      declarations:
+        - ["width", "100%"]
+        - ["height", "22px"]
+        - ["padding", "0"]
+    - selector: ".fg-flow-connector svg"
+      declarations:
+        - ["transform", "rotate(90deg)"]
+- media: "(prefers-reduced-motion:reduce)"
+  rules:
+    - selector: ".fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after"
+      declarations:
+        - ["transition", "none"]

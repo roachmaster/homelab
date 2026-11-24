@@ -46,9 +46,13 @@ const tree = {
 const body = { isConnected: true };
 const extraElements = new Map();
 const sourceElements = [];
+const flowElements = [];
 function sourceNode(tag = 'span') {
+  const classes = new Set();
   return { tagName: tag.toUpperCase(), dataset: {}, children: [], textContent: '',
     isConnected: true, scrollLeft: 0, scrollTop: 0, clientTop: 1, scrolled: false,
+    classList: { add(c) { classes.add(c); }, contains(c) { return classes.has(c); } },
+    contains(target) { let cur = target; while (cur) { if (cur === this) return true; cur = cur.parentElement; } return false; },
     closest(selector) { return selector === '[data-source-view]' && this.hasAttribute(selector.slice(1, -1)) ? this : this.parentElement?.closest?.(selector) ?? null; },
     getBoundingClientRect() {
       if (this.tagName === 'PRE') return { top: 100 };
@@ -59,6 +63,7 @@ function sourceNode(tag = 'span') {
       return { top: 0 };
     },
     setAttribute(name, value) { this[name] = value; },
+    removeAttribute(name) { delete this[name]; },
     hasAttribute(name) { return name === 'data-source-view' && this.tagName === 'PRE'; },
     append(...children) { for (const child of children) child.parentElement = this; this.children.push(...children); },
     replaceChildren(...children) { for (const child of children) child.parentElement = this; this.children = children; },
@@ -70,7 +75,8 @@ const document = {
   body, activeElement: body, visibilityState: 'visible',
   addEventListener(name, fn) { documentLifecycle.set(name, fn); },
   createElement(tag) { return sourceNode(tag); },
-  querySelectorAll(selector) { if (selector.includes('[data-source-view]')) return sourceElements; if (selector === '[data-bind-text]') return [status]; if(selector === 'input,textarea')return [input,checkbox]; if(selector === 'input[type=checkbox][data-action]')return [checkbox]; return selector === 'input[data-action]:not([type=checkbox]),textarea[data-action]' ? [input] : []; },
+  createElementNS(ns, tag) { const node = sourceNode(tag); node.namespaceURI = ns; return node; },
+  querySelectorAll(selector) { if (selector.includes('.fg-flow-diagram')) return [...sourceElements, ...flowElements]; if (selector.includes('[data-source-view]')) return sourceElements; if (selector === '[data-bind-text]') return [status]; if(selector === 'input,textarea')return [input,checkbox]; if(selector === 'input[type=checkbox][data-action]')return [checkbox]; return selector === 'input[data-action]:not([type=checkbox]),textarea[data-action]' ? [input] : []; },
   querySelector() { return null; },
   getElementById(id) { return id === checkbox.id ? checkbox : id === input.id ? input : id === status.id ? status : id === tree.id ? tree : extraElements.get(id) ?? null; },
 };
@@ -450,3 +456,67 @@ checkboxView(false,null,'candidate-B',false,false);assert.equal(checkboxLabel.hi
 checkboxView(true,null,'candidate-B',false,true);assert.equal(checkboxLabel.textContent,'I verified candidate-B');
 lifecycle.get('pagehide')({persisted:false});assert.equal(checkbox.checked,false);assert.equal(checkbox.disabled,true);
 console.log('Checkbox presentation: boolean actions, acknowledgements, source changes and protected teardown passed.');
+
+lifecycle.get('pageshow')();
+const flowMount = sourceNode('section');
+flowMount.id = 'agents-stage-diagram';
+extraElements.set(flowMount.id, flowMount);
+flowElements.push(flowMount);
+function flowView(binding) {
+  workers.at(-1).onmessage({ data: { kind: 'view', view: { flow_diagrams: [binding] } } });
+}
+const sampleDiagram = {
+  id: flowMount.id,
+  track_label: 'Autonomous workflow · Native',
+  current_badge: { label: 'Reviewing code', tone: 'accent' },
+  summary: 'Stage 2 of 3 · Reviewing code · Events 1–5',
+  nodes: [
+    { id: 'plan', label: 'Plan', state: 'completed', current: false, count_label: '2×', detail: '#1–#2', time: { label: '2m ago', exact: '2026-11-19T18:00:00Z' } },
+    { id: 'code_review', label: 'Code review', state: 'current', current: true, detail: '<script>safe</script>', time: null },
+    { id: 'merged', label: 'Merged', state: 'invalid_injected', current: false, detail: '', time: null },
+  ],
+  branches: [
+    { id: 'branch-plan-revision', kind: 'loop', from_stage_label: 'Plan review', label: 'Plan revision → Plan', state: 'completed', detail: 'Revisions 1/3', time: null },
+  ],
+  trace_label: 'Observed event path (2 transitions)',
+  trace_hops: [
+    { id: 'hop-1-2', sequence_label: '#1–#2', badge: { label: 'Authoring plan', tone: 'accent' }, time: { label: '2m ago', exact: '2026-11-19T18:00:00Z' }, detail: '2 events' },
+  ],
+  empty_message: 'Open a task to view its event-stream path.',
+};
+flowView(sampleDiagram);
+assert.equal(flowMount.children.length, 5, 'header, track, branches, trace, empty mount once');
+const [flowHeader, flowTrack, flowBranches, flowTrace] = flowMount.children;
+assert.equal(flowTrack.children.length, 3);
+assert.equal(flowTrack.children[0].children[0].dataset.state, 'completed');
+assert.equal(flowTrack.children[0].children[1].children[0].namespaceURI, 'http://www.w3.org/2000/svg');
+assert.equal(flowTrack.children[1].children[0]['aria-current'], 'step');
+assert.equal(flowTrack.children[1].children[0].children[1].textContent, '<script>safe</script>');
+assert.equal(flowTrack.children[2].children[0].dataset.state, 'upcoming', 'unknown flow states clamp safely');
+assert.equal(flowBranches.hidden, false);
+assert.equal(flowBranches.children.length, 1);
+assert.equal(flowBranches.children[0].dataset.kind, 'loop');
+// Expanded disclosure exposes readable exact UTC timestamps without requiring hover.
+const firstHop = flowTrace.children[1].children[0];
+assert.equal(firstHop.children[2].textContent, '2m ago');
+assert.equal(firstHop.children[3].className, 'fg-flow-hop-exact');
+assert.equal(firstHop.children[3].textContent, '2026-11-19T18:00:00Z');
+assert.equal(firstHop.children[4].textContent, '2 events');
+// Persistent keyed disclosure survives background polls without losing open state.
+flowTrace.open = true;
+const originalTrace = flowTrace;
+flowView({ ...sampleDiagram, summary: 'Stage 2 of 3 · Reviewing code · Events 1–6' });
+assert.equal(flowMount.children[3], originalTrace, 'background poll preserves disclosure element');
+assert.equal(flowMount.children[3].open, true, 'background poll keeps open trace disclosure open');
+assert.equal(flowHeader.children[1].textContent, 'Stage 2 of 3 · Reviewing code · Events 1–6');
+// Clearing to an empty diagram resets disclosure open state before the next task opens.
+flowView({ ...sampleDiagram, nodes: [], branches: [], trace_hops: [] });
+assert.equal(flowMount.children[3].open, false, 'empty diagram closes trace disclosure');
+flowView(sampleDiagram);
+// Protected teardown synchronously clears stage diagram pixels and cache.
+lifecycle.get('pagehide')({ persisted: false });
+assert.equal(flowMount.children.length, 0, 'pagehide clears flow diagram synchronously');
+lifecycle.get('pageshow')();
+flowView(sampleDiagram);
+assert.equal(flowMount.children.length, 5, 'new worker re-renders flow diagram without stale cache');
+console.log('Flow diagram presentation: SVG connectors, aria-current, state clamping, safe text, persistent disclosure and teardown passed.');

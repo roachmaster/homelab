@@ -537,8 +537,39 @@ REVIEW_PROTOCOL_CONTEXT_SHA256 = {'AGENT_WORK.md': '74187a9baa76afbd6aae600a2b89
  'deploy/mission-control/jenkins/verify-candidate.py': 'e73b78425f9d14e16b064777d2a02722345919c93093476cea9c116135c81912',
  'docs/architecture/external-agent-workflow.md': 'c4811902a3ebabde6271f67e6ea3f0a7a443bb35d17e378ea5ccddfd721e21ef'}
 
+# Current additive ABI15 event-stream stage-diagram UI source; historical maps
+# above remain literal provenance. This narrow overlay binds only the UI model,
+# declarative component/emitters, atomic ABI15 metadata, docs, and UI/host tests.
+# It grants no live activation or CI success and changes no SQL, native
+# publication guard, or backend source pin.
+UI_STAGE_DIAGRAM_CONTEXT_SHA256 = {
+    'docs/design/implementation-status.md': 'a57eb8d4df855dd32c0a27c59b6f0baee0698be2901414cb2644979a2b1a9330',
+    'src/rust/forge-ide-ui/README.md': 'e952faf199fa1ac5ed4deeab6fbb2b566dc60e94f1c09739fab56548368252d4',
+    'src/rust/forge-ide-ui/src/model/agents.rs': 'bb996c324090486818e9c78bdb98ce18ff189d7dfd4aa7aa2e2bba6ada250959',
+    'src/rust/forge-ide-ui/src/model/agents/history.rs': 'd4fe5e7cd2a9464c3e79ee3145cfcd2064a1aeae6534cd44818229b9287e775c',
+    'src/rust/forge-ide-ui/src/model/agents/stage_diagram.rs': '9b8363ef2dc50f22740e0e5ad4b0b381a76761b8ef078205c9df268c42d3db4e',
+    'src/rust/forge-ide-ui/src/model/agents/tests.rs': 'b38734e3fe56159a0d5574db4008f91c9c49908221c85bb5ac01e475668f6dbe',
+    'src/rust/forge-ide-ui/src/model/agents/tests/stage_diagram.rs': 'c7269e545232828b799374256bc0833e2df2c4c52e06682160212a8a9abdd687',
+    'src/rust/forge-ide-ui/src/model/projection.rs': '9ea4d08b8f14a1d7d7b6ff36bcf5379209a2219b7496f547aa4210cb52801d33',
+    'src/rust/forge-ide-ui/src/view.rs': '51ab58c988c8b1b4fe6f804b89bde4b4c092b09b044f5ec7be3f6731461cebf2',
+    'src/rust/forge-ide-ui/tests/worker_glue.mjs': '44e733ef50d84c2457ebf98db60d3591309ed03275925ee89ee000f546968831',
+    'src/rust/forge-ide-web-host/README.md': 'cc9dfbe13b50803c1d2910427846972d7d42c9b0fedb623aeb141ba5f1c102f6',
+    'src/rust/forge-ide-web-host/deploy/README.md': '0d0dda823d829f0e27fe0795e16a4d4691888766aa32cf07991b6fee06cadf39',
+    'src/rust/forge-ide-web/README.md': '2feb9e100fa0368ebe3963b3865ede6bc5be8af5f672acbfa57c4eba919323a4',
+    'src/rust/forge-ide-web/WORKBENCH.md': '688c4e0407f1f0f9bc862b29832bd2ce7cf0950cd7121d5dfa239b134f1d1a46',
+    'src/rust/forge-ide-web/src/generate/application.rs': 'ae1c8f6d8660859a7b0355d52ca4cd787d61efe092045c1fedb7c37174dccc06',
+    'src/rust/forge-ide-web/src/generate/component.rs': 'f7af659a222113f7e7c5ef19688ab15fba59c71705f1095dd0555eae5a52acbc',
+    'src/rust/forge-ide-web/src/generate/html.rs': 'ad0cd101d75d0ff8ff72b1c0af0255536089d29bfa23dc65751d0ac946254e99',
+    'src/rust/forge-ide-web/src/generate/javascript.rs': '737465499080e9bd5e3b7132200eb2f5c6d7da9590ceedc244a93f3be35b9b9a',
+    'src/rust/forge-ide-web/src/wasm.rs': 'b7a455568ebd2e66f7b1ac14fac1e9071ca05c689ea32c4f29a4d5b38ccaa5b3',
+    'src/rust/forge-ide-web/tests/browser/journey.mjs': 'e6a5a7d8dace636de757ce6ae779bc9b61cab8eea302e9cb922eb334984ed3d7',
+    'src/rust/forge-ide-web/tests/generation.rs': 'd76abe1dd440806fe0de94d88286b8da9c5af467f8ca2508c9a6305cde4fbab0',
+    'src/rust/forge-ide-web/tests/input-presentation.mjs': '8533c2c2f2ed0d1d591e1a115631819ea7548ae7f838c5dad483b8accbbff31a',
+    'src/rust/forge-ide-web/ui/styles.yaml': '33a1696b367038ef2534f3200d8656aa3f61e856431b91fa78b90cdd4d149def',
+}
+
 def qualified_source(relative, expected):
-    return REVIEW_PROTOCOL_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))))))
+    return UI_STAGE_DIAGRAM_CONTEXT_SHA256.get(relative, REVIEW_PROTOCOL_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected))))))))))
 
 STRICT_VERIFIER_FILES = {
     "verify-superseding-reviews.sql",
@@ -701,6 +732,16 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 if '/migrations/' in relative or '/fragments/' in relative:
                     with self.subTest(applied_schema=relative):
                         self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_stage_diagram_ui_overlay_is_scoped_to_abi15_ui_source(self):
+        self.assertEqual(len(UI_STAGE_DIAGRAM_CONTEXT_SHA256), 23)
+        for relative, expected in UI_STAGE_DIAGRAM_CONTEXT_SHA256.items():
+            with self.subTest(stage_diagram_ui=relative):
+                self.assertTrue(
+                    relative.startswith(('src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/'))
+                    or relative == 'docs/design/implementation-status.md'
+                )
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:

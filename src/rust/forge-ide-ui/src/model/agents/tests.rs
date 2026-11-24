@@ -1322,6 +1322,7 @@ mod delivery;
 mod history;
 mod review;
 mod scopes;
+mod stage_diagram;
 mod workflow;
 
 #[test]

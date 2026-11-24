@@ -18,6 +18,7 @@ impl Agents {
         self.history_next = None;
         self.history_loaded = false;
         self.history_request = None;
+        self.clear_stage_trace();
     }
     pub(super) fn history_action_valid(&self, task: &str, correlation: &str, cursor: u64) -> bool {
         self.pane == Pane::Reader
@@ -91,6 +92,9 @@ impl Agents {
         self.history_cursor = page.cursor;
         self.history_next = (events.len() == PAGE).then_some(next);
         self.history = events.clone();
+        if page.cursor <= self.stage_trace.last_sequence() {
+            self.fold_stage_events(&events);
+        }
         if !self.events_loaded && page.cursor == 0 {
             self.event_sequence = next;
             self.events_loaded = true;

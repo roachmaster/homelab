@@ -1044,3 +1044,63 @@ fn asset_error_display_names_each_failure_exactly() {
             .is_some()
     );
 }
+
+#[test]
+fn flow_diagram_component_validates_renders_deterministically_and_clears_on_teardown() {
+    let mut bad_id = config();
+    bad_id.document = Document {
+        title: "Fixture".into(),
+        subtitle: "Flow".into(),
+        children: vec![component!(flow_diagram "bad id", "Valid label")],
+    };
+    assert!(register_assets("assets", bad_id).is_err());
+
+    let mut bad_label = config();
+    bad_label.document = Document {
+        title: "Fixture".into(),
+        subtitle: "Flow".into(),
+        children: vec![component!(flow_diagram "stage-flow", "   ")],
+    };
+    assert!(register_assets("assets", bad_label).is_err());
+
+    let first = build(config());
+    let second = build(config());
+    assert_eq!(
+        first, second,
+        "flow diagram generation must be deterministic"
+    );
+    let html = std::str::from_utf8(&first.files["index.html"]).unwrap();
+    let css = std::str::from_utf8(&first.files["style.css"]).unwrap();
+    let main = std::str::from_utf8(&first.files["main.js"]).unwrap();
+    let worker = std::str::from_utf8(&first.files["worker.js"]).unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&first.manifest).unwrap();
+    assert!(html.contains(
+        "<section id=\"agents-stage-diagram\" class=\"fg-flow-diagram\" aria-label=\"Task event-stream stage diagram\"></section>"
+    ));
+    assert!(css.contains(".fg-flow-track"));
+    assert!(css.contains(".fg-flow-hop-exact"));
+    assert!(css.contains("@media (max-width:639px)"));
+    let reduced_motion_rule = "@media (prefers-reduced-motion:reduce){\n.fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after{\ntransition:none;}\n}";
+    let reduced_pos = css
+        .rfind(reduced_motion_rule)
+        .expect("flow reduced-motion override rule present");
+    for base_rule in [
+        "\n.fg-flow-node{\n",
+        "\n.fg-flow-trace>summary{\n",
+        "\n.fg-flow-trace>summary::after{\n",
+    ] {
+        let base_pos = css
+            .rfind(base_rule)
+            .unwrap_or_else(|| panic!("missing base flow rule {base_rule}"));
+        assert!(
+            reduced_pos > base_pos,
+            "reduced-motion override must follow base rule {base_rule} to win the cascade"
+        );
+    }
+    assert!(main.contains("function renderFlowDiagram(binding)"));
+    assert!(main.contains("fg-flow-hop-exact"));
+    assert!(main.contains(".fg-flow-diagram"));
+    assert!(main.contains("flowDiagramViews=new WeakMap()"));
+    assert!(worker.contains("wasm.abi_version()!==15"));
+    assert_eq!(manifest["abi_version"], 15);
+}

@@ -36,7 +36,7 @@ dependencies; localhost browser acceptance is separate from deployed HTTPS
 verification. Source must remain unchanged during the final fingerprinted run.
 
 Build the candidate `forge-ide-web-host` with Cargo `--release --locked`, and
-copy the ABI14 generated asset bundle **including its manifest** as one unit. Build
+copy the ABI15 generated asset bundle **including its manifest** as one unit. Build
 and update `forge-agent` separately when its code/configuration or wire contract
 changes. A Web-only replacement may retain the existing agent only after exact
 used DTO/codec/route compatibility is verified. The host
