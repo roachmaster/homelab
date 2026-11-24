@@ -1,4 +1,30 @@
-# Current: Recover malformed native reviews automatically — 2026-11-24
+# Current: Continue verified peer feedback automatically — 2026-11-24
+
+The live superseding-review recovery ran Codex through its normal worker and
+obtained a valid `revise` verdict for the original stage-diagram candidate. Its
+reviewer-protocol event resolved at one of twenty attempts. The subsequent
+author setup exposed a distinct defect: a linked child receiving a review of
+itself was incorrectly bound to its parent's older source review. Correct only
+that source relationship; preserve strict parent binding for feedback that
+actually targets the parent and retain every other identity and digest check.
+
+Select a separate peer-feedback recovery provider at the workflow composition
+root. Before normal Resume it must verify the actual stopped attempt,
+reconciliation, unchanged source and feedback, independently valid decided
+peer revision, approved scope, current policy, readiness and idle admission.
+Reuse the server-issued continuation note so the preserved feedback remains
+bound across a setup-only retry. Keep the build-feedback recovery semantics
+unchanged. Repeated recovery consumes the same feedback-delivery event's twenty
+attempt allowance; duplicate or raced admissions consume once. Never rewrite
+the valid verdict, failed attempt, original owner or spent counters. No schema
+change is required; applied migrations1–33 remain immutable.
+
+Root owns integration, source qualification, safe idle-worker rollout and
+publication. Core owns the narrow pure validator and full provider regression;
+Audit owns the scoped automatic recovery port and actual PostgreSQL regressions.
+Ops stages release and CI configuration only; Root activates qualified artifacts.
+
+# Previous: Recover malformed native reviews automatically — 2026-11-24
 
 The user requests actual automated completion of the original stage-diagram task,
 not another status report. Preserve original Gemini/Antigravity author and Codex
