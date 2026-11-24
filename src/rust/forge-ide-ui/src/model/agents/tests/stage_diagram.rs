@@ -9,6 +9,7 @@ const EXT_ASSIGNMENT: &str = "88888888-8888-4888-8888-888888888888";
 
 fn workflow_summary(kind: WorkWorkflowKind, phase: WorkWorkflowPhase) -> WorkWorkflowSummary {
     WorkWorkflowSummary {
+        retry_event: None,
         kind,
         workflow_id: WF.into(),
         policy_digest: "c".repeat(64),
@@ -285,6 +286,7 @@ fn standalone_implement_plan_review_and_external_tracks_are_truthful() {
     let mut impl_task = detail(WorkStatus::AwaitingReview);
     impl_task.mode = WorkMode::Implement;
     impl_task.review = Some(WorkReviewSummary {
+        retry_event: None,
         auto_repair: true,
         stage: "hosted_pending".into(),
         review_id: Some(KEY.into()),
@@ -416,6 +418,7 @@ fn post_merge_delivery_appends_verify_repair_and_honest_deploy_receipt_states() 
             build_number: Some(42),
         },
         repair: WorkRepairStage {
+            retry_event: None,
             status: repair_status,
             round: if repair_status == WorkRepairStatus::None {
                 0
@@ -955,6 +958,7 @@ fn linked_repair_child_task_tracks_own_implement_lifecycle_instead_of_parent_wor
         WorkWorkflowPhase::Completed,
     ));
     task.review = Some(WorkReviewSummary {
+        retry_event: None,
         auto_repair: true,
         stage: "repairing".into(),
         review_id: Some(KEY.into()),
@@ -989,4 +993,245 @@ fn linked_repair_child_task_tracks_own_implement_lifecycle_instead_of_parent_wor
     let current = diagram.nodes.iter().find(|n| n.current).unwrap();
     assert_eq!(current.label, "Running");
     assert_eq!(current.state, FlowStageState::Current);
+}
+
+#[test]
+fn workflow_processing_phase_honors_authoritative_task_exception_states() {
+    let cases = [
+        (
+            WorkStatus::QuotaBlocked,
+            WorkEventKind::QuotaBlocked,
+            FlowStageState::Warning,
+            "Quota blocked",
+            BadgeTone::Warning,
+            "branch-quota_blocked",
+            "Halted · Quota blocked · #4",
+        ),
+        (
+            WorkStatus::BlockedAuth,
+            WorkEventKind::BlockedAuth,
+            FlowStageState::Warning,
+            "Sign-in required",
+            BadgeTone::Warning,
+            "branch-blocked_auth",
+            "Halted · Sign-in required · #4",
+        ),
+        (
+            WorkStatus::BlockedPermission,
+            WorkEventKind::BlockedPermission,
+            FlowStageState::Warning,
+            "Permission blocked",
+            BadgeTone::Warning,
+            "branch-blocked_permission",
+            "Halted · Permission blocked · #4",
+        ),
+        (
+            WorkStatus::NeedsReconcile,
+            WorkEventKind::NeedsReconcile,
+            FlowStageState::Warning,
+            "Reconciliation required",
+            BadgeTone::Warning,
+            "branch-needs_reconcile",
+            "Halted · Reconciliation required · #4",
+        ),
+        (
+            WorkStatus::Failed,
+            WorkEventKind::Failed,
+            FlowStageState::Error,
+            "Failed",
+            BadgeTone::Error,
+            "branch-failed",
+            "Halted · Failed · #4",
+        ),
+        (
+            WorkStatus::CancelRequested,
+            WorkEventKind::CancelRequested,
+            FlowStageState::Warning,
+            "Stopping",
+            BadgeTone::Warning,
+            "branch-cancel_requested",
+            "Stopping · #4",
+        ),
+        (
+            WorkStatus::Cancelled,
+            WorkEventKind::Cancelled,
+            FlowStageState::Cancelled,
+            "Cancelled",
+            BadgeTone::Neutral,
+            "branch-cancelled",
+            "Halted · Cancelled · #4",
+        ),
+    ];
+
+    for (
+        status,
+        event_kind,
+        expected_state,
+        expected_label,
+        expected_tone,
+        branch_id,
+        detail_text,
+    ) in cases
+    {
+        let mut task = detail(status);
+        task.workflow = Some(workflow_summary(
+            WorkWorkflowKind::Native,
+            WorkWorkflowPhase::Implement,
+        ));
+        let mut agents = reader_with(task);
+        agents.events_loaded = true;
+        agents.fold_stage_events(&[
+            wf_event(1, WorkWorkflowPhase::Plan, "Plan drafted"),
+            wf_event(2, WorkWorkflowPhase::PlanReview, "Plan approved"),
+            wf_event(3, WorkWorkflowPhase::Implement, "Implementing change"),
+            raw_event(4, event_kind),
+        ]);
+
+        let diagram = project_diagram(&agents);
+        assert_eq!(
+            diagram.current_badge,
+            badge(expected_label, expected_tone),
+            "badge must reflect authoritative task exception {status:?}"
+        );
+        assert!(
+            diagram
+                .summary
+                .contains(&format!("Stage 3 of 9 · {expected_label}")),
+            "summary should reflect exception stage and label: {}",
+            diagram.summary
+        );
+
+        assert_eq!(diagram.nodes[0].state, FlowStageState::Completed);
+        assert_eq!(diagram.nodes[1].state, FlowStageState::Completed);
+        assert_eq!(diagram.nodes[2].label, "Implement");
+        assert!(diagram.nodes[2].current);
+        assert_eq!(diagram.nodes[2].state, expected_state);
+        assert_eq!(diagram.nodes[2].detail, detail_text);
+        assert!(
+            diagram.nodes[3..]
+                .iter()
+                .all(|n| n.state == FlowStageState::Skipped && !n.current),
+            "all downstream workflow stages must be Skipped for {status:?}"
+        );
+
+        let ex_branch = diagram
+            .branches
+            .iter()
+            .find(|b| b.id == branch_id)
+            .expect("explicit exception branch must be attached to Implement");
+        assert_eq!(ex_branch.kind, FlowBranchKind::Exception);
+        assert_eq!(ex_branch.from_stage_label, "Implement");
+        assert_eq!(ex_branch.label, expected_label);
+        assert_eq!(ex_branch.state, expected_state);
+        assert_eq!(ex_branch.detail, format!("{expected_label} · #4"));
+        assert_eq!(
+            ex_branch.time.as_ref().and_then(|t| t.exact.as_deref()),
+            Some(TIME)
+        );
+    }
+}
+
+#[test]
+fn external_workflow_repair_exception_and_reconcile_recovery_are_truthful() {
+    // 1. External Muse workflow halted by QuotaBlocked during Repair propagates Warning to node & repair loop.
+    let mut task = detail(WorkStatus::QuotaBlocked);
+    task.attempt = None;
+    task.agent_profile = "muse-db-primary".into();
+    let mut wf = workflow_summary(
+        WorkWorkflowKind::ExternalDatabase,
+        WorkWorkflowPhase::Repair,
+    );
+    wf.code_revisions = 1;
+    task.workflow = Some(wf);
+    let mut agents = reader_with(task);
+    agents.events_loaded = true;
+    agents.fold_stage_events(&[
+        wf_event(1, WorkWorkflowPhase::Plan, "Plan drafted"),
+        wf_event(2, WorkWorkflowPhase::PlanReview, "Plan approved"),
+        wf_event(3, WorkWorkflowPhase::Implement, "Implementing"),
+        wf_event(4, WorkWorkflowPhase::Repair, "Addressing review"),
+        raw_event(5, WorkEventKind::QuotaBlocked),
+    ]);
+    let diagram = project_diagram(&agents);
+    assert_eq!(diagram.track_label, "Autonomous workflow · External Muse");
+    assert_eq!(
+        diagram.current_badge,
+        badge("Quota blocked", BadgeTone::Warning)
+    );
+    let labels: Vec<&str> = diagram.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        vec![
+            "Plan",
+            "Plan review",
+            "Implement",
+            "Code review",
+            "Checks",
+            "Merge",
+            "Merged"
+        ]
+    );
+    assert!(diagram.nodes[2].current);
+    assert_eq!(diagram.nodes[2].state, FlowStageState::Warning);
+    assert!(diagram.nodes[3..]
+        .iter()
+        .all(|n| n.state == FlowStageState::Skipped));
+    let repair_loop = diagram
+        .branches
+        .iter()
+        .find(|b| b.id == "branch-code-repair")
+        .expect("repair loop branch");
+    assert_eq!(repair_loop.state, FlowStageState::Warning);
+    let quota_branch = diagram
+        .branches
+        .iter()
+        .find(|b| b.id == "branch-quota_blocked")
+        .expect("quota exception branch");
+    assert_eq!(quota_branch.from_stage_label, "Implement");
+    assert_eq!(quota_branch.kind, FlowBranchKind::Exception);
+
+    // 2. Active NeedsReconcile on a workflow suppresses stale recovery branch even after an earlier resume.
+    let mut rec_task = detail(WorkStatus::NeedsReconcile);
+    rec_task.workflow = Some(workflow_summary(
+        WorkWorkflowKind::Native,
+        WorkWorkflowPhase::Implement,
+    ));
+    let mut rec_agents = reader_with(rec_task);
+    rec_agents.events_loaded = true;
+    rec_agents.fold_stage_events(&[
+        wf_event(1, WorkWorkflowPhase::Implement, "Implementing"),
+        raw_event(2, WorkEventKind::NeedsReconcile),
+        raw_event(3, WorkEventKind::Resumed),
+        raw_event(4, WorkEventKind::NeedsReconcile),
+    ]);
+    let active_reconcile = project_diagram(&rec_agents);
+    assert!(active_reconcile
+        .branches
+        .iter()
+        .any(|b| b.id == "branch-needs_reconcile" && b.kind == FlowBranchKind::Exception));
+    assert!(!active_reconcile
+        .branches
+        .iter()
+        .any(|b| b.id == "branch-reconcile-recovered"));
+
+    // 3. Once resumed back to Running, the workflow returns to Current/Upcoming and records recovery.
+    rec_agents.task.as_mut().unwrap().status = WorkStatus::Running;
+    rec_agents.fold_stage_events(&[raw_event(5, WorkEventKind::Resumed)]);
+    let recovered = project_diagram(&rec_agents);
+    assert_eq!(
+        recovered.current_badge,
+        badge("Implementing", BadgeTone::Accent)
+    );
+    assert_eq!(recovered.nodes[2].state, FlowStageState::Current);
+    assert!(recovered.nodes[3..]
+        .iter()
+        .all(|n| n.state == FlowStageState::Upcoming));
+    assert!(!recovered
+        .branches
+        .iter()
+        .any(|b| b.id == "branch-needs_reconcile"));
+    assert!(recovered
+        .branches
+        .iter()
+        .any(|b| b.id == "branch-reconcile-recovered" && b.kind == FlowBranchKind::Loop));
 }

@@ -183,8 +183,6 @@ class FeedbackRecoveryFactoryTest(unittest.TestCase):
         flow = Mock()
         flow.config.project_workflows = {}
         self.assertIsNone(FeedbackRecoveryFactory(flow).create())
-        flow.config = None
-        self.assertIsNone(FeedbackRecoveryFactory(flow).create())
 
     def test_missing_config_disables_recovery_without_effects(self):
         flow = Mock()

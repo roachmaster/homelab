@@ -99,10 +99,7 @@ publish "$directory/work_superseding_review.py" "$target/work_superseding_review
 publish "$directory/work_peer_context.py" "$target/work_peer_context.py"
 publish "$directory/work_context_recovery_contract.py" "$target/work_context_recovery_contract.py"
 publish "$directory/work_context_recovery.py" "$target/work_context_recovery.py"
-<<<<<<< HEAD
-=======
 publish "$directory/work_peer_feedback_recovery.py" "$target/work_peer_feedback_recovery.py"
->>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
 publish "$directory/work_workflow.py" "$target/work_workflow.py"
 publish "$directory/work_merge.py" "$target/work_merge.py"
 publish "$directory/work_source_revision.py" "$target/work_source_revision.py"

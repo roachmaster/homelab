@@ -3623,14 +3623,11 @@ async function agentsJourney() {
     for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
       relay.workflowPhase(externalWorkflowTask,phase);await page.locator('#agents-refresh').click();
       await check(page.locator('#agents-workflow-phase')).toHaveText(label);
-<<<<<<< HEAD
       if(phase==='plan_revision'){
         await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-branch-id="branch-plan-revision"]')).toBeVisible();
       }
-=======
       await check(page.locator('#agents-workflow-revisions')).toContainText('Code revisions 40');
       assert.equal((await page.locator('#agents-workflow-revisions').textContent()).includes('/20'),false,'lifetime revision totals are not an event budget');
->>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
       if(phase==='code_review'){
         await check(page.locator('#agents-workflow-reviewer')).toBeVisible();
         const linkedEvent=page.locator('#agents-history > li').filter({hasText:'Trusted fixture workflow: code_review.'});

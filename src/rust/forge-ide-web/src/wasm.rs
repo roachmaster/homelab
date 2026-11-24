@@ -6,13 +6,9 @@
 //! Host order: reserve_input(len), copy exactly len bytes through memory.buffer,
 //! dispatch_input(), copy output_ptr/output_len bytes, release_output(). Refresh
 //! JavaScript memory views after every call; reentry returns 0, never panics.
-<<<<<<< HEAD
-//! ABI 15 adds reusable `FlowDiagramBinding` event-stream stage diagrams in `ViewModel`.
-//! ABI 14 added negotiated read-only main verification, repair and release projections.
-=======
-//! ABI 15 adds negotiated per-event retry progress and lifetime repair telemetry.
+//! ABI 15 adds negotiated per-event retry progress, lifetime repair telemetry,
+//! and reusable `FlowDiagramBinding` event-stream stage diagrams in `ViewModel`.
 //! ABI 14 added read-only main verification, repair and release projections.
->>>>>>> 43e027cbf3309b2e0b7999d5f601d0b65100e6b1
 //! ABI 13 added typed task organization and retired dormant Chat/Mail reducers,
 //! diff bindings and legacy wire events while preserving inert snapshot data.
 //! Deploy the generated script/HTML/CSS and WASM as one verified asset bundle;

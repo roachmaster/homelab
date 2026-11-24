@@ -484,7 +484,7 @@ fn build_diagram(
 }
 
 fn build_workflow_diagram(
-    _task: &WorkTaskDetail,
+    task: &WorkTaskDetail,
     workflow: &WorkWorkflowSummary,
     trace: &StageTrace,
     events_loaded: bool,
@@ -532,10 +532,16 @@ fn build_workflow_diagram(
         ]
     };
 
+    let task_exception = workflow
+        .phase
+        .is_processing()
+        .then(|| status_exception(task.status))
+        .flatten();
+
     let halted_state = match workflow.phase {
         WorkWorkflowPhase::Escalated => Some(FlowStageState::Warning),
         WorkWorkflowPhase::Cancelled => Some(FlowStageState::Cancelled),
-        _ => None,
+        _ => task_exception.map(|(state, _, _)| state),
     };
 
     let active_key = match workflow.phase {
@@ -583,7 +589,7 @@ fn build_workflow_diagram(
                 )),
                 _ => stats.and_then(stats_count_label),
             };
-            let active_stats = match workflow.phase {
+            let phase_stats = match workflow.phase {
                 WorkWorkflowPhase::PlanRevision => {
                     trace.stats(StageKey::WorkflowPlanRevision).or(stats)
                 }
@@ -592,30 +598,43 @@ fn build_workflow_diagram(
                 WorkWorkflowPhase::Cancelled => trace.stats(StageKey::Cancelled).or(stats),
                 _ => stats,
             };
-            let detail = match workflow.phase {
-                WorkWorkflowPhase::PlanRevision => {
-                    format!("Revising plan{}", stats_seq_suffix(active_stats))
+            let active_stats = task_exception
+                .and_then(|(_, _, ex_key)| trace.stats(ex_key))
+                .or(phase_stats);
+            let detail = if let Some((_, ex_label, _)) = task_exception {
+                if task.status == WorkStatus::CancelRequested {
+                    format!("{ex_label}{}", stats_seq_suffix(active_stats))
+                } else {
+                    format!("Halted · {ex_label}{}", stats_seq_suffix(active_stats))
                 }
-                WorkWorkflowPhase::Repair => format!("Repairing{}", stats_seq_suffix(active_stats)),
-                WorkWorkflowPhase::Escalated => {
-                    format!("Halted · Needs attention{}", stats_seq_suffix(active_stats))
-                }
-                WorkWorkflowPhase::Cancelled => {
-                    format!("Halted · Cancelled{}", stats_seq_suffix(active_stats))
-                }
-                WorkWorkflowPhase::Completed => {
-                    if let Some(s) = active_stats {
-                        s.sequence_range()
-                    } else if let Some(commit) = workflow.merge_commit.as_deref() {
-                        format!("Merged · {}", short_sha(commit))
-                    } else {
-                        "Merged".into()
+            } else {
+                match workflow.phase {
+                    WorkWorkflowPhase::PlanRevision => {
+                        format!("Revising plan{}", stats_seq_suffix(active_stats))
                     }
+                    WorkWorkflowPhase::Repair => {
+                        format!("Repairing{}", stats_seq_suffix(active_stats))
+                    }
+                    WorkWorkflowPhase::Escalated => {
+                        format!("Halted · Needs attention{}", stats_seq_suffix(active_stats))
+                    }
+                    WorkWorkflowPhase::Cancelled => {
+                        format!("Halted · Cancelled{}", stats_seq_suffix(active_stats))
+                    }
+                    WorkWorkflowPhase::Completed => {
+                        if let Some(s) = active_stats {
+                            s.sequence_range()
+                        } else if let Some(commit) = workflow.merge_commit.as_deref() {
+                            format!("Merged · {}", short_sha(commit))
+                        } else {
+                            "Merged".into()
+                        }
+                    }
+                    _ => active_stats.map_or_else(
+                        || workflow.phase.label().into(),
+                        |s| format!("{} · {}", workflow.phase.label(), s.sequence_range()),
+                    ),
                 }
-                _ => active_stats.map_or_else(
-                    || workflow.phase.label().into(),
-                    |s| format!("{} · {}", workflow.phase.label(), s.sequence_range()),
-                ),
             };
             FlowStageNode {
                 id: key.id().into(),
@@ -641,7 +660,7 @@ fn build_workflow_diagram(
     {
         let rev_stats = trace.stats(StageKey::WorkflowPlanRevision);
         let state = if workflow.phase == WorkWorkflowPhase::PlanRevision {
-            FlowStageState::Current
+            task_exception.map_or(FlowStageState::Current, |(state, _, _)| state)
         } else {
             FlowStageState::Completed
         };
@@ -667,7 +686,7 @@ fn build_workflow_diagram(
     {
         let rep_stats = trace.stats(StageKey::WorkflowRepair);
         let state = if workflow.phase == WorkWorkflowPhase::Repair {
-            FlowStageState::Current
+            task_exception.map_or(FlowStageState::Current, |(state, _, _)| state)
         } else {
             FlowStageState::Completed
         };
@@ -696,43 +715,65 @@ fn build_workflow_diagram(
         let from_label = stage_keys
             .get(current_idx)
             .map_or("Plan", |(_, label)| *label);
-        let ex_stats = if workflow.phase == WorkWorkflowPhase::Escalated {
-            trace.stats(StageKey::Escalated)
+        if let Some((ex_state, ex_label, ex_key)) = task_exception {
+            let ex_stats = trace.stats(ex_key);
+            branches.push(FlowBranch {
+                id: format!("branch-{}", ex_key.id()),
+                kind: FlowBranchKind::Exception,
+                from_stage_label: from_label.into(),
+                label: ex_label.into(),
+                state: ex_state,
+                detail: format!("{ex_label}{}", stats_seq_suffix(ex_stats)),
+                time: ex_stats.map(|s| timestamp(&s.last_at, now_ms)),
+            });
         } else {
-            trace.stats(StageKey::Cancelled)
-        };
-        let detail = if workflow.phase == WorkWorkflowPhase::Escalated {
-            let reason = workflow
-                .escalation_reason
-                .as_deref()
-                .map(compact_note)
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "Operator attention required".into());
-            format!("{reason}{}", stats_seq_suffix(ex_stats))
-        } else {
-            format!("Workflow cancelled{}", stats_seq_suffix(ex_stats))
-        };
-        branches.push(FlowBranch {
-            id: if workflow.phase == WorkWorkflowPhase::Escalated {
-                "branch-escalated".into()
+            let ex_stats = if workflow.phase == WorkWorkflowPhase::Escalated {
+                trace.stats(StageKey::Escalated)
             } else {
-                "branch-cancelled".into()
-            },
-            kind: FlowBranchKind::Exception,
-            from_stage_label: from_label.into(),
-            label: workflow.phase.label().into(),
-            state: halted,
-            detail,
-            time: ex_stats.map(|s| timestamp(&s.last_at, now_ms)),
-        });
+                trace.stats(StageKey::Cancelled)
+            };
+            let detail = if workflow.phase == WorkWorkflowPhase::Escalated {
+                let reason = workflow
+                    .escalation_reason
+                    .as_deref()
+                    .map(compact_note)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "Operator attention required".into());
+                format!("{reason}{}", stats_seq_suffix(ex_stats))
+            } else {
+                format!("Workflow cancelled{}", stats_seq_suffix(ex_stats))
+            };
+            branches.push(FlowBranch {
+                id: if workflow.phase == WorkWorkflowPhase::Escalated {
+                    "branch-escalated".into()
+                } else {
+                    "branch-cancelled".into()
+                },
+                kind: FlowBranchKind::Exception,
+                from_stage_label: from_label.into(),
+                label: workflow.phase.label().into(),
+                state: halted,
+                detail,
+                time: ex_stats.map(|s| timestamp(&s.last_at, now_ms)),
+            });
+        }
     }
 
-    append_recovery_branch(&mut branches, trace, false, now_ms);
+    append_recovery_branch(
+        &mut branches,
+        trace,
+        task.status == WorkStatus::NeedsReconcile,
+        now_ms,
+    );
 
     FlowDiagramBinding {
         id: "agents-stage-diagram",
         track_label,
-        current_badge: workflow_phase_badge(workflow.phase),
+        current_badge: if task_exception.is_some() {
+            task_badge(task.status)
+        } else {
+            workflow_phase_badge(workflow.phase)
+        },
         summary: String::new(),
         nodes,
         branches,
