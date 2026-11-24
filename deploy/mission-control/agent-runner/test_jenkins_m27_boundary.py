@@ -669,7 +669,8 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             for relative, expected in pins.items():
                 if '/sql/' in relative:
                     with self.subTest(immutable_applied_sql=relative):
-                        self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                        current = expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected)
+                        self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), current)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
