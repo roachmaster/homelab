@@ -120,7 +120,9 @@ class EventPhaseContractTest(unittest.TestCase):
             'deploy/mission-control/agent-runner/work_executor.py',
             'deploy/mission-control/agent-runner/work_worker.py',
             'deploy/mission-control/agent-runner/work_external_recovery.py',
-            'deploy/mission-control/agent-runner/work_external_workflow.py'}
+            'deploy/mission-control/agent-runner/work_external_plan_override.py',
+            'deploy/mission-control/agent-runner/work_external_workflow.py',
+            'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql'}
         contract=CiGateContractFactory(EVENT_PROFILE).create()
         for path in paths:
             with self.subTest(path=path):

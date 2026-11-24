@@ -7,3 +7,10 @@ GRANT USAGE ON SCHEMA forge_external_workflow_worker_api TO forge_coding_worker;
 GRANT EXECUTE ON FUNCTION forge_external_workflow_worker_api.read_context(uuid,uuid) TO forge_coding_worker;
 GRANT USAGE ON SCHEMA forge_external_workflow_delivery_api TO forge_coding_reconciler;
 GRANT EXECUTE ON FUNCTION forge_external_workflow_delivery_api.claim(text,text),forge_external_workflow_delivery_api.renew(uuid,integer,uuid),forge_external_workflow_delivery_api.checkpoint(uuid,integer,uuid,jsonb) TO forge_coding_reconciler;
+DO $grant_external_plan_override$
+BEGIN
+ IF to_regclass('forge_external_workflow.plan_approve_overrides') IS NOT NULL THEN
+  GRANT SELECT,INSERT ON forge_external_workflow.plan_approve_overrides TO forge_agent;
+ END IF;
+END;
+$grant_external_plan_override$;

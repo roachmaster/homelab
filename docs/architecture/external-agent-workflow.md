@@ -164,3 +164,31 @@ another failure leaves it exhausted and cannot start an automatic retry loop.
 Replays return the same receipt; another exception is refused. This is a private
 operator action following a human's recovery request, not a model-selected or
 portal approval capability.
+
+## Private operator plan approve-override
+
+The private `work_external_plan_override.py` operator command implements the
+single narrow `escalated -> implement` transition defined in
+[external-plan-approve-override.md](proposals/external-plan-approve-override.md).
+It applies only to an external `muse-db` workflow stranded in plan-revision
+exhaustion (M31 20-attempt `planning` exhaustion or pre-M31 legacy plan-budget
+exhaustion, with `code_revisions = 0`, no prior `approved_plan`/`candidate`/
+`merge_receipt`, no user cancellation receipt, active scope/worker grants, and a
+reconciled stopped reviewer `revise` verdict on the exact pinned plan artifact).
+
+Its dedicated bootstrap-injected `PlanApproveOverrideGrantScope` is never wired
+into the HTTP host's default `WorkServiceFactory` and is separate from
+`NativeReviewerGrantScope`. Every execution requires root access from an
+installed immutable release, explicit `--confirm-accept-as-is --execute`,
+non-empty human `reason` and `acceptance_ref`, and cryptographic/revision pins
+(`source_review_id`, `plan_assignment_id`, `plan_sha256`,
+`expected_workflow_revision`, `expected_root_revision`). In one atomic
+transaction it reactivates the root envelope, sets `approved_plan` and honest
+override provenance in `plan_review` (`decision: "user_override_approve"`),
+appends both an operator audit checkpoint and a coordinator `implement`
+transition checkpoint on `root_task_id`, queues the `implement` assignment via
+`enqueue_v2`, and writes an immutable `UNIQUE(workflow_id)` audit row in
+`forge_external_workflow.plan_approve_overrides` (migration 0038, protected by
+a `P0009` `BEFORE UPDATE OR DELETE` trigger). Prior plan reviews, artifacts,
+and exhausted retry events remain untouched, and full independent Codex code
+review, Jenkins checks, and guarded merge execute unchanged.

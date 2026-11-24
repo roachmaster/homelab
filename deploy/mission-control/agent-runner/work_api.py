@@ -342,6 +342,13 @@ class WorkService:
         if self._external_workflow is None:raise Rejected(403,'denied')
         return self._external_workflow.recover_review_infrastructure(command)
 
+    def approve_external_plan_override(self,command):
+        from work_external_plan_override import ExternalPlanApproveOverride
+        if not isinstance(command,ExternalPlanApproveOverride):raise Rejected(400,'invalid_request')
+        self._require_project(command.project_alias)
+        if self._external_workflow is None:raise Rejected(403,'denied')
+        return self._external_workflow.approve_plan_override(command)
+
     def _external_control_guard(self,command):
         flow=self._external_workflow
         if flow is not None:flow.forbid_manual_control(command.project_alias,command.task_id)

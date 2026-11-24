@@ -75,9 +75,10 @@ def validate_branch_scope(scope,*,candidate_commit,expected_main):
 
 
 class ExternalWorkflowStore:
-    def __init__(self,config,catalog,*,recovery_grant_provider=None):
+    def __init__(self,config,catalog,*,recovery_grant_provider=None,plan_override_grant_provider=None):
         self.config,self.catalog=config,catalog
         self._recovery_grants=recovery_grant_provider
+        self._plan_override_grants=plan_override_grant_provider
         self.policies=config.external_workflows
         self.owner=config.owner
         self._store=None
@@ -436,6 +437,10 @@ class ExternalWorkflowStore:
         from work_retry_continuation import continue_external_plan
         return continue_external_plan(self,command)
 
+    def approve_plan_override(self,command):
+        from work_external_plan_override import approve_plan_override
+        return approve_plan_override(self,command)
+
     def _source_key(self,w):return str(w['active_task_id'])+':'+str(w['plan_revisions'])+':'+str(w['code_revisions'])+(':'+w['state']['operator_source_epoch'] if w['state'].get('operator_source_epoch') else '')
 
     def _action(self,cursor,w,kind,key,request):
@@ -693,22 +698,24 @@ class ExternalWorkflowStore:
                        "Implement and verify the approved Plan, publish the preserved feature candidate, and finish with ONLY the exact JSON object specified by external_context.result_contract "
                        "(version,candidate_commit,candidate_tree,base_revision,summary, and optional source_branch). No Markdown fences or extra prose; report the actual commit/tree and supplied base_revision.")
 
-    def _queue_author(self,cursor,w,mode,source,feedback,*,retry_event=None):
-        task_id=uuid4();root=self._task(cursor,w,w['root_task_id']);recipe=w['snapshot']['recipes']['author_plan' if mode=='plan' else 'author_implement']
+    def _queue_author(self,cursor,w,mode,source,feedback,*,retry_event=None,task_id=None,summary=None):
+        task_id=task_id if task_id is not None else uuid4()
+        root=self._task(cursor,w,w['root_task_id']);recipe=w['snapshot']['recipes']['author_plan' if mode=='plan' else 'author_implement']
         phase=('plan_revision' if feedback else 'plan') if mode=='plan' else ('repair' if feedback else 'implement')
         w['active_task_id']=task_id
         # Workflow authorization is persisted before the v2 SQL enqueue checks it.
         self._insert_task(cursor,w,task_id,mode,w['author_profile'],recipe,
             self._author_prompt(mode)+((' The current '+retry_event['kind'].replace('_',' ')+' failure event is '+retry_event['event_id']+'; this is retry '+str(retry_event['used'])+' of '+str(retry_event['limit'])+'. Retain that event identity across revisions.') if retry_event else ''),
             root['acceptance_criteria'],w['state'].get('base_revision',root['base_revision']),'author')
-        self._save(cursor,w,w['author_profile']+' '+('revision' if feedback else 'implementation')+' queued from the reviewed artifact.',phase=phase,related_task_id=task_id)
+        self._save(cursor,w,summary if summary is not None else (w['author_profile']+' '+('revision' if feedback else 'implementation')+' queued from the reviewed artifact.'),phase=phase,related_task_id=task_id)
         context={'version':2,'workflow_id':str(w['workflow_id']),'stage':mode,'request_prompt':root['prompt'],'acceptance_criteria':root['acceptance_criteria'],
                  'approved_plan':w['state'].get('approved_plan'),'previous_artifact':{k:source[k] for k in ('assignment_id','sha256','content')},'feedback':feedback,
                  'base_revision':w['state'].get('base_revision',root['base_revision']),
                  'result_contract':{'version':1,'candidate_commit':'40 lowercase hex','candidate_tree':'40 lowercase hex','base_revision':'the supplied base_revision','summary':'bounded implementation report','source_branch':'optional Git feature branch name'} if mode=='implement' else 'Full revised plan text'}
-        self._enqueue(cursor,w['project_alias'],task_id,context)
+        assignment_id=self._enqueue(cursor,w['project_alias'],task_id,context)
         w['state'].pop('active_review_id',None);w['state'].pop('candidate',None);w['state'].pop('code_review',None);w['state'].pop('candidate_source',None)
         cursor.execute('UPDATE forge_external_workflow.workflows SET state=%s WHERE workflow_id=%s',(Json(w['state']),w['workflow_id']))
+        return assignment_id
 
     def _delivery_request(self,w):
         candidate=w['state']['candidate'];return {**candidate,'candidate':candidate,'base_revision':candidate['integration_base'],
