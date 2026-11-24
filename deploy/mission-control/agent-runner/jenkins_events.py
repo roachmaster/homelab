@@ -88,6 +88,14 @@ def validate_owner(value) -> str:
     return value
 
 
+def validate_actor(value) -> str:
+    """A producer actor is `kind:id` (fix 2 vocabulary, single-text form)."""
+    if (not isinstance(value, str) or len(value.encode("utf-8")) > 128
+            or not re.fullmatch(r"[a-z]+:[A-Za-z0-9_.-]{1,128}", value)):
+        raise ValueError("Invalid Jenkins actor")
+    return value
+
+
 def validate_identifier(value, label: str = "identifier") -> str:
     if not isinstance(value, str) or not IDENTIFIER_RE.fullmatch(value):
         raise ValueError(f"Invalid Jenkins {label}")
@@ -287,6 +295,13 @@ class JenkinsEventEmit:
     duration_ms: int | None = None
     build_url: str | None = None
     correlation_id: str | None = None
+    # Fix 3 provenance (migration 0037). Only the publication-worker producer
+    # sets the actor; webhook emits leave it None and all flags false.
+    actor: str | None = None
+    backfilled: bool = False
+    reconciled: bool = False
+    completion_time_estimated: bool = False
+    started_at: str | None = None
 
     def __post_init__(self):
         validate_identifier(self.project_alias, "project_alias")
@@ -319,6 +334,25 @@ class JenkinsEventEmit:
             validate_build_url(self.build_url)
         if self.correlation_id is not None:
             validate_correlation_id(self.correlation_id)
+        if self.actor is not None:
+            validate_actor(self.actor)
+        for flag in ("backfilled", "reconciled", "completion_time_estimated"):
+            if type(getattr(self, flag)) is not bool:
+                raise ValueError(f"Invalid Jenkins {flag} flag")
+        normalized_started_at = None
+        if self.started_at is not None:
+            normalized_started_at = parse_utc_timestamp(self.started_at)
+            object.__setattr__(self, "started_at", normalized_started_at)
+        # An estimated completion time is a qualification of a stage
+        # completion only; started_at is its lower bound, never a bare
+        # timestamp. Both rules are enforced here so a violating event is
+        # rejected before it reaches the codec or the store.
+        if self.completion_time_estimated and kind is not JenkinsEventKind.STAGE_COMPLETED:
+            raise ValueError("completion_time_estimated is allowed only on stage_completed")
+        if self.started_at is not None and not self.completion_time_estimated:
+            raise ValueError("started_at requires completion_time_estimated")
+        if normalized_started_at is not None and normalized_started_at > normalized_occurred_at:
+            raise ValueError("started_at must not be after occurred_at")
 
         if kind is JenkinsEventKind.BUILD_QUEUED:
             if (self.queue_id is None
@@ -371,6 +405,11 @@ class JenkinsEventEmit:
             "summary": self.summary,
             "correlation_id": self.correlation_id,
             "occurred_at": self.occurred_at,
+            "actor": self.actor,
+            "backfilled": self.backfilled,
+            "reconciled": self.reconciled,
+            "completion_time_estimated": self.completion_time_estimated,
+            "started_at": self.started_at,
         }
 
     def payload_sha256(self) -> str:
@@ -404,10 +443,17 @@ class JenkinsEventEmit:
             ("duration_ms", self.duration_ms),
             ("build_url", self.build_url),
             ("correlation_id", self.correlation_id),
+            ("actor", self.actor),
+            ("started_at", self.started_at),
         )
         for key, value in optional:
             if value is not None:
                 payload[key] = value
+        # Provenance flags are always present so a consumer never mistakes
+        # an estimated or backfilled timestamp for an observed one.
+        payload["backfilled"] = self.backfilled
+        payload["reconciled"] = self.reconciled
+        payload["completion_time_estimated"] = self.completion_time_estimated
         return payload
 
 
@@ -435,6 +481,11 @@ class JenkinsEventRecord:
     duration_ms: int | None = None
     build_url: str | None = None
     correlation_id: str | None = None
+    actor: str | None = None
+    backfilled: bool = False
+    reconciled: bool = False
+    completion_time_estimated: bool = False
+    started_at: str | None = None
 
     def observation_key(self) -> str:
         if self.build_number is not None:
@@ -464,6 +515,11 @@ class JenkinsEventRecord:
             "occurred_at": self.occurred_at,
             "received_at": self.received_at,
             "payload_sha256": self.payload_sha256,
+            "actor": self.actor,
+            "backfilled": self.backfilled,
+            "reconciled": self.reconciled,
+            "completion_time_estimated": self.completion_time_estimated,
+            "started_at": self.started_at,
         }
 
 

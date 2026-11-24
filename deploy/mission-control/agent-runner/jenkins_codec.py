@@ -31,6 +31,7 @@ _PHASE_TO_KIND = {
     "STARTED": JenkinsEventKind.BUILD_STARTED,
     "COMPLETED": JenkinsEventKind.BUILD_COMPLETED,
     "FINALIZED": JenkinsEventKind.BUILD_COMPLETED,
+    "STAGE_STARTED": JenkinsEventKind.STAGE_STARTED,
     "STAGE_COMPLETED": JenkinsEventKind.STAGE_COMPLETED,
 }
 
@@ -120,6 +121,8 @@ def _synthesize_summary(
         text = f"Jenkins job {job_name} #{build_number} started"
     elif event_kind is JenkinsEventKind.BUILD_COMPLETED:
         text = f"Jenkins job {job_name} #{build_number} completed: {build_result.value}"
+    elif event_kind is JenkinsEventKind.STAGE_STARTED:
+        text = f"Jenkins job {job_name} #{build_number} stage {stage_name} started"
     else:
         text = f"Jenkins job {job_name} #{build_number} stage {stage_name}: {stage_status.value}"
     encoded = text.encode("utf-8")
@@ -200,15 +203,16 @@ def translate_jenkins_webhook(
 
     stage_name = None
     stage_status = None
-    if event_kind is JenkinsEventKind.STAGE_COMPLETED:
+    if event_kind in {JenkinsEventKind.STAGE_STARTED, JenkinsEventKind.STAGE_COMPLETED}:
         stage = build.get("stage")
         if not isinstance(stage, dict):
-            raise JenkinsCodecError("invalid_webhook_payload", "Missing stage object for stage_completed")
+            raise JenkinsCodecError("invalid_webhook_payload", "Missing stage object for stage event")
         stage_name = stage.get("name")
-        raw_stage_status = stage.get("status")
-        if not isinstance(raw_stage_status, str) or raw_stage_status.upper() not in _STATUS_TO_STAGE_STATUS:
-            raise JenkinsCodecError("invalid_webhook_payload", "Missing or invalid Jenkins stage status")
-        stage_status = _STATUS_TO_STAGE_STATUS[raw_stage_status.upper()]
+        if event_kind is JenkinsEventKind.STAGE_COMPLETED:
+            raw_stage_status = stage.get("status")
+            if not isinstance(raw_stage_status, str) or raw_stage_status.upper() not in _STATUS_TO_STAGE_STATUS:
+                raise JenkinsCodecError("invalid_webhook_payload", "Missing or invalid Jenkins stage status")
+            stage_status = _STATUS_TO_STAGE_STATUS[raw_stage_status.upper()]
 
     commit_sha = None
     branch = None

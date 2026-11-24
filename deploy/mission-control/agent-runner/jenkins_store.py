@@ -75,6 +75,11 @@ def _row_to_event(row) -> JenkinsEventRecord:
         occurred_at=_iso_utc(row["occurred_at"]),
         received_at=_iso_utc(row["received_at"]),
         payload_sha256=row["payload_sha256"],
+        actor=row["actor"],
+        backfilled=bool(row["backfilled"]),
+        reconciled=bool(row["reconciled"]),
+        completion_time_estimated=bool(row["completion_time_estimated"]),
+        started_at=_iso_utc(row["started_at"]),
     )
 
 
@@ -298,13 +303,15 @@ class JenkinsStore:
                     owner_id, project_alias, sequence, jenkins_instance, job_name, delivery_id,
                     event_kind, build_number, queue_id, commit_sha, branch, build_result,
                     stage_name, stage_status, duration_ms, build_url, summary,
-                    correlation_id, occurred_at, payload_sha256
+                    correlation_id, occurred_at, payload_sha256,
+                    actor, backfilled, reconciled, completion_time_estimated, started_at
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s
+                    %s, %s, %s,
+                    %s, %s, %s, %s, %s
                 )
                 RETURNING event_id, project_alias, sequence, payload_sha256
                 """,
@@ -329,6 +336,11 @@ class JenkinsStore:
                     event.correlation_id,
                     event.occurred_at,
                     digest,
+                    event.actor,
+                    event.backfilled,
+                    event.reconciled,
+                    event.completion_time_estimated,
+                    event.started_at,
                 ),
             )
             inserted = cursor.fetchone()

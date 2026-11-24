@@ -320,4 +320,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=36)
 \ir migrations/0036_event_stream_actor_cause.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(36,'event_stream_actor_cause');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=37) AS apply_0037
+\gset
+\if :apply_0037
+\ir migrations/0037_event_stream_jenkins_producer.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(37,'event_stream_jenkins_producer');
+\endif
 COMMIT;
