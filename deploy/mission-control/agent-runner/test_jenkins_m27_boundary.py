@@ -600,7 +600,7 @@ PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
     'deploy/mission-control/sql/management/verify-jenkins-events.sql': '1eb78295a9c49634fa7516141842b97e459928ff59889bfcb72decdb0155482a',
     'deploy/mission-control/sql/migrations/0034_jenkins_stage_started.sql': '5ee11519561b0a0d77e606e6b6e76b2f89e85e8b45713a8c6b2b1b90aa52ba2f',
     'src/rust/forge-ide-ui/src/model/agents.rs': 'f4a0bc836bc2fa7befec7653845413d0d6110c5985d416e3db6f18eab1887a82',
-    'src/rust/forge-ide-ui/src/model/agents/pipeline_diagram.rs': '8acbbc585873172e81068fea44e330bcf620a1969e21460da0f684ddebae992e',
+    'src/rust/forge-ide-ui/src/model/agents/pipeline_diagram.rs': '0a6ead2b44eafd336231b9d46c4dcfc066455ff26b535912a4455fe91ba6a05a',
     'src/rust/forge-ide-ui/src/model/agents/tests.rs': '32a9217ee20516e2f6a07a0cc334e9d0789e562f4c24a37f775620435100f072',
     'src/rust/forge-ide-ui/src/model/projection.rs': 'b5f993da9d2d0a4ddc59da43f4f948df85f84a69a1330f65aa221bfce4cc5138',
     'src/rust/forge-ide-ui/src/protocol/work.rs': 'a78e03ee429cb25b00336771dfced0cbf0f08a258a82acf520decd2443193267',

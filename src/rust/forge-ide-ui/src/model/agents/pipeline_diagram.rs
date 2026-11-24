@@ -10,7 +10,7 @@ use crate::view::{
 
 /// Maximum diagram nodes. The server projection caps stages at 16; the UI
 /// enforces the same cap so a malformed snapshot cannot grow the diagram.
-pub const MAX_STAGE_NODES: usize = 16;
+pub(super) const MAX_STAGE_NODES: usize = 16;
 
 fn node(stage: &PipelineStageStatus) -> FlowStageNode {
     let (state, current, mut detail) = match stage.status {
@@ -168,7 +168,7 @@ fn empty_message(availability: PipelineAvailability) -> String {
 /// Project the review's pipeline stages onto the flow-diagram binding.
 /// Always pushes exactly one binding when a review exists, so the region
 /// renders its no-run / unavailable message instead of disappearing.
-pub fn project_pipeline_diagram(view: &mut ViewModel, review: Option<&WorkReviewSummary>) {
+pub(super) fn project_pipeline_diagram(view: &mut ViewModel, review: Option<&WorkReviewSummary>) {
     let Some(review) = review else {
         return;
     };
