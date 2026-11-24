@@ -167,3 +167,10 @@ GRANT EXECUTE ON FUNCTION forge_agent.delivery_projection(text,uuid),forge_agent
  forge_agent.delivery_repair_admit(uuid,integer,uuid,text),
  forge_agent.delivery_repair_claim(text),forge_agent.delivery_repair_renew(uuid,integer,uuid),forge_agent.delivery_repair_checkpoint(uuid,integer,uuid,jsonb),forge_agent.delivery_repair_finish(uuid,integer,uuid,text,jsonb,text) TO forge_agent;
 \endif
+
+-- M38: immutable audit table for authorized external plan approve-overrides (SELECT/INSERT only for forge_agent).
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=38) AS has_external_plan_approve_override
+\gset
+\if :has_external_plan_approve_override
+GRANT SELECT,INSERT ON forge_external_workflow.plan_approve_overrides TO forge_agent;
+\endif

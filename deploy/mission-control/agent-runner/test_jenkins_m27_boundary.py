@@ -661,7 +661,35 @@ MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256 = {
 }
 
 
+# Exact additive M38 external plan approve-override source; predecessor maps
+# remain literal provenance. Only these current bytes qualify their pins, and
+# no applied migration (0001..0037) or legacy owner/publication guard changes.
+PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256 = {
+    'deploy/mission-control/agent-runner/setup-runner.sh': '7bc8374cfa1a57ac8b8c3f8e4f18b6c08e6670d09d3089244c1b30a01f96acca',
+    'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': 'cceb3be8f50a7d5ac3d4808f80e97e3a9c5cf71491e67e373f6a9de302d0a8ed',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '7609bafb9544ec4eaf66b53a51cfcddfe996933ab2cd7f277781b9de9bd85f24',
+    'deploy/mission-control/agent-runner/test_external_plan_override.py': '922a5b970c6114240a53968ae94a870706da949a1e9f0c0e824e214087ba0548',
+    'deploy/mission-control/agent-runner/test_muse_read_access.py': 'f4ca5825e8c8b6f94012e24a26ed4da38946e44f576de446146d0a663ddaef9a',
+    'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'ae97a02578470a53c7de26df008efb74f120744a3427d308a1e98ed5b78539c6',
+    'deploy/mission-control/agent-runner/test_work_muse_intake.py': 'c4e32af1469aada4c0c4b96894237de7a802a372a6e94cd17c016f94527324f6',
+    'deploy/mission-control/agent-runner/test_work_owner_fence.py': '2e6ced3e81b3a501fc46ad3841b1b7f4aafba18ff8b926486ff44077a2b465a3',
+    'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': 'd5c1149fd40f75e9128959021b4c782d042858b0114ac8b5c4cf8f5e4168ee9f',
+    'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '00ba5200fb09b8e97025a71c9ff1660176d3671fcfd8b6747cf0ad83f3f74b92',
+    'deploy/mission-control/agent-runner/work_api.py': '8a1be138528da0294ed4ea3ced0a6ecb7045d73467c071ba44a5e64d9217fee2',
+    'deploy/mission-control/agent-runner/work_external.py': '819b465e7518028051f3dfd972cc3021f02a7b2485ab69b8b0d9081a3601b29b',
+    'deploy/mission-control/agent-runner/work_external_plan_override.py': '53364d703f979b5691a2db20a7a251605d04fe66e966dc36f54259186d0a1634',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': 'efb193df1d7055d3fa2501780f3122ad09d7e3f65ea49d6d9f3646a916d242af',
+    'deploy/mission-control/sql/apply.sql': 'bfdb898223d91ddc87584d12d6fe8e4cb7f74e92cee4c845a6975f69841010ee',
+    'deploy/mission-control/sql/management/grant-runner.sql': '7ef6a5fa7d0af3f1ecdd128a8f06aff34058b6c77f1ba7db94f82369fbe1fd98',
+    'deploy/mission-control/sql/management/verify-external-workflows.sql': '6c3c24e18faba2e3e4be69d17fab364efda73f00fe58c5bed8d96167f649ef74',
+    'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql': 'bbd04bc1cbdbc192dc9c05fe36242eae44f95babb3a3c91097be630c21574b86',
+    'docs/architecture/external-agent-workflow.md': 'f4ea3aa1876dc5044c7dc7add799e4b8b03f68d1875d74da74c5d5f292d921fa',
+}
+
+
 def qualified_source(relative, expected):
+    if relative in PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256:
+        return PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256[relative]
     if relative in MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256:
         return MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256[relative]
     return PIPELINE_DIAGRAM_CONTEXT_SHA256.get(relative, UI_STAGE_DIAGRAM_CONTEXT_SHA256.get(relative, REVIEW_PROTOCOL_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))))))))
@@ -849,7 +877,8 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     'docs/architecture/forge-post-merge-verification.md', 'docs/design/implementation-status.md'})
                 if '/migrations/' in relative:
                     self.assertTrue(relative.endswith('0034_jenkins_stage_started.sql'))
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                actual = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
+                self.assertEqual(actual, expected if '/migrations/' in relative else qualified_source(relative, expected))
 
     def test_muse_merge_compatibility_overlay_is_scoped_and_exact(self):
         self.assertEqual(set(MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256), {
@@ -867,6 +896,16 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             with self.subTest(muse_compatibility_source=relative):
                 if '/migrations/' in relative or '/fragments/' in relative:
                     self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0035_event_stream_peer_review_diagnostics.sql')
+                actual = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
+                self.assertEqual(actual, expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected))
+
+    def test_plan_approve_override_overlay_is_scoped_and_exact(self):
+        self.assertIn('deploy/mission-control/agent-runner/work_external_plan_override.py', PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256)
+        for relative, expected in PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256.items():
+            with self.subTest(plan_override_source=relative):
+                self.assertTrue(relative.startswith('deploy/mission-control/') or relative == 'docs/architecture/external-agent-workflow.md')
+                if '/migrations/' in relative or '/fragments/' in relative:
+                    self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql')
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):

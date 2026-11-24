@@ -164,3 +164,27 @@ another failure leaves it exhausted and cannot start an automatic retry loop.
 Replays return the same receipt; another exception is refused. This is a private
 operator action following a human's recovery request, not a model-selected or
 portal approval capability.
+
+## Private operator plan approve-override
+
+When an external workflow is stranded in plan-revision exhaustion (`phase = 'escalated'`,
+`enabled = false`, latest plan review `status = 'revise'`, planning retry event
+exhausted at 20 attempts or pre-M31 legacy plan budget exhausted, `code_revisions = 0`,
+no `approved_plan`/`candidate`/`merge_receipt`, and no user cancellation receipt), the
+authenticated operator may invoke `work_external_plan_override.py` with
+`--confirm-accept-as-is --execute` to accept the exact latest plan artifact as-is and
+queue implementation.
+
+The command binds `plan_assignment_id`, `plan_sha256`, `source_review_id`,
+`expected_workflow_revision`, `expected_root_revision`, non-empty `reason`, and
+`acceptance_ref`. It requires a bootstrap-injected `PlanOverrideGrantScope` that is
+never wired into the normal HTTP host, workers, or automatic coordinator. In one atomic
+transaction it records an immutable one-shot audit row in
+`forge_external_workflow.plan_approve_overrides` (`UNIQUE(workflow_id)` with a `P0009`
+`BEFORE UPDATE OR DELETE` trigger and `SELECT, INSERT` only for `forge_agent`), appends
+an operator audit checkpoint and a coordinator `implement` checkpoint to
+`forge_agent.coding_events`, sets `approved_plan` and honest `plan_review` override
+provenance (`decision: "user_override_approve"`), and hands off into the unchanged
+`muse-db` `enqueue_v2` implementation path. All prior plan reviews, assignments,
+artifacts, and exhausted planning retry events remain untouched, and all downstream
+independent `code_review`, Jenkins `checks`, and guarded `merge` gates remain intact.

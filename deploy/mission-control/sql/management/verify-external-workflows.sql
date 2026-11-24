@@ -1,12 +1,16 @@
 -- M22 exact private schema, immutable artifact bindings, scoped APIs and ACLs. Read only.
 DO $external_workflows_verify$
-DECLARE actual jsonb;
+DECLARE actual jsonb;has_override boolean;expected_fn text;expected_rel text;
 BEGIN
  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=22 AND name='external_workflows') THEN RAISE EXCEPTION 'Missing external workflow migration22';END IF;
+ has_override:=EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=38);
+ IF has_override AND NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=38 AND name='external_plan_approve_override') THEN RAISE EXCEPTION 'External plan approve override migration identity drift';END IF;
+ expected_fn:=CASE WHEN has_override THEN '334aeba43f359424d49cf6ffa044a798a0ac6071306722755509baa41c89ec36' ELSE '67617592efa9069d1ea7be5f14116dee2036e803c3ad0ba0c3e4f39c5c4830dc' END;
+ expected_rel:=CASE WHEN has_override THEN '8d4071e22ed3fdc8f1c2b9375029a6d54b8d6fb794da3615b858cbace9108753' ELSE '3100b7fc1c7fef83be0803b4f7523d3436ec80554381b6df09defd1a3a171dd1' END;
  SELECT value INTO actual FROM (SELECT jsonb_agg(jsonb_build_object('name',n.nspname,'owner',pg_get_userbyid(n.nspowner),'acl',n.nspacl) ORDER BY n.nspname) FROM pg_namespace n WHERE n.nspname IN('forge_external_workflow','forge_external_workflow_api','forge_external_workflow_worker_api','forge_external_workflow_delivery_api')) source(value);
  IF encode(sha256(convert_to(actual::text,'UTF8')),'hex') IS DISTINCT FROM '509ff2e5e1f4600c9c9bab88b8a30d3568396465835ca81c54782664c8455a03' THEN RAISE EXCEPTION 'External workflow schemas catalog drift';END IF;
  SELECT value INTO actual FROM (SELECT jsonb_agg(jsonb_build_object('signature',p.oid::regprocedure::text,'owner',pg_get_userbyid(p.proowner),'language',l.lanname,'kind',p.prokind,'return',format_type(p.prorettype,NULL),'set',p.proretset,'secdef',p.prosecdef,'strict',p.proisstrict,'leakproof',p.proleakproof,'volatile',p.provolatile,'parallel',p.proparallel,'config',p.proconfig,'arguments',pg_get_function_arguments(p.oid),'result',pg_get_function_result(p.oid),'acl',p.proacl,'source',p.prosrc) ORDER BY n.nspname,p.proname,p.oid::regprocedure::text) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_language l ON l.oid=p.prolang WHERE n.nspname IN('forge_external_workflow','forge_external_workflow_api','forge_external_workflow_worker_api','forge_external_workflow_delivery_api')) source(value);
- IF encode(sha256(convert_to(actual::text,'UTF8')),'hex') IS DISTINCT FROM '67617592efa9069d1ea7be5f14116dee2036e803c3ad0ba0c3e4f39c5c4830dc' THEN RAISE EXCEPTION 'External workflow functions catalog drift';END IF;
+ IF encode(sha256(convert_to(actual::text,'UTF8')),'hex') IS DISTINCT FROM expected_fn THEN RAISE EXCEPTION 'External workflow functions catalog drift';END IF;
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
  SELECT value INTO actual FROM (SELECT jsonb_agg(jsonb_build_object('name',c.relname,'owner',pg_get_userbyid(c.relowner),'kind',c.relkind,'persistence',c.relpersistence,'row_security',c.relrowsecurity,'force_row_security',c.relforcerowsecurity,
  'columns',(SELECT jsonb_agg(jsonb_build_array(a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,pg_get_expr(d.adbin,d.adrelid),a.attidentity,a.attgenerated,(SELECT jsonb_agg(x::text ORDER BY x::text) FROM unnest(a.attacl) x)) ORDER BY a.attnum) FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),
@@ -22,7 +26,7 @@ BEGIN
  'acl',(SELECT jsonb_agg(entry ORDER BY entry::text) FROM unnest(c.relacl) entry WHERE entry::text<>'muse_events=r/forge_agent_owner'),
  'triggers',(SELECT coalesce(jsonb_agg(jsonb_build_array(t.tgname,pg_get_triggerdef(t.oid),t.tgenabled) ORDER BY t.tgname),'[]') FROM pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal AND NOT(t.tgname='post_merge_external_confirmed' AND c.oid='forge_external_workflow.workflows'::regclass AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=28)))) ORDER BY c.relname) FROM pg_class c WHERE c.relnamespace='forge_external_workflow'::regnamespace AND c.relkind IN('r','p','v','m','f','S')) source(value);
  END IF;
- IF encode(sha256(convert_to(actual::text,'UTF8')),'hex') IS DISTINCT FROM '3100b7fc1c7fef83be0803b4f7523d3436ec80554381b6df09defd1a3a171dd1' THEN RAISE EXCEPTION 'External workflow relations catalog drift';END IF;
+ IF encode(sha256(convert_to(actual::text,'UTF8')),'hex') IS DISTINCT FROM expected_rel THEN RAISE EXCEPTION 'External workflow relations catalog drift';END IF;
  IF EXISTS(SELECT FROM pg_class c,LATERAL aclexplode(c.relacl) a WHERE c.relnamespace='forge_external_workflow'::regnamespace AND a.grantee=to_regrole('muse_events') AND(a.privilege_type<>'SELECT' OR a.is_grantable OR a.grantor<>'forge_agent_owner'::regrole)) THEN RAISE EXCEPTION 'Unexpected external reader privilege';END IF;
 END;
 $external_workflows_verify$;
