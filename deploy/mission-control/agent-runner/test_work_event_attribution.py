@@ -498,19 +498,19 @@ EXPECTED_SQL_EVENT_INSERTS = {
     ("0025_native_delivery_repair.sql", "forge_coding_reconciler_api.native_branch_first_replay"): 1,
     ("0025_native_delivery_repair.sql", "forge_coding_reconciler_api.native_branch_published"): 1,
     ("0030_agent_wide_retry_policy.sql", "forge_agent.amend_agent_retry_policy"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_worker_api.claim"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_worker_api.checkpoint"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_worker_api.publish"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_worker_api.record_stop"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_worker_api.report_progress"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_reconciler_api.expire_leases"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_reconciler_api.publication_finish"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_reconciler_api.review_finish"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_reconciler_api.native_branch_first_replay"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_reconciler_api.native_branch_published"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_coding_reconciler_api.native_merge_failure"): 1,
-    ("0033_event_stream_actor_cause.sql", "forge_agent.coding_schedule_repair"): 2,
-    ("0033_event_stream_actor_cause.sql", "forge_agent.amend_agent_retry_policy"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_worker_api.claim"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_worker_api.checkpoint"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_worker_api.publish"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_worker_api.record_stop"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_worker_api.report_progress"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_reconciler_api.expire_leases"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_reconciler_api.publication_finish"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_reconciler_api.review_finish"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_reconciler_api.native_branch_first_replay"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_reconciler_api.native_branch_published"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_coding_reconciler_api.native_merge_failure"): 1,
+    ("0036_event_stream_actor_cause.sql", "forge_agent.coding_schedule_repair"): 2,
+    ("0036_event_stream_actor_cause.sql", "forge_agent.amend_agent_retry_policy"): 1,
 }
 
 
@@ -528,8 +528,11 @@ class EventAttributionCoverageTest(unittest.TestCase):
             if count:
                 hits[path.name] = count
         # Both INSERTs are the two statements inside work_events.insert_event,
-        # the single sanctioned Python inserter.
-        self.assertEqual(hits, {"work_events.py": 2})
+        # the single sanctioned Python inserter, plus the one checkpoint
+        # INSERT in work_superseding_review.correct (main's 0033
+        # superseding-review path, which records the queued correction
+        # directly).
+        self.assertEqual(hits, {"work_events.py": 2, "work_superseding_review.py": 1})
 
     def test_sql_event_insert_inventory_matches_checked_in_set(self):
         migrations = SQL_DIR / "migrations"

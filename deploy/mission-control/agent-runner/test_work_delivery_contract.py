@@ -73,11 +73,12 @@ class _ListenerStore:
 
 def _loop_worker(store, run_once, stop):
     """Build the smallest worker run_forever can drive: only the attributes
-    the loop touches (store, stop, native_ci, run_once)."""
+    the loop touches (store, stop, native_ci, run_once, jenkins_drain)."""
     worker = PublicationWorker.__new__(PublicationWorker)
     worker.store = store
     worker.stop = stop
     worker.native_ci = None
+    worker.jenkins_drain = None
     worker.run_once = run_once
     return worker
 

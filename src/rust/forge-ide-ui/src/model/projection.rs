@@ -759,7 +759,6 @@ impl UiModel {
         let mut view = ViewModel {
             checks: vec![],
             document_dirty: false,
-            flow_diagrams: vec![],
             panes: vec![
                 PaneBinding {
                     id: "workspace-panel",
