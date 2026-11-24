@@ -504,8 +504,23 @@ SUPERSEDING_REVIEW_CONTEXT_SHA256 = {'AGENT_WORK.md': '7bc6d4ee90235797dcbb0ab75
  'deploy/mission-control/sql/migrations/0033_superseding_reviews.sql': 'c8cc28b5e0aeb618ffe43725452935024ce66973420120181f01b3d887edf30e',
  'docs/architecture/proposals/forge-autonomous-agent-workflow.md': '7f2383cd89be8a5549a3ddd391d21ffc5d4970624a125450dbd26484e4d9cef7'}
 
+# Exact peer-feedback correction; all applied SQL and predecessor pins remain immutable.
+PEER_FEEDBACK_CONTEXT_SHA256 = {'AGENT_WORK.md': '5b2736ec7bbb7502c3a8ecaa9a8b99637dd8dfc0f8151758e90186a5404dc877',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'f7035d6ed8070811cbdc430af94bf08f16adb74019de4eca44db16f8c2f6e73d',
+ 'deploy/mission-control/agent-runner/test_ci_event_phases.py': 'fb8d24dd8427d660281a597f535de374519e595d6328198f5458613c2fac7b72',
+ 'deploy/mission-control/agent-runner/test_work_linked_child_feedback.py': '54bf5a07a1864ef1d17c2eb4e791a677f1241d34a388ca02f6cf8996f6e591ec',
+ 'deploy/mission-control/agent-runner/test_work_peer_context.py': '0d01c0eb9b5a7f40761add138db5098b587713b2330b1a53552e62b931be021e',
+ 'deploy/mission-control/agent-runner/test_work_peer_feedback_recovery.py': '498a27d4c63143d6cfdd17130ccadc1c24ab6ba30607b857c44ccf11f4855b4e',
+ 'deploy/mission-control/agent-runner/work_ci_contract.py': '97bb410ae046980f03ac20d4659ca5f717afedd2b56e205e2825724cec3e13d6',
+ 'deploy/mission-control/agent-runner/work_context_recovery.py': '218a27d07d7516d19461a17214141a75970bdedf8470706d842a21761c58124c',
+ 'deploy/mission-control/agent-runner/work_peer_context.py': '23d524b418ca2aafe9484aacc812093860d3eb66e4e7ad65e716571cf698f4bb',
+ 'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py': '5cf99d4949f63f151ab3d99a496a7cd3899576cd5d5628e5fa612645c382c3aa',
+ 'deploy/mission-control/agent-runner/work_workflow.py': 'e8b63ac0a6d236f9a5effe10c6d4c7465f34c358280e84528f3cbc162aff1a69',
+ 'deploy/mission-control/jenkins/verify-candidate.py': 'ee759e4406f428134c111c617c8fbb7fb2c0eabe916611345b4c6a3bb75abcb8',
+ 'docs/architecture/proposals/forge-autonomous-agent-workflow.md': 'dd604a82143980feaa9a4591987516d823685aa7413af2c56e8ab5877aa22210'}
+
 def qualified_source(relative, expected):
-    return SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))))
+    return PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected))))))))
 
 STRICT_VERIFIER_FILES = {
     "verify-superseding-reviews.sql",
@@ -635,12 +650,25 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     'AGENT_WORK.md', 'docs/architecture/proposals/forge-autonomous-agent-workflow.md'})
                 if '/migrations/' in relative or '/fragments/' in relative:
                     self.assertTrue(relative.endswith('0033_superseding_reviews.sql'))
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                actual = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
+                self.assertEqual(actual, expected if '/sql/' in relative else qualified_source(relative, expected))
         # The new context cannot qualify edits to any previously applied SQL.
         for pins in (EVENT_RETRY_CONTEXT_SHA256, LINEAGE_RETRY_CONTEXT_SHA256):
             for relative, expected in pins.items():
                 if '/migrations/' in relative or '/fragments/' in relative:
                     with self.subTest(immutable_pre_m33=relative):
+                        self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_peer_feedback_overlay_is_exact_and_cannot_qualify_applied_sql(self):
+        self.assertEqual(set(PEER_FEEDBACK_CONTEXT_SHA256), {'docs/architecture/proposals/forge-autonomous-agent-workflow.md', 'deploy/mission-control/jenkins/verify-candidate.py', 'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py', 'AGENT_WORK.md', 'deploy/mission-control/agent-runner/work_workflow.py', 'deploy/mission-control/agent-runner/test_work_peer_context.py', 'deploy/mission-control/agent-runner/test_work_peer_feedback_recovery.py', 'deploy/mission-control/agent-runner/work_peer_context.py', 'deploy/mission-control/agent-runner/test_ci_event_phases.py', 'deploy/mission-control/agent-runner/work_ci_contract.py', 'deploy/mission-control/agent-runner/work_context_recovery.py', 'deploy/mission-control/agent-runner/setup-runner.sh', 'deploy/mission-control/agent-runner/test_work_linked_child_feedback.py'})
+        for relative, expected in PEER_FEEDBACK_CONTEXT_SHA256.items():
+            with self.subTest(peer_feedback_source=relative):
+                self.assertNotIn('/sql/', relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+        for pins in (EVENT_RETRY_CONTEXT_SHA256, LINEAGE_RETRY_CONTEXT_SHA256, SUPERSEDING_REVIEW_CONTEXT_SHA256):
+            for relative, expected in pins.items():
+                if '/sql/' in relative:
+                    with self.subTest(immutable_applied_sql=relative):
                         self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
@@ -682,6 +710,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         required = (
             "work_owner_control.py", "work_owner_reverification.py", "work_publication_clients.py", "work_review.py",
             "work_store.py", "work_worker_store.py", "work_reviewer_correction.py", "work_superseding_review.py",
+            "work_peer_feedback_recovery.py",
             "work_post_merge.py", "work_post_merge_provider.py", "jenkins_events.py", "jenkins_config.py",
             "jenkins_codec.py", "jenkins_store.py", "jenkins_consumer.py",
             "jenkins_api.py", "jenkins_emitter.py", "jenkins_emit_tool.py",
