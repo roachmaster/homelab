@@ -479,10 +479,35 @@ LINEAGE_RETRY_CONTEXT_SHA256 = {
     'docs/architecture/ci-stage-evidence.md': '976d0728e0522e967363559adeadcf033738e86f156e668e54f228c293944966',
 }
 
+# Exact additive M33 source; every predecessor pin remains historical authority.
+SUPERSEDING_REVIEW_CONTEXT_SHA256 = {'AGENT_WORK.md': '7bc6d4ee90235797dcbb0ab75a0759943cc3e230a9b9f7febd6490d809d7fdb1',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': '4982edf6698c318f72d3cc06285448326ea090ba84dfffd1a74ef257691265ef',
+ 'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '2a17322ef5c3776e374dbb5e631fc89d1c7d83b484ea195a7286d37b3675b1b1',
+ 'deploy/mission-control/agent-runner/test_ci_event_phases.py': 'd39fd595d4ba86d13aaa5b99621e8b9e87bbd5aa9504bf290f47436f5c4645e0',
+ 'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '2022edb53c6347b2d498b6a8abbac8583e8ed92b7be0331bd2b1b2a297c5a237',
+ 'deploy/mission-control/agent-runner/test_muse_read_access.py': 'b05ffd90e71452efc62a0ef01d7fcce7581b2d5e792a442892285305ab016aba',
+ 'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'fca3c6b7c9cdeb22bde4af3bc91bd25b9b8725f7a0c9a352c0169abfb453e0a7',
+ 'deploy/mission-control/agent-runner/test_work_owner_fence.py': 'e8312f05f22e85d1bf11e4b44d2ac21d5b407fb8d17a79c545ed7c3c0fb1bfeb',
+ 'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '6224514db83428e9127eeccda3bc2c73aa08416a817e618d26ca2cf50d784a45',
+ 'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '5b445814289746635e888a1abb35da00d00453e08289f4f90c1a8709f984a749',
+ 'deploy/mission-control/agent-runner/test_work_review_transcription.py': '5013c229831d18f392b8936ccc2708cd1faed277c3bdb570a658ea7464a4b680',
+ 'deploy/mission-control/agent-runner/work_ci_contract.py': '05cc57f0a30694d75f57767a1988f4bb265c76d890f670930e6edae3a9677299',
+ 'deploy/mission-control/agent-runner/work_superseding_review.py': 'e792a42c7245ef76025aa7810cf7570a772d755d55c78d12adba9f361f5a252d',
+ 'deploy/mission-control/agent-runner/work_workflow.py': '12de226b95b1e6d4b1e24d86011be94c89dfe80225d008a1d07f31f7e472e400',
+ 'deploy/mission-control/jenkins/verify-candidate.py': '2100f323f4c264ddf9f55621c103853ebce4e75f2eeab7cc0f283f0d3b41a472',
+ 'deploy/mission-control/sql/apply.sql': '9f12bc3e12e7429c070e6401e0c9062d5e6cba382aaac2b6dd4f98f825ac0dc5',
+ 'deploy/mission-control/sql/fragments/0033_superseding_reviews.sql': '3bc5b801a55f1ab636f898f3ca9c6f0b541e0e5e62efc4f56b743c005f9b0a57',
+ 'deploy/mission-control/sql/management/verify-autonomy.sql': '4aeaed6664c9f8434164361cd1dd6cc967d764af443c633b38b8c02c32eaa269',
+ 'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '8ddacae0bdb2b1d0a7eba53c3f18bb9c789a894704d5d94daa520b48deab19c7',
+ 'deploy/mission-control/sql/management/verify.sql': '6db57578a4f6b436120fb48ca9e160d3c9fe21047dfbe6aa87b69b2fa6191f09',
+ 'deploy/mission-control/sql/migrations/0033_superseding_reviews.sql': 'c8cc28b5e0aeb618ffe43725452935024ce66973420120181f01b3d887edf30e',
+ 'docs/architecture/proposals/forge-autonomous-agent-workflow.md': '7f2383cd89be8a5549a3ddd391d21ffc5d4970624a125450dbd26484e4d9cef7'}
+
 def qualified_source(relative, expected):
-    return LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected))))))
+    return SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))))
 
 STRICT_VERIFIER_FILES = {
+    "verify-superseding-reviews.sql",
     "verify-delivery-lineage.sql",
     "verify-retry-events.sql",
     "verify-agent-retries.sql",
@@ -595,11 +620,27 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     'AGENT_WORK.md', 'docs/architecture/ci-stage-evidence.md'})
                 if '/migrations/' in relative:
                     self.assertTrue(relative.endswith('0032_observer_retry_lineage.sql'))
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
         for relative, expected in EVENT_RETRY_CONTEXT_SHA256.items():
             if '/migrations/0031_' in relative or '/fragments/0031_' in relative:
                 with self.subTest(applied_m31=relative):
                     self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_superseding_review_overlay_preserves_applied_schema_and_exact_source(self):
+        self.assertIn('deploy/mission-control/agent-runner/work_superseding_review.py', SUPERSEDING_REVIEW_CONTEXT_SHA256)
+        for relative, expected in SUPERSEDING_REVIEW_CONTEXT_SHA256.items():
+            with self.subTest(superseding_review_source=relative):
+                self.assertTrue(relative.startswith('deploy/mission-control/') or relative in {
+                    'AGENT_WORK.md', 'docs/architecture/proposals/forge-autonomous-agent-workflow.md'})
+                if '/migrations/' in relative or '/fragments/' in relative:
+                    self.assertTrue(relative.endswith('0033_superseding_reviews.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+        # The new context cannot qualify edits to any previously applied SQL.
+        for pins in (EVENT_RETRY_CONTEXT_SHA256, LINEAGE_RETRY_CONTEXT_SHA256):
+            for relative, expected in pins.items():
+                if '/migrations/' in relative or '/fragments/' in relative:
+                    with self.subTest(immutable_pre_m33=relative):
+                        self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
@@ -639,7 +680,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         required = (
             "work_owner_control.py", "work_owner_reverification.py", "work_publication_clients.py", "work_review.py",
-            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py",
+            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py", "work_superseding_review.py",
             "work_post_merge.py", "work_post_merge_provider.py", "jenkins_events.py", "jenkins_config.py",
             "jenkins_codec.py", "jenkins_store.py", "jenkins_consumer.py",
             "jenkins_api.py", "jenkins_emitter.py", "jenkins_emit_tool.py",
