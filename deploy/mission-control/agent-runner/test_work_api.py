@@ -493,7 +493,8 @@ class WorkHttpApiTest(unittest.TestCase):
         command = work_api.WorkCancel('homelab', TASK_ID, 1, 'selected-control')
         self.assertEqual(service.cancel(command), receipt)
         flow.cancel.assert_called_once_with(project_alias='homelab', task_id=TASK_ID,
-            expected_revision=1, idempotency_key='selected-control')
+            expected_revision=1, idempotency_key='selected-control',
+            actor={'kind': 'operator', 'id': store.owner}, cause='operator_request')
         store.cancel.assert_not_called()
 
     def _service_with_mock_store(self):

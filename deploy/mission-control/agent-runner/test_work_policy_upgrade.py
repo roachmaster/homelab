@@ -115,6 +115,8 @@ def historical_registry(root, maximum):
         "forge_coding_worker_api.queue_publication(", "forge_coding_reconciler_api.publication_")))+"\n"
     value=value.replace("forge_coding_reconciler_api.reconcile(uuid, uuid, text, jsonb),\nTO", "forge_coding_reconciler_api.reconcile(uuid, uuid, text, jsonb)\nTO")
     if maximum<12:value=value.replace("    forge_coding_worker_api.report_progress(uuid, uuid, integer, text, text),\n","")
+    if maximum<33:value=value.replace("forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text, text)",
+                                      "forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text)")
     grant.write_text(value)
 
 
@@ -1054,7 +1056,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 # runtime registry before snapshotting an actual complete M26
                 # surface; its M27 block is still inactive here.
                 cluster._run("psql", "-h", cluster.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1",
-                    "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", SQL_DIR/"management/grant-runner.sql")
+                    "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", registry/"management/grant-runner.sql")
                 self.execute("CREATE ROLE muse_events LOGIN NOINHERIT", cluster=cluster)
                 result = cluster._run("psql", "-h", cluster.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1",
                     "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", SQL_DIR/"management/grant-muse-read-access.sql")

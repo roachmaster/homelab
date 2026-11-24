@@ -181,7 +181,8 @@ class NativeDeliveryDatabaseContractTest(unittest.TestCase):
         self.assertEqual(len(stored), 1)
         self.assertEqual(tuple(map(str, stored[0][:2])), (event["event_id"], event["correlation_id"]))
         self.assertEqual(stored[0][2], "checkpoint")
-        self.assertEqual(stored[0][3], {**receipt, "stage": "branch_pushed", "review_id": job["review_id"]})
+        self.assertEqual(stored[0][3], {**receipt, "stage": "branch_pushed", "review_id": job["review_id"],
+                                        "actor": {"kind": "service", "id": "forge-coding-reconciler"}})
         for changed in (dict(candidate_commit="f" * 40), dict(branch="main"),
                         dict(scope={**scope, "workflow_id": str(uuid4())})):
             with self.subTest(changed=changed), self.assertRaises((WorkerStoreError, ValueError, psycopg2.Error)):

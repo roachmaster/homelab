@@ -535,12 +535,14 @@ class WorkStore:
                 raise ValueError("Recipe resolver returned an invalid pinned recipe")
 
             task_id = uuid4()
+            actor = require_actor(actor, self._owner)
             receipt = {
                 "task_id": str(task_id),
                 "project_alias": project_alias,
                 "revision": 1,
                 "status": "queued",
                 "recipe_digest": recipe.digest,
+                "actor": actor,
             }
             cursor.execute("""
                 INSERT INTO forge_agent.coding_tasks (
@@ -560,7 +562,7 @@ class WorkStore:
                 workflow_id=cursor.fetchone()["workflow_id"]
                 cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_required=true,workflow_id=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(workflow_id,self._owner,project_alias,task_id))
             insert_event(cursor, self._owner, project_alias, task_id, "queued",
-                         receipt, actor=require_actor(actor, self._owner), first=True)
+                         receipt, actor=actor, first=True)
             if recipe.resource_profile in EXTERNAL_POLICIES:
                 if self._external is None or agent_profile not in self._external.profiles:
                     raise Rejected(503, "unavailable")

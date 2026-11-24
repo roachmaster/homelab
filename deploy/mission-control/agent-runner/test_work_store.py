@@ -752,6 +752,7 @@ class WorkStorePostgresTest(unittest.TestCase):
             "base_revision": 1,
             "revision": 2,
             "status": "cancelled",
+            "actor": {"kind": "operator", "id": "mission-control"},
         })
 
         # Same key + same intent replays original business receipt BEFORE CAS/state checks.

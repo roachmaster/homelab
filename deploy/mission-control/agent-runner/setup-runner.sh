@@ -58,6 +58,7 @@ publish "$directory/work_external_review_context.py" "$target/work_external_revi
 publish "$directory/work_external_delivery_store.py" "$target/work_external_delivery_store.py"
 publish "$directory/work_external_delivery.py" "$target/work_external_delivery.py"
 publish "$directory/work_store.py" "$target/work_store.py"
+publish "$directory/work_events.py" "$target/work_events.py"
 publish "$directory/work_api.py" "$target/work_api.py"
 publish "$directory/work_owner_control.py" "$target/work_owner_control.py"
 publish "$directory/work_owner_reverification.py" "$target/work_owner_reverification.py"
