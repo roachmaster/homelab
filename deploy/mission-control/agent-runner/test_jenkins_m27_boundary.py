@@ -576,6 +576,7 @@ UI_STAGE_DIAGRAM_CONTEXT_SHA256 = {
 # ABI 14->15 move, and their tests and browser journey. It grants no live
 # activation and changes no legacy owner/publication guard.
 PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
+    'docs/design/implementation-status.md': 'b97f932aa8ac6d52da4e0ec6e855a2f60107c5e0644c7fa9d2fef59263f1e478',
     'deploy/mission-control/agent-runner/jenkins_api.py': '8bf9e3046fab277a3399e110ce4d6cacd9d0c305e5fc29848f7c24981325626f',
     'deploy/mission-control/agent-runner/jenkins_events.py': 'e1b7cf6bab521404be16683642069227485f9d5525993630cd889da08a38cb45',
     'deploy/mission-control/agent-runner/runner.py': '27eaa28a5ceca354b2ea78b855ea00e42de1ae7bdd6f5c0bd95652d1bdde5684',
@@ -809,10 +810,11 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_pipeline_diagram_overlay_is_scoped_and_exact(self):
-        self.assertEqual(len(PIPELINE_DIAGRAM_CONTEXT_SHA256), 51)
+        self.assertEqual(len(PIPELINE_DIAGRAM_CONTEXT_SHA256), 52)
         for relative, expected in PIPELINE_DIAGRAM_CONTEXT_SHA256.items():
             with self.subTest(pipeline_source=relative):
-                self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/')))
+                self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/')) or relative in {
+                    'docs/architecture/forge-post-merge-verification.md', 'docs/design/implementation-status.md'})
                 if '/migrations/' in relative:
                     self.assertTrue(relative.endswith('0034_jenkins_stage_started.sql'))
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
