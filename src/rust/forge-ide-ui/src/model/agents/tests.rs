@@ -1026,7 +1026,11 @@ fn pipeline_stage(id: &str, label: &str, status: PipelineStageState) -> Pipeline
         detail: None,
     }
 }
-fn pipeline_review(stages: Vec<PipelineStageStatus>, availability: PipelineAvailability, phase: PipelinePhase) -> WorkReviewSummary {
+fn pipeline_review(
+    stages: Vec<PipelineStageStatus>,
+    availability: PipelineAvailability,
+    phase: PipelinePhase,
+) -> WorkReviewSummary {
     let mut review = review_summary(true);
     review.pipeline_stages = stages;
     review.pipeline_availability = availability;
@@ -1083,7 +1087,10 @@ fn pipeline_diagram_maps_every_stage_status() {
     );
     assert_eq!(diagram.current_badge.label, "Running · Beta");
     assert_eq!(diagram.current_badge.tone, BadgeTone::Accent);
-    assert_eq!(diagram.summary, "Verification is running. 1 of 7 stages passed.");
+    assert_eq!(
+        diagram.summary,
+        "Verification is running. 1 of 7 stages passed."
+    );
     assert_eq!(diagram.empty_message, "Some stage states are unavailable.");
 }
 #[test]
@@ -1155,11 +1162,24 @@ fn pipeline_diagram_reports_every_availability_and_phase() {
 #[test]
 fn pipeline_diagram_caps_nodes_at_sixteen() {
     let stages: Vec<PipelineStageStatus> = (0..20)
-        .map(|i| pipeline_stage(&format!("s{i:02}"), &format!("Stage {i}"), PipelineStageState::Waiting))
+        .map(|i| {
+            pipeline_stage(
+                &format!("s{i:02}"),
+                &format!("Stage {i}"),
+                PipelineStageState::Waiting,
+            )
+        })
         .collect();
-    let review = pipeline_review(stages, PipelineAvailability::Available, PipelinePhase::Running);
+    let review = pipeline_review(
+        stages,
+        PipelineAvailability::Available,
+        PipelinePhase::Running,
+    );
     let diagram = projected_diagram(&review);
-    assert_eq!(diagram.nodes.len(), super::pipeline_diagram::MAX_STAGE_NODES);
+    assert_eq!(
+        diagram.nodes.len(),
+        super::pipeline_diagram::MAX_STAGE_NODES
+    );
     assert_eq!(diagram.nodes[15].id, "s15");
 }
 #[test]

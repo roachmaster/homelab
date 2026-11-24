@@ -28,11 +28,7 @@ fn node(stage: &PipelineStageStatus) -> FlowStageNode {
             },
         ),
         PipelineStageState::Skipped => (FlowStageState::Skipped, false, String::new()),
-        PipelineStageState::NotRun => (
-            FlowStageState::Skipped,
-            false,
-            "not run".to_string(),
-        ),
+        PipelineStageState::NotRun => (FlowStageState::Skipped, false, "not run".to_string()),
         PipelineStageState::Unknown => (
             FlowStageState::Upcoming,
             false,

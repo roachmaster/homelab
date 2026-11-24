@@ -2164,15 +2164,11 @@ mod tests {
     }
     #[test]
     fn pipeline_stages_serialize_and_parse_with_new_fields() {
-        let review: WorkReviewSummary =
-            serde_json::from_value(pipeline_review_json()).unwrap();
+        let review: WorkReviewSummary = serde_json::from_value(pipeline_review_json()).unwrap();
         assert!(review.is_valid());
         assert_eq!(review.pipeline_stages.len(), 3);
         assert_eq!(review.pipeline_stages[0].status, PipelineStageState::Passed);
-        assert_eq!(
-            review.pipeline_availability,
-            PipelineAvailability::Partial
-        );
+        assert_eq!(review.pipeline_availability, PipelineAvailability::Partial);
         assert_eq!(review.pipeline_phase, PipelinePhase::Running);
         let round_tripped: WorkReviewSummary =
             serde_json::from_str(&serde_json::to_string(&review).unwrap()).unwrap();
@@ -2196,8 +2192,7 @@ mod tests {
     }
     #[test]
     fn pipeline_stage_validation_bounds() {
-        let mut review: WorkReviewSummary =
-            serde_json::from_value(pipeline_review_json()).unwrap();
+        let mut review: WorkReviewSummary = serde_json::from_value(pipeline_review_json()).unwrap();
         assert!(review.is_valid());
         review.pipeline_stages = (0..17)
             .map(|i| PipelineStageStatus {
