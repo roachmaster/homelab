@@ -13,6 +13,7 @@ from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
 from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64
 from work_retry_policy import AGENT_RETRY_LIMIT,AGENT_RETRY_POLICY_ID,effective_limit
+from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause
 
 TERMINAL={'completed','cancelled','escalated'}
 MAX_NATIVE_VERDICT=65536
@@ -211,9 +212,9 @@ class ExternalWorkflowStore:
     def _event(self,cursor,w,summary,related_task_id=None,*,details=None):
         cursor.execute('SELECT id FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(%s,%s,%s) FOR UPDATE',(self.owner,w['project_alias'],w['root_task_id']))
         cursor.fetchone()
-        cursor.execute('''INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
-          SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'checkpoint',%s FROM forge_agent.coding_events
-          WHERE(owner_id,project_alias,task_id)=(%s,%s,%s)''',(self.owner,w['project_alias'],w['root_task_id'],Json({**(details or {}),'workflow_id':str(w['workflow_id']),'phase':w['phase'],'summary':summary[:4096],**({'related_task_id':str(related_task_id)} if related_task_id else {})}),self.owner,w['project_alias'],w['root_task_id']))
+        insert_event(cursor,self.owner,w['project_alias'],w['root_task_id'],'checkpoint',
+                     {**(details or {}),'workflow_id':str(w['workflow_id']),'phase':w['phase'],'summary':summary[:4096],**({'related_task_id':str(related_task_id)} if related_task_id else {})},
+                     actor=COORDINATOR_ACTOR)
         cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
 
     def _save(self,cursor,w,summary,*,phase=None,related_task_id=None):
@@ -470,7 +471,7 @@ class ExternalWorkflowStore:
     def _step(self,cursor,w):
         task=self._task(cursor,w)
         if task['status'] in {'cancelled','cancel_requested'}:
-            return self._cancel_locked(cursor,w,'Author task cancellation observed.')
+            return self._cancel_locked(cursor,w,'Author task cancellation observed.',actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
         if w['phase'] in {'plan','plan_revision','implement','repair'}:
             artifact=self._artifact(cursor,w,task)
             if artifact is None:
@@ -579,7 +580,9 @@ class ExternalWorkflowStore:
           VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'queued',1,false,false)''',
           (self.owner,w['project_alias'],task_id,task_id,intent,base,mode,profile,prepare_title(prompt),prompt,criteria,Json(recipe['recipe']),recipe['digest']))
         cursor.execute('INSERT INTO forge_external_workflow.tasks(owner_id,project_alias,task_id,workflow_id,role) VALUES(%s,%s,%s,%s,%s)',(self.owner,w['project_alias'],task_id,w['workflow_id'],role))
-        cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) VALUES(%s,%s,%s,1,'queued',%s)",(self.owner,w['project_alias'],task_id,Json({'workflow_id':str(w['workflow_id']),'status':'queued','revision':1,'task_id':str(task_id),'project_alias':w['project_alias'],'recipe_digest':recipe['digest']})))
+        insert_event(cursor,self.owner,w['project_alias'],task_id,'queued',
+                     {'workflow_id':str(w['workflow_id']),'status':'queued','revision':1,'task_id':str(task_id),'project_alias':w['project_alias'],'recipe_digest':recipe['digest']},
+                     actor={'kind':'agent','id':profile},first=True)
         cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
 
     def _native_artifact(self,cursor,w,task,*,accepted_revision=None):
@@ -795,9 +798,7 @@ class ExternalWorkflowStore:
                   'status':'completed','base_revision':root['revision'],'revision':revision,'delivery_action_id':str(a['action_id']),
                   'candidate_commit':candidate['candidate_commit'],'candidate_tree':candidate['candidate_tree'],
                   'gate_manifest_sha256':candidate['gate_manifest_sha256'],'merge_commit':receipt['merge_commit']}
-        cursor.execute('''INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
-          SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'completed',%s FROM forge_agent.coding_events
-          WHERE(owner_id,project_alias,task_id)=(%s,%s,%s)''',(self.owner,w['project_alias'],w['root_task_id'],Json(evidence),self.owner,w['project_alias'],w['root_task_id']))
+        insert_event(cursor,self.owner,w['project_alias'],w['root_task_id'],'completed',evidence,actor=COORDINATOR_ACTOR)
         return True
 
     def _request_rebase(self,cursor,w,summary,*,action=None):
@@ -809,7 +810,7 @@ class ExternalWorkflowStore:
         return True
 
     def _escalate(self,cursor,w,reason):
-        self._cancel_children(cursor,w)
+        self._cancel_children(cursor,w,actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
 
         # The public workflow DTO caps this field in UTF-8 bytes, not characters.
         # Keep the complete review artifact separately and preserve whole codepoints.
@@ -821,7 +822,7 @@ class ExternalWorkflowStore:
     def _cleanup_action(self,cursor,w,action):
         return self._action(cursor,w,'cancel',str(action['action_id']),{'target_action_id':str(action['action_id']),'target_kind':action['kind'],'target_request':action['intent'],'target_receipt':(action['result'] or {}).get('receipt',{})})
 
-    def _cancel_children(self,cursor,w):
+    def _cancel_children(self,cursor,w,*,actor,cause):
         cursor.execute("""SELECT t.* FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x
           ON(x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id)
           WHERE x.workflow_id=%s AND t.status IN('queued','running','awaiting_review','needs_reconcile','blocked_auth','blocked_permission','quota_blocked') FOR UPDATE OF t""",(w['workflow_id'],))
@@ -831,21 +832,22 @@ class ExternalWorkflowStore:
             status='cancel_requested' if cursor.fetchone()['active'] else 'cancelled'
             cursor.execute("""UPDATE forge_agent.coding_tasks SET status=%s,cancelled_at=CASE WHEN %s='cancelled' THEN clock_timestamp() ELSE NULL END,
               revision=revision+1,updated_at=clock_timestamp() WHERE(owner_id,project_alias,id)=(%s,%s,%s)""",(status,status,self.owner,w['project_alias'],task['id']))
-            cursor.execute("""INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
-              SELECT %s,%s,%s,coalesce(max(sequence),0)+1,%s,%s FROM forge_agent.coding_events WHERE(owner_id,project_alias,task_id)=(%s,%s,%s)""",(self.owner,w['project_alias'],task['id'],status,Json({'base_revision':task['revision'],'revision':task['revision']+1}),self.owner,w['project_alias'],task['id']))
+            insert_event(cursor,self.owner,w['project_alias'],task['id'],status,
+                         {'base_revision':task['revision'],'revision':task['revision']+1,'workflow_id':str(w['workflow_id'])},
+                         actor=actor,cause=cause)
         cursor.execute("SELECT * FROM forge_external_workflow.actions WHERE workflow_id=%s AND kind='verify' AND status IN('queued','leased','failed') ",(w['workflow_id'],))
         cleanup=cursor.fetchall()
         cursor.execute("""UPDATE forge_external_workflow.actions SET status='failed',result=%s,lease_token=NULL,lease_role=NULL,lease_until=NULL,
           updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('queued','leased')""",(Json({'status':'failed','receipt':{},'summary':'Workflow admission stopped before delivery completed.'}),w['workflow_id']))
         for action in cleanup:self._cleanup_action(cursor,w,action)
 
-    def _cancel_locked(self,cursor,w,note):
+    def _cancel_locked(self,cursor,w,note,*,actor,cause):
         if w['phase']=='merging':raise Rejected(409,'not_cancellable')
         if w['phase'] in TERMINAL:return False
-        self._cancel_children(cursor,w)
+        self._cancel_children(cursor,w,actor=actor,cause=cause)
         w['enabled']=False;self._save(cursor,w,note,phase='cancelled');return True
 
-    def cancel(self,*,project_alias,task_id,expected_revision,idempotency_key):
+    def cancel(self,*,project_alias,task_id,expected_revision,idempotency_key,actor=None,cause=None):
         if not self.manages(project_alias):return None
         from work_store import _cancel_intent_digest
         digest=_cancel_intent_digest(project_alias=project_alias,task_id=task_id,expected_revision=expected_revision)
@@ -865,10 +867,11 @@ class ExternalWorkflowStore:
                 return prior['receipt_json']
             if task['revision']!=expected_revision:raise Rejected(409,'revision_conflict')
             if w['phase'] in TERMINAL|{'merging'}:raise Rejected(409,'not_cancellable')
-            self._cancel_locked(cursor,w,'User cancelled the complete external workflow.')
+            actor=require_actor(actor,self.owner);cause=require_cancel_cause(cause)
+            self._cancel_locked(cursor,w,'User cancelled the complete external workflow.',actor=actor,cause=cause)
             # An already accepted root artifact stays accepted; advance its control revision once.
             cursor.execute('UPDATE forge_agent.coding_tasks SET revision=%s,updated_at=clock_timestamp() WHERE(owner_id,project_alias,id)=(%s,%s,%s)',(expected_revision+1,self.owner,project_alias,task_id))
-            receipt={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,'status':'cancelled'}
+            receipt={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,'status':'cancelled','actor':actor}
             cursor.execute("""INSERT INTO forge_agent.coding_control_receipts(owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json)
               VALUES(%s,%s,%s,'cancel',%s,%s,%s,%s,%s)""",(self.owner,project_alias,task_id,idempotency_key,digest,expected_revision,expected_revision+1,Json(receipt)))
             return receipt
