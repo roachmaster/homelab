@@ -1011,7 +1011,162 @@ fn review_summary(green: bool) -> WorkReviewSummary {
         can_repair: true,
         can_retry: false,
         findings: vec![],
+        pipeline_stages: vec![],
+        pipeline_availability: PipelineAvailability::NoRun,
+        pipeline_phase: PipelinePhase::Unknown,
     }
+}
+fn pipeline_stage(id: &str, label: &str, status: PipelineStageState) -> PipelineStageStatus {
+    PipelineStageStatus {
+        id: id.into(),
+        label: label.into(),
+        status,
+        finding_id: None,
+        finding_summary: None,
+        detail: None,
+    }
+}
+fn pipeline_review(stages: Vec<PipelineStageStatus>, availability: PipelineAvailability, phase: PipelinePhase) -> WorkReviewSummary {
+    let mut review = review_summary(true);
+    review.pipeline_stages = stages;
+    review.pipeline_availability = availability;
+    review.pipeline_phase = phase;
+    review
+}
+fn projected_diagram(review: &WorkReviewSummary) -> FlowDiagramBinding {
+    let mut view = ViewModel::default();
+    project_pipeline_diagram(&mut view, Some(review));
+    assert_eq!(view.flow_diagrams.len(), 1);
+    view.flow_diagrams.pop().unwrap()
+}
+#[test]
+fn pipeline_diagram_maps_every_stage_status() {
+    let review = pipeline_review(
+        vec![
+            pipeline_stage("a", "Alpha", PipelineStageState::Waiting),
+            pipeline_stage("b", "Beta", PipelineStageState::Running),
+            pipeline_stage("c", "Gamma", PipelineStageState::Passed),
+            {
+                let mut failed = pipeline_stage("d", "Delta", PipelineStageState::Failed);
+                failed.finding_id = Some("f-1".into());
+                failed.finding_summary = Some("make ci failed".into());
+                failed
+            },
+            pipeline_stage("e", "Epsilon", PipelineStageState::Skipped),
+            pipeline_stage("f", "Zeta", PipelineStageState::NotRun),
+            pipeline_stage("g", "Eta", PipelineStageState::Unknown),
+        ],
+        PipelineAvailability::Partial,
+        PipelinePhase::Running,
+    );
+    let diagram = projected_diagram(&review);
+    assert_eq!(diagram.id, "agents-verification-pipeline-diagram");
+    assert_eq!(diagram.track_label, "Pipeline");
+    assert!(diagram.branches.is_empty());
+    assert!(diagram.trace_hops.is_empty());
+    let states: Vec<(FlowStageState, bool, &str)> = diagram
+        .nodes
+        .iter()
+        .map(|node| (node.state, node.current, node.detail.as_str()))
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            (FlowStageState::Upcoming, false, ""),
+            (FlowStageState::Current, true, ""),
+            (FlowStageState::Completed, false, ""),
+            (FlowStageState::Error, false, "f-1 · make ci failed"),
+            (FlowStageState::Skipped, false, ""),
+            (FlowStageState::Skipped, false, "not run"),
+            (FlowStageState::Upcoming, false, "stage detail unavailable"),
+        ]
+    );
+    assert_eq!(diagram.current_badge.label, "Running · Beta");
+    assert_eq!(diagram.current_badge.tone, BadgeTone::Accent);
+    assert_eq!(diagram.summary, "Verification is running. 1 of 7 stages passed.");
+    assert_eq!(diagram.empty_message, "Some stage states are unavailable.");
+}
+#[test]
+fn pipeline_diagram_composes_server_detail_with_finding() {
+    let mut failed = pipeline_stage("a", "Alpha", PipelineStageState::Failed);
+    failed.finding_id = Some("f-9".into());
+    failed.finding_summary = Some("killed".into());
+    failed.detail = Some("interrupted by cancellation".into());
+    let review = pipeline_review(
+        vec![failed],
+        PipelineAvailability::Available,
+        PipelinePhase::Complete,
+    );
+    let diagram = projected_diagram(&review);
+    assert_eq!(
+        diagram.nodes[0].detail,
+        "interrupted by cancellation · f-9 · killed"
+    );
+    assert_eq!(diagram.current_badge.label, "Complete · 1 stage failed");
+    assert_eq!(diagram.current_badge.tone, BadgeTone::Warning);
+}
+#[test]
+fn pipeline_diagram_reports_every_availability_and_phase() {
+    for (availability, phase, badge, summary, empty) in [
+        (
+            PipelineAvailability::NoRun,
+            PipelinePhase::Unknown,
+            "No run yet",
+            "No verification run yet for this candidate.",
+            "No verification run yet for this candidate.",
+        ),
+        (
+            PipelineAvailability::StageDataUnavailable,
+            PipelinePhase::Preparing,
+            "Stage detail unavailable",
+            "Pipeline stage detail is unavailable for this run.",
+            "Pipeline stage detail is unavailable for this run.",
+        ),
+        (
+            PipelineAvailability::Available,
+            PipelinePhase::Preparing,
+            "Preparing",
+            "Verification is preparing.",
+            "",
+        ),
+        (
+            PipelineAvailability::Available,
+            PipelinePhase::Finalizing,
+            "Finalizing",
+            "Verification is finalizing.",
+            "",
+        ),
+        (
+            PipelineAvailability::Available,
+            PipelinePhase::Complete,
+            "Complete · all stages passed",
+            "Verification complete.",
+            "",
+        ),
+    ] {
+        let review = pipeline_review(vec![], availability, phase);
+        let diagram = projected_diagram(&review);
+        assert_eq!(diagram.current_badge.label, badge, "{availability:?}");
+        assert_eq!(diagram.summary, summary, "{availability:?}");
+        assert_eq!(diagram.empty_message, empty, "{availability:?}");
+        assert!(diagram.nodes.is_empty());
+    }
+}
+#[test]
+fn pipeline_diagram_caps_nodes_at_sixteen() {
+    let stages: Vec<PipelineStageStatus> = (0..20)
+        .map(|i| pipeline_stage(&format!("s{i:02}"), &format!("Stage {i}"), PipelineStageState::Waiting))
+        .collect();
+    let review = pipeline_review(stages, PipelineAvailability::Available, PipelinePhase::Running);
+    let diagram = projected_diagram(&review);
+    assert_eq!(diagram.nodes.len(), super::pipeline_diagram::MAX_STAGE_NODES);
+    assert_eq!(diagram.nodes[15].id, "s15");
+}
+#[test]
+fn pipeline_diagram_absent_without_review() {
+    let mut view = ViewModel::default();
+    project_pipeline_diagram(&mut view, None);
+    assert!(view.flow_diagrams.is_empty());
 }
 #[test]
 fn finished_and_legacy_completed_plans_have_three_guarded_decisions_instead_of_acceptance() {
