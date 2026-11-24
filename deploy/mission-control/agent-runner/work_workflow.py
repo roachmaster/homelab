@@ -131,6 +131,7 @@ class WorkflowStore:
         self.config=config;self.catalog=catalog;self.store=store
         self.reviewer_correction = None
         self.feedback_recovery = None
+        self.peer_feedback_recovery = None
         self.superseding_review = None
         self._retry_allowance_position = None
         self._manual_allowance_position = None
@@ -829,6 +830,8 @@ class WorkflowStore:
         self._apply_retry_allowances()
         if self.feedback_recovery is not None:
             self.feedback_recovery.run_once()
+        if self.peer_feedback_recovery is not None:
+            self.peer_feedback_recovery.run_once()
         self._recover_source_readiness()
         self._recover_preparations()
         self._recover_peer_verdicts()
@@ -1098,15 +1101,17 @@ class WorkflowCoordinatorFactory:
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,superseding_review_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
         self.config,self.catalog,self.store=config,catalog,store
         self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
         self.reviewer_correction_factory=reviewer_correction_factory
         self.feedback_recovery_factory=feedback_recovery_factory
+        self.peer_feedback_recovery_factory=peer_feedback_recovery_factory
         self.superseding_review_factory=superseding_review_factory
     def create(self):
         from work_reviewer_correction import ReviewerCorrectionFactory
         from work_context_recovery import FeedbackRecoveryFactory
+        from work_peer_feedback_recovery import PeerFeedbackRecoveryFactory
         from work_superseding_review import SupersedingReviewFactory
         flow=WorkflowStore(self.config,self.catalog,self.store,retry_events=self.retry_events)
         factory=self.reviewer_correction_factory or ReviewerCorrectionFactory
@@ -1116,6 +1121,9 @@ class WorkflowStoreFactory:
         flow.feedback_recovery=(self.feedback_recovery_factory or FeedbackRecoveryFactory)(flow).create()
         if flow.feedback_recovery is not None and not callable(getattr(flow.feedback_recovery,'run_once',None)):
             raise TypeError('Feedback recovery requires a ready recovery port')
+        flow.peer_feedback_recovery=(self.peer_feedback_recovery_factory or PeerFeedbackRecoveryFactory)(flow).create()
+        if flow.peer_feedback_recovery is not None and not callable(getattr(flow.peer_feedback_recovery,'run_once',None)):
+            raise TypeError('Peer feedback recovery requires a ready recovery port')
         flow.superseding_review=(self.superseding_review_factory or SupersedingReviewFactory)(flow).create()
         if not all(callable(getattr(flow.superseding_review,name,None)) for name in ('recover','correct','root_review_id')):
             raise TypeError('Superseding review requires a ready source-bound recovery port')

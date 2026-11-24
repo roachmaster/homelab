@@ -470,3 +470,21 @@ verified progress resets the ordinary stagnation counter. The newly corrected
 candidate can still pass fresh fixed checks and independent review and proceed
 through the existing exact-head hosted checks and trusted merge. The owner turn
 is never an approval, successful build, stopped process or merge receipt.
+
+# Valid peer feedback on an existing linked child
+
+The coordinator selects `PeerFeedbackRecoveryFactory` separately from the build
+feedback consumer. It recovers the specific stopped setup failure in which a
+genuine current peer revision targets the linked child itself while that child
+still retains its original parent-review identity. The unchanged build consumer
+continues to require failed checks and trusted build evidence.
+
+Both consumers share the exact stopped/reconciled receipt, immutable packet,
+source, policy, grant, readiness and normal Resume engine. Peer recovery also
+requires the actual decided independent code verdict, its stopped result, the
+approved Plan, and successful validation of the complete preserved feedback.
+The server-issued recovery note binds the newest stopped setup attempt to the
+older immutable feedback parent without changing either. The same feedback
+event retains its twenty attempts across consumer action prefixes; duplicate or
+raced admission emits one recovery and one Resume. A new worker claim must pass
+both normal feedback providers before the model runs.

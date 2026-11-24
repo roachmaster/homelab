@@ -15,9 +15,23 @@ BACKOFF_SECONDS = 60
 
 
 class FeedbackRecovery:
+    POLICY_ID = POLICY
+    FAILURE_SUMMARIES = (RECOVERY_SUMMARY, LEGACY_SUMMARY)
+    ACTION_PREFIX = 'feedback-delivery-retry:'
+    IDEMPOTENCY_PREFIX = 'feedback-delivery-'
+    AUDIT_STAGE = 'feedback_delivery_recovered'
+    RECOVERY_DESCRIPTION = 'Verified build feedback delivery resumed the same approved task.'
+    # Both selected consumers account for the same logical feedback event.
+    ACCOUNTING_PREFIXES = ('feedback-delivery-retry:%', 'peer-feedback-delivery-retry:%')
+
     def __init__(self, flow):
         self.flow = flow
         self.store = flow.store
+
+    def _validate_failure_context(self, cursor, w, task, attempt, rec, feedback, packet, review, source):
+        return (review['verification'].get('checks_passed') is False
+            and review['verification'].get('integration_base') == feedback['integration_base']
+            and isinstance(review['verification'].get('delivery_failure', {}).get('build'), dict))
 
     def retry(self, *, project_alias, task_id, expected_revision, reconciliation_receipt_id,
               idempotency_key):
@@ -42,7 +56,7 @@ class FeedbackRecovery:
             rec = cursor.fetchone()
             if not rec:
                 raise Rejected(409, 'reconcile_required')
-            key = 'feedback-delivery-retry:' + str(rec['attempt_id'])
+            key = self.ACTION_PREFIX + str(rec['attempt_id'])
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",
                 (task['workflow_id'], key))
             previous = cursor.fetchone()
@@ -50,8 +64,8 @@ class FeedbackRecovery:
                 if previous['intent'].get('request') != request:
                     raise Rejected(409, 'idempotency_conflict')
                 receipt = previous['finish_receipt'] or {}
-                if (previous['status'] != 'completed' or previous['intent'].get('policy') != POLICY
-                        or receipt.get('status') != 'feedback_delivery_recovered' or not isinstance(receipt.get('receipt'), dict)):
+                if (previous['status'] != 'completed' or previous['intent'].get('policy') != self.POLICY_ID
+                        or receipt.get('status') != self.AUDIT_STAGE or not isinstance(receipt.get('receipt'), dict)):
                     raise Rejected(409, 'reconcile_required')
                 return dict(receipt['receipt'])
             if task['revision'] != expected_revision:
@@ -82,7 +96,7 @@ class FeedbackRecovery:
             attempt = cursor.fetchone()
             if (not attempt or attempt['phase'] != 'stopped' or attempt['reservation_active']
                     or attempt['lease_expires_at'] is not None or attempt['outcome'] != 'needs_reconcile'
-                    or attempt['summary'] not in {RECOVERY_SUMMARY, LEGACY_SUMMARY}
+                    or attempt['summary'] not in self.FAILURE_SUMMARIES
                     or attempt['result_sha256'] is not None or attempt['result_byte_count'] is not None
                     or attempt['result_chunk_count'] is not None or attempt['finished_at'] is None
                     or attempt['published_at'] is None or attempt['feedback_id'] != task['feedback_id']
@@ -143,16 +157,15 @@ class FeedbackRecovery:
                     or review['gate_manifest_sha256'] != feedback['gate_manifest_sha256']
                     or review['workspace_digest'] != rec['workspace_digest']
                     or review['verification'].get('cleanup_confirmed') is not True
-                    or review['verification'].get('checks_passed') is not False
-                    or review['verification'].get('integration_base') != feedback['integration_base']
-                    or not isinstance(review['verification'].get('delivery_failure', {}).get('build'), dict)):
+                    or not self._validate_failure_context(cursor, w, task, attempt, rec,
+                        feedback, packet, review, source)):
                 raise Rejected(409, 'result_mismatch')
             cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND(status IN('queued','running','cancel_requested') OR(id<>%s AND status IN('failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')))) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s AND p.status IN('pending','checking','publishing')) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",
                 (w['workflow_id'], w['workflow_id'], task_id, w['workflow_id'], w['workflow_id'], w['workflow_id']))
             if cursor.fetchone()['busy']:
                 raise Rejected(409, 'reconcile_required')
-            cursor.execute("SELECT count(*) AS used,max(created_at) AS last,coalesce(max(created_at)<=clock_timestamp()-interval '60 seconds',true) AS ready FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE 'feedback-delivery-retry:%%'",
-                (w['workflow_id'],))
+            cursor.execute("SELECT count(*) AS used,max(created_at) AS last,coalesce(max(created_at)<=clock_timestamp()-interval '60 seconds',true) AS ready FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE ANY(%s)",
+                (w['workflow_id'], list(self.ACCOUNTING_PREFIXES)))
             budget = cursor.fetchone()
             events = self.flow.retry_events
             if (events is None and budget['used'] >= MAX_RECOVERIES) or not budget['ready']:
@@ -169,8 +182,8 @@ class FeedbackRecovery:
                     attempt['outcome_digest'], phase_id='feedback.' + str(task['feedback_id']))
                 cursor.execute("SELECT count(*) AS used FROM forge_agent.coding_workflow_actions "
                     "WHERE workflow_id=%s AND kind='decide' AND status='completed' "
-                    "AND source_key LIKE 'feedback-delivery-retry:%%' AND intent->>'feedback_id'=%s",
-                    (w['workflow_id'], str(task['feedback_id'])))
+                    "AND source_key LIKE ANY(%s) AND intent->>'feedback_id'=%s",
+                    (w['workflow_id'], list(self.ACCOUNTING_PREFIXES), str(task['feedback_id'])))
                 prior_used = cursor.fetchone()['used']
                 if event['used'] == 0 and prior_used:
                     event = events.adopt_legacy(cursor, event['event_id'], prior_used,
@@ -201,18 +214,18 @@ class FeedbackRecovery:
             receipt = self.store.resume(project_alias=project_alias, task_id=task_id, expected_revision=expected_revision,
                 idempotency_key=idempotency_key, agent_profile=p['author_profile'], reconciliation_receipt_id=reconciliation_receipt_id,
                 note=note, allowed_modes={'implement'}, resolve_recipe=lambda _: recipe, _authority=authority)
-            intent = dict(policy=POLICY, request=request, source_attempt_id=str(attempt['attempt_id']),
+            intent = dict(policy=self.POLICY_ID, request=request, source_attempt_id=str(attempt['attempt_id']),
                 source_event_id=str(witness['event_id']), feedback_id=str(task['feedback_id']),
                 feedback_sha256=task['feedback_sha256'], workspace_digest=rec['workspace_digest'], max_recoveries=MAX_RECOVERIES)
             if event is not None:
                 intent['retry_event'] = event
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
-                (w['workflow_id'], self.store.owner, project_alias, key, Json(intent), Json({'status': 'feedback_delivery_recovered', 'receipt': receipt})))
+                (w['workflow_id'], self.store.owner, project_alias, key, Json(intent), Json({'status': self.AUDIT_STAGE, 'receipt': receipt})))
             cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'checkpoint',%s FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s",
-                (self.store.owner, project_alias, task_id, Json(dict(stage='feedback_delivery_recovered', policy=POLICY,
+                (self.store.owner, project_alias, task_id, Json(dict(stage=self.AUDIT_STAGE, policy=self.POLICY_ID,
                     source_attempt_id=str(attempt['attempt_id']), source_event_id=str(witness['event_id']),
                     reconciliation_receipt_id=str(rec['receipt_id']), feedback_id=str(task['feedback_id']),
-                    summary='Verified build feedback delivery resumed the same approved task.', receipt=receipt)),
+                    summary=self.RECOVERY_DESCRIPTION, receipt=receipt)),
                  self.store.owner, project_alias, task_id))
             return receipt
 
@@ -228,13 +241,13 @@ class FeedbackRecovery:
                 AND a.summary=ANY(%s) AND a.phase='stopped' AND NOT a.reservation_active
                 AND a.lease_expires_at IS NULL AND a.result_sha256 IS NULL
                 AND w.phase IN('implement','repair','escalated') ORDER BY r.created_at DESC LIMIT 64""",
-                (self.store.owner, list(self.store.allowed_projects), [RECOVERY_SUMMARY, LEGACY_SUMMARY]))
+                (self.store.owner, list(self.store.allowed_projects), list(self.FAILURE_SUMMARIES)))
             candidates = cursor.fetchall()
         changed = False
         for task in candidates:
             try:
                 receipt = self.retry(project_alias=task['project_alias'], task_id=task['id'], expected_revision=task['revision'],
-                    reconciliation_receipt_id=task['receipt_id'], idempotency_key='feedback-delivery-' + str(task['attempt_id']))
+                    reconciliation_receipt_id=task['receipt_id'], idempotency_key=self.IDEMPOTENCY_PREFIX + str(task['attempt_id']))
                 changed = changed or receipt.get('status') == 'queued'
             except Rejected:
                 pass
