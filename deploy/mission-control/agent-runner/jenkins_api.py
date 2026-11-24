@@ -164,6 +164,7 @@ class JenkinsServiceFactory:
         store_factory=None,
         handler_factories=None,
         worker_id: str = "jenkins-consumer",
+        with_consumers: bool = True,
     ):
         if config is not None:
             if not isinstance(config, JenkinsConfig):
@@ -178,11 +179,14 @@ class JenkinsServiceFactory:
                 raise TypeError("connect_factory must be callable or None")
             if store_factory is not None and not callable(store_factory):
                 raise TypeError("store_factory must be callable or None")
+        if type(with_consumers) is not bool:
+            raise TypeError("with_consumers must be a boolean")
         self._config = config
         self._connect_factory = connect_factory
         self._store_factory = store_factory
         self._handler_factories = handler_factories
         self._worker_id = worker_id
+        self._with_consumers = with_consumers
 
     def create(self) -> JenkinsService | None:
         if self._config is None:
@@ -193,7 +197,7 @@ class JenkinsServiceFactory:
             else JenkinsStore(self._config, self._connect_factory)
         )
         consumer_worker = None
-        if any(consumer.enabled for consumer in self._config.consumers):
+        if self._with_consumers and any(consumer.enabled for consumer in self._config.consumers):
             consumer_worker = JenkinsConsumerFactory(
                 self._config,
                 store,
@@ -201,6 +205,19 @@ class JenkinsServiceFactory:
                 worker_id=self._worker_id,
             ).create()
         return JenkinsService(self._config, store, consumer_worker=consumer_worker)
+
+
+def create_jenkins_service(config, connect_factory, *, handler_factories=None,
+                           worker_id="jenkins-consumer", with_consumers=True):
+    """Shared JenkinsService constructor for the runner and the publication worker.
+
+    Both processes build their own service from the same validated frozen
+    configuration; nothing is shared between the processes. Emit-only callers
+    (the publication worker's lifecycle producer) pass with_consumers=False so
+    no consumer worker starts in a process that only emits events.
+    """
+    return JenkinsServiceFactory(config, connect_factory, handler_factories=handler_factories,
+                                 worker_id=worker_id, with_consumers=with_consumers).create()
 
 
 def handles(headers) -> bool:

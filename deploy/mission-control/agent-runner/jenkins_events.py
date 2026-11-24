@@ -42,6 +42,7 @@ class JenkinsEventKind(str, Enum):
     BUILD_QUEUED = "build_queued"
     BUILD_STARTED = "build_started"
     BUILD_COMPLETED = "build_completed"
+    STAGE_STARTED = "stage_started"
     STAGE_COMPLETED = "stage_completed"
 
 
@@ -338,6 +339,12 @@ class JenkinsEventEmit:
                     or self.stage_name is not None
                     or self.stage_status is not None):
                 raise ValueError("build_completed requires build_number and build_result and forbids stage fields")
+        elif kind is JenkinsEventKind.STAGE_STARTED:
+            if (self.build_number is None
+                    or self.build_result is not None
+                    or self.stage_name is None
+                    or self.stage_status is not None):
+                raise ValueError("stage_started requires build_number and stage_name and forbids build_result/stage_status")
         elif kind is JenkinsEventKind.STAGE_COMPLETED:
             if (self.build_number is None
                     or self.build_result is not None

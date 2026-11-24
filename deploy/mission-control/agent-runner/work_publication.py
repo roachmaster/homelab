@@ -8,13 +8,19 @@ approved exact-tree intent. No native agent receives publication authority.
 
 from contextlib import contextmanager, nullcontext
 import fcntl
+import json
 import logging
 import os
 from pathlib import Path
 import signal
 import threading
 
+import jenkins_api
+import jenkins_config
+from jenkins_emitter import InProcessJenkinsEmitter
 from work_executor import SystemdSupervisor, WorkspaceProvider
+from work_external_delivery import DeliveryConfig, read_private
+from work_jenkins_lifecycle import DRAIN_SHUTDOWN_TIMEOUT_SECONDS, IntentDrain
 from work_publication_checks import IsolatedCheckRunner
 from work_publication_clients import (DIGEST, SHA, GitHubPullRequestClient, GitRepositoryProvider,
                                       PublicationError, WorkspaceSnapshotProvider, branch_name, uuid)
@@ -59,13 +65,14 @@ def validate_job(config, job):
 
 class PublicationWorker:
     def __init__(self, config, store, snapshots, git, checks, pull_requests, *, candidates, reviewer=None, merger=None, stop=None,
-                 native_ci=None, post_merge=None, source_observer=None, release=None):
+                 native_ci=None, post_merge=None, source_observer=None, release=None, jenkins_drain=None):
         self.config, self.store, self.snapshots, self.git = config, store, snapshots, git
         self.checks, self.pull_requests = checks, pull_requests
         self.candidates, self.reviewer = candidates, reviewer
         self.merger = merger
         self.native_ci = native_ci
         self.post_merge = post_merge
+        self.jenkins_drain = jenkins_drain
         self.automation = tuple(port for port in (post_merge, source_observer, release) if port is not None)
         self._automation_index = 0
         self._yield_post_merge = False
@@ -207,25 +214,39 @@ class PublicationWorker:
         return True
 
     def run_forever(self):
-        while not self.stop.is_set():
-            try:
-                listener = self.store.listen() if hasattr(self.store, "listen") else nullcontext(None)
-                with listener as committed:
-                    ci_listener = (self.native_ci.listen_scope(lambda: self.store.wait(committed, 0))
-                        if self.native_ci is not None and committed is not None else nullcontext())
-                    with ci_listener:
-                        # Subscribe before scanning. Notifications wake this owner;
-                        # leases and source-bound rows still authorize every action.
-                        while not self.stop.is_set():
-                            if self.run_once():
-                                continue
-                            if committed is not None:
-                                self.store.wait(committed, 5)
-                            else:
-                                self.stop.wait(5)
-            except Exception:
-                LOG.warning("Publication queue unavailable; no remote action replayed")
-            self.stop.wait(5)
+        # The intent drain runs on its own thread, concurrently with the
+        # verification loop: no run_once pass happens during a verification,
+        # so a run_once hook could never deliver build_started live.
+        if self.jenkins_drain is not None:
+            self.jenkins_drain.start(self.stop)
+        try:
+            while not self.stop.is_set():
+                try:
+                    listener = self.store.listen() if hasattr(self.store, "listen") else nullcontext(None)
+                    with listener as committed:
+                        ci_listener = (self.native_ci.listen_scope(lambda: self.store.wait(committed, 0))
+                            if self.native_ci is not None and committed is not None else nullcontext())
+                        with ci_listener:
+                            # Subscribe before scanning. Notifications wake this owner;
+                            # leases and source-bound rows still authorize every action.
+                            while not self.stop.is_set():
+                                if self.run_once():
+                                    continue
+                                if committed is not None:
+                                    self.store.wait(committed, 5)
+                                else:
+                                    self.stop.wait(5)
+                except Exception:
+                    LOG.warning("Publication queue unavailable; no remote action replayed")
+                self.stop.wait(5)
+        finally:
+            if self.jenkins_drain is not None:
+                # Bounded shutdown: finish the in-flight emit (bounded by the
+                # 4s/5s transaction bounds), start no new emission, exit. If
+                # the join times out the daemon thread is abandoned and the
+                # process exits; a stuck drain cannot delay the service stop
+                # past its bound (well inside TimeoutStopSec=45).
+                self.jenkins_drain.join(timeout=DRAIN_SHUTDOWN_TIMEOUT_SECONDS)
 
 
 class PublicationWorkerFactory:
@@ -283,6 +304,46 @@ class PublicationWorkerFactory:
         self.source_sync_factory = source_sync_factory
         self.repair_source_factory = repair_source_factory
 
+    def _jenkins_events(self):
+        """Build the validated emit-only Jenkins services for the lifecycle producer.
+
+        Validates the section against the deployment's JenkinsConfig at
+        construction time and refuses to start on a mismatch -- an
+        unauthorized instance or job is a startup failure, not a runtime
+        surprise. Returns (verification emitter, event lookup, instance
+        alias, drain emitter). The two services share only a connect
+        factory; each transaction opens its own connection, so no
+        connection is ever shared between the poll loop and the drain.
+        """
+        import psycopg2
+
+        section = self.config.jenkins_events
+        selected = jenkins_config.load_jenkins_config(str(section.config_path))
+        if selected is None:
+            raise ValueError("Jenkins events configuration is unavailable")
+        if selected.owner != self.config.worker.owner:
+            raise ValueError("Jenkins events owner does not match publication owner")
+        if section.instance not in selected.allowed_instances:
+            raise ValueError("Jenkins events instance is not allowed")
+        for alias in self.config.repositories:
+            if alias not in selected.allowed_projects:
+                raise ValueError("Jenkins events project is not allowed")
+        delivery = DeliveryConfig.parse(json.loads(read_private(self.config.jenkins_delivery_config)))
+        for alias in self.config.repositories:
+            if not selected.is_job_allowed(alias, delivery.jenkins_job):
+                raise ValueError("Jenkins events job is not allowed")
+        connect = lambda: psycopg2.connect(**section.database.connection_arguments())
+        verification = jenkins_api.create_jenkins_service(selected, connect, with_consumers=False)
+        drain = jenkins_api.create_jenkins_service(selected, connect, with_consumers=False)
+
+        def event_lookup(project_alias, job_name, commit_sha):
+            result = verification.list_events(jenkins_api.JenkinsEventsList(
+                project_alias=project_alias, job_name=job_name, commit_sha=commit_sha, limit=100))
+            return result.get("events", [])
+
+        return (InProcessJenkinsEmitter(verification), event_lookup, section.instance,
+                InProcessJenkinsEmitter(drain))
+
     def create(self):
         self.config.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.config.state_root.is_symlink() or self.config.state_root.stat().st_mode & 0o077:
@@ -295,8 +356,15 @@ class PublicationWorkerFactory:
         candidates = self.candidate_factory(self.config, git)
         pulls = self.pull_request_factory(self.config)
         native_ci = None
+        jenkins_drain = None
         if self.hosted_factory is None and self.config.hosted_provider == 'jenkins':
-            native_ci = self.native_jenkins_factory(self.config, store, git, candidates, supervisor, client=pulls, stop=self.stop)
+            emitter = event_lookup = jenkins_instance = drain_emitter = None
+            if self.config.jenkins_events is not None:
+                emitter, event_lookup, jenkins_instance, drain_emitter = self._jenkins_events()
+            native_ci = self.native_jenkins_factory(self.config, store, git, candidates, supervisor, client=pulls, stop=self.stop,
+                                                    emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance)
+            if drain_emitter is not None:
+                jenkins_drain = IntentDrain(native_ci.delivery.config.state_root / 'actions', drain_emitter)
             checks = hosted = native_ci
         else:
             checks = self.checks_factory(self.config, supervisor)
@@ -334,7 +402,8 @@ class PublicationWorkerFactory:
         return PublicationWorker(self.config, store, snapshots, git, checks,
                                  pulls, candidates=candidates,
                                  reviewer=reviewer, merger=merger, stop=self.stop, native_ci=native_ci,
-                                 post_merge=post_merge, source_observer=source_observer, release=release)
+                                 post_merge=post_merge, source_observer=source_observer, release=release,
+                                 jenkins_drain=jenkins_drain)
 
 
 def default_store_factory(config):

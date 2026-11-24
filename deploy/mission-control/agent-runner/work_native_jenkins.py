@@ -20,6 +20,7 @@ from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGa
 from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFactory,
     LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
+from work_jenkins_lifecycle import LifecycleTracker
 from work_publication_checks import VerificationFailure
 from work_publication_clients import PublicationError, branch_name
 from work_review import gate_source_digest
@@ -69,10 +70,18 @@ def native_check_accounting(commands, receipt):
 
 class NativeJenkinsVerification:
     def __init__(self, config, store, git, candidates, delivery, supervisor, *, client=None, stop=None,
-                 clock=time.monotonic, wait=None, timeout=3600, cleanup_timeout=45):
+                 clock=time.monotonic, wait=None, timeout=3600, cleanup_timeout=45,
+                 emitter=None, event_lookup=None, jenkins_instance=None):
         self.config, self.store, self.git, self.candidates = config, store, git, candidates
         self.delivery, self.supervisor = delivery, supervisor
         self.client = client
+        # The lifecycle emitter is injected by the publication worker factory
+        # from validated configuration. A verification constructed WITHOUT an
+        # emitter emits nothing; the projection reads stage_data_unavailable
+        # for its runs. The emitter is exposed so composition tests can prove
+        # the factory wired it; the poll loop itself only ever RECORDS intents
+        # through the tracker -- the drain thread owns delivery.
+        self.emitter, self.event_lookup, self.jenkins_instance = emitter, event_lookup, jenkins_instance
         self.contract = contract_for_config(delivery.config)
         self.version = binding_version(self.contract.profile)
         self.stop = stop if stop is not None else threading.Event()
@@ -557,10 +566,40 @@ class NativeJenkinsVerification:
                 checks=tuple({**check, 'status': 'not_run'} for check in report.checks))
         return report
 
+    def _lifecycle_tracker(self, binding):
+        """Build the per-run lifecycle tracker, or None when unconfigured.
+
+        The tracker records durable pending-emission intents only; it never
+        touches the database and cannot block the poll loop on a lock.
+        """
+        if self.emitter is None or self.jenkins_instance is None:
+            return None
+        request = binding['request']
+        tracker = LifecycleTracker(
+            self._directory(request['action_id']), action_id=request['action_id'],
+            project_alias=request['project_alias'], jenkins_instance=self.jenkins_instance,
+            job_name=self.delivery.config.jenkins_job,
+            commit_sha=request['candidate_commit'], event_lookup=self.event_lookup)
+        tracker.reconcile()
+        return tracker
+
+    def _record_cancellation(self, tracker, binding):
+        if tracker is None:
+            return
+        path = self._directory(binding['request']['action_id']) / 'cancel-observation.json'
+        if not path.exists():
+            return
+        try:
+            tracker.observe_cancelled(json.loads(read_private(path, owner=os.geteuid())))
+        except (OSError, ValueError):
+            LOG.warning('Lifecycle cancellation observation unreadable for action %s',
+                        binding['request']['action_id'])
+
     def run(self, job, repository, stop):
         if getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1':
             self.publish_source(job, repository, stop)
         binding = self._prepare(job, repository)
+        tracker = self._lifecycle_tracker(binding)
         deadline = self.clock() + self.timeout
 
         def require_lease():
@@ -574,6 +613,8 @@ class NativeJenkinsVerification:
                     raise LeaseLost('Native Jenkins wait deadline ended')
                 result = self.delivery.verify(binding['request'], require_lease)
                 durable_json(self._directory(binding['request']['action_id']) / 'observation.json', result)
+                if tracker is not None:
+                    tracker.observe(result)
                 if result['status'] in {'passed', 'failed'}:
                     report = self._report(binding, result)
                     if not report.cleanup_confirmed:
@@ -589,6 +630,7 @@ class NativeJenkinsVerification:
                 self.wait(2)
         except LeaseLost:
             cleanup = self._cancel_wait(binding)
+            self._record_cancellation(tracker, binding)
             result = {'status': 'failed', 'summary': 'Native Jenkins verification was cancelled or lost its lease.'}
             raise VerificationFailure('verification_timeout_or_cancelled' if cleanup else 'verification_scope_unstopped',
                 self._report(binding, result, code='verification_timeout_or_cancelled', cleanup=cleanup)) from None
@@ -599,6 +641,7 @@ class NativeJenkinsVerification:
             # imply that the remote process stopped. Retain cancellation intent
             # and require an actual queue/root-supervisor cleanup observation.
             cleanup = self._cancel_wait(binding)
+            self._record_cancellation(tracker, binding)
             result = {'status': 'failed', 'summary': 'Native Jenkins observation failed; scoped cleanup was requested.'}
             raise VerificationFailure('verification_process_unavailable' if cleanup else 'verification_scope_unstopped',
                 self._report(binding, result, code='verification_process_unavailable', cleanup=cleanup)) from None
@@ -748,7 +791,8 @@ class NativeJenkinsVerification:
 
 
 def create_native_jenkins(config, store, git, candidates, supervisor, *, client=None, stop=None,
-                          delivery_factory=DeliveryProviderFactory):
+                          delivery_factory=DeliveryProviderFactory, emitter=None, event_lookup=None,
+                          jenkins_instance=None):
     raw = json.loads(read_private(config.jenkins_delivery_config))
     selected = DeliveryConfig.parse(raw)
     contract = contract_for_config(selected)
@@ -770,4 +814,5 @@ def create_native_jenkins(config, store, git, candidates, supervisor, *, client=
             raise ValueError('Native Jenkins project scope changed')
     selected = replace(selected, state_root=config.state_root / 'native-ci')
     delivery = delivery_factory(selected).create()
-    return NativeJenkinsVerification(config, store, git, candidates, delivery, supervisor, client=client, stop=stop)
+    return NativeJenkinsVerification(config, store, git, candidates, delivery, supervisor, client=client, stop=stop,
+                                     emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance)

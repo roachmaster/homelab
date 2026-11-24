@@ -664,6 +664,10 @@ class TrustedDeliveryPort:
         receipt['queue_id'] = value.get('queue_id')
         if value['building']:
             return {'status': 'pending', 'receipt': receipt, 'summary': 'Jenkins is running the fixed verification gates.'}
+        # The Jenkins result is recorded for every finished build, not only
+        # the passed path: the lifecycle producer derives build_completed's
+        # build_result from it when no trusted receipt exists.
+        receipt['result'] = value['result']
         require_lease()
         result_file = self.config.results_root / (request['action_id'] + '.json')
         if not result_file.exists():
@@ -703,7 +707,6 @@ class TrustedDeliveryPort:
                     for index, (check, argv) in enumerate(zip(checks, plan.checks))))
         if (value['result'] == 'SUCCESS' and result.get('status') == 'passed'
                 and result.get('cleanup_confirmed') is True and complete):
-            receipt['result'] = 'SUCCESS'
             summary = ('All fixed Jenkins gates passed on the exact reviewed candidate.'
                 if plan.profile == LEGACY_PROFILE else
                 'Exact branch in-memory gates passed; browser/database were not run.' if plan.scope == 'branch' else

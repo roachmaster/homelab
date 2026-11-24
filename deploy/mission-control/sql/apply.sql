@@ -302,4 +302,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=33)
 \ir migrations/0033_superseding_reviews.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(33,'superseding_reviews');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=34) AS apply_0034
+\gset
+\if :apply_0034
+\ir migrations/0034_jenkins_stage_started.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(34,'jenkins_stage_started');
+\endif
 COMMIT;
