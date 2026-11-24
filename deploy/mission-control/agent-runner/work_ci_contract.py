@@ -68,6 +68,7 @@ V3_PROTECTED_PATHS = frozenset({
     'deploy/mission-control/agent-runner/work_superseding_review.py',
     'deploy/mission-control/agent-runner/work_retry_continuation.py',
     'deploy/mission-control/agent-runner/work_context_recovery.py',
+    'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py',
     'deploy/mission-control/sql/management/verify-retry-events.sql',
     'deploy/mission-control/sql/management/verify-delivery-lineage.sql',
     'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
