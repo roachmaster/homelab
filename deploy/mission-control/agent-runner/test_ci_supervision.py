@@ -6,6 +6,7 @@ import stat
 import socket
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -2441,14 +2442,38 @@ class PortalArtifactExportTest(unittest.TestCase):
             preexec_fn=lambda: os.umask(0o077))
         self.assertEqual(built.returncode, 0, built.stderr)
         host = args['layout'].target / 'release/forge-ide-web-host'
-        self.assertEqual(host.stat().st_nlink, 2, 'the regression must exercise actual Cargo hardlinks')
-        # Cargo 1.100 no longer creates release/deps/; the second hardlink is
-        # the build-unit artifact at release/build/<crate>/<hash>/out/.
+        host_stat = host.stat()
+        self.assertEqual(host_stat.st_nlink, 2, 'the regression must exercise actual Cargo hardlinks')
+        version_proc = subprocess.run([str(TOOLCHAIN / 'bin/cargo'), '--version'], env=environment,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        self.assertEqual(version_proc.returncode, 0, version_proc.stderr)
+        version_match = re.search(r'\bcargo\s+(\d+)\.(\d+)\b', version_proc.stdout)
+        self.assertIsNotNone(version_match, f'unable to parse cargo version from {version_proc.stdout!r}')
+        cargo_version = (int(version_match.group(1)), int(version_match.group(2)))
+        host_id = (host_stat.st_dev, host_stat.st_ino)
         release = args['layout'].target / 'release'
-        self.assertFalse((release / 'deps').exists(), 'cargo 1.100 dropped the deps layout')
-        aliases = list((release / 'build/forge-ide-web-host').glob('*/out/forge_ide_web_host'))
-        self.assertEqual(len(aliases), 1, 'exactly one cargo 1.100 alias')
-        self.assertEqual(aliases[0].stat().st_ino, host.stat().st_ino)
+        deps = release / 'deps'
+        deps_aliases = [
+            path for path in deps.iterdir()
+            if re.fullmatch(r'forge_ide_web_host-[0-9a-f]{16,64}', path.name)
+            and (path.lstat().st_dev, path.lstat().st_ino) == host_id
+        ] if deps.is_dir() else []
+        build_units = release / 'build/forge-ide-web-host'
+        build_aliases = [
+            path for path in build_units.glob('*/out/forge_ide_web_host')
+            if re.fullmatch(r'[0-9a-f]{16,64}', path.parents[1].name)
+            and (path.lstat().st_dev, path.lstat().st_ino) == host_id
+        ] if build_units.is_dir() else []
+        # Cargo >= 1.100 dropped release/deps/ and hardlinks to
+        # release/build/<crate>/<hex>/out/; Cargo < 1.100 uses release/deps/.
+        if cargo_version >= (1, 100):
+            self.assertFalse(deps.exists(), 'cargo >= 1.100 dropped the deps layout')
+            self.assertEqual(deps_aliases, [], 'cargo >= 1.100 should not emit deps aliases')
+            self.assertEqual(len(build_aliases), 1, 'exactly one cargo >= 1.100 build-unit alias')
+        else:
+            self.assertTrue(deps.is_dir(), 'cargo < 1.100 uses the deps layout')
+            self.assertEqual(len(deps_aliases), 1, 'exactly one cargo < 1.100 deps alias')
+            self.assertEqual(build_aliases, [], 'cargo < 1.100 should not emit build-unit aliases')
         with self.assertRaises(ValueError):
             CI.read_file(host, owner=os.getuid(), maximum=64 * 1024 * 1024)
         attestation = CI.seal_portal_artifacts(request, **args)
@@ -2486,6 +2511,136 @@ class PortalArtifactExportTest(unittest.TestCase):
                 with host.open('ab') as stream: stream.write(b'changed')
             return original_fstat(fd)
         with patch.object(CI.os, 'fstat', side_effect=changed_after_read), self.assertRaises(ValueError): read()
+
+    def test_fixed_cargo_1100_build_unit_alias_requires_exact_owned_layout_and_stable_metadata(self):
+        uid = os.getuid()
+        unit_hash = '0123456789abcdef'
+
+        def make_case(unit_name=unit_hash, *, link_alias=True):
+            temporary = tempfile.TemporaryDirectory(prefix='forge-portal-cargo1100-')
+            self.addCleanup(temporary.cleanup)
+            root = Path(temporary.name)
+            target = root / 'target'; target.mkdir(mode=0o755)
+            release = target / 'release'; release.mkdir(mode=0o755)
+            host = release / 'forge-ide-web-host'
+            host.write_bytes(b'owned isolated cargo 1.100 host'); host.chmod(0o755)
+            out = release / 'build' / 'forge-ide-web-host' / unit_name / 'out'
+            for directory in (release / 'build', release / 'build/forge-ide-web-host',
+                              release / 'build/forge-ide-web-host' / unit_name, out):
+                directory.mkdir(mode=0o755)
+            alias = out / 'forge_ide_web_host'
+            if link_alias:
+                os.link(host, alias)
+            return root, target, release, host, out, alias
+
+        # Succeeds when release/deps/ is absent.
+        _root, target, release, host, _out, _alias = make_case()
+        self.assertFalse((release / 'deps').exists())
+        self.assertEqual(CI.read_portal_host(target, owner=uid, maximum=1024), host.read_bytes())
+
+        # Succeeds when an unrelated release/deps/ directory exists with no matching alias.
+        deps = release / 'deps'; deps.mkdir(mode=0o755)
+        unrelated = deps / ('forge_ide_web_host-' + 'b' * 16)
+        unrelated.write_bytes(b'different inode'); unrelated.chmod(0o755)
+        other = deps / ('other_crate-' + 'c' * 16)
+        other.write_bytes(b'other crate'); other.chmod(0o644)
+        self.assertEqual(CI.read_portal_host(target, owner=uid, maximum=1024), host.read_bytes())
+
+        # Rejects foreign/third hardlink (st_nlink == 3) and missing alias (st_nlink == 2).
+        root, target, _release, host, _out, alias = make_case()
+        foreign = root / 'foreign'; os.link(host, foreign)
+        with self.assertRaises(ValueError):
+            CI.read_portal_host(target, owner=uid, maximum=1024)
+        alias.unlink()
+        with self.assertRaises(ValueError):
+            CI.read_portal_host(target, owner=uid, maximum=1024)
+
+        # Rejects non-hex or short unit directory names.
+        for bad_unit in ('not-a-hex-unit-dir', 'g' * 16, 'a' * 15):
+            with self.subTest(bad_unit=bad_unit):
+                _root, target, _release, _host, _out, _alias = make_case(unit_name=bad_unit)
+                with self.assertRaises(ValueError):
+                    CI.read_portal_host(target, owner=uid, maximum=1024)
+
+        # Rejects symlinks at every directory component and the leaf component.
+        for component in ('build', 'forge-ide-web-host', 'unit', 'out', 'forge_ide_web_host'):
+            with self.subTest(symlink_component=component):
+                temporary = tempfile.TemporaryDirectory(prefix='forge-portal-cargo1100-symlink-')
+                self.addCleanup(temporary.cleanup)
+                root = Path(temporary.name)
+                target = root / 'target'; target.mkdir(mode=0o755)
+                release = target / 'release'; release.mkdir(mode=0o755)
+                host = release / 'forge-ide-web-host'
+                host.write_bytes(b'owned isolated cargo 1.100 host'); host.chmod(0o755)
+                alt = root / 'alt'; alt.mkdir(mode=0o755)
+                if component == 'build':
+                    alt_out = alt / 'build/forge-ide-web-host' / unit_hash / 'out'
+                    alt_out.mkdir(parents=True, mode=0o755)
+                    os.link(host, alt_out / 'forge_ide_web_host')
+                    (release / 'build').symlink_to(alt / 'build')
+                elif component == 'forge-ide-web-host':
+                    (release / 'build').mkdir(mode=0o755)
+                    alt_out = alt / 'forge-ide-web-host' / unit_hash / 'out'
+                    alt_out.mkdir(parents=True, mode=0o755)
+                    os.link(host, alt_out / 'forge_ide_web_host')
+                    (release / 'build/forge-ide-web-host').symlink_to(alt / 'forge-ide-web-host')
+                elif component == 'unit':
+                    (release / 'build').mkdir(mode=0o755)
+                    (release / 'build/forge-ide-web-host').mkdir(mode=0o755)
+                    alt_out = alt / unit_hash / 'out'
+                    alt_out.mkdir(parents=True, mode=0o755)
+                    os.link(host, alt_out / 'forge_ide_web_host')
+                    (release / 'build/forge-ide-web-host' / unit_hash).symlink_to(alt / unit_hash)
+                elif component == 'out':
+                    (release / 'build').mkdir(mode=0o755)
+                    (release / 'build/forge-ide-web-host').mkdir(mode=0o755)
+                    (release / 'build/forge-ide-web-host' / unit_hash).mkdir(mode=0o755)
+                    alt_out = alt / 'out'
+                    alt_out.mkdir(mode=0o755)
+                    os.link(host, alt_out / 'forge_ide_web_host')
+                    (release / 'build/forge-ide-web-host' / unit_hash / 'out').symlink_to(alt_out)
+                else:
+                    out_dir = release / 'build/forge-ide-web-host' / unit_hash / 'out'
+                    out_dir.mkdir(parents=True, mode=0o755)
+                    os.link(host, root / 'foreign')
+                    (out_dir / 'forge_ide_web_host').symlink_to(host)
+                self.assertEqual(host.stat().st_nlink, 2)
+                with self.assertRaises(ValueError):
+                    CI.read_portal_host(target, owner=uid, maximum=1024)
+
+        # Rejects wrong owner (host/directory/fstat) and mid-read mutation.
+        _root, target, _release, host, out, _alias = make_case()
+        self.assertEqual(CI.read_portal_host(target, owner=uid, maximum=1024), host.read_bytes())
+        with self.assertRaises(ValueError):
+            CI.read_portal_host(target, owner=uid + 1, maximum=1024)
+        metadata = host.stat()
+        wrong_owner = SimpleNamespace(**{name: getattr(metadata, name) for name in (
+            'st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_mode', 'st_nlink')},
+            st_uid=uid + 1)
+        with patch.object(CI.os, 'fstat', return_value=wrong_owner), self.assertRaises(ValueError):
+            CI.read_portal_host(target, owner=uid, maximum=1024)
+        original_lstat = Path.lstat; saw_out = False
+        def wrong_out_owner(path):
+            nonlocal saw_out
+            info = original_lstat(path)
+            if path == out:
+                saw_out = True
+                return SimpleNamespace(**{name: getattr(info, name) for name in (
+                    'st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_mode', 'st_nlink')},
+                    st_uid=uid + 1)
+            return info
+        with patch.object(Path, 'lstat', wrong_out_owner), self.assertRaises(ValueError):
+            CI.read_portal_host(target, owner=uid, maximum=1024)
+        self.assertTrue(saw_out)
+        original_fstat = os.fstat; calls = []
+        def changed_after_read(fd):
+            calls.append(fd)
+            if len(calls) == 3:
+                with host.open('ab') as stream: stream.write(b'changed')
+            return original_fstat(fd)
+        with patch.object(CI.os, 'fstat', side_effect=changed_after_read), self.assertRaises(ValueError):
+            CI.read_portal_host(target, owner=uid, maximum=1024)
+        self.assertGreaterEqual(len(calls), 3)
 
     def test_hardlinked_build_output_never_becomes_root_artifact(self):
         request, args = self.fixture()
