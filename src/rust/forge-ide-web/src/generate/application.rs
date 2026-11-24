@@ -126,6 +126,10 @@ pub fn ide_document() -> Document {
                             component!(caption "agents-verification-counts", ""),
                             component!(text "agents-verification-check", ""),
                             component!(text "agents-verification-handoff", ""),
+                            component!(region "agents-verification-pipeline"; [
+                                component!(heading "agents-verification-pipeline-heading", "Pipeline"),
+                                component!(flow_diagram "agents-verification-pipeline-diagram", "Jenkins pipeline stage diagram"),
+                            ]),
                             component!(disclosure "agents-verification-details", "Findings and source details"; [
                                 component!(caption "agents-verification-source", ""),
                                 component!(caption "agents-verification-policy", ""),

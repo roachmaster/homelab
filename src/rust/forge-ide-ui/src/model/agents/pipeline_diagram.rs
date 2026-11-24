@@ -177,7 +177,7 @@ pub fn project_pipeline_diagram(view: &mut ViewModel, review: Option<&WorkReview
         return;
     };
     view.flow_diagrams.push(FlowDiagramBinding {
-        id: "agents-verification-pipeline",
+        id: "agents-verification-pipeline-diagram",
         track_label: "Pipeline".to_string(),
         current_badge: badge(review),
         summary: summary(review),

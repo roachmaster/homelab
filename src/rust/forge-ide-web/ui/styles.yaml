@@ -2782,7 +2782,7 @@
         - ["max-width", "48rem"]
 - media: "(prefers-reduced-motion:reduce)"
   rules:
-    - selector: ".fg-metric-card,.fg-metric-select,.fg-metric-refresh,.fg-metric-details>summary,.fg-metric-details>summary::after,#agents .fg-row-select"
+    - selector: ".fg-metric-card,.fg-metric-select,.fg-metric-refresh,.fg-metric-details>summary,.fg-metric-details>summary::after,#agents .fg-row-select,.fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after"
       declarations:
         - ["transition", "none"]
 
@@ -2872,7 +2872,7 @@
         - ["white-space", "pre-wrap"]
         - ["overflow-wrap", "anywhere"]
 
-    - selector: "#agents-stage-panel"
+    - selector: "#agents-stage-panel,#agents-verification-pipeline"
       declarations:
         - ["margin-block", "12px 16px"]
         - ["padding", "14px"]
@@ -2882,7 +2882,7 @@
         - ["display", "grid"]
         - ["gap", "10px"]
         - ["min-width", "0"]
-    - selector: "#agents-stage-heading"
+    - selector: "#agents-stage-heading,#agents-verification-pipeline-heading"
       declarations:
         - ["margin", "0"]
         - ["font-size", ".75rem"]
@@ -3208,7 +3208,7 @@
         - ["min-width", "0"]
 - media: "(max-width:639px)"
   rules:
-    - selector: "#agents-stage-panel"
+    - selector: "#agents-stage-panel,#agents-verification-pipeline"
       declarations:
         - ["padding", "12px"]
     - selector: ".fg-flow-track"
