@@ -1,4 +1,32 @@
-# Current: Continue verified peer feedback automatically — 2026-11-24
+# Current: Fix reviewer protocol and CLI transport causes — 2026-11-24
+
+The user requests finding and fixing the two actual review failures. Native
+diagram workflow3939 passed candidate CI, then its critic returned `revise`
+with approval-only attestations. Preserve that verdict and all findings; improve
+the prompt and request a new independently valid review through the existing
+bounded superseding-review provider. Do not normalize or accept invalid bytes.
+
+The external Postgres-proxy workflow8c300 exhausted its reviewer-correction
+event20/20 after CLI JSON transport parsing failures. The old offending bytes
+were not retained. Diagnose with a single bounded read-only supervised capture
+using a clearly separate diagnostic target; never apply its verdict or reset a
+live event. Require observed output and a discriminating regression before
+claiming a transport fix. Strict verdict/source parsing remains unchanged.
+
+After the qualified fix is active, the user's new instruction authorizes one
+explicit private operator recovery review of the exhausted external event.
+Preserve20/20, all original source artifacts and owners, and record the exception
+once through the existing receipt-bound recovery port. It is not another twenty
+automatic attempts. A genuine valid review may resolve the same exhausted event;
+a failed exception leaves it exhausted. No applied SQL edits or new public route.
+
+Root owns integration, exact-source checks, safe idle-worker rollout, publication
+and live proof. Native-review owner fixes the classifier/prompt; transport owner
+proves and fixes the CLI boundary; recovery owner implements the narrow private
+post-fix exception. Each writes a separate worktree. Keep Muse's other active
+work and all running review processes uninterrupted.
+
+# Previous: Continue verified peer feedback automatically — 2026-11-24
 
 The live superseding-review recovery ran Codex through its normal worker and
 obtained a valid `revise` verdict for the original stage-diagram candidate. Its
