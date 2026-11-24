@@ -977,10 +977,16 @@ class WorkflowStore:
                 cursor.execute('ROLLBACK TO SAVEPOINT workflow_action')
                 if isinstance(error,Rejected) and (error.code=='reconcile_required' or error.status>=500):return
                 self._escalate(cursor,w,'Peer review could not safely continue: '+(getattr(error,'code',None) or type(error).__name__))
-                diagnostics=None
-                if isinstance(error,PeerReviewError) and error.check is not None:
-                    diagnostics={"check":error.check,"detail":error.detail}
-                cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',diagnostics=%s,updated_at=clock_timestamp() WHERE workflow_review_id=%s",(Json(diagnostics) if diagnostics is not None else None,review['workflow_review_id']))
+                # The locked SELECT * row identifies whether this additive
+                # field is installed. Historical schemas still escalate safely
+                # without issuing SQL against a column they do not have.
+                if 'diagnostics' in review:
+                    diagnostics=None
+                    if isinstance(error,PeerReviewError) and error.check is not None:
+                        diagnostics={"check":error.check,"detail":error.detail}
+                    cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',diagnostics=%s,updated_at=clock_timestamp() WHERE workflow_review_id=%s",(Json(diagnostics) if diagnostics is not None else None,review['workflow_review_id']))
+                else:
+                    cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
                 return
             cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='completed',finish_token=%s,finish_receipt=%s,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE action_id=%s",(action['lease_token'],Json(receipt),action['action_id']))
 
