@@ -645,7 +645,24 @@ PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
 }
 
 
+# Reviewed branch-only compatibility correction. Historical maps remain literal
+# provenance; only these explicit current bytes may supersede their source pins.
+# M35 has not shipped on main. No applied migration or guard is qualified here.
+MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256 = {
+    'AGENT_WORK.md': 'b326136cb864717197f975644f96eff262c3a91c22b3f5f6f894a5320af5a84f',
+    'deploy/mission-control/agent-runner/test_superseding_review_schema.py': '40a5a4ce294461a8da7b16f330fb96d39c57953387d482f912a63a0b6839bc5a',
+    'deploy/mission-control/agent-runner/test_work_peer_diagnostics_schema.py': '6669fd97ab41d7408727c0b4c71e99d1cb8982c19894b8be9ef73e403b5a2024',
+    'deploy/mission-control/agent-runner/test_work_peer_replay.py': '1135bc2c298609a2bfb5c89754e815645d05af51d40b4fbcd36514b0d4efb653',
+    'deploy/mission-control/agent-runner/work_workflow.py': '94b72c6c0a0aed1c3f1ef2070743bbdd96470d4b207ac52a0b62b76b2528b2ff',
+    'deploy/mission-control/sql/management/verify-autonomy.sql': 'd4ea5e110f74934f3a8b7626b444436c2cf17cb7ae538c49aa65829beffc1c11',
+    'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '27ba8c6b9594fb0e607e60a551ea0aa4d15cf11809b077e1027c8e936da0b77f',
+    'deploy/mission-control/sql/migrations/0035_event_stream_peer_review_diagnostics.sql': 'bb30872c207b9dd7b510430dde93761567c03c46b72424b305025923c6c07957',
+}
+
+
 def qualified_source(relative, expected):
+    if relative in MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256:
+        return MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256[relative]
     return PIPELINE_DIAGRAM_CONTEXT_SHA256.get(relative, UI_STAGE_DIAGRAM_CONTEXT_SHA256.get(relative, REVIEW_PROTOCOL_CONTEXT_SHA256.get(relative, PEER_FEEDBACK_CONTEXT_SHA256.get(relative, SUPERSEDING_REVIEW_CONTEXT_SHA256.get(relative, LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))))))))
 
 STRICT_VERIFIER_FILES = {
@@ -780,7 +797,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 if '/migrations/' in relative or '/fragments/' in relative:
                     self.assertTrue(relative.endswith('0033_superseding_reviews.sql'))
                 actual = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
-                self.assertEqual(actual, expected if '/sql/' in relative else qualified_source(relative, expected))
+                self.assertEqual(actual, expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected))
         # The new context cannot qualify edits to any previously applied SQL.
         for pins in (EVENT_RETRY_CONTEXT_SHA256, LINEAGE_RETRY_CONTEXT_SHA256):
             for relative, expected in pins.items():
@@ -806,7 +823,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in REVIEW_PROTOCOL_CONTEXT_SHA256.items():
             with self.subTest(review_protocol_source=relative):
                 self.assertNotIn('/sql/', relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
         for pins in (EVENT_RETRY_CONTEXT_SHA256, LINEAGE_RETRY_CONTEXT_SHA256, SUPERSEDING_REVIEW_CONTEXT_SHA256):
             for relative, expected in pins.items():
                 if '/migrations/' in relative or '/fragments/' in relative:
@@ -831,6 +848,23 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     'docs/architecture/forge-post-merge-verification.md', 'docs/design/implementation-status.md'})
                 if '/migrations/' in relative:
                     self.assertTrue(relative.endswith('0034_jenkins_stage_started.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_muse_merge_compatibility_overlay_is_scoped_and_exact(self):
+        self.assertEqual(set(MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256), {
+            'AGENT_WORK.md',
+            'deploy/mission-control/agent-runner/test_superseding_review_schema.py',
+            'deploy/mission-control/agent-runner/test_work_peer_diagnostics_schema.py',
+            'deploy/mission-control/agent-runner/test_work_peer_replay.py',
+            'deploy/mission-control/agent-runner/work_workflow.py',
+            'deploy/mission-control/sql/management/verify-autonomy.sql',
+            'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
+            'deploy/mission-control/sql/migrations/0035_event_stream_peer_review_diagnostics.sql',
+        })
+        for relative, expected in MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256.items():
+            with self.subTest(muse_compatibility_source=relative):
+                if '/migrations/' in relative or '/fragments/' in relative:
+                    self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0035_event_stream_peer_review_diagnostics.sql')
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):

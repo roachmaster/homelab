@@ -1,4 +1,28 @@
-# Current: Fix reviewer protocol and CLI transport causes — 2026-11-24
+# Current: Reconcile feature/muse review-schema compatibility — 2026-11-24
+
+Fix the remaining py-agent-runner failures on feature/muse at e41db88, based on
+main dc1af267. Preserve main's tested superseding-review provider byte for byte:
+its parent remains escalated, recovery discovers escalated rows, and the
+49-character context-hash regression continues to expect escalated.
+
+Retain M33's source-binding constraint including review_generation and its
+canonical lineage guard. Reconcile the branch-only M35 correction path with
+that contract, keeping its final superseded status confined to that path.
+M35 is unmerged branch source; migrations 1–34 remain unchanged. Regenerate only
+the affected M35 catalog expectations and explicit changed-source pins.
+
+Persist optional peer diagnostics only when the trusted locked review row
+exposes that column. A schema32 workflow still records the ordinary escalation;
+schema35+ retains structured diagnostics. Use actual PostgreSQL regressions for
+both cases and the complete agent-runner suite without skipped cases.
+
+Root owns the feature/muse worktree, integration, task record, source pins,
+full-suite qualification and final branch commit. SQL and diagnostics writers
+use separate worktrees; an independent reader audits the merged contracts.
+No production migration, deployment, main merge or model invocation is part of
+this branch-only fix.
+
+# Previous: Fix reviewer protocol and CLI transport causes — 2026-11-24
 
 The user requests finding and fixing the two actual review failures. Native
 diagram workflow3939 passed candidate CI, then its critic returned `revise`
