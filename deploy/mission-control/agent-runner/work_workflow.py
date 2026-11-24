@@ -587,6 +587,13 @@ class WorkflowStore:
             except (ValueError,KeyError,TypeError):raise Rejected(409,'result_mismatch') from None
             defect=classify_verdict_defect(result['content'],target)
             if defect is not None:
+                # The selected canonical provider owns generation/event-budget
+                # accounting. Do not let this compatibility path preempt it or
+                # admit another correction after its event budget is exhausted.
+                # Historical configurations without retry events retain their
+                # one-shot correction; valid-verdict replay below is separate.
+                if self.superseding_review is not None and self.retry_events is not None:
+                    raise Rejected(409,'not_reviewable')
                 return self._correct_peer_verdict(cursor,w,review,task,critic,target,defect,
                     reviewer_attempt_id=reviewer_attempt_id,reviewer_result_sha256=reviewer_result_sha256,
                     correction_key=correction_key,correction_intent=correction_intent,validate_target=validate_review_target)

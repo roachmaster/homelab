@@ -356,6 +356,21 @@ class PeerVerdictCorrectionTest(unittest.TestCase):
             self.coordinator.store.retry_peer_verdict(
                 **{**request, "idempotency_key": "changed-correction-intent"})
 
+    def test_selected_canonical_provider_fences_alternate_correction(self):
+        author, _critic, _raw, review, request = self.escalate_with_defect()
+        service = WorkServiceFactory(self.config, lambda: self.cluster.connect("forge_agent")).create()
+        flow = service.workflow_worker.store
+        before = self.rows("SELECT to_jsonb(r) FROM forge_agent.coding_workflow_reviews r WHERE workflow_review_id=%s", (review[0],))
+        with self.assertRaises(Rejected) as rejected:
+            flow.retry_peer_verdict(**request)
+        self.assertEqual((rejected.exception.status, rejected.exception.code), (409, "not_reviewable"))
+        self.assertEqual(self.rows("SELECT to_jsonb(r) FROM forge_agent.coding_workflow_reviews r WHERE workflow_review_id=%s", (review[0],)), before)
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_reviews WHERE supersedes_review_id=%s", (review[0],)), [(0,)])
+        self.assertTrue(flow.superseding_review.recover())
+        self.assertEqual(self.rows("SELECT to_jsonb(r) FROM forge_agent.coding_workflow_reviews r WHERE workflow_review_id=%s", (review[0],)), before)
+        self.assertEqual(self.rows("SELECT review_generation,supersedes_workflow_review_id FROM forge_agent.coding_workflow_reviews WHERE supersedes_review_id=%s", (review[0],)), [(1, None)])
+        self.assertEqual(self.get(author.task_id)["workflow"]["phase"], "code_review")
+
     def test_main_generation_child_cannot_use_root_only_branch_correction(self):
         author, _critic, _raw, review, _request = self.escalate_with_defect()
         recovery_service = WorkServiceFactory(self.config, lambda: self.cluster.connect("forge_agent")).create()
