@@ -35,6 +35,7 @@ from work_peer_context import PeerReviewContext, WorkflowFeedbackContext
 from work_external_review_context import ExternalReviewContext,validate_target
 from work_peer_review import MAX_VERDICT_BYTES
 from work_worker_config import WorkerConfig, verify_recipe
+from work_cli_transport import CliTransportError, parse_record
 
 UNIT_RE = re.compile(r"forge-coding-[0-9a-f]{32}")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -323,15 +324,6 @@ class CliOutcome:
     fresh_session: bool = True
 
 
-def _json_object(pairs):
-    value = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError("Duplicate CLI event field")
-        value[key] = item
-    return value
-
-
 _BLOCKED_FAILURES = frozenset({"quota_blocked", "blocked_auth", "blocked_permission"})
 _FAILURE_PRIORITY = {
     "failed": 1,
@@ -511,6 +503,7 @@ class CliParser:
         self.backend = backend
         self.buffer = bytearray()
         self.stream_bytes = 0
+        self.record_ordinal = 0
         self.conversation_id = None
         self.response = ""
         self.usage = None
@@ -578,13 +571,15 @@ class CliParser:
                 self._record(record)
 
     def _record(self, record):
+        self.record_ordinal += 1
         try:
-            value = json.loads(record.decode("utf-8"), object_pairs_hook=_json_object,
-                               parse_constant=lambda _v: (_ for _ in ()).throw(ValueError("Invalid constant")))
-            if not isinstance(value, dict):
-                raise ValueError("Invalid CLI event")
-        except (UnicodeError, ValueError, RecursionError):
-            raise ExecutionError("failed", "The coding agent returned malformed machine output.") from None
+            value = parse_record(record, self.backend)
+        except CliTransportError as failure:
+            error = ExecutionError("failed", "The coding agent returned malformed machine output.")
+            error.transport_diagnostic = dict(version=1, backend=self.backend,
+                reason=failure.reason, path=failure.path, record_ordinal=self.record_ordinal,
+                record_byte_count=len(record), record_sha256=hashlib.sha256(record).hexdigest())
+            raise error from None
         if self.backend == "antigravity":
             self._antigravity(value)
         elif self.backend == "grok":
@@ -1046,11 +1041,23 @@ class SystemdSupervisor:
 class CommandRunnerProvider:
     """Selected factory that creates a fresh adapter/process scope per attempt."""
 
-    def __init__(self, config, supervisor, *, sessions=None, codex_sessions=None, popen=subprocess.Popen, clock=time.monotonic):
+    def __init__(self, config, supervisor, *, sessions=None, codex_sessions=None, popen=subprocess.Popen, clock=time.monotonic,
+                 transport_diagnostics=None):
         self.config, self.supervisor, self.popen, self.clock = config, supervisor, popen, clock
         self.sessions = sessions
         self.codex_sessions = codex_sessions
         self._binary_hashes = {}
+        if transport_diagnostics is not None and not callable(getattr(transport_diagnostics, 'report', None)):
+            raise TypeError('CLI diagnostics require a ready report port')
+        self.transport_diagnostics = transport_diagnostics
+
+    def _report_transport_failure(self, lease, error):
+        diagnostic = getattr(error, 'transport_diagnostic', None)
+        if self.transport_diagnostics is not None and diagnostic is not None:
+            try:
+                self.transport_diagnostics.report(lease, diagnostic)
+            except Exception:
+                LOG.warning('CLI structural diagnostics unavailable')
 
     def _session_provider(self, backend):
         if backend == "antigravity":
@@ -1566,6 +1573,7 @@ class CommandRunnerProvider:
                                     try:
                                         parser.feed(chunk, stderr=key.data == "error")
                                     except ExecutionError as error:
+                                        self._report_transport_failure(lease, error)
                                         errors.append(error)
                 try:
                     returncode = process.wait(timeout=15)
@@ -1639,6 +1647,9 @@ class CommandRunnerProvider:
                     return settled(CliOutcome("failed", "", parser.conversation_id, parser.usage,
                                               "Agent returned a result without a persisted public plan; submit a new attempt that reports its plan first.", proof))
                 return settled(outcome)
+        except ExecutionError as error:
+            self._report_transport_failure(lease, error)
+            raise
         except (OSError, subprocess.SubprocessError, SessionError):
             proof = self.supervisor.stop(lease["unit_name"])
             return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else "failed", "", None, None,

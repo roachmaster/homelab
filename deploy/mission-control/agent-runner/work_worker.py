@@ -27,6 +27,7 @@ from work_peer_context import PeerReviewContextProvider, PeerReviewCandidateSour
 from work_source_revision import SelectedSourceRevisionProvider
 from work_external_review_context import ExternalReviewContextProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
+from work_cli_transport import CliDiagnosticReporter
 
 LOG = logging.getLogger("forge-coding-worker")
 FEEDBACK_INTEGRITY_SUMMARY = "Review feedback integrity could not be verified; explicit review is required."
@@ -434,7 +435,8 @@ class CodingWorkerFactory:
                                    sessions=self.session_factory(config)
                                    if "antigravity" in config.binaries else None,
                                    codex_sessions=self.codex_session_factory(config)
-                                   if "codex" in config.binaries else None))
+                                   if "codex" in config.binaries else None,
+                                   transport_diagnostics=CliDiagnosticReporter(LOG)))
         self.workspace_factory = workspace_factory
         self.source_revision_factory = source_revision_factory
         self.external_context_factory = external_context_factory or (lambda store: ExternalReviewContextProvider(store,_workspace_git))
