@@ -379,7 +379,7 @@ class SupersedingReviewUpgradeIndependentTest(unittest.TestCase):
                 def snapshot():
                     return {
                         'source': fixture.authority(source, checks),
-                        'review': fixture.rows("SELECT to_jsonb(r)-'review_generation'-'supersedes_review_id' "
+                        'review': fixture.rows("SELECT to_jsonb(r)-'review_generation'-'supersedes_review_id'-'diagnostics'-'supersedes_workflow_review_id' "
                             'FROM forge_agent.coding_workflow_reviews r ORDER BY workflow_review_id'),
                         'artifact': fixture.artifact(critic),
                         'events': fixture.rows('SELECT to_jsonb(e) FROM forge_agent.coding_events e ORDER BY event_id'),
@@ -396,9 +396,9 @@ class SupersedingReviewUpgradeIndependentTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(), before)
                 self.assertEqual(fixture.rows('SELECT max(version) FROM forge_agent.schema_migrations'), [(37,)])
-                self.assertEqual(fixture.rows('SELECT review_generation,supersedes_review_id FROM '
+                self.assertEqual(fixture.rows('SELECT review_generation,supersedes_review_id,diagnostics,supersedes_workflow_review_id FROM '
                     'forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s',
-                    (critic.workflow_review_id,)), [(0, None)])
+                    (critic.workflow_review_id,)), [(0, None, None, None)])
                 replacement = fixture.following_reviewer(source)
                 self.assertIsNotNone(replacement)
                 self.assertEqual(fixture.artifact(critic)[-1], raw)
