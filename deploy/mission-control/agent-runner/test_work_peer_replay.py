@@ -10,7 +10,7 @@ from unittest.mock import patch
 from uuid import UUID
 
 from queue_store import Rejected
-from work_api import WorkCancel
+from work_api import WorkCancel, WorkServiceFactory
 from work_peer_review import PeerReviewError, parse_review_target, parse_review_verdict
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE
 import test_work_workflow as workflow_fixtures
@@ -338,6 +338,8 @@ class PeerVerdictCorrectionTest(unittest.TestCase):
         self.assertEqual(new[1:8], old_binding)
         self.assertEqual(new[10], old_id)
         self.assertNotEqual(new[9], target_sha256)
+        self.assertEqual(self.rows("SELECT review_generation,supersedes_review_id FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s", (old_id,)), [(0, None)])
+        self.assertEqual(self.rows("SELECT review_generation,supersedes_review_id FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s", (new_id,)), [(1, old_id)])
         workflow = self.rows("SELECT phase, enabled, escalation_reason FROM forge_agent.coding_workflows "
                              "WHERE workflow_id=%s", (new[1],))[0]
         self.assertEqual(workflow, ("code_review", True, ""))
@@ -353,6 +355,28 @@ class PeerVerdictCorrectionTest(unittest.TestCase):
         with self.assertRaises(Rejected):
             self.coordinator.store.retry_peer_verdict(
                 **{**request, "idempotency_key": "changed-correction-intent"})
+
+    def test_main_generation_child_cannot_use_root_only_branch_correction(self):
+        author, _critic, _raw, review, _request = self.escalate_with_defect()
+        recovery_service = WorkServiceFactory(self.config, lambda: self.cluster.connect("forge_agent")).create()
+        self.assertTrue(recovery_service.workflow_worker.store.superseding_review.recover())
+        self.assertTrue(self.coordinator.run_once())
+        child = self.rows("SELECT workflow_review_id,review_generation,supersedes_review_id,supersedes_workflow_review_id FROM forge_agent.coding_workflow_reviews WHERE supersedes_review_id=%s", (review[0],))[0]
+        self.assertEqual(child[1:], (1, review[0], None))
+        critic = self.claim("codex-v2")
+        self.assertIsNotNone(critic)
+        envelope = self.db.read_review_target(critic)
+        raw = self.defective_verdict(critic)
+        self.publish(critic, raw)
+        self.assertTrue(self.coordinator.run_once())
+        workflow_id = self.rows("SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s", (author.task_id,))[0][0]
+        count = self.rows("SELECT count(*) FROM forge_agent.coding_workflow_reviews WHERE workflow_id=%s", (workflow_id,))
+        with self.assertRaises(Rejected):
+            self.coordinator.store.retry_peer_verdict(project_alias="homelab", workflow_review_id=child[0],
+                expected_revision=self.get(author.task_id)["revision"], reviewer_attempt_id=UUID(critic.attempt_id),
+                reviewer_result_sha256=hashlib.sha256(raw.encode()).hexdigest(), target_sha256=envelope['target_sha256'],
+                idempotency_key="canonical-child-is-not-an-m35-root")
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_reviews WHERE workflow_id=%s", (workflow_id,)), count)
 
     def test_second_defect_from_superseding_row_does_not_correct_again(self):
         author, critic, raw, review, request = self.escalate_with_defect()

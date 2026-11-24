@@ -43,9 +43,15 @@ class SupersedingReviewSchemaTest(unittest.TestCase):
                     '-d', 'forge_agent', '-c', 'SET ROLE forge_agent_owner', '-f', SQL_DIR / 'management/grant-runner.sql')
                 self.malformed_review(cluster)
                 names = self.rows(cluster, "SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname<>'schema_migrations' ORDER BY 1,2")
+                def historical_rows(schema, name):
+                    projection = "to_jsonb(t)-'review_generation'-'supersedes_review_id'"
+                    if (schema, name) == ('forge_agent', 'coding_workflow_reviews'):
+                        projection += "-'diagnostics'-'supersedes_workflow_review_id'"
+                    return self.rows(cluster, "SELECT coalesce(jsonb_agg((" + projection + ") ORDER BY (" + projection + ")::text),'[]'::jsonb) FROM " + schema + '.' + name + ' t')
+
                 def snapshot():
                     return dict(
-                        rows={schema + '.' + name: self.rows(cluster, "SELECT coalesce(jsonb_agg((to_jsonb(t)-'review_generation'-'supersedes_review_id') ORDER BY (to_jsonb(t)-'review_generation'-'supersedes_review_id')::text),'[]'::jsonb) FROM " + schema + '.' + name + ' t') for schema, name in names},
+                        rows={schema + '.' + name: historical_rows(schema, name) for schema, name in names},
                         migrations=self.rows(cluster, 'SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=32 ORDER BY version'),
                         credentials=self.rows(cluster, 'SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r'),
                         defaults=self.rows(cluster, 'SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
@@ -56,13 +62,16 @@ class SupersedingReviewSchemaTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(), before)
                 self.assertEqual(self.rows(cluster, 'SELECT max(version) FROM forge_agent.schema_migrations'), [(37,)])
-                self.assertEqual(self.rows(cluster, 'SELECT DISTINCT review_generation,supersedes_review_id FROM forge_agent.coding_workflow_reviews'), [(0, None)])
+                self.assertEqual(self.rows(cluster, 'SELECT DISTINCT review_generation,supersedes_review_id,diagnostics,supersedes_workflow_review_id FROM forge_agent.coding_workflow_reviews'), [(0, None, None, None)])
             finally:
                 cluster.stop()
 
     def test_guard_pins_source_parent_generation_and_preserves_old_evidence(self):
         cluster = DisposablePostgresCluster().start()
         try:
+            self.assertEqual(self.rows(cluster, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='forge_agent.coding_workflow_reviews'::regclass AND conname='coding_workflow_reviews_workflow_id_target_kind_source_atte_key'"),
+                [('UNIQUE NULLS NOT DISTINCT (workflow_id, target_kind, source_attempt_id, source_review_id, review_generation)',)])
+            self.assertEqual(self.rows(cluster, "SELECT to_regclass('forge_agent.coding_workflow_reviews_source_binding_unique')"), [(None,)])
             source, critic, original = self.malformed_review(cluster)
             parent = self.rows(cluster, 'SELECT workflow_review_id,to_jsonb(r) FROM forge_agent.coding_workflow_reviews r WHERE reviewer_task_id=%s', (critic.task_id,))[0]
             insert = '''INSERT INTO forge_agent.coding_workflow_reviews(workflow_review_id,workflow_id,owner_id,project_alias,target_kind,source_task_id,source_attempt_id,source_result_sha256,source_revision,source_review_id,candidate_commit,gate_manifest_sha256,review_generation,supersedes_review_id)

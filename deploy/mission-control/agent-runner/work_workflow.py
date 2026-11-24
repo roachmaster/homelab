@@ -448,25 +448,35 @@ class WorkflowStore:
 
         The defective verdict is never applied. The old row keeps its target
         and verdict bytes untouched and only flips to 'superseded'; the new
-        row reuses the same source binding verbatim under a fresh target built
-        by the ordinary admission construction. Only a root row may be
+        row reuses the source binding at the next canonical generation, under
+        a fresh target built by ordinary admission. Only an M35 root may be
         superseded, enforced atomically under the row lock held by the caller.
         The repair budget is not consumed here: it still gates the revision
         that the fresh review may request.
         """
-        if review['supersedes_workflow_review_id'] is not None:
+        if ('supersedes_workflow_review_id' not in review
+            or review['supersedes_workflow_review_id'] is not None
+            or type(review.get('review_generation')) is not int
+            or review['review_generation'] != 0
+            or review.get('supersedes_review_id') is not None):
             raise Rejected(409,'not_reviewable')
         self._verify_peer_recovery_source(cursor,review['project_alias'],w,review,task,critic,target)
-        # Supersede first: the partial unique index frees the source binding
-        # for the new row in this same transaction.
-        cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='superseded',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
-        cursor.execute("""INSERT INTO forge_agent.coding_workflow_reviews(workflow_id,owner_id,project_alias,target_kind,source_task_id,source_attempt_id,source_result_sha256,source_revision,source_review_id,candidate_commit,gate_manifest_sha256,supersedes_workflow_review_id)
-          VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING workflow_review_id""",
-          (review['workflow_id'],review['owner_id'],review['project_alias'],review['target_kind'],review['source_task_id'],review['source_attempt_id'],review['source_result_sha256'],review['source_revision'],review['source_review_id'],review['candidate_commit'],review['gate_manifest_sha256'],review['workflow_review_id']))
+        # M33 validates the exact escalated parent and next generation at
+        # INSERT. Keep M35's terminal status change in this same transaction,
+        # after that canonical lineage proof; main's independent path stays
+        # escalated and does not enter this branch-only correction helper.
+        cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
+        generation=review['review_generation']+1
+        cursor.execute("""INSERT INTO forge_agent.coding_workflow_reviews(workflow_id,owner_id,project_alias,target_kind,source_task_id,source_attempt_id,source_result_sha256,source_revision,source_review_id,candidate_commit,gate_manifest_sha256,supersedes_workflow_review_id,review_generation,supersedes_review_id)
+          VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING workflow_review_id""",
+          (review['workflow_id'],review['owner_id'],review['project_alias'],review['target_kind'],review['source_task_id'],review['source_attempt_id'],review['source_result_sha256'],review['source_revision'],review['source_review_id'],review['candidate_commit'],review['gate_manifest_sha256'],review['workflow_review_id'],generation,review['workflow_review_id']))
         new_id=cursor.fetchone()['workflow_review_id']
+        cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='superseded',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
         cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,workflow_review_id,kind,source_key) VALUES(%s,%s,%s,%s,'review',%s) RETURNING action_id",(w['workflow_id'],self.store.owner,review['project_alias'],new_id,str(new_id)))
         review_action_id=cursor.fetchone()['action_id']
-        new_review=dict(review);new_review.update(workflow_review_id=new_id,target_json=None,target_sha256=None,reviewer_task_id=None,reviewer_attempt_id=None,reviewer_result_sha256=None,verdict_json=None,verdict_sha256=None,status='pending',diagnostics=None,supersedes_workflow_review_id=review['workflow_review_id'])
+        new_review=dict(review);new_review.update(workflow_review_id=new_id,target_json=None,target_sha256=None,reviewer_task_id=None,reviewer_attempt_id=None,reviewer_result_sha256=None,verdict_json=None,verdict_sha256=None,status='pending',supersedes_workflow_review_id=review['workflow_review_id'],review_generation=generation,supersedes_review_id=review['workflow_review_id'])
+        if 'diagnostics' in review:
+            new_review['diagnostics']=None
         # Un-escalate BEFORE admitting the fresh reviewer: the role grant
         # (coding_workflow_role_granted) only allows a workflow whose phase
         # is not completed/cancelled/escalated, so admitting while still
