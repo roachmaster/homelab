@@ -487,6 +487,7 @@ SUPERSEDING_REVIEW_CONTEXT_SHA256 = {'AGENT_WORK.md': '7bc6d4ee90235797dcbb0ab75
  'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '2022edb53c6347b2d498b6a8abbac8583e8ed92b7be0331bd2b1b2a297c5a237',
  'deploy/mission-control/agent-runner/test_muse_read_access.py': 'b05ffd90e71452efc62a0ef01d7fcce7581b2d5e792a442892285305ab016aba',
  'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'fca3c6b7c9cdeb22bde4af3bc91bd25b9b8725f7a0c9a352c0169abfb453e0a7',
+ 'deploy/mission-control/agent-runner/test_work_muse_intake.py': 'afef02c708f844467c734d8b9e02aac0b67f36a2d6e59a61bbade727086d7463',
  'deploy/mission-control/agent-runner/test_work_owner_fence.py': 'e8312f05f22e85d1bf11e4b44d2ac21d5b407fb8d17a79c545ed7c3c0fb1bfeb',
  'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '6224514db83428e9127eeccda3bc2c73aa08416a817e618d26ca2cf50d784a45',
  'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '5b445814289746635e888a1abb35da00d00453e08289f4f90c1a8709f984a749',
