@@ -34,6 +34,6 @@ BEGIN
   AND proowner='forge_agent_owner'::regrole AND prosecdef AND provolatile='v'
   AND proconfig=ARRAY['search_path=pg_catalog, pg_temp'] AND prorettype='jsonb'::regtype
   AND proacl=ARRAY['forge_agent_owner=X/forge_agent_owner','forge_agent=X/forge_agent_owner']::aclitem[]
-  AND encode(sha256(convert_to(prosrc,'UTF8')),'hex')='14f39088d8d664e6e07bc4ecc6ade62d8646dafdfd317acd5d47167a476ac016')
+  AND encode(sha256(convert_to(prosrc,'UTF8')),'hex')='1f066aa435653adda101786580e078739652e8c9fc5e87addb0ef32ed4582f3b')
  THEN RAISE EXCEPTION 'Shared retry amendment function drift';END IF;
 END;$verify$;
