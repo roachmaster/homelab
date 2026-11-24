@@ -7,6 +7,8 @@ credential or filesystem destination is accepted from build parameters.
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from http.client import HTTPConnection, HTTPException
 from pathlib import Path
 import ctypes
 import fcntl
@@ -25,7 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 
 CONFIG = Path('/etc/forge-ci/pipeline.json')
 MAX_SOURCE_BYTES = 128 * 1024 * 1024
@@ -236,6 +238,245 @@ def checks_for_scope(branch_scope, profile=LEGACY_PROFILE):
     if branch_scope == 'main':
         return SCOPED_MAIN_CHECKS, ('source preflight and make ci', 'make ui-qa', 'all backend suites')
     return SCOPED_BRANCH_CHECKS, ('source and Python preflight', 'make ci', 'in-memory backend')
+
+
+# Frozen logical check names per command index, mirroring CiGatePlan
+# (work_ci_contract.py). The verifier is standalone and never imports that
+# module; a contract test proves these tuples match it for every profile
+# and scope.
+CHECK_LOGICAL_NAMES = ('check', 'real-browser', 'pr-fast-gate')
+SCOPED_BRANCH_LOGICAL_NAMES = ('source-preflight', 'check', 'in-memory-backend')
+SCOPED_MAIN_LOGICAL_NAMES = ('check', 'real-browser', 'backend-suites')
+
+
+def logical_checks_for_scope(branch_scope, profile=LEGACY_PROFILE):
+    """Frozen logical check name per command index for the run's gate plan."""
+    if profile != SCOPED_PROFILE:
+        return CHECK_LOGICAL_NAMES
+    if branch_scope == 'main':
+        return SCOPED_MAIN_LOGICAL_NAMES
+    return SCOPED_BRANCH_LOGICAL_NAMES
+
+
+# --- Stage-event emission (pipeline diagram) ---------------------------------
+# Stdlib-only: the installed verifier MUST NOT import agent-runner modules.
+# Emission is additive observability ONLY: it writes events and changes no
+# check, no check order, no result, no verdict, and no gate semantics. An
+# emission failure is logged and NEVER fails or alters a check.
+STAGE_EVENT_JOB = 'forge-native-candidate'
+STAGE_EVENT_INSTANCE_DEFAULT = 'ci-primary'
+RUNNER_TOKEN_PATHS = (
+    Path('/run/credentials/forge-agent-runner.service/runner.token'),
+    Path('/etc/forge-ci/runner.token'),
+)
+RUNNER_DISPATCH_HOST = '127.0.0.1'
+RUNNER_DISPATCH_PORT = 18083
+STAGE_EMIT_TIMEOUT_SECONDS = 10.0
+STAGE_EMIT_MAX_ATTEMPTS = 2
+STAGE_EMIT_TOTAL_BUDGET_SECONDS = 30.0
+STAGE_EMIT_MAX_RESPONSE_BYTES = 64 * 1024
+STAGE_TOKEN_RE = re.compile(r'[a-fA-F0-9]{32,128}')
+STAGE_IDENTIFIER_RE = re.compile(r'[A-Za-z0-9_.-]{1,64}')
+STAGE_BUILD_NUMBER_RE = re.compile(r'[1-9][0-9]{0,9}')
+
+
+def _stage_canonical_json(value):
+    """Canonical JSON bytes, byte-identical to jenkins_events.canonical_json_bytes."""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False,
+                      separators=(',', ':')).encode('utf-8')
+
+
+def stage_delivery_id(action_id, stage_name, event_kind):
+    """Deterministic delivery id: a digest of (action, stage, kind).
+
+    Identical construction to work_jenkins_lifecycle.stage_delivery_id; the
+    emitter contract test proves the two agree byte-for-byte.
+    """
+    return hashlib.sha256(_stage_canonical_json(
+        {'scope': 'jenkins-stage-v1', 'action_id': action_id,
+         'stage_name': stage_name, 'event_kind': event_kind})).hexdigest()
+
+
+def _stage_log_stderr(line):
+    print(line, file=sys.stderr, flush=True)
+
+
+class StageEmitter:
+    """Best-effort stage-event emitter for one verification run.
+
+    Posts canonical event JSON to loopback /v1/dispatch with the dispatch
+    bearer token, read at emission time from the systemd credential path
+    (falling back to the setup-ci.py provisioned copy). The token is held
+    only in this process's memory, is never logged (failures log only the
+    event kind, stage, and HTTP status), and is never placed in any
+    child-process environment. Emission is bounded: at most 2 events per
+    stage, at most 2 attempts per event with a 10s per-attempt timeout,
+    and a 30s total emission budget per run -- emission can never stall
+    a check.
+    """
+
+    def __init__(self, *, action_id, project_alias, commit_sha, jenkins_instance,
+                 build_number, job_name, logical_names, token_paths=RUNNER_TOKEN_PATHS,
+                 host=RUNNER_DISPATCH_HOST, port=RUNNER_DISPATCH_PORT,
+                 timeout_seconds=STAGE_EMIT_TIMEOUT_SECONDS,
+                 max_attempts=STAGE_EMIT_MAX_ATTEMPTS,
+                 total_budget_seconds=STAGE_EMIT_TOTAL_BUDGET_SECONDS,
+                 connection_factory=HTTPConnection, clock=time.monotonic, log=None):
+        self._action_id = action_id
+        self._project_alias = project_alias
+        self._commit_sha = commit_sha
+        self._jenkins_instance = jenkins_instance
+        self._build_number = build_number
+        self._job_name = job_name
+        self._logical_names = tuple(logical_names)
+        self._token_paths = tuple(token_paths)
+        self._host, self._port = host, port
+        self._timeout, self._max_attempts = float(timeout_seconds), int(max_attempts)
+        self._budget = float(total_budget_seconds)
+        self._connection_factory = connection_factory
+        self._clock = clock
+        self._log = log if log is not None else _stage_log_stderr
+        self._elapsed = 0.0
+        self._budget_exhausted = False
+
+    def bind_log(self, log):
+        """Direct failure lines at the run log once it is open."""
+        self._log = log
+
+    def _read_token(self):
+        for path in self._token_paths:
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, 'r', encoding='utf-8') as stream:
+                    token = stream.read(256).strip()
+            except (OSError, UnicodeError, ValueError):
+                continue
+            if STAGE_TOKEN_RE.fullmatch(token):
+                return token
+        return None
+
+    def _post(self, payload, request_id, token):
+        headers = {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json',
+            'Forge-Envelope-Version': '1',
+            'Forge-Contract-Version': '1',
+            'Forge-Destination': 'ci.jenkins.event.emit',
+            'Forge-Request-Id': request_id,
+        }
+        started = self._clock()
+        try:
+            connection = self._connection_factory(self._host, self._port, timeout=self._timeout)
+            try:
+                connection.request('POST', '/v1/dispatch', body=payload, headers=headers)
+                response = connection.getresponse()
+                status = response.status
+                raw = response.read(STAGE_EMIT_MAX_RESPONSE_BYTES + 1)
+            finally:
+                connection.close()
+        except (OSError, HTTPException, TimeoutError):
+            return None, 'runner_unavailable'
+        finally:
+            self._elapsed += self._clock() - started
+        if len(raw) > STAGE_EMIT_MAX_RESPONSE_BYTES:
+            return status, 'invalid_runner_response'
+        try:
+            parsed = json.loads(raw.decode('utf-8'))
+        except (UnicodeDecodeError, ValueError):
+            return status, 'invalid_runner_response'
+        if (not isinstance(parsed, dict) or parsed.get('protocol_version') != 1
+                or not isinstance(parsed.get('event'), dict)
+                or parsed['event'].get('kind') != 'jenkins_event_emitted'
+                or parsed['event'].get('request_id') != request_id):
+            return status, 'invalid_runner_response'
+        if status != 202:
+            return status, 'emit_rejected'
+        return status, None
+
+    def _emit(self, event_kind, stage_name, stage_status=None):
+        # Emission must NEVER fail or alter a check: every failure path logs
+        # and swallows, including unexpected errors in the emit path itself.
+        try:
+            return self._emit_inner(event_kind, stage_name, stage_status)
+        except Exception as error:
+            self._log('FORGE_STAGE_EMIT_FAILED %s %s unexpected %s' % (
+                event_kind, stage_name, error.__class__.__name__))
+            return False
+
+    def _emit_inner(self, event_kind, stage_name, stage_status=None):
+        if self._budget_exhausted:
+            return False
+        if self._elapsed >= self._budget:
+            self._budget_exhausted = True
+            self._log('FORGE_STAGE_EMIT_FAILED budget_exhausted total budget exceeded')
+            return False
+        occurred_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        request_id = 'jk-' + str(uuid4())
+        wire = {
+            'kind': 'jenkins_event_emit', 'request_id': request_id,
+            'project_alias': self._project_alias, 'jenkins_instance': self._jenkins_instance,
+            'job_name': self._job_name,
+            'delivery_id': stage_delivery_id(self._action_id, stage_name, event_kind),
+            'event_kind': event_kind, 'occurred_at': occurred_at,
+            'summary': ('Stage %s started' % stage_name if stage_status is None
+                        else 'Stage %s completed: %s' % (stage_name, stage_status)),
+            'build_number': self._build_number, 'commit_sha': self._commit_sha,
+            'stage_name': stage_name,
+        }
+        if stage_status is not None:
+            wire['stage_status'] = stage_status
+        payload = _stage_canonical_json(wire)
+        for _attempt in range(self._max_attempts):
+            if self._elapsed >= self._budget:
+                self._budget_exhausted = True
+                self._log('FORGE_STAGE_EMIT_FAILED budget_exhausted total budget exceeded')
+                return False
+            token = self._read_token()
+            if token is None:
+                self._log('FORGE_STAGE_EMIT_FAILED %s %s token_unavailable' % (event_kind, stage_name))
+                return False
+            status, error = self._post(payload, request_id, token)
+            if error is None:
+                return True
+            self._log('FORGE_STAGE_EMIT_FAILED %s %s %s status=%s' % (
+                event_kind, stage_name, error, status if status is not None else 'none'))
+        return False
+
+    def emit_started(self, index):
+        if 0 <= index < len(self._logical_names):
+            self._emit('stage_started', self._logical_names[index])
+
+    def emit_completed(self, index, passed):
+        if 0 <= index < len(self._logical_names):
+            self._emit('stage_completed', self._logical_names[index],
+                       'success' if passed else 'failure')
+
+
+def build_stage_emitter(action, request, config):
+    """Build the run's stage emitter from validated identity, or (None, reason).
+
+    Build identity is read once from the verifier's OWN process environment
+    at startup, before any child process runs, and never re-read: a forged
+    BUILD_NUMBER in a child environment cannot influence the emitted
+    identity. Any validation failure disables emission (the checks still
+    run -- identity failure degrades the diagram, never the gate).
+    """
+    raw_build = os.environ.get('BUILD_NUMBER')
+    job_name = os.environ.get('JOB_NAME')
+    if (not isinstance(raw_build, str) or not STAGE_BUILD_NUMBER_RE.fullmatch(raw_build)
+            or not 1 <= int(raw_build) <= 2147483647):
+        return None, 'invalid BUILD_NUMBER'
+    if job_name != STAGE_EVENT_JOB:
+        return None, 'unexpected JOB_NAME'
+    instance = config.get('jenkins_instance', STAGE_EVENT_INSTANCE_DEFAULT)
+    if not isinstance(instance, str) or not STAGE_IDENTIFIER_RE.fullmatch(instance):
+        return None, 'invalid jenkins_instance'
+    logical_names = logical_checks_for_scope(request['branch_scope'], config['verification_profile'])
+    return StageEmitter(
+        action_id=action, project_alias=request['project_alias'],
+        commit_sha=request['candidate_commit'], jenkins_instance=instance,
+        build_number=int(raw_build), job_name=job_name,
+        logical_names=logical_names), None
 
 
 def profile_coverage(profile, branch_scope):
@@ -2879,6 +3120,14 @@ def _execute_locked(action, config, *, cache_port):
         candidate_commit=request['candidate_commit'],
         expected_main=request['expected_main'],
     )
+    # Stage-event identity is read once from this process's own environment
+    # here, before any child process runs; a forged value in a child
+    # environment can never influence the emitted identity. A construction
+    # failure disables emission, never the verification.
+    try:
+        stage_emitter, stage_emit_disabled = build_stage_emitter(action, request, config)
+    except Exception:
+        stage_emitter, stage_emit_disabled = None, 'emitter unavailable'
     bundle = read_file(directory / 'candidate.bundle', owner=submitter.pw_uid, maximum=MAX_SOURCE_BYTES)
     if hashlib.sha256(bundle).hexdigest() != request['bundle_sha256']:
         raise ValueError('CI bundle changed')
@@ -3089,6 +3338,14 @@ def _execute_locked(action, config, *, cache_port):
                     f'files={restore_outcome.restored_files} bytes={restore_outcome.restored_bytes}\n'
                 ).encode('utf-8'))
                 log.flush()
+                if stage_emitter is not None:
+                    def emit_log(line, _log=log):
+                        _log.write((line + '\n').encode('utf-8'))
+                        _log.flush()
+                    stage_emitter.bind_log(emit_log)
+                elif stage_emit_disabled is not None:
+                    log.write(('FORGE_STAGE_EMIT_DISABLED ' + stage_emit_disabled + '\n').encode('utf-8'))
+                    log.flush()
                 for index, argv in enumerate(active_checks):
                     remaining = config['timeout_seconds'] - (time.time() - started)
                     if remaining <= 0:
@@ -3096,6 +3353,8 @@ def _execute_locked(action, config, *, cache_port):
                         break
                     log.write(('FORGE_FIXED_CHECK_START ' + str(index) + '\n').encode())
                     log.flush()
+                    if stage_emitter is not None:
+                        stage_emitter.emit_started(index)
                     span_start = log.tell()
                     check_started = time.monotonic()
                     code = run_child(argv, cwd=source, env=environment, account=account,
@@ -3108,6 +3367,8 @@ def _execute_locked(action, config, *, cache_port):
                         f'FORGE_FIXED_CHECK_END {index} rc={code} elapsed_ms={check_elapsed_ms}\n'
                     ).encode('utf-8'))
                     log.flush()
+                    if stage_emitter is not None:
+                        stage_emitter.emit_completed(index, code == 0)
                     checks.append({'index': index, 'argv': list(argv), 'returncode': code})
                     stages.append({
                         'name': f'check_{index}',

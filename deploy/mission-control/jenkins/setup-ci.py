@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import pwd
+import re
 import shutil
 import stat
 import subprocess
@@ -29,6 +30,12 @@ DEFAULT_TIMEOUT_SECONDS = 2700
 DEFAULT_CARGO_CACHE_MAX_BYTES = 20 * 1024 * 1024 * 1024
 DEFAULT_CARGO_CACHE_MAX_ENTRIES = 8
 DEFAULT_CARGO_CACHE_MAX_AGE_SECONDS = 14 * 86400
+# Stage-event dispatch credential paths. Must match RUNNER_TOKEN_PATHS in
+# verify-candidate.py: the verifier reads the systemd credential path first
+# and falls back to the provisioned copy.
+RUNNER_TOKEN_SYSTEMD_PATH = Path('/run/credentials/forge-agent-runner.service/runner.token')
+RUNNER_TOKEN_COPY_PATH = CONFIG / 'runner.token'
+RUNNER_TOKEN_RE = re.compile(r'[a-fA-F0-9]{32,128}')
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -146,8 +153,10 @@ def selected_verification_profile(value):
 
 
 def render_pipeline_config(*, operator, spool, state_root, toolchain, registry, modules, verifier_sha256,
-                           verification_profile='forge-sdlc-jenkins-v2'):
+                           verification_profile='forge-sdlc-jenkins-v2', jenkins_instance='ci-primary'):
     verification_profile = selected_verification_profile(verification_profile)
+    if not isinstance(jenkins_instance, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', jenkins_instance):
+        raise ValueError('Invalid Jenkins events instance alias')
     return {
         'version': 1,
         'build_user': 'forge_ci',
@@ -160,6 +169,7 @@ def render_pipeline_config(*, operator, spool, state_root, toolchain, registry, 
         'node_modules': str(modules),
         'projects': ['homelab'],
         'verification_profile': verification_profile,
+        'jenkins_instance': jenkins_instance,
         'portal_artifact_export': verification_profile in {'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'},
         'timeout_seconds': DEFAULT_TIMEOUT_SECONDS,
         'verifier_sha256': verifier_sha256,
@@ -272,12 +282,37 @@ def execute_native(client_path, operator, *, verification_profile=None):
     install(selected['release'] / 'verify-candidate.py', selected['helper'], mode=0o755)
     install(selected['wrapper'], selected['helper'], mode=0o755)
     install(selected['config'], (json.dumps(selected['pipeline'], indent=2) + '\n').encode())
-    rule = b'jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-native-ci-check *\n'
+    # Command-scoped preservation for stage-event build identity ONLY: exactly
+    # BUILD_NUMBER and JOB_NAME survive sudo, for the native wrapper command
+    # alone. The legacy rule is untouched.
+    rule = (b'Defaults!/usr/local/libexec/forge-native-ci-check env_keep += "BUILD_NUMBER JOB_NAME"\n'
+            b'jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-native-ci-check *\n')
     staged = PRIVATE / 'sudoers-native-check'
     install(staged, rule, mode=0o440)
     subprocess.run(['/usr/sbin/visudo', '-cf', str(staged)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     install(Path('/etc/sudoers.d/forge-native-ci-check'), rule, mode=0o440)
+    # Stage-event credential requalification: the verifier (root via the pinned
+    # sudo rule) reads the dispatch bearer token from the runner's systemd
+    # credential path at emission time, falling back to a root-owned 0600 copy
+    # at /etc/forge-ci/runner.token. The install qualifies when either path
+    # holds a valid token; it fails closed when neither does -- the install
+    # cannot qualify stage emission, and a copy cannot be provisioned from an
+    # unreadable source.
+    stage_token_source = None
+    for candidate in (RUNNER_TOKEN_SYSTEMD_PATH, RUNNER_TOKEN_COPY_PATH):
+        try:
+            raw_token = candidate.read_text().strip()
+        except OSError:
+            continue
+        if RUNNER_TOKEN_RE.fullmatch(raw_token):
+            stage_token_source = ('systemd-credential' if candidate == RUNNER_TOKEN_SYSTEMD_PATH
+                                  else 'provisioned-copy')
+            break
+    if stage_token_source is None:
+        raise ValueError('Runner dispatch token is not readable from the verifier context; '
+                         'fix the runner credential path or provision a root-owned 0600 copy at '
+                         '/etc/forge-ci/runner.token')
     script = (HERE / 'native-ci-job.groovy').read_text()
     info = json.loads(request(client, 'scriptText', body=urllib.parse.urlencode({'script': script}).encode()))
     if (info.get('job') != selected['job'] or info.get('node') != 'forge-mission-control-ci'
@@ -289,6 +324,7 @@ def execute_native(client_path, operator, *, verification_profile=None):
         'pipeline': str(selected['config']), 'require_main_ancestor': True,
         'results_root': selected['pipeline'].get('results_root'),
         'portal_artifact_export': selected['pipeline']['portal_artifact_export'],
+        'stage_token_source': stage_token_source,
         'existing_job_unchanged': 'forge-exact-candidate', 'no_service_restarted': True,
         'no_job_submitted': True}
     install(PRIVATE / 'native-provisioned.json', (json.dumps(report, indent=2) + '\n').encode(), mode=0o600)
