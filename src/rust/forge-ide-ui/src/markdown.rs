@@ -6,12 +6,15 @@
 //! safety boundary for that site, so it follows three rules:
 //!
 //! - Only a fixed whitelist of tags is ever emitted: headings, paragraphs,
-//!   `strong`, `em`, `code`, `pre`, lists, blockquotes, `hr`, tables and
+//!   `strong`, `em`, `code`, `pre`, lists, blockquotes, `hr`, tables,
 //!   `a` with an `http` or `https` href and fixed attributes that open the
-//!   link in a new tab without opener or referrer access.
+//!   link in a new tab without opener or referrer access, and `img` with an
+//!   `http` or `https` src and an escaped `alt` attribute and no other
+//!   attributes.
 //! - All source text is HTML-escaped. Raw HTML in the source is escaped, never
 //!   passed through, so model output cannot create elements, event handlers
-//!   or scripts. Image syntax renders as its alt text, never an `img` element.
+//!   or scripts. Image syntax with a safe URL renders a fixed `<img>`
+//!   element; any other URL renders as its alt text.
 //! - Output is bounded. A rendering that would exceed its output budget returns
 //!   [`None`], leaving the original text available.
 //!
@@ -439,8 +442,9 @@ fn parse_chars(chars: &[char], out: &mut String, depth: usize, limit: usize) -> 
                 }
             },
             '!' if i + 1 < chars.len() && chars[i + 1] == '[' => {
-                // Images never become elements; render the alt text only.
-                match parse_image_alt(chars, i, out, depth, limit) {
+                // Safe URLs become a fixed <img> element; anything else
+                // renders the alt text only.
+                match parse_image(chars, i, out, depth, limit) {
                     Some(consumed) => i += consumed,
                     None => {
                         out.push('!');
@@ -585,9 +589,11 @@ fn parse_link(
     Some(end + 1 - i)
 }
 
-/// Parse `![alt](url)` at `i`, rendering only the alt text. Returns the
-/// characters consumed, or `None` when the text is not image syntax.
-fn parse_image_alt(
+/// Parse `![alt](url)` at `i`. A safe URL renders a fixed `<img>` element
+/// carrying only `src` and `alt`; any other URL renders the alt text.
+/// Returns the characters consumed, or `None` when the text is not image
+/// syntax.
+fn parse_image(
     chars: &[char],
     i: usize,
     out: &mut String,
@@ -599,7 +605,18 @@ fn parse_image_alt(
         return None;
     }
     let end = find_url_end(chars, close + 2)?;
-    if !parse_chars(&chars[i + 2..close], out, depth + 1, limit) {
+    let url: String = chars[close + 2..end].iter().collect();
+    if is_safe_url(&url) {
+        out.push_str("<img src=\"");
+        escape_str(&url, out);
+        out.push_str("\" alt=\"");
+        // Alt text is plain text in the attribute: escape the raw characters
+        // so no markup or quote can break out of it.
+        for c in &chars[i + 2..close] {
+            escape_char(*c, out);
+        }
+        out.push_str("\">");
+    } else if !parse_chars(&chars[i + 2..close], out, depth + 1, limit) {
         return None;
     }
     Some(end + 1 - i)
@@ -769,10 +786,38 @@ mod tests {
     }
 
     #[test]
-    fn images_render_as_alt_text_only() {
+    fn images_render_as_fixed_elements_for_safe_urls() {
         assert_eq!(
             render_markdown("![alt text](https://example.com/x.png)").as_deref(),
-            Some("<p>alt text</p>")
+            Some("<p><img src=\"https://example.com/x.png\" alt=\"alt text\"></p>")
+        );
+        // Unsafe schemes, data URIs and relative URLs fall back to alt text.
+        assert_eq!(
+            render_markdown("![alt](javascript:alert(1))").as_deref(),
+            Some("<p>alt</p>")
+        );
+        assert_eq!(
+            render_markdown("![alt](/relative/path.png)").as_deref(),
+            Some("<p>alt</p>")
+        );
+        assert_eq!(
+            render_markdown("![alt](data:image/png;base64,AAAA)").as_deref(),
+            Some("<p>alt</p>")
+        );
+        // Alt text is plain escaped text: quotes and markup cannot break out
+        // of the attribute or become elements.
+        assert_eq!(
+            render_markdown("![a\"b<c](https://example.com/x.png)").as_deref(),
+            Some("<p><img src=\"https://example.com/x.png\" alt=\"a&quot;b&lt;c\"></p>")
+        );
+        assert_eq!(
+            render_markdown("![**bold**](https://example.com/x.png)").as_deref(),
+            Some("<p><img src=\"https://example.com/x.png\" alt=\"**bold**\"></p>")
+        );
+        // Unterminated image syntax renders literally.
+        assert_eq!(
+            render_markdown("![alt](https://example.com/x.png").as_deref(),
+            Some("<p>![alt](https://example.com/x.png</p>")
         );
     }
 

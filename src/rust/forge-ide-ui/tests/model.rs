@@ -393,10 +393,12 @@ fn verified_markdown_preview_uses_whole_file_without_changing_raw_windows() {
     let html = markdown.rendered_html.as_deref().unwrap();
     assert!(html.contains("<h1>Title</h1>") && html.contains("<strong>Bold</strong>"));
     assert!(
-        html.contains("&lt;script&gt;alert(1)&lt;/script&gt;") && html.contains("unsafe diagram")
+        html.contains("&lt;script&gt;alert(1)&lt;/script&gt;")
+            && html.contains("unsafe")
+            && html.contains("<img src=\"https://example.com/p.png\" alt=\"diagram\">")
     );
     assert!(html.contains("<h2>Tail</h2>"));
-    assert!(!html.contains("<script") && !html.contains("<img") && !html.contains("href="));
+    assert!(!html.contains("<script") && !html.contains("href="));
     assert!(text.starts_with(&source.text) && !source.text.contains("## Tail"));
 
     let next = event(

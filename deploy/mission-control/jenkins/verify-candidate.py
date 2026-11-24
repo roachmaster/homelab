@@ -2944,7 +2944,10 @@ def build_portal_artifacts(config, *, source, environment, account, log, log_pat
 def read_portal_host(target, *, owner, maximum):
     """Read only Cargo's fixed host output after all build-user processes stopped.
 
-    Cargo links release/NAME to release/deps/NAME-HASH. This is a build-output
+    Cargo hardlinks release/NAME to exactly one owned alias: release/deps/
+    NAME-HASH before 1.100, and the build-unit artifact at
+    release/build/forge-ide-web-host/<HASH>/out/forge_ide_web_host from
+    1.100 on (which no longer creates release/deps/). This is a build-output
     exception, never an exception to the single-link authority/input reader.
     """
     release = target / 'release'
@@ -2968,20 +2971,55 @@ def read_portal_host(target, *, owner, maximum):
                 raise ValueError('Cargo host output changed before read')
             alias = None
             if before.st_nlink == 2:
-                deps = release / 'deps'
-                regular_directory(deps, owner=owner)
-                matches = []
-                for index, path in enumerate(deps.iterdir()):
-                    if index >= 65536:
-                        raise ValueError('Cargo dependency output bound exceeded')
-                    if not re.fullmatch(r'forge_ide_web_host-[0-9a-f]{16,64}', path.name):
-                        continue
+                def _present(path):
+                    try:
+                        path.lstat()
+                    except (FileNotFoundError, NotADirectoryError):
+                        return False
+                    return True
+
+                def _match_alias(path):
                     info = path.lstat()
-                    if (info.st_dev, info.st_ino) == (before.st_dev, before.st_ino):
-                        check(info)
-                        if identity(info) != identity(before):
-                            raise ValueError('Cargo host alias changed')
-                        matches.append(path)
+                    if (info.st_dev, info.st_ino) != (before.st_dev, before.st_ino):
+                        return False
+                    check(info)
+                    if identity(info) != identity(before):
+                        raise ValueError('Cargo host alias changed')
+                    return True
+
+                matches = []
+                # Cargo before 1.100 links release/NAME to release/deps/NAME-HASH.
+                deps = release / 'deps'
+                if _present(deps):
+                    regular_directory(deps, owner=owner)
+                    for index, path in enumerate(deps.iterdir()):
+                        if index >= 65536:
+                            raise ValueError('Cargo dependency output bound exceeded')
+                        if not re.fullmatch(r'forge_ide_web_host-[0-9a-f]{16,64}', path.name):
+                            continue
+                        if _match_alias(path):
+                            matches.append(path)
+                # Cargo 1.100 links release/NAME to the build-unit artifact and
+                # does not create release/deps/.
+                build = release / 'build'
+                if _present(build):
+                    regular_directory(build, owner=owner)
+                    units = build / 'forge-ide-web-host'
+                    if _present(units):
+                        regular_directory(units, owner=owner)
+                        for index, unit in enumerate(units.iterdir()):
+                            if index >= 65536:
+                                raise ValueError('Cargo build output bound exceeded')
+                            if not re.fullmatch(r'[0-9a-f]{16,64}', unit.name):
+                                continue
+                            regular_directory(unit, owner=owner)
+                            out = unit / 'out'
+                            if not _present(out):
+                                continue
+                            regular_directory(out, owner=owner)
+                            candidate = out / 'forge_ide_web_host'
+                            if _present(candidate) and _match_alias(candidate):
+                                matches.append(candidate)
                 if len(matches) != 1:
                     raise ValueError('Cargo host requires its exact owned dependency alias')
                 alias = matches[0]
