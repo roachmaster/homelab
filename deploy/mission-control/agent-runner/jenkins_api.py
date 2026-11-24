@@ -55,6 +55,14 @@ EMIT_OPTIONAL_KEYS = frozenset({
     "duration_ms",
     "build_url",
     "correlation_id",
+    # Fix 3 provenance: actor + the three flags + started_at ride the wire
+    # so a producer can emit backfilled/reconciled/estimated events; the
+    # DTO validates them (bool flags, actor format, started_at rules).
+    "actor",
+    "started_at",
+    "backfilled",
+    "reconciled",
+    "completion_time_estimated",
 })
 
 
@@ -272,6 +280,11 @@ def decode(route: Destination, correlation: str, body):
                 duration_ms=body.get("duration_ms"),
                 build_url=body.get("build_url"),
                 correlation_id=body.get("correlation_id"),
+                actor=body.get("actor"),
+                started_at=body.get("started_at"),
+                backfilled=body.get("backfilled", False),
+                reconciled=body.get("reconciled", False),
+                completion_time_estimated=body.get("completion_time_estimated", False),
             )
 
         if route is Destination.LIST and kind == "jenkins_events_list":

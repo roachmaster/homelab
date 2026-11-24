@@ -2822,7 +2822,10 @@ def append_progress(path, record):
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
     try:
         info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+        # The file must be owned by the verifier itself (root in production;
+        # the effective uid in a non-root run), never by the build user, so
+        # a candidate cannot forge or rewrite stage records.
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
                 or info.st_mode & 0o022 or info.st_nlink != 1):
             raise ValueError('Unsafe CI progress file')
         os.write(fd, (json.dumps(record, sort_keys=True) + '\n').encode('utf-8'))
