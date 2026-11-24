@@ -18,6 +18,7 @@ from usage_store import (
     validate_safe_error_code,
     validate_utc_rfc3339,
 )
+from work_events import CAUSES
 from work_config import (
     DIGEST_HEX_RE,
     VALID_BACKENDS,
@@ -507,14 +508,16 @@ class WorkerDB:
             )
             return dict(cursor.fetchone()[0])
 
-    def record_stop(self, lease, stop_proof, summary):
+    def record_stop(self, lease, stop_proof, summary, cause):
         attempt_id, attempt_token = _extract_attempt_creds(lease)
         sanitized_proof = _validate_stop_proof(stop_proof, require_stopped=False)
         sanitized_summary = _validate_summary(summary)
+        if cause not in CAUSES["needs_reconcile"]:
+            raise ValueError(f"invalid stop cause: {cause!r}")
         with self._worker_cursor() as cursor:
             cursor.execute(
-                "SELECT forge_coding_worker_api.record_stop(%s, %s, %s, %s)",
-                (attempt_id, attempt_token, Json(sanitized_proof), sanitized_summary),
+                "SELECT forge_coding_worker_api.record_stop(%s, %s, %s, %s, %s)",
+                (attempt_id, attempt_token, Json(sanitized_proof), sanitized_summary, cause),
             )
 
     def cancellation_requested(self, lease):

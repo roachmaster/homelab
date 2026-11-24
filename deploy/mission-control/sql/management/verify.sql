@@ -636,7 +636,7 @@ BEGIN
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.queue_publication(uuid,uuid,uuid)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.append_result(uuid,uuid,integer,text)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.publish(uuid,uuid,text,jsonb,jsonb,text,jsonb)', 'EXECUTE')
-           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.record_stop(uuid,uuid,jsonb,text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.record_stop(uuid,uuid,jsonb,text,text)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.cancellation_requested(uuid,uuid)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.begin_usage_poll(text)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.next_refresh()', 'EXECUTE')

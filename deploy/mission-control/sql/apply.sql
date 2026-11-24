@@ -308,4 +308,16 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=34)
 \ir migrations/0034_jenkins_stage_started.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(34,'jenkins_stage_started');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=35) AS apply_0035
+\gset
+\if :apply_0035
+\ir migrations/0035_event_stream_peer_review_diagnostics.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(35,'event_stream_peer_review_diagnostics');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=36) AS apply_0036
+\gset
+\if :apply_0036
+\ir migrations/0036_event_stream_actor_cause.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(36,'event_stream_actor_cause');
+\endif
 COMMIT;
