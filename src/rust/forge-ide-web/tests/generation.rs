@@ -1078,9 +1078,11 @@ fn flow_diagram_component_validates_renders_deterministically_and_clears_on_tear
         "<section id=\"agents-stage-diagram\" class=\"fg-flow-diagram\" aria-label=\"Task event-stream stage diagram\"></section>"
     ));
     assert!(css.contains(".fg-flow-track"));
+    assert!(css.contains(".fg-flow-hop-exact"));
     assert!(css.contains("@media (max-width:639px)"));
     assert!(css.contains(".fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after"));
     assert!(main.contains("function renderFlowDiagram(binding)"));
+    assert!(main.contains("fg-flow-hop-exact"));
     assert!(main.contains(".fg-flow-diagram"));
     assert!(main.contains("flowDiagramViews=new WeakMap()"));
     assert!(worker.contains("wasm.abi_version()!==15"));

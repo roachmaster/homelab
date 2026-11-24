@@ -471,6 +471,9 @@ function renderFlowDiagram(binding){
         const state=document.createElement('span');if(hop.badge)paintBadge(state,hop.badge);
         const time=document.createElement('time');time.className='fg-flow-time';if(hop.time)paintTime(time,hop.time);
         row.append(seq,state,time);
+        if(hop.time?.exact&&hop.time.exact!==hop.time.label){
+          const exact=document.createElement('code');exact.className='fg-flow-hop-exact';exact.textContent=hop.time.exact;row.append(exact);
+        }
         if(hop.detail){
           const detail=document.createElement('span');detail.className='fg-flow-hop-detail';detail.textContent=hop.detail;row.append(detail);
         }

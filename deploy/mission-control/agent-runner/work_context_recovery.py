@@ -220,4 +220,4 @@ class FeedbackRecoveryFactory:
     flow: object
 
     def create(self):
-        return FeedbackRecovery(self.flow) if self.flow.config.project_workflows else None
+        return FeedbackRecovery(self.flow) if getattr(self.flow.config, 'project_workflows', None) else None

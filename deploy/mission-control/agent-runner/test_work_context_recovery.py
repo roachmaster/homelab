@@ -183,6 +183,8 @@ class FeedbackRecoveryFactoryTest(unittest.TestCase):
         flow = Mock()
         flow.config.project_workflows = {}
         self.assertIsNone(FeedbackRecoveryFactory(flow).create())
+        flow.config = None
+        self.assertIsNone(FeedbackRecoveryFactory(flow).create())
 
     def test_selected_ready_provider_is_injected_without_effects(self):
         config = Mock()

@@ -249,12 +249,15 @@ impl StageTrace {
         task: &WorkTaskDetail,
         event: &WorkLogEvent,
     ) -> Option<(StageKey, BadgeView, bool, String)> {
-        // Strict provenance checks matching history.rs.
+        // Strict provenance checks matching history.rs. Linked workflow tasks
+        // (reviewer / repair child tasks) follow their own task lifecycle rather
+        // than the parent workflow's phase track.
         if let Some(p) = event.workflow_progress.as_ref() {
-            if task
-                .workflow
-                .as_ref()
-                .is_some_and(|w| w.workflow_id == p.workflow_id)
+            if is_workflow_root_task(task)
+                && task
+                    .workflow
+                    .as_ref()
+                    .is_some_and(|w| w.workflow_id == p.workflow_id)
             {
                 let stage = workflow_phase_key(p.phase);
                 let hop_badge = workflow_phase_badge(p.phase);
@@ -294,7 +297,7 @@ impl StageTrace {
                 .map(|p| compact_note(&p.summary))
                 .or_else(|| verified_native.map(|p| compact_note(&p.summary)))
                 .unwrap_or_default();
-            if task.workflow.is_some() {
+            if is_workflow_root_task(task) && task.workflow.is_some() {
                 let stage = match self.last_hop_stage {
                     Some(StageKey::WorkflowPlanRevision) => StageKey::WorkflowPlanRevision,
                     Some(StageKey::WorkflowRepair) => StageKey::WorkflowRepair,
@@ -392,6 +395,30 @@ impl Agents {
     }
 }
 
+/// Linked workflow reviewer tasks carry the shared parent `workflow` projection
+/// from the backend (`workflow_id` / `forge_external_workflow.tasks`), but own
+/// their own `Queued -> Running -> Ready for review -> Accepted/Review complete`
+/// lifecycle rather than the parent workflow's phase track.
+fn is_linked_reviewer_task(task: &WorkTaskDetail) -> bool {
+    (task.workflow.is_some() || task.workflow_required)
+        && (task.mode == WorkMode::Review
+            || task.workflow.as_ref().is_some_and(|w| {
+                w.reviewer_task_id.as_deref() == Some(task.task_id.as_str())
+                    || task.agent_profile == w.reviewer_profile
+            }))
+}
+
+fn is_linked_repair_task(task: &WorkTaskDetail) -> bool {
+    task.review
+        .as_ref()
+        .and_then(|r| r.parent_task_id.as_ref())
+        .is_some()
+}
+
+fn is_workflow_root_task(task: &WorkTaskDetail) -> bool {
+    !is_linked_reviewer_task(task) && !is_linked_repair_task(task)
+}
+
 fn build_diagram(
     task: &WorkTaskDetail,
     trace: &StageTrace,
@@ -399,7 +426,11 @@ fn build_diagram(
     events_more: bool,
     now_ms: u64,
 ) -> FlowDiagramBinding {
-    let mut binding = if let Some(workflow) = task.workflow.as_ref() {
+    let mut binding = if is_linked_reviewer_task(task) {
+        build_standalone_simple_diagram(task, trace, events_loaded, events_more, now_ms)
+    } else if is_linked_repair_task(task) {
+        build_standalone_implement_diagram(task, trace, events_loaded, events_more, now_ms)
+    } else if let Some(workflow) = task.workflow.as_ref() {
         build_workflow_diagram(task, workflow, trace, events_loaded, events_more, now_ms)
     } else if task.workflow_required {
         build_degraded_workflow_diagram(task, trace, events_loaded, events_more, now_ms)
@@ -412,13 +443,15 @@ fn build_diagram(
         build_standalone_simple_diagram(task, trace, events_loaded, events_more, now_ms)
     };
 
-    // Append post-merge delivery continuation whenever present on a completed/merged task.
+    // Append post-merge delivery continuation whenever present on a completed/merged
+    // root task (never attach parent delivery stages onto a linked child task).
     let delivery_active = task.delivery.as_ref().filter(|_| {
-        task.status == WorkStatus::Completed
-            || task
-                .workflow
-                .as_ref()
-                .is_some_and(|w| w.phase == WorkWorkflowPhase::Completed)
+        is_workflow_root_task(task)
+            && (task.status == WorkStatus::Completed
+                || task
+                    .workflow
+                    .as_ref()
+                    .is_some_and(|w| w.phase == WorkWorkflowPhase::Completed))
     });
     if let Some(delivery) = delivery_active {
         append_delivery_stages(&mut binding, delivery, now_ms);
@@ -1038,7 +1071,12 @@ fn build_standalone_implement_diagram(
 
     FlowDiagramBinding {
         id: "agents-stage-diagram",
-        track_label: "Implement task".into(),
+        track_label: if is_linked_repair_task(task) {
+            "Linked repair task"
+        } else {
+            "Implement task"
+        }
+        .into(),
         current_badge,
         summary: String::new(),
         nodes,
@@ -1057,8 +1095,11 @@ fn build_standalone_simple_diagram(
     now_ms: u64,
 ) -> FlowDiagramBinding {
     let external = task.external_result.is_some() && task.attempt.is_none();
+    let linked_reviewer = is_linked_reviewer_task(task);
     let track_label = if external {
         "External Muse task"
+    } else if linked_reviewer {
+        "Linked review task"
     } else {
         match task.mode {
             WorkMode::Plan => "Plan task",
@@ -1072,7 +1113,9 @@ fn build_standalone_simple_diagram(
     } else {
         "Running"
     };
-    let done_label = if task.mode == WorkMode::Review && task.status == WorkStatus::Completed {
+    let done_label = if (task.mode == WorkMode::Review || linked_reviewer)
+        && task.status == WorkStatus::Completed
+    {
         "Review complete"
     } else {
         "Accepted"
@@ -1191,7 +1234,9 @@ fn build_standalone_simple_diagram(
         }
     }
 
-    let current_badge = if task.mode == WorkMode::Review && task.status == WorkStatus::Completed {
+    let current_badge = if (task.mode == WorkMode::Review || linked_reviewer)
+        && task.status == WorkStatus::Completed
+    {
         badge("Review complete", BadgeTone::Success)
     } else {
         task_badge(task.status)

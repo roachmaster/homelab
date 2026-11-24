@@ -3510,6 +3510,8 @@ async function agentsJourney() {
     const stageTrace=page.locator('#agents-stage-diagram details.fg-flow-trace');
     await stageTrace.locator('summary').focus();await page.keyboard.press('Enter');
     await check(stageTrace).toHaveJSProperty('open',true);
+    await check(stageTrace.locator('.fg-flow-hop-exact').first()).toBeVisible();
+    await check(stageTrace.locator('.fg-flow-hop-exact').first()).toHaveText('2026-11-19T18:00:00Z');
     const stageTraceNode=await stageTrace.elementHandle();
     const eventDetails=page.locator('#agents-history > li').first().locator('details');
     await eventDetails.locator('summary').focus();await page.keyboard.press('Enter');
@@ -3580,6 +3582,14 @@ async function agentsJourney() {
       },width<640),true,'stage track stacks vertically on phones and flows horizontally on desktop');
     }
     await page.setViewportSize({width:390,height:844});
+    // Verify touch-target sizing and direct tap/click toggle on phone without hover.
+    assert.equal(await stageTrace.locator('summary').evaluate(node=>node.getBoundingClientRect().height>=44),true,'stage trace disclosure meets 44px touch target');
+    await stageTrace.locator('summary').click();
+    await check(stageTrace).toHaveJSProperty('open',false);
+    await stageTrace.locator('summary').click();
+    await check(stageTrace).toHaveJSProperty('open',true);
+    await check(stageTrace.locator('.fg-flow-hop-exact').first()).toBeVisible();
+    await check(stageTrace.locator('.fg-flow-hop-exact').first()).toHaveText('2026-11-19T18:00:00Z');
     await page.locator('#agents-history-panel').scrollIntoViewIfNeeded();
     await screenshot(page,'ide-agents-event-history.png');
     await page.locator('#agents-back').click();
@@ -3614,6 +3624,13 @@ async function agentsJourney() {
         await linkedEvent.locator('.fg-timeline-related').click();
         await check(page.locator('#agents-task-title')).toHaveText('Independent external workflow review');
         await check(page.locator('#agents-workflow-reviewer')).toBeHidden();
+        await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Linked review task');
+        assert.deepEqual(
+          await page.locator('#agents-stage-diagram .fg-flow-node .fg-flow-label').allTextContents(),
+          ['Queued','Running','Ready for review','Accepted'],
+          'linked reviewer task renders its own review track instead of parent workflow phases',
+        );
+        await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Ready for review');
         await page.locator('#agents-back').click();
         await check(page.locator('#agents-tasks')).not.toContainText('Independent external workflow review');
         await page.locator(`#agents-tasks [data-row-id="${externalWorkflowTask}"] .fg-row-select`).click();

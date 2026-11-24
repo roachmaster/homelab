@@ -822,3 +822,171 @@ fn repair_checkpoints_stay_attributed_to_repair_and_refresh_active_timestamp() {
         Some(repair_time)
     );
 }
+
+#[test]
+fn linked_reviewer_task_uses_own_track_across_queued_running_awaiting_and_completed_states() {
+    let make_reviewer = |status: WorkStatus,
+                         kind: WorkWorkflowKind,
+                         parent_phase: WorkWorkflowPhase,
+                         active_reviewer_id: bool| {
+        let mut task = detail(status);
+        task.mode = WorkMode::Review;
+        task.agent_profile = "codex-primary".into();
+        task.workflow_required = true;
+        let mut wf = workflow_summary(kind, parent_phase);
+        if active_reviewer_id {
+            wf.reviewer_task_id = Some(task.task_id.clone());
+        }
+        task.workflow = Some(wf);
+        task
+    };
+
+    // 1. Queued reviewer while parent workflow is in CodeReview
+    let mut agents = reader_with(make_reviewer(
+        WorkStatus::Queued,
+        WorkWorkflowKind::Native,
+        WorkWorkflowPhase::CodeReview,
+        false,
+    ));
+    agents.events_loaded = true;
+    agents.fold_stage_events(&[raw_event(1, WorkEventKind::Queued)]);
+    let diagram = project_diagram(&agents);
+    assert_eq!(diagram.track_label, "Linked review task");
+    let labels: Vec<&str> = diagram.nodes.iter().map(|n| n.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        vec!["Queued", "Running", "Ready for review", "Accepted"]
+    );
+    let current = diagram.nodes.iter().find(|n| n.current).unwrap();
+    assert_eq!(current.label, "Queued");
+    assert_eq!(current.state, FlowStageState::Current);
+    assert_eq!(diagram.current_badge, badge("Queued", BadgeTone::Neutral));
+
+    // 2. Running reviewer with native checkpoint while parent workflow is in CodeReview
+    let mut agents = reader_with(make_reviewer(
+        WorkStatus::Running,
+        WorkWorkflowKind::ExternalDatabase,
+        WorkWorkflowPhase::CodeReview,
+        true,
+    ));
+    agents.events_loaded = true;
+    let mut checkpoint = raw_event(3, WorkEventKind::Checkpoint);
+    checkpoint.progress = Some(WorkProgress {
+        attempt_id: ATTEMPT.into(),
+        sequence: 1,
+        stage: WorkProgressStage::Progress,
+        summary: "Inspecting candidate diff".into(),
+    });
+    checkpoint.progress_verified = true;
+    agents.fold_stage_events(&[
+        raw_event(1, WorkEventKind::Queued),
+        raw_event(2, WorkEventKind::Started),
+        checkpoint,
+    ]);
+    let diagram = project_diagram(&agents);
+    assert_eq!(diagram.track_label, "Linked review task");
+    let current = diagram.nodes.iter().find(|n| n.current).unwrap();
+    assert_eq!(current.label, "Running");
+    assert_eq!(current.state, FlowStageState::Current);
+    assert_eq!(current.detail, "Running · #2–#3");
+    assert_eq!(diagram.current_badge, badge("Running", BadgeTone::Accent));
+    assert_eq!(diagram.trace_hops.len(), 2);
+    assert_eq!(diagram.trace_hops[1].sequence_label, "#2–#3");
+
+    // 3. AwaitingReview reviewer while parent workflow is in CodeReview
+    let mut agents = reader_with(make_reviewer(
+        WorkStatus::AwaitingReview,
+        WorkWorkflowKind::ExternalDatabase,
+        WorkWorkflowPhase::CodeReview,
+        true,
+    ));
+    agents.events_loaded = true;
+    agents.fold_stage_events(&[
+        raw_event(1, WorkEventKind::Queued),
+        raw_event(2, WorkEventKind::Started),
+        raw_event(3, WorkEventKind::AwaitingReview),
+    ]);
+    let diagram = project_diagram(&agents);
+    assert_eq!(diagram.track_label, "Linked review task");
+    let current = diagram.nodes.iter().find(|n| n.current).unwrap();
+    assert_eq!(current.label, "Ready for review");
+    assert_eq!(current.state, FlowStageState::Current);
+
+    // 4. Completed reviewer after parent workflow advances to Implement or Merged
+    for parent_phase in [WorkWorkflowPhase::Implement, WorkWorkflowPhase::Completed] {
+        let mut agents = reader_with(make_reviewer(
+            WorkStatus::Completed,
+            WorkWorkflowKind::Native,
+            parent_phase,
+            false,
+        ));
+        agents.events_loaded = true;
+        agents.fold_stage_events(&[
+            raw_event(1, WorkEventKind::Queued),
+            raw_event(2, WorkEventKind::Started),
+            raw_event(3, WorkEventKind::AwaitingReview),
+            raw_event(4, WorkEventKind::Completed),
+        ]);
+        let diagram = project_diagram(&agents);
+        assert_eq!(diagram.track_label, "Linked review task");
+        let labels: Vec<&str> = diagram.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec!["Queued", "Running", "Ready for review", "Review complete"]
+        );
+        let current = diagram.nodes.iter().find(|n| n.current).unwrap();
+        assert_eq!(current.label, "Review complete");
+        assert_eq!(current.state, FlowStageState::Completed);
+        assert_eq!(current.detail, "#4");
+        assert_eq!(
+            diagram.current_badge,
+            badge("Review complete", BadgeTone::Success)
+        );
+    }
+}
+
+#[test]
+fn linked_repair_child_task_tracks_own_implement_lifecycle_instead_of_parent_workflow() {
+    let mut task = detail(WorkStatus::Running);
+    task.mode = WorkMode::Implement;
+    task.workflow_required = true;
+    task.workflow = Some(workflow_summary(
+        WorkWorkflowKind::Native,
+        WorkWorkflowPhase::Completed,
+    ));
+    task.review = Some(WorkReviewSummary {
+        auto_repair: true,
+        stage: "repairing".into(),
+        review_id: Some(KEY.into()),
+        feedback_id: None,
+        repair_task_id: None,
+        parent_task_id: Some(FOREIGN_WF.into()),
+        round: 1,
+        max_rounds: 3,
+        open_findings: 1,
+        verified_findings: 0,
+        latest_check_status: Some("failed".into()),
+        toolchain: None,
+        handoff_reason: None,
+        source_attempt_id: Some(ATTEMPT.into()),
+        candidate_commit: Some("a".repeat(40)),
+        workspace_digest: None,
+        gate_manifest_sha256: None,
+        required_hosted_green: false,
+        can_accept: false,
+        can_repair: false,
+        can_retry: false,
+        findings: vec![],
+    });
+    let mut agents = reader_with(task);
+    agents.events_loaded = true;
+    agents.fold_stage_events(&[
+        raw_event(1, WorkEventKind::Queued),
+        raw_event(2, WorkEventKind::Started),
+    ]);
+    let diagram = project_diagram(&agents);
+    assert_eq!(diagram.track_label, "Linked repair task");
+    let current = diagram.nodes.iter().find(|n| n.current).unwrap();
+    assert_eq!(current.label, "Running");
+    assert_eq!(current.state, FlowStageState::Current);
+}

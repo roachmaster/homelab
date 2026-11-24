@@ -3193,6 +3193,12 @@
         - ["font", ".75rem ui-monospace,SFMono-Regular,monospace"]
         - ["color", "var(--muted)"]
         - ["font-variant-numeric", "tabular-nums"]
+    - selector: ".fg-flow-hop-exact"
+      declarations:
+        - ["font", ".6875rem ui-monospace,SFMono-Regular,monospace"]
+        - ["color", "var(--muted)"]
+        - ["font-variant-numeric", "tabular-nums"]
+        - ["overflow-wrap", "anywhere"]
     - selector: ".fg-flow-hop-detail"
       declarations:
         - ["font-size", ".75rem"]

@@ -496,6 +496,12 @@ assert.equal(flowTrack.children[2].children[0].dataset.state, 'upcoming', 'unkno
 assert.equal(flowBranches.hidden, false);
 assert.equal(flowBranches.children.length, 1);
 assert.equal(flowBranches.children[0].dataset.kind, 'loop');
+// Expanded disclosure exposes readable exact UTC timestamps without requiring hover.
+const firstHop = flowTrace.children[1].children[0];
+assert.equal(firstHop.children[2].textContent, '2m ago');
+assert.equal(firstHop.children[3].className, 'fg-flow-hop-exact');
+assert.equal(firstHop.children[3].textContent, '2026-11-19T18:00:00Z');
+assert.equal(firstHop.children[4].textContent, '2 events');
 // Persistent keyed disclosure survives background polls without losing open state.
 flowTrace.open = true;
 const originalTrace = flowTrace;
