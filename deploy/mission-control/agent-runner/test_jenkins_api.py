@@ -364,6 +364,59 @@ class JenkinsApiEndToEndPostgresTest(unittest.TestCase):
             finally:
                 service.consumer_worker.close(timeout=5.0)
 
+    def test_http_emit_stage_started_lands_and_lists_via_bootstrap_factory(self):
+        # Rollout fixture: the updated receiver (this tree) accepts
+        # stage_started through the real runner dispatch; the event lands in
+        # jenkins_events and the list filter finds it by kind. The negative
+        # control proves the kind gate is strict: an unknown kind is
+        # rejected the way the pre-change receiver rejected stage_started
+        # (its enum lacked the kind), which is why the rollout restarts the
+        # receiver before the verifier install.
+        raw_cfg = sample_raw_config(
+            allowed_jobs={'homelab': ['forge-native-candidate']})
+        with TemporaryDirectory(prefix='forge-jenkins-rollout-') as tmp:
+            cfg_path = Path(tmp) / 'jenkins.json'
+            cfg_path.write_text(json.dumps(raw_cfg), encoding='utf-8')
+            service = runner.build_jenkins_service(
+                {jenkins_config.CONFIG_ENV_VAR: str(cfg_path)},
+                self.cluster.connect,
+            )
+            self.assertIsNotNone(service)
+            with runner_server(jenkins_service=service) as port:
+                status, unknown = dispatch_post(port, jenkins_api.Destination.EMIT, emit_body(
+                    job_name='forge-native-candidate', delivery_id='del-unknown-1',
+                    event_kind='stage_paused', stage_name='check'))
+                self.assertEqual(status, 400)
+                self.assertEqual(unknown['event']['code'], 'invalid_request')
+                status, emitted = dispatch_post(port, jenkins_api.Destination.EMIT, emit_body(
+                    job_name='forge-native-candidate', delivery_id='del-stage-1',
+                    event_kind='stage_started', stage_name='check',
+                    build_number=7, build_result=None, summary='Stage check started'))
+                self.assertEqual(status, 202)
+                self.assertEqual(emitted['event']['kind'], 'jenkins_event_emitted')
+                self.assertFalse(emitted['event']['deduplicated'])
+                status, completed = dispatch_post(port, jenkins_api.Destination.EMIT, emit_body(
+                    job_name='forge-native-candidate', delivery_id='del-stage-2',
+                    event_kind='stage_completed', stage_name='check', stage_status='success',
+                    build_number=7, build_result=None, summary='Stage check completed: success'))
+                self.assertEqual(status, 202)
+                status, listed = dispatch_post(port, jenkins_api.Destination.LIST, {
+                    'kind': 'jenkins_events_list', 'request_id': REQUEST_ID,
+                    'project_alias': 'homelab', 'job_name': 'forge-native-candidate',
+                    'event_kind': 'stage_started', 'commit_sha': SHA1})
+                self.assertEqual(status, 200)
+                self.assertEqual(len(listed['event']['events']), 1)
+                self.assertEqual(listed['event']['events'][0]['stage_name'], 'check')
+                self.assertEqual(listed['event']['events'][0]['build_number'], 7)
+                with closing(self.cluster.connect()) as conn, conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT event_kind, stage_name, stage_status FROM forge_agent.jenkins_events "
+                        "WHERE owner_id=%s AND project_alias=%s AND job_name=%s ORDER BY sequence",
+                        ('mission-control', 'homelab', 'forge-native-candidate'))
+                    self.assertEqual(cursor.fetchall(), [
+                        ('stage_started', 'check', None),
+                        ('stage_completed', 'check', 'success')])
+
     def test_http_deliveries_pagination_across_multiple_consumers_with_limit_one(self):
         raw_cfg = sample_raw_config(
             consumers=[
