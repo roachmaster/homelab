@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant W as Trusted native worker
+    participant S as Source provider
+    participant I as Identity provider
+    participant D as Private durable state
+    participant R as Scoped peer reviewer
+    participant C as Fixed checks / Jenkins
+    participant P as Publisher
+    W->>W: Admit lease / protocol
+    alt v2 first execution
+        W->>S: Acquire
+        S-->>W: ArtifactManifest
+        W->>I: Freeze snapshot
+        I->>D: Persist snapshot
+        D-->>I: Durable
+        I-->>W: Identity
+    else v2 resume
+        W->>D: Load snapshot
+        D-->>W: Frozen identity
+        W->>S: Verify artifact
+        S-->>W: Match or reject
+    else legacy-v1
+        W->>W: Keep v1 bindings
+    end
+    W->>C: Run exact checks
+    C-->>W: Check evidence
+    W->>D: Save check receipt
+    W->>R: Peer review
+    R-->>W: Bound verdict
+    opt Approval and CI pass
+        W->>P: Publish candidate
+        P-->>W: Publish receipt
+    end
+    Note over W,P: Invalid context rejects before checks or publication
+    Note over D,C: Policy change creates a new generation

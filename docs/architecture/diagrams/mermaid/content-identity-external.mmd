@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant A as External database author
+    participant D as Workflow store
+    participant T as Trusted delivery provider
+    participant F as Private identity state
+    participant S as Source provider
+    participant R as Independent native reviewer
+    participant C as Jenkins / exact-tree merge
+    A->>D: Submit leased code
+    D->>T: Admit prepare action
+    T->>T: Validate quarantine
+    T->>S: Acquire
+    S-->>T: ArtifactManifest
+    T->>F: Persist identity
+    F-->>T: Durable
+    T->>T: Bundle and import
+    T->>D: Publish context
+    D->>R: Lease review
+    R->>S: Acquire
+    S-->>R: ArtifactManifest
+    alt v2 content matches
+        R->>R: Verify scope / policy
+        R->>D: Bound verdict
+    else Mismatch
+        R->>D: Reject before CI
+    end
+    opt Approved candidate
+        D->>T: Admit delivery
+        T->>C: Submit exact candidate
+        C-->>T: CI / merge receipts
+        T->>D: Commit outcome
+    end
+    Note over T,R: Git is provenance and delivery
+    Note over A,C: Content equality never grants approval or skips CI

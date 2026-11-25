@@ -489,7 +489,7 @@ class CodingWorkerFactory:
                                    transport_diagnostics=CliDiagnosticReporter(LOG)))
         self.workspace_factory = workspace_factory
         self.source_revision_factory = source_revision_factory
-        self.external_context_factory = external_context_factory or (lambda store: ExternalReviewContextProvider(store,_workspace_git))
+        self.external_context_factory = external_context_factory or default_external_context_factory
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None
                                    else lambda config: SystemdSupervisor(
                                        config, consumer_cache_provider=configured_consumer_caches(config)))
@@ -518,6 +518,14 @@ class CodingWorkerFactory:
                             clock=self.clock, stop=self.stop, usage_normalizer=self.usage_normalizer,
                             review_context_provider=review_contexts, peer_context_provider=peer_contexts,
                             external_context_provider=self.external_context_factory(store) if self.config.external_reviews else None)
+
+
+def default_external_context_factory(store):
+    from work_artifact_source import GitArtifactProviderFactory
+    def bounded_git(repository,*args,timeout=40):
+        return _workspace_git(repository,*args,timeout=min(40,timeout))
+    return ExternalReviewContextProvider(store,_workspace_git,
+        artifacts=GitArtifactProviderFactory(bounded_git).create())
 
 
 def default_store_factory(config):
