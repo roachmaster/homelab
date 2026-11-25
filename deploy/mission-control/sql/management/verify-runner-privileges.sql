@@ -27,17 +27,42 @@ BEGIN
     AND NOT has_schema_privilege(current_user, 'forge_agent', 'CREATE')
     AND NOT has_table_privilege(current_user, 'forge_agent.schema_migrations', 'INSERT')
     AND (
-      SELECT bool_and(has_table_privilege(current_user, 'forge_agent.' || relation, privilege))
-      FROM unnest(ARRAY[
-        'conversations', 'runs', 'messages', 'tool_calls',
-        'tool_results', 'run_events', 'ide_workspace_tabs'
-      ]) AS relation
-      CROSS JOIN unnest(CASE WHEN cutover THEN ARRAY['SELECT'] ELSE ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] END) AS privilege
-    )
-    AND (
-      SELECT bool_and(has_table_privilege(current_user, 'forge_agent.' || relation, privilege))
-      FROM unnest(ARRAY['ide_workspace_history', 'ide_chats']) AS relation
-      CROSS JOIN unnest(CASE WHEN cutover THEN ARRAY['SELECT'] ELSE ARRAY['SELECT', 'INSERT', 'UPDATE'] END) AS privilege
+      -- Exact privilege matrix for the IDE tables (finding
+      -- review-runner-verifier-write-blind-spot): the old form only
+      -- asserted the allowed privileges were present, so restoring
+      -- a forbidden INSERT, UPDATE, or DELETE post-cutover was
+      -- invisible. Every privilege is now asserted present iff
+      -- allowed, with a column-grant check for the forbidden ones
+      -- (a table-level check alone misses column-only grants).
+      SELECT bool_and(
+        has_table_privilege(current_user, 'forge_agent.' || spec.relation, privilege)
+        = (privilege = ANY(spec.allowed))
+        AND CASE
+          WHEN privilege IN ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
+               AND NOT privilege = ANY(spec.allowed)
+          THEN NOT has_any_column_privilege(
+            current_user, 'forge_agent.' || spec.relation, privilege
+          )
+          ELSE true
+        END
+      )
+      FROM (SELECT relation,
+              CASE WHEN cutover THEN ARRAY['SELECT'] ELSE allowed END
+                AS allowed
+             FROM (VALUES
+               ('conversations', ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']),
+               ('runs', ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']),
+               ('messages', ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']),
+               ('tool_calls', ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']),
+               ('tool_results', ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']),
+               ('run_events', ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']),
+               ('ide_workspace_tabs', ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']),
+               ('ide_workspace_history', ARRAY['SELECT', 'INSERT', 'UPDATE']),
+               ('ide_chats', ARRAY['SELECT', 'INSERT', 'UPDATE'])
+             ) AS v(relation, allowed)) AS spec(relation, allowed)
+      CROSS JOIN unnest(ARRAY[
+        'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
+      ]) AS privilege
     )
     AND (
       SELECT bool_and(
