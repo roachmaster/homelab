@@ -42,14 +42,31 @@ proxy_cutover() {
         "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover')" 2>/dev/null || echo f
 }
 
+proxy_preparation() {
+    # Prints t when the preparation migration is applied, f otherwise.
+    # A missing database (first install) reports f.
+    psql_as postgres forge_agent -Atc \
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation')" 2>/dev/null || echo f
+}
+
 install_auth_files() {
     # Install the HBA template and ident map for the current stage.
     # Sets hba_changed=true when a file changed. The installed HBA
     # file keeps its name; only its contents are stage-dependent.
-    local template ident_file cutover
+    # Three stages: cutover (40) admits the proxy roles only via
+    # peer auth and rejects everything else; preparation (39, no 40)
+    # admits the proxy OS user as the caller roles via peer auth
+    # while preserving direct access, so the proxy can run and be
+    # verified before cutover; before preparation the original
+    # template applies. The ident map is installed at preparation
+    # (the peer rules need it) and at cutover.
+    local template ident_file cutover preparation
     cutover="$(proxy_cutover)"
+    preparation="$(proxy_preparation)"
     if [[ "$cutover" == t ]]; then
         template="$directory/postgres-worker-hba-proxy.conf"
+    elif [[ "$preparation" == t ]]; then
+        template="$directory/postgres-worker-hba-preparation.conf"
     else
         template="$directory/postgres-worker-hba.conf"
     fi
@@ -57,7 +74,7 @@ install_auth_files() {
         install -m 0640 -o postgres -g postgres "$template" "$cluster_config/forge-worker-hba.conf"
         hba_changed=true
     fi
-    if [[ "$cutover" == t ]]; then
+    if [[ "$cutover" == t || "$preparation" == t ]]; then
         ident_file="$cluster_config/pg_ident.conf"
         if [[ -f "$ident_file" ]]; then
             # Appended once; the cluster file keeps operator additions.
@@ -84,8 +101,9 @@ check_cluster() {
     ")"
     [[ "$configuration" == "16|$data_directory|$loopback" ]] ||
         fail "Unexpected cluster configuration: $configuration"
-    local cutover
+    local cutover preparation
     cutover="$(psql_as postgres forge_agent -Atc "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover')")"
+    preparation="$(psql_as postgres forge_agent -Atc "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation')")"
     local worker_access
     if [[ "$cutover" == t ]]; then
         # Post-cutover: the write-capable roles are admitted only via
@@ -153,6 +171,58 @@ check_cluster() {
              AND peer.options = ARRAY['map=forge-pg-proxy']
              AND rej.type = 'local' AND rej.auth_method = 'reject'
              AND peer.line_number >= rej.line_number)
+           AND (SELECT count(*) FILTER (WHERE error IS NOT NULL) = 0
+             AND count(*) FILTER (WHERE map_name = 'forge-pg-proxy'
+               AND sys_name = 'forge-pg-proxy'
+               AND pg_username IN ('forge_agent','forge_coding_worker','forge_coding_reconciler','forge_gpu_worker','muse_proxy_writer','forge_pg_proxy')) = 6
+             FROM pg_ident_file_mappings)
+        FROM pg_hba_file_rules;
+    ")"
+    elif [[ "$preparation" == t ]]; then
+        # Preparation: the proxy OS user is admitted as each caller
+        # role via local peer auth (six peer rules, in order, then
+        # the retained host rules at 7-10), the ident map holds the
+        # six mappings, and direct access is preserved: no local
+        # reject rule for a proxy role, and both SCRAM host paths
+        # still admit their roles.
+        worker_access="$(psql_as postgres postgres -Atc "
+        SELECT count(*) FILTER (WHERE error IS NOT NULL) = 0
+           AND count(*) FILTER (WHERE type = 'local'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_agent']
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+           AND count(*) FILTER (WHERE type = 'local'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_coding_worker']
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+           AND count(*) FILTER (WHERE type = 'local'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_coding_reconciler']
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+           AND count(*) FILTER (WHERE type = 'local'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_gpu_worker']
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+           AND count(*) FILTER (WHERE type = 'local'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['muse_proxy_writer']
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+           AND count(*) FILTER (WHERE type = 'local'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_pg_proxy']
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+           AND count(*) FILTER (WHERE type = 'local'
+             AND database = ARRAY['forge_agent']
+             AND user_name && ARRAY['forge_agent','forge_coding_worker','forge_coding_reconciler','forge_gpu_worker','muse_proxy_writer','forge_pg_proxy']
+             AND auth_method = 'reject') = 0
+           AND count(*) FILTER (WHERE rule_number = 7 AND type = 'host'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_gpu_worker']
+             AND address = '$loopback' AND netmask = '255.255.255.255'
+             AND auth_method = 'scram-sha-256') = 1
+           AND count(*) FILTER (WHERE rule_number = 8 AND type = 'host'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['muse_events']
+             AND address = '$loopback' AND netmask = '255.255.255.255'
+             AND auth_method = 'scram-sha-256') = 1
+           AND count(*) FILTER (WHERE rule_number = 9 AND database = ARRAY['all']
+             AND user_name = ARRAY['all'] AND auth_method = 'reject'
+             AND type = 'host' AND address = '$loopback' AND netmask = '255.255.255.255') = 1
+           AND count(*) FILTER (WHERE rule_number = 10 AND database = ARRAY['replication']
+             AND user_name = ARRAY['all'] AND auth_method = 'reject'
+             AND type = 'host' AND address = '$loopback' AND netmask = '255.255.255.255') = 1
            AND (SELECT count(*) FILTER (WHERE error IS NOT NULL) = 0
              AND count(*) FILTER (WHERE map_name = 'forge-pg-proxy'
                AND sys_name = 'forge-pg-proxy'
@@ -284,7 +354,8 @@ psql_as postgres forge_agent -c 'SET ROLE forge_agent_owner' -f "$directory/sql/
     -f "$directory/sql/management/grant-runner.sql"
 # apply.sql stops at the preparation migration (39); cutover (40)
 # applies only via proxy-cutover.sh. Re-select the auth files after
-# apply.sql so a post-cutover re-provision still installs the proxy
+# apply.sql so a post-cutover (or preparation-stage) re-provision
+# still installs the matching HBA template.
 # HBA template before verifying the cluster.
 hba_changed=false
 install_auth_files

@@ -29,6 +29,7 @@ import psycopg2
 import psycopg2.extras
 
 import forge_pg_proxy as proxy
+import proxy_verify
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
@@ -72,6 +73,12 @@ def _parse_apply_sql():
     assert [version for version, _, _ in triples] == list(
         range(1, len(triples) + 1))
     return triples
+
+
+def _normalize(sql):
+    """Collapse whitespace and lowercase, for comparing SQL text
+    across the script and the test constants."""
+    return re.sub(r"\s+", " ", sql).strip().lower()
 
 
 def _parse_cutover_sql():
@@ -973,6 +980,100 @@ class AdmissionTest(unittest.TestCase):
                 self.cluster.connect("forge_agent", user)
 
 
+class PreparationAdmissionTest(unittest.TestCase):
+    """Finding 3: the preparation HBA template admits the proxy OS
+    user as each caller role via local peer auth (six peer rules +
+    six ident mappings) while preserving direct access — no reject
+    rules, and both SCRAM host paths still admit their roles. The
+    live peer login itself is proved by proxy_verify.py on Mission
+    Control (this suite cannot run as the forge-pg-proxy OS user);
+    here the deployed configuration is asserted, rule by rule."""
+
+    PROXY_ROLES = ("forge_agent", "forge_coding_worker",
+                   "forge_coding_reconciler", "forge_gpu_worker",
+                   "muse_proxy_writer", "forge_pg_proxy")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cluster = ScratchCluster()
+        cls.port = _free_port()
+        cls.cluster.start(tcp_port=cls.port)
+        cls.cluster.apply_migrations(39)
+        cls.cluster.apply_grant_files()
+        cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
+        cls.cluster.set_password("muse_events", MUSE_EVENTS_PASSWORD)
+        cls.cluster.install_hba("postgres-worker-hba-preparation.conf",
+                                ident_name="postgres-worker-ident.conf")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.cluster.stop()
+
+    def _hba_rules(self):
+        conn = self.cluster.connect("postgres", "postgres")
+        try:
+            cur = conn.cursor(
+                cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM pg_hba_file_rules")
+            return cur.fetchall()
+        finally:
+            conn.close()
+
+    def test_preparation_peer_rules_and_ident_map(self):
+        rows = self._hba_rules()
+        self.assertEqual(
+            [row for row in rows if row["error"] is not None], [])
+        peer = [row for row in rows
+                if row["type"] == "local"
+                and row["database"] == ["forge_agent"]
+                and row["auth_method"] == "peer"
+                and row["options"] == ["map=forge-pg-proxy"]]
+        self.assertEqual(
+            {row["user_name"][0] for row in peer}, set(self.PROXY_ROLES))
+        self.assertEqual(len(peer), 6)
+        rejects = [row for row in rows
+                   if row["type"] == "local"
+                   and row["auth_method"] == "reject"
+                   and set(row["user_name"]) & set(self.PROXY_ROLES)]
+        self.assertEqual(rejects, [])
+        host = {row["rule_number"]: row for row in rows
+                if row["type"] == "host"}
+        self.assertEqual(host[7]["user_name"], ["forge_gpu_worker"])
+        self.assertEqual(host[7]["auth_method"], "scram-sha-256")
+        self.assertEqual(host[8]["user_name"], ["muse_events"])
+        self.assertEqual(host[8]["auth_method"], "scram-sha-256")
+        self.assertEqual(host[9]["auth_method"], "reject")
+        self.assertEqual(host[10]["database"], ["replication"])
+        conn = self.cluster.connect("postgres", "postgres")
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT count(*) FILTER (WHERE error IS NOT NULL),"
+                " count(*) FILTER (WHERE map_name = 'forge-pg-proxy'"
+                " AND sys_name = 'forge-pg-proxy'"
+                " AND pg_username IN ('forge_agent',"
+                " 'forge_coding_worker', 'forge_coding_reconciler',"
+                " 'forge_gpu_worker', 'muse_proxy_writer',"
+                " 'forge_pg_proxy'))"
+                " FROM pg_ident_file_mappings")
+            errors, mapped = cur.fetchone()
+            self.assertEqual(errors, 0)
+            self.assertEqual(mapped, 6)
+        finally:
+            conn.close()
+
+    def test_preparation_preserves_direct_tcp_access(self):
+        for user, password in (("forge_gpu_worker", GPU_PASSWORD),
+                               ("muse_events", MUSE_EVENTS_PASSWORD)):
+            conn = self.cluster.connect_tcp(user, password)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                self.assertEqual(cur.fetchone()[0], 1)
+            finally:
+                conn.close()
+
+
 class QuiescenceTest(ProxyDbTestCase, FixtureMixin):
     """Finding 11: the cutover quiescence queries (the same SQL
     proxy-cutover.sh runs) see live sessions and leases."""
@@ -1062,6 +1163,54 @@ class QuiescenceTest(ProxyDbTestCase, FixtureMixin):
             " clock_timestamp() - interval '1 minute' WHERE id = %s",
             (run,))
         self.assertEqual(self.fixture_sql(self.RUN_SQL)[0][0], 0)
+
+
+    def test_script_queries_match(self):
+        # Finding 4: the quiescence test must exercise the script's
+        # actual queries, not a parallel copy. Extract the three
+        # queries from proxy-cutover.sh and assert the active-lease
+        # definition the drain relies on.
+        script = os.path.join(REPO, "deploy", "mission-control",
+                              "proxy-cutover.sh")
+        with open(script, encoding="utf-8") as handle:
+            lines = handle.readlines()
+
+        def _script_sql(needle):
+            for line in lines:
+                if needle in line and "SELECT" in line:
+                    start = line.index('"') + 1
+                    # The SQL string ends at the next quote; a later
+                    # quote closes the surrounding shell $(...).
+                    end = line.index('"', start)
+                    return _normalize(line[start:end])
+            raise AssertionError(f"no script query for {needle}")
+
+        marker = lines.index(
+            next(line for line in lines
+                 if "quiescence: leased_assignments query" in line))
+        assignment = _script_sql(
+            "forge_external_agent.assignments")
+        # The marker sits directly above the query it annotates
+        # (the assignment spans the next two lines).
+        self.assertIn("leased_assignments", lines[marker + 1])
+        self.assertIn("SELECT count(*)", lines[marker + 2])
+        self.assertEqual(assignment, _normalize(self.ASSIGNMENT_SQL))
+        runs = _script_sql("FROM forge_agent.runs")
+        self.assertIn(
+            "lease_until is not null"
+            " and lease_until > clock_timestamp()", runs)
+        sessions = _script_sql("FROM pg_stat_activity")
+        # The sessions query references the CALLER_ROLES variable;
+        # assert the reference and the variable's definition.
+        self.assertIn("$caller_roles", sessions)
+        self.assertIn("pid <> pg_backend_pid()", sessions)
+        roles_line = next(
+            line for line in lines if line.startswith("CALLER_ROLES="))
+        for role in ("forge_agent", "forge_coding_worker",
+                     "forge_coding_reconciler", "forge_gpu_worker",
+                     "muse_proxy_writer", "muse_events",
+                     "forge_pg_proxy"):
+            self.assertIn(role, roles_line)
 
 
 class ProxyHttpDbTest(ProxyDbTestCase, FixtureMixin):
@@ -1330,6 +1479,34 @@ class TransportTest(ProxyDbTestCase, FixtureMixin):
                             " 'x', 'y')")
         finally:
             conn.close()
+
+
+class ProxyVerifyDbTest(ProxyDbTestCase, FixtureMixin):
+    """Findings 3 and 9: the pre-cutover verification sequence
+    (proxy_verify.py) runs against the live proxy — /health plus
+    one safe probe per caller — and a wrong token fails only that
+    caller's probe."""
+
+    def _url(self):
+        return f"http://127.0.0.1:{self.proxy_port}"
+
+    def _tokens(self):
+        return {name: f"db-test-token-{name}"
+                for name in proxy_verify.CALLERS}
+
+    def test_verify_sequence_passes(self):
+        ok, detail = proxy_verify.verify_health(self._url())
+        self.assertTrue(ok, detail)
+        results = proxy_verify.verify_probes(self._url(), self._tokens())
+        failures = [result for result in results if result[1] is False]
+        self.assertEqual(failures, [], results)
+
+    def test_verify_sequence_fails_a_bad_token(self):
+        tokens = self._tokens()
+        tokens["worker"] = "not-the-worker-token"
+        results = proxy_verify.verify_probes(self._url(), tokens)
+        failed = [name for name, ok, _ in results if ok is False]
+        self.assertEqual(failed, ["probe:worker"])
 
 
 if __name__ == "__main__":

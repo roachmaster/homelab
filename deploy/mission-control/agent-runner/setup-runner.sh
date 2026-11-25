@@ -171,8 +171,11 @@ PY
 # --- forge-pg-proxy -------------------------------------------------------
 # Publish the proxy alongside the runner. The proxy is enabled
 # unconditionally but only started once the proxy HBA rules are
-# installed (post-cutover); before that it cannot reach Postgres and
-# would only serve 503 on /health.
+# installed (preparation, migration 39, or cutover, migration 40);
+# before that it cannot reach Postgres and would only serve 503
+# on /health. Starting at preparation lets the operator run the
+# pre-cutover proxy verification sequence (proxy_verify.py) before
+# any caller is migrated or cutover is attempted.
 proxy_user=forge-pg-proxy
 proxy_config_directory=/etc/homelab-forge/forge-pg-proxy
 proxy_unit=/etc/systemd/system/forge-pg-proxy.service
@@ -187,6 +190,13 @@ install -d -o "$proxy_user" -g "$proxy_user" -m 0750 "$proxy_config_directory/to
 # the proxy group grants that read without widening the token files.
 if getent passwd forge_agent >/dev/null; then
     usermod -a -G "$proxy_user" forge_agent
+fi
+# The coding and publication workers run as lrocha and read their
+# caller token files at rollout (their database.proxy section points
+# at them); group membership grants that read without widening the
+# token files.
+if getent passwd lrocha >/dev/null; then
+    usermod -a -G "$proxy_user" lrocha
 fi
 for caller in coordinator worker reconciler gpu muse operator; do
     token_file="$proxy_config_directory/tokens/$caller.token"
@@ -242,6 +252,12 @@ for _ in range(40):
 else:
     sys.exit("Forge Postgres proxy did not become ready")
 PY
+    # Pre-cutover verification sequence (rollout steps 1-3): prove
+    # the proxy serves every caller and the proxy OS user is admitted
+    # as each caller role via peer auth, before any caller migrates.
+    # This runs at preparation as well as at cutover.
+    /usr/bin/python3 "$directory/proxy_verify.py" \
+        --config-dir "$proxy_config_directory"
 else
-    printf '%s\n' 'Forge Postgres proxy published but not started: proxy HBA rules are not installed (pre-cutover).'
+    printf '%s\n' 'Forge Postgres proxy published but not started: proxy HBA rules are not installed (preparation, migration 39, not yet applied).'
 fi
