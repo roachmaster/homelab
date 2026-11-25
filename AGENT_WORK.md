@@ -50,6 +50,16 @@ clean main changes, freeze the selected tree/base, and obtain fresh independent
 review and exact-source CI. Only genuine conflicts need the original author.
 This does not claim control over the externally owned Muse execution speed.
 
+Qualification checkpoint: the combined suite caught a fresh-worker startup
+ordering bug in cooldown storage. Follow-up f999518 acquires only the owned
+selected state directory at first advertisement, with anchored no-follow
+ancestor validation and no factory effects. Forty-three combined boundary,
+authority, cooldown and normal-runtime integration checks passed with zero skips.
+Full backend qualification uses the actual CI Cargo1.97.1 toolchain rather than
+the older default1.86.0. Source is checkpointed before that expensive check.
+Matched V3 controller/helper configuration and immutable AGY1.5.17 are staged;
+services, source-bound recoveries and publication remain pending qualification.
+
 # Previous: Git-independent artifact and verification identities — 2026-11-25
 
 User requests implementing the content-identity design described after task
