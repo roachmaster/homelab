@@ -129,13 +129,13 @@ UNCHANGED_LEGACY_GUARD_AST_SHA256 = {
     "work_workflow.py::BoundDelegatedAuthority.validate": "3c5684800e9fd927d175c1b184368e3fbe9b47f88011fbf01704ac42125c9ac0",
     "work_workflow.py::WorkflowStore._code_handoff": "28c134dec07214188396c681e59bf90bf81c8592bd645019790ba11977916b02",
     "work_owner_control.py::owner_continuation_used": "9360ba6cabf3fd2100c0baad30f40a0e7ca28206dcefbe8edfaf4279d0fb6ec8",
-    "work_owner_control.py::_owner_source_history": "2e944f3a0bdd32d24c1130180be4293f876f7cc6588ef2cdb9eb60635288c1da",
+    "work_owner_control.py::_owner_source_history": "f0ce35cddc2bae383d74aaf7cbf98310a98220e03f87f3b219d65d796d96ff49",
     "work_owner_control.py::_followup_replay": "91b40027cd2166441c903826b5c436cc025d348097d7d9eed2508b671bb2776f",
     "work_owner_control.py::require_owner_capability": "4d69560a3daf28ac3903d962ba6e9f11ec317a8c1983b63fbf54018600471c68",
     "work_owner_control.py::NativeOwnerControl.review_decide": "9931f291b49bc0801c928fec5897828243ade1e229bd890cf54a7d7f503641e4",
     "work_store.py::WorkStore.plan_decide": "9fef752f5c30754bdd228f378c827a0547dbef840ec09552f56c64644fd4d5a7",
     "work_store.py::WorkStore.review_decide": "7984ccd6a5146b99982c239cd72b14ffbca8f275105cff3e79788d65c62e45a2",
-    "work_store.py::WorkStore._append_review_retry": "cd87596f0deed82998e5e1c38d535317c58eb629481a7a7285b5c794bb3a4355",
+    "work_store.py::WorkStore._append_review_retry": "5b54a9b5ee8997bd2a78d9fd3d752f5de2efe6e31804e2e3e8fb17da8f760e7a",
     "work_store.py::WorkStore._publication_busy": "8e56623d967373002fa0b9fdc6634ca2741097296e965fa4b27cc09856e06ea4",
     "work_store.py::WorkStore._require_transition_authority": "ef19c73adb7a69244d38a747189357b26cf74f7c3333f921c5985867be9c416c",
     "work_workflow.py::BoundNativeRetryAuthority": "e24dd6666fbcce44177b849f6048b810a87f93f5ee99a4adea537fa0a8bcc604",
@@ -370,9 +370,9 @@ AGENT_WIDE_RETRY_CONTEXT_SHA256 = {
 }
 
 AGENT_WIDE_RETRY_GUARD_AST_SHA256 = {
-    "work_owner_control.py::NativeOwnerControl.review_decide": "df38231d3ead8bdcbda377ef1caa8169ac2d2ecac79e44c8f49c306f1ff822a1",
+    "work_owner_control.py::NativeOwnerControl.review_decide": "38e88f979e8c9e39d0b2c47291d0f8c98ff888c94eeeabd5351f58c978e3f1a2",
     "work_workflow.py::WorkflowStore.retry_peer_verdict": "8cdec9551d14ac203946d8a856e34d702774a21dd51326e4f004318b8aa497a0",
-    "work_workflow.py::WorkflowStore.retry_preparation": "548ac8131c562637b7dc80316cc8f49ae4d5b835779ef718bcc3e11fc26a1edb"
+    "work_workflow.py::WorkflowStore.retry_preparation": "2389a69620493d634c25323a06c2687467cf86392d2daa0de2d4d52573f842f0"
 }
 
 # Reviewed per-event retry context. Task totals are audit history; immutable
@@ -466,7 +466,7 @@ EVENT_RETRY_CONTEXT_SHA256 = {
 }
 
 EVENT_RETRY_GUARD_AST_SHA256 = {
-    "work_workflow.py::WorkflowStore.retry_peer_verdict": "5972f045d86247d74e2d7008307fbe51b2ed5980123b666cc19f9ccae36d9771"
+    "work_workflow.py::WorkflowStore.retry_peer_verdict": "6bddc52dbeb7617d2010c66f6ae64a8a82d6f8568d05b5bb597fce3f8d2bff60"
 }
 
 # Exact additive M32 source; predecessor maps remain historical provenance.
@@ -711,7 +711,7 @@ TASK_RECOVERY_CONTEXT_SHA256 = {
 }
 
 TASK_RECOVERY_GUARD_AST_SHA256 = {
-    'work_workflow.py::WorkflowStore.retry_native_timeout': '1dd378b0024d8ee49493672edb2f0a2d78d0e819033b62802efcdd2ddb7aab11',
+    'work_workflow.py::WorkflowStore.retry_native_timeout': 'e6e7189beddc024741164ecaf4e8896e3521d50db2276345c447433e78bbe651',
 }
 
 
@@ -782,10 +782,14 @@ CONTENT_IDENTITY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_identity_store.py': '2c7b18856d4e402477aa625ba04484053214eeda910ad82f099a0063fbc225b6',
     'deploy/mission-control/agent-runner/work_native_identity.py': '225fe528dceccf4fb72cf71568c4a10aeb602533c28918eed4e9aff5023f20e2',
     'deploy/mission-control/agent-runner/work_native_jenkins.py': '6cfd6527f60ee11b2adb9b32bf3a3343e49343a79b41aeffe9ffc80a4fdc1809',
+    'deploy/mission-control/agent-runner/work_owner_control.py': '669de791761d9faca1de74425e644c24c2f1e283c51e07641933db30e97c8b65',
+    'deploy/mission-control/agent-runner/work_owner_reverification.py': 'ab4248ba4844c9e135fc5717c9b848a9e1483bb430a9ccc27c358c699cb5049c',
     'deploy/mission-control/agent-runner/work_publication.py': '604e2c029f4e52f23fb8200561fc2bae9d95c6fee403a9e290db231477031e49',
     'deploy/mission-control/agent-runner/work_publication_config.py': 'c60b9463c6c137506e23ee29dab45220b0b45c7d1cd47f5bc82a326737503708',
     'deploy/mission-control/agent-runner/work_review.py': '1092d3017205e395be0c5bcb7f8a8af2cb2b7d6c87bf0c61578a9d128fd7d9f1',
+    'deploy/mission-control/agent-runner/work_store.py': '0840e4ff2ac2b3939488b3a79baaf9260c2b35cd4f9629d3e01314dd1b5ab7b7',
     'deploy/mission-control/agent-runner/work_worker.py': '37ba4e2691b6bdc7b6846ddc85862cb8174da95aad6ca909eb23b02308773dcf',
+    'deploy/mission-control/agent-runner/work_workflow.py': 'e139df7ac02ae6eb04e3e45b5e2761c86511502882d30410709ab1e8c98fb729',
     'docs/README.md': 'eb87245ac52fcfcc5a029a116ee4a853f6de1dbbcf8e2e9a6c16be2230f91033',
     'docs/architecture/README.md': '1e44e052542a4ec8c8defbf779aaf9ac3ee501e29bb12c2c7bf509b2c7a1a622',
     'docs/architecture/content-identity.md': '433979bcf86e54d9bdf6c32566168cf0c233257c53f9dd2a0cef8e32abe50419',
@@ -1160,10 +1164,14 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             'deploy/mission-control/agent-runner/work_identity_store.py',
             'deploy/mission-control/agent-runner/work_native_identity.py',
             'deploy/mission-control/agent-runner/work_native_jenkins.py',
+            'deploy/mission-control/agent-runner/work_owner_control.py',
+            'deploy/mission-control/agent-runner/work_owner_reverification.py',
             'deploy/mission-control/agent-runner/work_publication.py',
             'deploy/mission-control/agent-runner/work_publication_config.py',
             'deploy/mission-control/agent-runner/work_review.py',
+            'deploy/mission-control/agent-runner/work_store.py',
             'deploy/mission-control/agent-runner/work_worker.py',
+            'deploy/mission-control/agent-runner/work_workflow.py',
             'docs/README.md',
             'docs/architecture/README.md',
             'docs/architecture/content-identity.md',
