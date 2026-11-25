@@ -64,6 +64,7 @@ class AgentsRuntimeIntegrationTest(unittest.TestCase):
             for alias, profile in self.config.profiles.items() if alias != "legacy-v1"
         }
         config = parse_config(raw)
+        self.assertFalse(config.state_root.exists())
         self.events = []
         self.workspaces = RuntimeWorkspaces(self.events)
         self.supervisor = Mock()
@@ -93,8 +94,16 @@ class AgentsRuntimeIntegrationTest(unittest.TestCase):
         self.assertIs(worker.store, self.db)
         self.assertIs(worker.runner, self.runner)
         self.assertIs(worker.workspaces, self.workspaces)
+        self.assertFalse(config.state_root.exists(), 'Selected ready factories do not acquire cooldown state')
         worker.advertise()
         return worker
+
+    def test_fresh_factory_advertisement_acquires_private_state_root(self):
+        worker=self.make_worker()
+        self.assertEqual(worker.config.state_root.stat().st_mode&0o777,0o700)
+        self.assertEqual((worker.config.state_root/'provider-cooldowns').stat().st_mode&0o777,0o700)
+        self.assertEqual(worker.cooldowns.selection()[0],worker.config.allowed_profiles)
+        self.runner.run.assert_not_called()
 
     def test_selected_worker_processes_actual_immutable_lease_and_publishes_full_result(self):
         with (patch("subprocess.Popen", side_effect=AssertionError("No agent processes")),

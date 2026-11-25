@@ -20,16 +20,54 @@ MAX_BYTES=262144
 
 class ProviderCooldown:
     def __init__(self,config,*,clock=time.time):self.config,self.clock=config,clock
+    def _state_directory(self):
+        """Acquire the selected state root without following untrusted parents.
+
+        Only its final component may be created. Existing root/user-owned
+        ancestors must not be writable by others, except a root-owned sticky
+        directory such as /tmp. The selected root itself must be worker-owned.
+        """
+        flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW
+        directory=os.open('/',flags)
+        try:
+            parts=self.config.state_root.parts[1:]
+            for ordinal,part in enumerate(parts):
+                final=ordinal==len(parts)-1
+                try:current=os.open(part,flags,dir_fd=directory)
+                except FileNotFoundError:
+                    if not final:raise ValueError('Provider state root parent is missing')from None
+                    try:os.mkdir(part,mode=0o700,dir_fd=directory)
+                    except FileExistsError:pass # A concurrent first reader may create it.
+                    else:os.fsync(directory)
+                    current=os.open(part,flags,dir_fd=directory)
+                try:
+                    info=os.fstat(current)
+                    writable=bool(info.st_mode&0o022)
+                    sticky_parent=not final and info.st_uid==0 and bool(info.st_mode&stat.S_ISVTX)
+                    if (not stat.S_ISDIR(info.st_mode)or info.st_uid not in({os.geteuid()}if final else{0,os.geteuid()})
+                        or writable and not sticky_parent):raise ValueError('Unsafe provider state root or ancestor')
+                except BaseException:
+                    os.close(current);raise
+                os.close(directory);directory=current
+            selected=directory;directory=None
+            return selected
+        finally:
+            if directory is not None:os.close(directory)
     @contextmanager
     def _locked(self):
-        root=self.config.state_root/'provider-cooldowns'
-        root.mkdir(mode=0o700,exist_ok=True)
-        info=root.lstat()
-        if not stat.S_ISDIR(info.st_mode)or info.st_uid!=os.geteuid()or stat.S_IMODE(info.st_mode)!=0o700:
-            raise ValueError('Unsafe provider cooldown directory')
-        directory=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-        lock=os.open('admission.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK,0o600,dir_fd=directory)
+        state=self._state_directory()
         try:
+            try:os.mkdir('provider-cooldowns',mode=0o700,dir_fd=state)
+            except FileExistsError:pass
+            else:os.fsync(state)
+            directory=os.open('provider-cooldowns',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=state)
+        finally:os.close(state)
+        lock=None
+        try:
+            info=os.fstat(directory)
+            if not stat.S_ISDIR(info.st_mode)or info.st_uid!=os.geteuid()or stat.S_IMODE(info.st_mode)!=0o700:
+                raise ValueError('Unsafe provider cooldown directory')
+            lock=os.open('admission.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK,0o600,dir_fd=directory)
             info=os.fstat(lock)
             if not stat.S_ISREG(info.st_mode)or info.st_uid!=os.geteuid()or stat.S_IMODE(info.st_mode)!=0o600 or info.st_nlink!=1:
                 raise ValueError('Unsafe provider cooldown lock')
@@ -55,7 +93,8 @@ class ProviderCooldown:
                 quota_summary(item['diagnostic'])
             yield directory,value
         finally:
-            os.close(lock);os.close(directory)
+            if lock is not None:os.close(lock)
+            os.close(directory)
     def record(self,lease,diagnostic):
         quota_summary(diagnostic)
         profile=lease['agent_profile'];model=lease['recipe']['model'];attempt=str(UUID(lease['attempt_id']))
