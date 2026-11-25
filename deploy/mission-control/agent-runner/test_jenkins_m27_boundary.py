@@ -723,7 +723,36 @@ M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256 = {
 }
 
 
+# Jenkins observation capability, separately selected from frozen mutations.
+# Applied SQL, existing mutation configuration, and all prior literal maps stay
+# unchanged. These are exact reviewed source bytes, never CI proof substitutes.
+JENKINS_PAGED_OBSERVER_CONTEXT_SHA256 = {
+    'AGENT_WORK.md': 'bffae2aaf43a78dac989f095e183b255662c92c155f115e0ba51e9a6846182e2',
+    'deploy/mission-control/agent-runner/setup-runner.sh': '447042e4343851149c5f16a54a5f3ecb050205288fbb1f1105cd45f35b1f0631',
+    'deploy/mission-control/agent-runner/test_jenkins_read_observer.py': '56e2699b08cf1d2a4b7bd9030d18eee6e161b288ad5acaf0cc5344e314840b42',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '4f6d761911d3f0f3f3cac73b70cb69698017ac42b66757443aaba036a8706397',
+    'deploy/mission-control/agent-runner/work_jenkins_observer.py': 'eab42d259be5934174208ba2b3842bc3198f86c34be061b532715991410a77de',
+    'deploy/mission-control/agent-runner/work_publication.py': '7c553427acd4e1ca6802f6757148c5d8840a58e470291b443ce59be4e5e136a7',
+    'src/rust/forge-jenkins/README.md': '2c8090f101956f122780fd39fef579daaa8b6dd068d192498d77794b0e24a0d2',
+    'src/rust/forge-jenkins/src/client.rs': 'ada4f2d451a5a475d6996fc71298f0f86d5b5bdead5027b267c3a192201918b1',
+    'src/rust/forge-jenkins/src/lib.rs': 'fb4c27de231b669da4cff69419387c932a83a6a96a735f76a5c50d92a4a7c46e',
+    'src/rust/forge-jenkins/src/observation.rs': '4935d989cc43a89e1f871348fe080b75f8b331e3f47dfb78744de89ba5de30ce',
+    'src/rust/forge-jenkins/tests/client.rs': '181344bfe0d8df65c53e03d7aba0e2f8f71953a3c5463c966e686464a72c14c8',
+    'src/rust/forge-local/README.md': '2d65b2fba45d6497ceded1007201488abfaa1f4727bd215803572a45f38458da',
+    'src/rust/forge-local/src/application.rs': '51cce8e196fe08714542ef73f9450e79e588f6846587ddfbe1b1022c0b792aa8',
+    'src/rust/forge-local/src/jenkins.rs': '6411f099986858442339fff1406d899a51a3a2ae3d3f6c9e8c794a60fd1cfdc1',
+    'src/rust/forge-local/tests/application.rs': '849d9793493fa8ac4501c4567ef67ab2c836d5cd1ada76385017dd1ea921f144',
+    'src/rust/forge-local/tests/jenkins_application.rs': '34ab4f8c38133deef22780a3c00637d90f31db4ff277237b97a7a76943dcfd01',
+    'src/rust/forge-terminal/README.md': '249c47a6d0bdc3dd7c551ca5f26296260504905e55cd8d0e5d06d96ce1b074ae',
+    'src/rust/forge-terminal/src/jenkins.rs': '85536151556880d687d1df0c25b4cf27cffd87e3f7ff3be1d2d2cb023df3f3c2',
+    'src/rust/forge-terminal/src/parser.rs': 'beb20d19ba5f566a6f75f333c1ca38bb01b6e618c744838f89e9722affeb5aaf',
+    'src/rust/forge-terminal/tests/jenkins.rs': '7585207b7f1eef28fa9bb2118f9a40a432ba9f0703c8856d2058274fbb8fd3ed',
+}
+
+
 def qualified_source(relative, expected):
+    if relative in JENKINS_PAGED_OBSERVER_CONTEXT_SHA256:
+        return JENKINS_PAGED_OBSERVER_CONTEXT_SHA256[relative]
     if relative in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256:
         return M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256[relative]
     if relative in TASK_RECOVERY_CONTEXT_SHA256:
@@ -982,7 +1011,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in TASK_RECOVERY_CONTEXT_SHA256.items():
             with self.subTest(task_recovery_source=relative):
                 self.assertNotIn('/sql/', relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
 
     def test_m36_legacy_progress_verifier_context_is_exact(self):
         self.assertEqual(set(M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256), {
@@ -991,6 +1020,34 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         })
         for relative, expected in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256.items():
             with self.subTest(accepted_m36_verifier=relative):
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_jenkins_paged_observer_context_is_scoped_and_exact(self):
+        self.assertEqual(set(JENKINS_PAGED_OBSERVER_CONTEXT_SHA256), {
+            'AGENT_WORK.md',
+            'deploy/mission-control/agent-runner/setup-runner.sh',
+            'deploy/mission-control/agent-runner/test_jenkins_read_observer.py',
+            'deploy/mission-control/agent-runner/work_external_delivery.py',
+            'deploy/mission-control/agent-runner/work_jenkins_observer.py',
+            'deploy/mission-control/agent-runner/work_publication.py',
+            'src/rust/forge-jenkins/README.md',
+            'src/rust/forge-jenkins/src/client.rs',
+            'src/rust/forge-jenkins/src/lib.rs',
+            'src/rust/forge-jenkins/src/observation.rs',
+            'src/rust/forge-jenkins/tests/client.rs',
+            'src/rust/forge-local/README.md',
+            'src/rust/forge-local/src/application.rs',
+            'src/rust/forge-local/src/jenkins.rs',
+            'src/rust/forge-local/tests/application.rs',
+            'src/rust/forge-local/tests/jenkins_application.rs',
+            'src/rust/forge-terminal/README.md',
+            'src/rust/forge-terminal/src/jenkins.rs',
+            'src/rust/forge-terminal/src/parser.rs',
+            'src/rust/forge-terminal/tests/jenkins.rs',
+        })
+        for relative, expected in JENKINS_PAGED_OBSERVER_CONTEXT_SHA256.items():
+            with self.subTest(jenkins_paged_observer_source=relative):
+                self.assertNotIn('/sql/', relative)
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):

@@ -22,6 +22,15 @@ assets; genuine user cancellation remains cancellation. Preserve each source
 artifact, reconciliation, Plan, owner, receipt, and protected CI requirement.
 No direct SQL status resets, stale-context approvals or fake completion.
 
+The portal release also exposed a pre-existing Jenkins observation ceiling:
+the old verifier cancellation kept retrying because a fifty-build snapshot was
+truncated. Add typed bounded build pages and an explicitly selected, pinned
+read-only observer. Preserve every frozen mutation executable/configuration and
+its journal binding; the new observer may read complete stable history but may
+never POST or infer absence from incomplete/changed pages. A real read-only
+probe has covered both live pages and established the old action is absent.
+Normal coordinator cancellation and main verification must supply actual proof.
+
 # Previous: Reconcile feature/muse review-schema compatibility — 2026-11-24
 
 Fix the remaining py-agent-runner failures on feature/muse at e41db88, based on
