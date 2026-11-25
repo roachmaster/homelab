@@ -41,8 +41,10 @@ receipt-bound task workspaces by importing their snapshot into a separate
 worktree.
 
 The record coordinates existing authorization; it does not grant new publication,
-deployment or paid-credit authority. The coordinator currently manages agent
-switching; no automatic quota controller is configured.
+deployment or paid-credit authority. Explicit configured AGY backup models may be selected by the coordinator after
+a genuine published quota stop and stopped-source reconciliation. Original
+workflow authority stays frozen; no paid-credit fallback or account polling is
+authorized.
 
 
 ## Current portal views

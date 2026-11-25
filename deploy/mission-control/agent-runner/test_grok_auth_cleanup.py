@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import Mock,patch
 
 from test_work_executor import FakeSupervisor,lease,proof
-from test_work_grok import GrokBoundaryTest,records
+import test_work_grok as fixture_module
+from test_work_grok import records
 from work_executor import CommandRunnerProvider,ExecutionError,WorkspaceLease
 from work_grok import stage_auth
 from work_policy import POLICY
@@ -18,7 +19,7 @@ from work_worker_config import parse_config
 
 class GrokAuthCleanupTest(unittest.TestCase):
  def fixture(self,root,*,failure=False,uncertain=False,cancel=False,replace_parent=False):
-  config=parse_config(GrokBoundaryTest().raw(root,True))
+  config=parse_config(fixture_module.GrokBoundaryTest().raw(root,True))
   host=config.account.home/'.grok/auth.json';host.parent.mkdir(parents=True,mode=0o700)
   host.write_text('owned authentication fixture');host.chmod(0o600)
   value=lease(config,backend='grok');value['agent_profile']='grok'

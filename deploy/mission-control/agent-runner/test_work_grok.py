@@ -142,7 +142,7 @@ class GrokFakeChildTest(unittest.TestCase):
  def test_usage_refresh_not_starved_when_all_execution_is_disabled(self):
   from types import SimpleNamespace
   from work_worker import CodingWorker
-  owner=SimpleNamespace(config=SimpleNamespace(allowed_profiles=()),reconcile_pending=Mock(),advertise=Mock(),collect_usage=Mock(),store=Mock())
+  owner=SimpleNamespace(config=SimpleNamespace(allowed_profiles=()),cooldowns=None,reconcile_pending=Mock(),advertise=Mock(),collect_usage=Mock(),store=Mock())
   self.assertFalse(CodingWorker.run_once(owner));owner.collect_usage.assert_called_once();owner.store.claim.assert_not_called()
 
 class GrokManualUsageTest(unittest.TestCase):

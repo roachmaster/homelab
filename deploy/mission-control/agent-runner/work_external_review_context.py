@@ -45,6 +45,31 @@ class ExternalReviewContext:
     target_kind:str
 
 
+@dataclass(frozen=True)
+class ExternalSourceIntegration:
+    """Trusted, freshly reviewed integration of one immutable author artifact."""
+    prepare_action_id:str
+    source_base_revision:str
+    source_candidate_commit:str
+    source_candidate_tree:str
+    integration_base:str
+    candidate_tree:str
+
+    def to_dict(self):
+        return {'version':1,**self.__dict__}
+
+    @classmethod
+    def from_dict(cls,value):
+        fields=set(cls.__dataclass_fields__)
+        if not isinstance(value,dict) or set(value)!={'version'}|fields or type(value['version']) is not int or value['version']!=1:
+            raise ValueError('Invalid external source integration receipt')
+        uuid(value['prepare_action_id'])
+        for key in fields-{'prepare_action_id'}:
+            if not isinstance(value[key],str) or not HEX40.fullmatch(value[key]):
+                raise ValueError('Invalid external source integration identity')
+        return cls(**{key:value[key] for key in fields})
+
+
 def validate_target(raw,digest):
     if not isinstance(raw,str) or not 1<=len(raw.encode())<=MAX_CONTEXT_BYTES or hashlib.sha256(raw.encode()).hexdigest()!=digest:
         raise ValueError('External review context digest mismatch')
@@ -66,6 +91,19 @@ def validate_target(raw,digest):
         uuid(plan['assignment_id'])
         if not isinstance(candidate,dict) or any(not HEX40.fullmatch(candidate.get(k,'')) for k in ('candidate_commit','candidate_tree','integration_base')) or candidate['candidate_commit']!=value['review_base_revision']:
             raise ValueError('External review candidate unavailable')
+        if 'source_integration' in candidate:
+            integration=ExternalSourceIntegration.from_dict(candidate['source_integration'])
+            authored=strict_json(text)
+            if (not isinstance(authored,dict) or integration.prepare_action_id!=candidate.get('prepare_action_id')
+                    or integration.source_base_revision!=value['source_base_revision']
+                    or integration.source_base_revision!=authored.get('base_revision')
+                    or integration.source_candidate_commit!=authored.get('candidate_commit')
+                    or integration.source_candidate_commit!=candidate.get('author_candidate_commit')
+                    or integration.source_candidate_tree!=authored.get('candidate_tree')
+                    or integration.integration_base!=candidate['integration_base']
+                    or integration.candidate_tree!=candidate['candidate_tree']
+                    or integration.integration_base==integration.source_base_revision):
+                raise ValueError('External review integration lost its immutable author source')
         if value['version']==2:
             from work_external_identity import validate_content_identity
             if candidate.get('identity_protocol')!='content-v2':raise ValueError('Missing frozen content protocol')

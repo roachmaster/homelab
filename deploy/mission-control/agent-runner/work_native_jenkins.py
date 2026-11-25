@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import threading
 import time
 from uuid import UUID, uuid5
@@ -75,6 +76,7 @@ class NativeJenkinsVerification:
                  emitter=None, event_lookup=None, jenkins_instance=None,identity_provider=None):
         self.config, self.store, self.git, self.candidates = config, store, git, candidates
         self.delivery, self.supervisor = delivery, supervisor
+        self._reconciliation_warnings = {}
         if (getattr(config,'native_identity_protocol','legacy-v1')=='content-v2'
                 and any(not callable(getattr(identity_provider,method,None))for method in ('selected','read','acquire','freeze','reference','plan'))):
             raise TypeError('Selected content identity provider is unavailable')
@@ -172,6 +174,62 @@ class NativeJenkinsVerification:
         return self.config.checks if plan.profile == LEGACY_PROFILE else plan.checks
 
 
+    def _historical_no_process(self, directory, binding, scope):
+        """A retired action may have been cancelled before a POST ever existed.
+
+        This recognizes only the trusted producer's exact never-submitted
+        receipt. A queue/build journal or protected result still requires the
+        existing complete cleanup path; this grants no process-stop authority.
+        """
+        action = binding['request']['action_id']
+        cancelled = directory / 'cancel-observation.json'
+        intent = directory / 'cancel-intent.json'
+        if not cancelled.exists() or not intent.exists():
+            return False
+        value = json.loads(read_private(cancelled, owner=os.geteuid()))
+        receipt = value.get('receipt', {})
+        if (value.get('status') != 'cancelled' or not isinstance(receipt, dict)
+                or set(receipt) != {'provider', 'target_action_id', 'process_started'}
+                or receipt.get('provider') != 'jenkins' or receipt.get('target_action_id') != action
+                or receipt.get('process_started') is not False
+                or json.loads(read_private(intent, owner=os.geteuid())) != {
+                    'version': binding['version'], 'action_id': action, 'scope': scope}):
+            return False
+        journal = directory / 'jenkins.json'
+        result = self.delivery.config.results_root / (action + '.json')
+        if journal.exists() or journal.is_symlink() or result.exists() or result.is_symlink():
+            return False
+        observed = directory / 'observation.json'
+        if observed.exists():
+            previous = json.loads(read_private(observed, owner=os.geteuid()))
+            if previous.get('status') != 'pending':
+                return False
+        spool = self.delivery.config.spool_root / action
+        if spool.is_symlink():
+            return False
+        request = binding['request']
+        plan = self._plan(binding)
+        expected = {'version': plan.result_version, 'action_id': action, 'workflow_id': scope['workflow_id'],
+            'project_alias': scope['project_alias'], 'candidate_commit': sha(request['candidate_commit']),
+            'candidate_tree': sha(request['candidate_tree']), 'expected_main': sha(request['integration_base']),
+            'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
+            'verification_profile': request.get('verification_profile', LEGACY_PROFILE),
+            'correlation_id': scope['correlation_id']}
+        if 'branch_scope' in request:
+            expected['branch_scope'] = request['branch_scope']
+        submitted_path = spool / 'request.json'
+        if submitted_path.exists() or submitted_path.is_symlink():
+            submitted = json.loads(read_private(submitted_path, owner=os.geteuid()))
+            if (not isinstance(submitted, dict) or set(submitted) != set(expected) | {'bundle_sha256'}
+                    or type(submitted.get('version')) is not int
+                    or any(submitted.get(key) != item for key, item in expected.items())):
+                return False
+            digest(submitted['bundle_sha256'])
+        current = self.store.native_ci_binding(scope)
+        self._scope(current, scope)
+        return (current.get('active') is False
+            and current.get('state') in {'completed', 'cancelled', 'superseded', 'inactive'})
+
     def _historical_terminal(self, directory):
         """Read-only cleanup proof for an inactive action's retired transport.
 
@@ -183,7 +241,8 @@ class NativeJenkinsVerification:
             binding = json.loads(read_private(directory / 'native-binding.json', owner=os.geteuid()))
             profile = binding.get('request', {}).get('verification_profile', LEGACY_PROFILE)
             frozen_version = binding_version(profile)
-            if (binding.get('version') != frozen_version or binding.get('transport_sha256') == self._transport_digest()
+            if (profile not in {LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE}
+                    or binding.get('version') != frozen_version or binding.get('transport_sha256') == self._transport_digest()
                     or digest(binding['transport_sha256']) != binding['transport_sha256']):
                 return False
             request = binding['request']
@@ -196,6 +255,8 @@ class NativeJenkinsVerification:
             expected_action = str(uuid5(UUID(scope['workflow_id']), frozen_version + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
             if action != expected_action or request.get('prepare_action_id') != str(uuid5(UUID(action),'candidate-bundle')):
                 return False
+            if self._historical_no_process(directory, binding, scope):
+                return True
             observed = None
             for filename,terminal in (('observation.json',{'passed','failed'}),('cancel-observation.json',{'cancelled'})):
                 if (directory / filename).exists():
@@ -823,6 +884,33 @@ class NativeJenkinsVerification:
         if value.get('state') != 'open' or value.get('merged_at') is not None:
             raise PublicationError('native_ci_pull_request_changed')
 
+    def _reconciliation_warning(self, directory, error):
+        """Bounded per-action diagnostics; raw exception text may contain secrets."""
+        try:
+            action = uid(directory.name)
+        except (ValueError, TypeError, PublicationError):
+            action = 'unavailable'
+        code = getattr(error, 'code', None)
+        if not isinstance(code, str) or not re.fullmatch(r'[a-z0-9_]{1,80}', code):
+            code = 'observation_unavailable'
+        error_type = type(error).__name__[:64]
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', error_type):
+            error_type = 'Exception'
+        key = (code, error_type)
+        now = self.clock()
+        cache = self._reconciliation_warnings
+        previous = cache.get(action)
+        if previous is not None and previous[0] == key and now - previous[1] < 60:
+            cache[action] = (key, previous[1], min(previous[2] + 1, 2147483647))
+            return
+        suppressed = previous[2] if previous is not None and previous[0] == key else 0
+        if action not in cache and len(cache) >= 128:
+            cache.pop(next(iter(cache)))
+        cache[action] = (key, now, 0)
+        LOG.warning('Native Jenkins action reconciliation remains pending action_id=%s error_code=%s error_type=%s suppressed=%s',
+            action, code, error_type, suppressed, extra={'forge_action_id': action,
+                'forge_error_code': code, 'forge_error_type': error_type, 'forge_suppressed': suppressed})
+
     def reconcile_once(self, limit=16):
         actions = self.delivery.config.state_root / 'actions'
         if not actions.is_dir():
@@ -857,8 +945,8 @@ class NativeJenkinsVerification:
                         continue
                 if (directory / 'cancel-intent.json').exists() or not self._current(binding):
                     self._cancel_once(binding)
-            except Exception:
-                LOG.warning('Native Jenkins action reconciliation remains pending')
+            except Exception as error:
+                self._reconciliation_warning(directory, error)
 
 
 def create_native_jenkins(config, store, git, candidates, supervisor, *, client=None, stop=None,

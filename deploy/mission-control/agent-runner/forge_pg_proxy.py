@@ -1178,7 +1178,8 @@ READ_QUERIES = {
     # work_workflow: tasks of a workflow with their latest attempt.
     "tasks_with_attempts": (
         "SELECT t.*, a.phase AS attempt_phase, a.result_sha256, "
-        "a.reservation_active, a.lease_expires_at, a.published_at "
+        "a.reservation_active, a.lease_expires_at, a.published_at, "
+        "a.summary AS attempt_summary, a.outcome AS attempt_outcome "
         "FROM forge_agent.coding_tasks t "
         "LEFT JOIN forge_agent.coding_attempts a "
         "ON (a.owner_id, a.project_alias, a.task_id, a.attempt_id) = "
@@ -1304,7 +1305,6 @@ READ_QUERIES = {
         "AND r.created_at >= a.deadline_at "
         "AND a.pinned_recipe->>'policy_digest' = ANY(%(policy_digests)s) "
         "AND t.agent_profile = w.snapshot->>'author_profile' "
-        "AND t.recipe_digest = w.snapshot->'recipes'->'author_implement'->>'digest' "
         "AND EXISTS (SELECT 1 FROM forge_agent.coding_events e "
         "WHERE (e.owner_id, e.project_alias, e.task_id) = "
         "(t.owner_id, t.project_alias, t.id) "

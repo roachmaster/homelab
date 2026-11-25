@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock,patch
 
 from test_work_executor import lease
-from test_work_grok import GrokBoundaryTest
+import test_work_grok as fixture_module
 from work_executor import CommandRunnerProvider,ExecutionError,SystemdSupervisor,WorkspaceLease
 from work_grok import CONFIG,MANAGED_POLICY,PROJECT_CONFIG_ROOTS,PROJECT_EXECUTABLE_PATHS,validate_project_subset
 from work_policy import POLICY
@@ -33,7 +33,7 @@ class GrokTrustSubsetTest(unittest.TestCase):
      if link:path.symlink_to(root/'absent-external-target')
      elif path.suffix in {'.json','.toml'}:path.write_text('must never be parsed')
      else:path.mkdir()
-     config=parse_config(GrokBoundaryTest().raw(root,True));provider=CommandRunnerProvider(config,Mock())
+     config=parse_config(fixture_module.GrokBoundaryTest().raw(root,True));provider=CommandRunnerProvider(config,Mock())
      assignment=lease(config,backend='grok');assignment['agent_profile']='grok'
      workspace=WorkspaceLease(project,root/'repository',root/'git',assignment['task_id'],'a'*40)
      with patch('work_executor.stage_grok_auth',side_effect=AssertionError('No auth acquisition'))as auth,patch('subprocess.Popen',side_effect=AssertionError('No process'))as spawn:
@@ -49,7 +49,7 @@ class GrokTrustSubsetTest(unittest.TestCase):
   self.assertEqual(POLICY['grok_config_sha256'],hashlib.sha256(CONFIG.encode()).hexdigest())
   self.assertEqual(POLICY['grok_managed_policy_sha256'],hashlib.sha256(MANAGED_POLICY.encode()).hexdigest())
   with TemporaryDirectory()as temporary:
-   root=Path(temporary);config=parse_config(GrokBoundaryTest().raw(root,True));scope=SystemdSupervisor(config);provider=CommandRunnerProvider(config,scope)
+   root=Path(temporary);config=parse_config(fixture_module.GrokBoundaryTest().raw(root,True));scope=SystemdSupervisor(config);provider=CommandRunnerProvider(config,scope)
    with patch('work_executor.GROK_BINARY_SHA256',hashlib.sha256(Path('/usr/bin/python3').resolve().read_bytes()).hexdigest()):provider.prepare()
    auth=config.account.home/'.grok/auth.json';auth.parent.mkdir(parents=True,mode=0o700);auth.write_text('owned fixture');auth.chmod(0o600)
    assignment=lease(config,backend='grok');assignment['agent_profile']='grok';project=root/'project';project.mkdir();(project/'AGENTS.md').write_text('plain instructions')

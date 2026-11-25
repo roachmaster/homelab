@@ -154,6 +154,14 @@ def _timestamp(value):
     return formatted
 
 
+def _attempt_summary(value):
+    from work_quota_diagnostics import parse_quota_summary
+    diagnostic=parse_quota_summary(value)
+    if diagnostic is None:return value
+    return ('Provider quota exhausted; waiting for allowance.' if diagnostic['retry_after_seconds']is None
+            else f"Provider quota exhausted; reset reported in {diagnostic['retry_after_seconds']} seconds.")
+
+
 def _summary(row):
     item = {
         "task_id": str(row["id"]),
@@ -639,7 +647,7 @@ class WorkStore:
                             _timestamp(attempt["finished_at"])
                             if attempt["finished_at"] is not None else None
                         ),
-                        "summary": attempt["summary"],
+                        "summary": _attempt_summary(attempt["summary"]),
                     }
                     if attempt["published_at"] is not None and attempt["result_sha256"] is not None:
                         result_dto = {
@@ -1227,7 +1235,11 @@ class WorkStore:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
-            self._require_transition_authority(cursor,task,_authority,"reviewer_correction" if task["mode"]=="review" else "native_timeout")
+            from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
+            transition_kind=('stopped_binary_pin' if isinstance(_authority,BoundBinaryPinAuthority)
+                             else 'provider_model_route' if isinstance(_authority,BoundProviderModelAuthority)
+                             else 'reviewer_correction' if task['mode']=='review' else 'native_timeout')
+            self._require_transition_authority(cursor,task,_authority,transition_kind)
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
 
@@ -1339,7 +1351,8 @@ class WorkStore:
         else:
             from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority
             from work_reviewer_correction import BoundReviewerCorrectionAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority)) or authority.store is not self:
+            from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 

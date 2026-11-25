@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import Mock,patch
 
 from test_work_executor import FakeSupervisor,lease,proof
-from test_work_muse import MuseBoundaryTest,events
+import test_work_muse as fixture_module
+from test_work_muse import events
 from work_executor import CommandRunnerProvider,ExecutionError,WorkspaceLease
 from work_muse import stage_auth
 from work_policy import POLICY
@@ -18,7 +19,7 @@ from work_worker_config import parse_config
 
 class MuseAuthCleanupTest(unittest.TestCase):
  def fixture(self,root,*,failure=False,uncertain=False,cancel=False,replace_parent=False):
-  config,_,_,_=MuseBoundaryTest().setup_provider(root)
+  config,_,_,_=fixture_module.MuseBoundaryTest().setup_provider(root)
   host=config.account.home/'.config/muse/auth.json';host.parent.mkdir(parents=True,mode=0o700);host.parent.parent.chmod(0o700)
   host.write_text('owned authentication fixture');host.chmod(0o600)
   value=lease(config,backend='muse');value['agent_profile']='muse'

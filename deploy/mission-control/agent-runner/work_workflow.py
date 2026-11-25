@@ -178,6 +178,7 @@ class WorkflowStore:
         self.feedback_recovery = None
         self.peer_feedback_recovery = None
         self.superseding_review = None
+        self.execution_policy = None
         self._retry_allowance_position = None
         self._manual_allowance_position = None
 
@@ -220,7 +221,14 @@ class WorkflowStore:
             raise Rejected(403,'denied')
         if not {'plan','review','implement'}<=self.config.allowed_modes:
             raise Rejected(403,'denied')
+        if self.execution_policy is not None:
+            self.execution_policy.effective(workflow)
         return policy
+
+    def _snapshot(self,workflow):
+        """Select future execution only; historical authority remains in snapshot."""
+        return (self.execution_policy.effective(workflow) if self.execution_policy is not None
+                else workflow['snapshot'])
 
     def _retry_limit(self,workflow,key):
         policy=self._current_policy(workflow)
@@ -451,7 +459,7 @@ class WorkflowStore:
                 or w['phase']!='escalated' and not w['enabled']
                 or w['phase']=='escalated' and w['escalation_reason'] not in {
                     'Agent stopped: needs_reconcile','Agent stopped: failed'}):raise Rejected(409,'not_reviewable')
-            p=w['snapshot'];self._current_policy(w)
+            p=self._snapshot(w);self._current_policy(w)
             recipe=recipe_from_snapshot(p,'author_implement')
             if (not task['workflow_required'] or task['workflow_review_id'] is not None or task['mode']!='implement'
                 or task['status'] not in {'needs_reconcile','failed'} or task['cancelled_at'] is not None
@@ -631,7 +639,7 @@ class WorkflowStore:
         cursor.execute("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1,updated_at=clock_timestamp() WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,review['project_alias'],critic['id']))
         insert_event(cursor,self.store.owner,review['project_alias'],critic['id'],'completed',
                      {'note':note,'superseding_workflow_review_id':str(new_id)},actor=COORDINATOR_ACTOR)
-        p=w['snapshot']
+        p=self._snapshot(w)
         self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
         ready = _read_query(cursor, "worker_readiness_fresh",
                             {"owner_id": self.store.owner,
@@ -695,7 +703,7 @@ class WorkflowStore:
                            (self.store.owner,project_alias,r['reviewer_task_id']));critic=cursor.fetchone()
             cursor.execute('SELECT * FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s FOR UPDATE',(workflow_review_id,));review=dict(cursor.fetchone())
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE',(r['workflow_id'],));w=cursor.fetchone()
-            self._current_policy(w);p=w['snapshot']
+            self._current_policy(w);p=self._snapshot(w)
             if (w['phase']!='escalated' or w['enabled'] or w['escalation_reason']!=PEER_WIRE_ERROR
                 or review['status']!='escalated' or review['target_kind']!='code' or review['target_sha256']!=target_sha256
                 or not task or not critic or task['workflow_id']!=w['workflow_id'] or critic['workflow_id']!=w['workflow_id']
@@ -809,7 +817,7 @@ class WorkflowStore:
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s FOR UPDATE',
                            (self.store.owner,project_alias,task['workflow_id']));w=cursor.fetchone()
             if not w:raise Rejected(409,'not_reviewable')
-            self._current_policy(w);p=w['snapshot'];recipe=recipe_from_snapshot(p,'author_implement')
+            self._current_policy(w);p=self._snapshot(w);recipe=recipe_from_snapshot(p,'author_implement')
             if (w['phase']!='escalated' or w['enabled'] or w['escalation_reason']!='publication_command_failed'
                 or task['revision']!=expected_revision or task['status']!='awaiting_review' or task['mode']!='implement'
                 or not task['workflow_required'] or task['workflow_review_id'] is not None or task['cancelled_at'] is not None
@@ -910,7 +918,7 @@ class WorkflowStore:
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s FOR UPDATE',
                            (self.store.owner,project_alias,task['workflow_id']));w=cursor.fetchone()
             if not w:raise Rejected(409,'not_reviewable')
-            self._current_policy(w);p=w['snapshot'];recipe=recipe_from_snapshot(p,'author_implement')
+            self._current_policy(w);p=self._snapshot(w);recipe=recipe_from_snapshot(p,'author_implement')
             if (w['phase']!='escalated' or w['enabled'] or not q or w['escalation_reason']!=q['reason']
                 or q['reason'] not in {'review_unavailable','workspace_busy'} or q['phase']!='local' or q['status']!='handoff'
                 or q['candidate_commit'] is not None or q['source_revision']!=expected_revision
@@ -1010,6 +1018,10 @@ class WorkflowStore:
             try:self._current_policy(w)
             except Rejected:self._escalate(cursor,w,'Workflow delegation or role grant is no longer current.');continue
             for t in tasks:
+                if t['status']=='quota_blocked' and self.execution_policy is not None and self.execution_policy.handles_quota(w,t):
+                    # Provider allowance is neither a code defect nor a reason
+                    # to consume review/repair budget or cancel sibling work.
+                    continue
                 if t['status'] in {'quota_blocked','blocked_auth','blocked_permission','needs_reconcile','failed'}:
                     self._escalate(cursor,w,'Agent stopped: '+t['status']);break
                 if t['status']=='cancelled':
@@ -1073,6 +1085,7 @@ class WorkflowStore:
         cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('code_review' if q else 'plan_review',w['workflow_id']))
 
     def claim(self,worker_id):
+        if self.execution_policy is not None:self.execution_policy.run_once()
         self._apply_retry_allowances()
         if self.feedback_recovery is not None:
             self.feedback_recovery.run_once()
@@ -1151,7 +1164,7 @@ class WorkflowStore:
             cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='completed',finish_token=%s,finish_receipt=%s,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE action_id=%s",(action['lease_token'],Json(receipt),action['action_id']))
 
     def _admit_reviewer(self,cursor,w,review,task,validate_target,*,idempotency_key=None):
-        p=w['snapshot'];self._grant(cursor,w,p['reviewer_profile'],'review')
+        p=self._snapshot(w);self._grant(cursor,w,p['reviewer_profile'],'review')
         source=self._artifact(cursor,task['id'],review['source_attempt_id']);reviewer_id=uuid4()
         cursor.execute("SELECT prompt,acceptance_criteria FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,w['project_alias'],w['root_task_id']));assignment=cursor.fetchone()
         if assignment is None:raise Rejected(409,'result_mismatch')
@@ -1230,7 +1243,7 @@ class WorkflowStore:
         return receipt
 
     def _apply_verdict(self,cursor,w,review,task,action,target,parse_verdict):
-        p=w['snapshot'];self._grant(cursor,w,p['reviewer_profile'],'review')
+        p=self._snapshot(w);self._grant(cursor,w,p['reviewer_profile'],'review')
         cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],review['reviewer_task_id']));critic=cursor.fetchone()
         expected=recipe_from_snapshot(p,'reviewer_review')
         if not critic or critic['mode']!='review' or critic['agent_profile']!=p['reviewer_profile'] or critic['recipe_digest']!=expected.digest or critic['workflow_review_id']!=review['workflow_review_id'] or critic['status']!='awaiting_review':raise Rejected(409,'result_mismatch')
@@ -1364,19 +1377,24 @@ class WorkflowCoordinatorFactory:
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,execution_policy_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
         self.config,self.catalog,self.store=config,catalog,store
         self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
         self.reviewer_correction_factory=reviewer_correction_factory
         self.feedback_recovery_factory=feedback_recovery_factory
         self.peer_feedback_recovery_factory=peer_feedback_recovery_factory
         self.superseding_review_factory=superseding_review_factory
+        self.execution_policy_factory=execution_policy_factory
     def create(self):
         from work_reviewer_correction import ReviewerCorrectionFactory
         from work_context_recovery import FeedbackRecoveryFactory
         from work_peer_feedback_recovery import PeerFeedbackRecoveryFactory
         from work_superseding_review import SupersedingReviewFactory
+        from work_provider_model_route import ExecutionPolicyFactory
         flow=WorkflowStore(self.config,self.catalog,self.store,retry_events=self.retry_events)
+        flow.execution_policy=(self.execution_policy_factory or ExecutionPolicyFactory)(flow).create()
+        if not all(callable(getattr(flow.execution_policy,name,None))for name in('effective','run_once','handles_quota')):
+            raise TypeError('Execution policy requires a ready generation selection port')
         factory=self.reviewer_correction_factory or ReviewerCorrectionFactory
         flow.reviewer_correction=factory(flow).create()
         if not all(callable(getattr(flow.reviewer_correction, name, None)) for name in ('correct','resume')):
