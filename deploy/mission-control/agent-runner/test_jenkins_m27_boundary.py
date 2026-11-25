@@ -715,9 +715,9 @@ CICD_STAGES_BRANCH_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_api.py': 'ef22c77e33dd9ce4cd57e79ee891848f46152f9bbe0bb2282b7fb60d9ffaa779',
     'deploy/mission-control/agent-runner/work_cicd_artifacts.py': 'f73dfe2752c50cbd9be1ea531e6f6836339b4a2b30afd999e266242da7d0758f',
     'deploy/mission-control/agent-runner/work_config.py': 'e1b1c6b966067a58eaf6c9fe1ad1aa80d7abb86e457b0216e791ba98f84f091d',
-    'deploy/mission-control/agent-runner/work_external_delivery.py': '47665472f25ba86a186d7972068cd00e95367f62f5b87f048f59815acd72b97b',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '45fc76b9afa38f58099f599f946156a298488c0e002b84aecf3a577194bc5289',
     'deploy/mission-control/agent-runner/work_external_delivery_store.py': '7bea3aeb4ccf731ea371195e6fd71d27f6d56f4f361db545217fc22972a2496c',
-    'deploy/mission-control/agent-runner/work_external_workflow.py': 'e89afc285fa1cafe96a847c17dc0f739b5aad3448ed3b351421b7aa4ddc86bb8',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': '0db22d2d375743dde813f28e7a90fa96b1e372582820ed7b01a613379df49b67',
     'deploy/mission-control/agent-runner/work_jenkins_lifecycle.py': '63a435604469ef62a3ed400c003c3618f7d027c64229b24945c081da24b20f5f',
     'deploy/mission-control/agent-runner/work_merge.py': '7bdda40cbe88f76e3deb5dd11b2a33154d83ba1d6ccec7bd5c891c91cab0dd23',
     'deploy/mission-control/agent-runner/work_native_jenkins.py': 'a9785fe205c69fc2b35dbbc5e915e156cc9962b0ac80a0e72cf706e85b06567b',
@@ -739,8 +739,6 @@ CICD_STAGES_BRANCH_CONTEXT_SHA256 = {
     'deploy/mission-control/sql/management/verify-jenkins-events.sql': '889dca14aba51e6915fafce28f3fd819ea801c865fd3f9728e13c1431e1434ff',
     'deploy/mission-control/sql/management/verify-muse-read-access.sql': '5053857dd7a4b6951827457db9d4902694174bc7eadee3e6de54115001bef06d',
     'deploy/mission-control/sql/management/verify-runner-privileges.sql': 'be3012fa1df92bab52618045d43e914c637995edb7941be3866dedf88a56a8d3',
-    # Unmodified HEAD (57a0aca8) bytes from M36 NOT VALID progress check grandfathering.
-    'deploy/mission-control/sql/management/verify-task-events.sql': '942ab0db7b9f2e0cceaaf64d4d7c73fe16c9fa5cc306d4a7ba5b1f432b4510ed',
     'deploy/mission-control/sql/management/verify.sql': 'ffc4fa0d1d98f99e6c9ba35dc1bb06d31d042063f875523a20ba7ab955c82cbe',
     'deploy/mission-control/sql/migrations/0039_agent_branch_and_cicd_stages.sql': 'a5603ca8268b3a2ea5ab3a59f4ed056d5233a1ad896575221201a249297037ae',
     'docs/architecture/ci-pipeline.md': '2dc46be7dd0f7c2030b482ac796f742bffa2028c5484eab1ef0bd7a2dedc17a1',
@@ -769,8 +767,8 @@ CICD_STAGES_BRANCH_CONTEXT_SHA256 = {
     'src/rust/forge-ide-web/src/generate/javascript.rs': 'b8d76c7bd49789ab075148f2d192affab06558c05fab4e93f02ddf38122cc416',
     'src/rust/forge-ide-web/src/generate/mod.rs': '98de5b59f2bc58f7e8d764db049e1cb2a1b2c1514f79547664cb4edfd8943856',
     'src/rust/forge-ide-web/src/wasm.rs': 'c9443fda7ddc6209bccbdf2c5b9e8308f13e63f6fcf8d37e800ba5cac490fc01',
-    'src/rust/forge-ide-web/tests/browser/agents-relay.mjs': 'ffb2017fbf479099e5ecb12ffb9ee0f35aa02cf8ddd34f45b4ca059c049c8195',
-    'src/rust/forge-ide-web/tests/browser/journey.mjs': 'c5dfa0b44eef5ccfd3e4aad39948dab106a36cd8bcac9ffcc7e63b5cb413cd16',
+    'src/rust/forge-ide-web/tests/browser/agents-relay.mjs': 'faeba923a40718ea4b1adb5775fa2e03081f89d8d7c9c46b3f7c48ee6d170602',
+    'src/rust/forge-ide-web/tests/browser/journey.mjs': 'f69356cdf638eacfe3e35b6233df0fd0ef79a2fe1952df6429192b7d46ee0402',
     'src/rust/forge-ide-web/tests/generation.rs': 'f353d5233ec6d98339b7d42a9396d8cfd4ab878cd1b78d8d5871cd464b711d74',
     'src/rust/forge-ide-web/tests/playtest-wire.mjs': 'a0c7cc8448914d01dea0ba52e65b359bbf55f7fa95cc865da59902d305c7eb67',
     'src/rust/forge-ide-web/ui/styles.yaml': 'bea39f2f3d08d4f4ee3124ed3a59412bc028719d4d5d7879a1cc1260aa2fdceb',
@@ -809,15 +807,12 @@ M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256 = {
 
 
 def qualified_source(relative, expected):
-<<<<<<< HEAD
     if relative in CICD_STAGES_BRANCH_CONTEXT_SHA256:
         return CICD_STAGES_BRANCH_CONTEXT_SHA256[relative]
-=======
     if relative in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256:
         return M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256[relative]
     if relative in TASK_RECOVERY_CONTEXT_SHA256:
         return TASK_RECOVERY_CONTEXT_SHA256[relative]
->>>>>>> bf080e2ccff7058d5836c30a60a9e802483f401e
     if relative in PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256:
         return PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256[relative]
     if relative in MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256:
@@ -1044,12 +1039,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 )
                 if '/migrations/' in relative or '/fragments/' in relative:
                     self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql')
-<<<<<<< HEAD
-                actual = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
-                self.assertEqual(actual, expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected))
-=======
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected))
->>>>>>> bf080e2ccff7058d5836c30a60a9e802483f401e
         published = {
             tuple(shlex.split(line, comments=True))
             for line in (RUNNER / 'setup-runner.sh').read_text().splitlines()
@@ -1057,7 +1047,38 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         self.assertIn(('publish', '$directory/work_external_plan_override.py', '$target/work_external_plan_override.py'), published)
 
-<<<<<<< HEAD
+    def test_task_recovery_overlay_is_exact_and_keeps_other_guards(self):
+        self.assertEqual(set(TASK_RECOVERY_CONTEXT_SHA256), {
+            'AGENT_WORK.md',
+            'deploy/mission-control/agent-runner/test_external_code_context_recovery.py',
+            'deploy/mission-control/agent-runner/test_external_diff_contract.py',
+            'deploy/mission-control/agent-runner/test_native_deadline_events.py',
+            'deploy/mission-control/agent-runner/work_external_delivery.py',
+            'deploy/mission-control/agent-runner/work_external_recovery.py',
+            'deploy/mission-control/agent-runner/work_external_review_context.py',
+            'deploy/mission-control/agent-runner/work_external_workflow.py',
+            'deploy/mission-control/agent-runner/work_workflow.py',
+            'src/rust/forge-ide-ui/src/model/agents/tests/scopes.rs',
+            'src/rust/forge-ide-ui/src/model/agents/workflow.rs',
+            'src/rust/forge-ide-web/tests/browser/agents-relay.mjs',
+            'src/rust/forge-ide-web/tests/browser/journey.mjs',
+        })
+        self.assertEqual(set(TASK_RECOVERY_GUARD_AST_SHA256), {
+            'work_workflow.py::WorkflowStore.retry_native_timeout'})
+        for relative, expected in TASK_RECOVERY_CONTEXT_SHA256.items():
+            with self.subTest(task_recovery_source=relative):
+                self.assertNotIn('/sql/', relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_m36_legacy_progress_verifier_context_is_exact(self):
+        self.assertEqual(set(M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256), {
+            'deploy/mission-control/sql/management/verify.sql',
+            'deploy/mission-control/sql/management/verify-task-events.sql',
+        })
+        for relative, expected in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256.items():
+            with self.subTest(accepted_m36_verifier=relative):
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
     def test_cicd_stages_and_persistent_branch_overlay_is_scoped_and_preserves_applied_migrations(self):
         self.assertIn('deploy/mission-control/agent-runner/work_agent_branch.py', CICD_STAGES_BRANCH_CONTEXT_SHA256)
         self.assertIn('deploy/mission-control/agent-runner/work_cicd_artifacts.py', CICD_STAGES_BRANCH_CONTEXT_SHA256)
@@ -1083,39 +1104,6 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         self.assertIn(('publish', '$directory/work_agent_branch.py', '$target/work_agent_branch.py'), published)
         self.assertIn(('publish', '$directory/work_cicd_artifacts.py', '$target/work_cicd_artifacts.py'), published)
-=======
-    def test_task_recovery_overlay_is_exact_and_keeps_other_guards(self):
-        self.assertEqual(set(TASK_RECOVERY_CONTEXT_SHA256), {
-            'AGENT_WORK.md',
-            'deploy/mission-control/agent-runner/test_external_code_context_recovery.py',
-            'deploy/mission-control/agent-runner/test_external_diff_contract.py',
-            'deploy/mission-control/agent-runner/test_native_deadline_events.py',
-            'deploy/mission-control/agent-runner/work_external_delivery.py',
-            'deploy/mission-control/agent-runner/work_external_recovery.py',
-            'deploy/mission-control/agent-runner/work_external_review_context.py',
-            'deploy/mission-control/agent-runner/work_external_workflow.py',
-            'deploy/mission-control/agent-runner/work_workflow.py',
-            'src/rust/forge-ide-ui/src/model/agents/tests/scopes.rs',
-            'src/rust/forge-ide-ui/src/model/agents/workflow.rs',
-            'src/rust/forge-ide-web/tests/browser/agents-relay.mjs',
-            'src/rust/forge-ide-web/tests/browser/journey.mjs',
-        })
-        self.assertEqual(set(TASK_RECOVERY_GUARD_AST_SHA256), {
-            'work_workflow.py::WorkflowStore.retry_native_timeout'})
-        for relative, expected in TASK_RECOVERY_CONTEXT_SHA256.items():
-            with self.subTest(task_recovery_source=relative):
-                self.assertNotIn('/sql/', relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
-
-    def test_m36_legacy_progress_verifier_context_is_exact(self):
-        self.assertEqual(set(M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256), {
-            'deploy/mission-control/sql/management/verify.sql',
-            'deploy/mission-control/sql/management/verify-task-events.sql',
-        })
-        for relative, expected in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256.items():
-            with self.subTest(accepted_m36_verifier=relative):
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
->>>>>>> bf080e2ccff7058d5836c30a60a9e802483f401e
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
