@@ -164,6 +164,7 @@ pub fn decode(info: &CommandInfo, args: &[OsString]) -> Result<Command, String> 
         | CommandKind::JenkinsJobs
         | CommandKind::JenkinsQueueList
         | CommandKind::JenkinsRecentBuilds
+        | CommandKind::JenkinsBuildPage
         | CommandKind::JenkinsStopBuild
         | CommandKind::JenkinsBuild
         | CommandKind::JenkinsQueue

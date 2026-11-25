@@ -358,6 +358,7 @@ mod native_disk {
                 | CommandKind::JenkinsJobs
                 | CommandKind::JenkinsQueueList
                 | CommandKind::JenkinsRecentBuilds
+                | CommandKind::JenkinsBuildPage
                 | CommandKind::JenkinsStopBuild
                 | CommandKind::JenkinsBuild
                 | CommandKind::JenkinsQueue
