@@ -49,6 +49,40 @@ class ObservationUnavailable(RuntimeError):
     """A bounded observation cannot establish completion or absence."""
 
 
+ARTIFACT_REJECTION_CODES = frozenset({
+    'private_or_generated_artifact', 'private_key_artifact', 'access_token_artifact',
+})
+
+
+class SourceArtifactRejected(PublicationError):
+    """Permanent source rejection; diagnostics contain paths/codes, never bytes."""
+    def __init__(self, candidate_commit, candidate_tree, prepared_tree, rejections, rejected_count):
+        super().__init__('source_artifact_rejected')
+        self.candidate_commit, self.candidate_tree = sha(candidate_commit), sha(candidate_tree)
+        self.prepared_tree = sha(prepared_tree)
+        self.rejections = tuple(rejections)
+        if (not self.rejections or len(self.rejections) > 32 or type(rejected_count) is not int
+                or not len(self.rejections) <= rejected_count <= 20000 or any(
+                    not isinstance(path, str) or not path or len(path.encode()) > 1024
+                    or path.startswith('/') or any(ord(c) < 32 for c in path)
+                    or any(part in {'', '.', '..'} for part in path.split('/'))
+                    or code not in ARTIFACT_REJECTION_CODES for path, code in self.rejections)):
+            raise ValueError('Invalid source rejection diagnostics')
+        self.rejected_count = rejected_count
+
+    def result(self):
+        paths = ', '.join(path.encode()[:256].decode('utf-8', errors='ignore') +
+            ('...' if len(path.encode()) > 256 else '') for path, _ in self.rejections[:4])
+        return {'status': 'failed', 'receipt': {'stage': 'source_preparation', 'reason': self.code,
+                'candidate_commit': self.candidate_commit, 'candidate_tree': self.candidate_tree,
+                'prepared_tree': self.prepared_tree, 'rejected_count': self.rejected_count,
+                'rejections': [{'path': path, 'code': code} for path, code in self.rejections]},
+            'summary': 'Trusted source preparation rejected ' + str(self.rejected_count) +
+                ' private or generated artifacts. Paths (up to four shown): ' + paths +
+                '. Remove all rejected artifacts from the submitted Git tree, preserve the implementation and approved Plan, '
+                'and return a fresh exact candidate manifest.'}
+
+
 class LeaseLost(RuntimeError):
     pass
 
@@ -562,6 +596,7 @@ class TrustedDeliveryPort:
         listing = self.git(repository, 'ls-tree', '-r', '-z', '--full-tree', claimed_tree)
         files = {}
         total = 0
+        rejections, rejected_count = [], 0
         for index, record in enumerate(listing.split(b'\0')):
             if not record:
                 continue
@@ -578,8 +613,18 @@ class TrustedDeliveryPort:
             total += len(data)
             if total > 256 * 1024 * 1024:
                 raise ValueError('External source exceeds checkout bounds')
-            artifact_guard(name, data)
+            try:
+                artifact_guard(name, data)
+            except PublicationError as error:
+                if error.code not in ARTIFACT_REJECTION_CODES:
+                    raise
+                rejected_count += 1
+                if len(rejections) < 32:
+                    rejections.append((name, error.code))
+                continue
             files[name] = [mode, blob]
+        if rejected_count:
+            raise SourceArtifactRejected(raw, integration.source_candidate_tree, claimed_tree, rejections, rejected_count)
         base_tree = self.git(repository, 'rev-parse', expected + '^{tree}').decode().strip()
         if base_tree == claimed_tree:
             clean = expected
@@ -1067,6 +1112,11 @@ class ExternalDeliveryWorker:
                 result = self.delivery.cancel(request, require_lease)
             else:
                 raise ValueError('Unknown delivery action')
+        except SourceArtifactRejected as error:
+            if (action.kind != 'prepare' or error.candidate_commit != request.get('candidate_commit')
+                    or error.candidate_tree != request.get('candidate_tree')):
+                raise ValueError('Source rejection does not match its claimed preparation') from error
+            result = error.result()
         except (ObservationUnavailable, PublicationError):
             result = {'status': 'pending', 'receipt': request.get('previous_receipt', {}),
                       'summary': 'Trusted delivery observation is temporarily unavailable; retaining the same bounded action.'}
