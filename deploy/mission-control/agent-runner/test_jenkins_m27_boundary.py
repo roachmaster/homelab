@@ -355,7 +355,7 @@ AGENT_WIDE_RETRY_CONTEXT_SHA256 = {
     "deploy/mission-control/agent-runner/work_reviewer_correction.py": "37354a39b14b48a503503480792f7fa76ad806c17bd35d29811e1b51e1ab89c0",
     "deploy/mission-control/agent-runner/work_store.py": "4f16976f616e0bcca58a22b321615a304cd0fd7a5ccbf98f747f45408771486c",
     "deploy/mission-control/agent-runner/work_workflow.py": "f4f42d9b49d35e590079bf91932aecc2158b77cebbc0f4bca747cf2ca94a28e3",
-    "deploy/mission-control/backend-suites.py": "4ebeb0107e9b69706fe34dde68b8cc205bc947604973f00c4989cdbbb1271a6f",
+    "deploy/mission-control/backend-suites.py": "c8be37b4959a6401afc83cc2f23f47cab4591862efc6824a0cf7270683df893e",
     "deploy/mission-control/sql/apply.sql": "7aef74aa55cc026fe056df383b25c7f93ce898830a6f3642d1dd0ecf2d490258",
     "deploy/mission-control/sql/management/verify-agent-retries.sql": "19c517c6b84e3b49f5e35a1bd1e0ea9866e3d2cd9360be35d3e94c8b6b1ab2ad",
     "deploy/mission-control/sql/management/verify-feedback.sql": "56bc19978bfa376f9955b38b15b4df94cc707ce8320fbfbda0b24c4b4f8baf3a",
@@ -387,7 +387,7 @@ EVENT_RETRY_CONTEXT_SHA256 = {
     "deploy/mission-control/agent-runner/setup-runner.sh": "aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b",
     "deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py": "e1000fc0989f05d961b0323c70e604981a364dc297de497c04368802b740c7ec",
     "deploy/mission-control/agent-runner/test_ci_supervision.py": "dd085b67e9b79c040f9946c1401600e4d4266b4618aa9d4288cf510fb3c56584",
-    "deploy/mission-control/agent-runner/test_external_flow.py": "32f339f42cdb23f33e3b3d5b5def9a0ecf2546e0a54fbc689ce6ec46d289d8b6",
+    "deploy/mission-control/agent-runner/test_external_flow.py": "2df06cfc8b86e223f59bc9bc371f1930d7ff0e7231a72c8c3501636ce23d2cd0",
     "deploy/mission-control/agent-runner/test_muse_read_access.py": "c7573aaa207062bf482cfa15e7404a33d66ab670411010f4ac2c5f343e7a4899",
     "deploy/mission-control/agent-runner/test_portal_release_actor.py": "90ee41284a6dc77acb40f41bf3bbf4ff497366dd97fc4b64902230f1175068a0",
     "deploy/mission-control/agent-runner/test_work_muse_intake.py": "3ee400e72fcacbddf00ff1e669ef2ed48c860623d4903d1f78e930d6d398c617",
@@ -543,7 +543,7 @@ REVIEW_PROTOCOL_CONTEXT_SHA256 = {'AGENT_WORK.md': '74187a9baa76afbd6aae600a2b89
  'deploy/mission-control/agent-runner/test_work_review_revision_attestations.py': 'ec59bc12275322938a4fa6caa7c4443870d6e27e35c7536cc0dbd7a42a0feea5',
  'deploy/mission-control/agent-runner/work_ci_contract.py': 'cdbb4aaa14af50e3e00d2bca43414f86cc9dece38b53d3be2bd0b314635a867a',
  'deploy/mission-control/agent-runner/work_cli_transport.py': 'ef7040213c882906c8c39ff45e6a8fca8b8d2b212586e7caa3828b90ef1451f4',
- 'deploy/mission-control/agent-runner/work_executor.py': '0fd960cd7f9eb504f365a589f2229ac0f4e67582f0a74ae234f43986f22367a0',
+ 'deploy/mission-control/agent-runner/work_executor.py': 'f7126e21fd865c6b3ad3ddee0681c6010e05bf18938aee12c2b3ce4204747a79',
  'deploy/mission-control/agent-runner/work_external_recovery.py': '2678b27800d3342e7cb9c1962513fce50876f097707e4230a0605544b1e565a6',
  'deploy/mission-control/agent-runner/work_external_workflow.py': 'aedae273ab85dfa8389642cbb74e76702490063c9e1c536b8ea20f1f844c4906',
  'deploy/mission-control/agent-runner/work_superseding_review.py': 'ca6b13e6f2e84ebc9c25b02687d2c9910f9c8185953b11c074cb3bcd26a6e382',
@@ -687,7 +687,7 @@ PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256 = {
     'deploy/mission-control/sql/management/grant-external-workflows.sql': '9efae0323ffa7c61f34d1f536b3ab4188561248c5e830b1500825bda9d8c760d',
     'deploy/mission-control/sql/management/verify-external-workflows.sql': '05b62b77dbef96c942dbb0f7cd20fa9dd7fea3a7fe571609b8c64953d041132c',
     'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql': '4e231e802726cde93a949d99b591aed3be3153abfa239bf7525959c24f49cf81',
-    'docs/architecture/external-agent-workflow.md': 'c88bc59f6a4d40b462097f6c4fa0df1d1cdbbfe75c05b0a8382b85fb03e24faa',
+    'docs/architecture/external-agent-workflow.md': 'd4b977856102f6c027013f7110b06a15b031b96d2238a6de00ddf118726f5c9e',
     'docs/architecture/proposals/external-plan-approve-override.md': 'e92b81b24667616c915bdb18a7d1f2d4f3bc831bcadd0e43cdbe9d7192b6f31b',
 }
 
@@ -767,16 +767,16 @@ NATIVE_CI_CONTEXT_RECOVERY_SHA256 = {
 CONTENT_IDENTITY_CONTEXT_SHA256 = {
     'AGENT_WORK.md': '020493751a8712e1bfff33e2578075cd312ff4e4f53dd01a3c69b0fb56759023',
     'deploy/mission-control/agent-runner/setup-runner.sh': '4a05e10774f0ced43ae482fff08c2f33a79666fa3e7c1cfc304f5cbacffc14b8',
-    'deploy/mission-control/agent-runner/test_external_content_identity.py': 'da4e8a5f9562201271b15eccfa1fd6159ef69d32c91797013ec0093dd0f284e0',
+    'deploy/mission-control/agent-runner/test_external_content_identity.py': '872bda34f49a3ba1a3cfc5bc0c0b37858308d78d428640f883bab653701e2148',
     'deploy/mission-control/agent-runner/test_native_content_identity.py': '63d133ae4d6c3bed213ce00c48edd511c0a2a258f95a9b4b4c75457cff3d9d95',
     'deploy/mission-control/agent-runner/test_work_artifact_identity.py': 'ba2bfa1a6189f38c6e21295e1c08eba8c0c565e43651b038179f7d49b0dce64a',
     'deploy/mission-control/agent-runner/test_work_identity_store.py': '381b18cd7c9f519c0b16bb23a4848f0725f1b95515974871e6fe043ab58684e7',
     'deploy/mission-control/agent-runner/work_artifact_identity.py': 'dd10cf60a3116a49aacbbba28475a8141beffde5322f94d622c9e3ca0ad8a920',
     'deploy/mission-control/agent-runner/work_artifact_source.py': '3f900127a41b0c05c5054f78ba613e6f3b2b4de01b016811e935c4ba07c59dbc',
-    'deploy/mission-control/agent-runner/work_config.py': '3206e73d5879a52feceadf1214ebd4ad42b288869c643b4a423a85bc7e0ba4df',
+    'deploy/mission-control/agent-runner/work_config.py': '8f63edf1d8d6e820e35213362932f6ad2a3d85b131fdc104b6bdf0cc9babda28',
     'deploy/mission-control/agent-runner/work_external_delivery.py': '5f66919d4883791a57e8899ec349ca345ddb26fd3c4475dcf2a9c76b2318fcb4',
     'deploy/mission-control/agent-runner/work_external_identity.py': '951fe253d8b696a50602bfade28c735fe87d9846f6e011be610daa0855587504',
-    'deploy/mission-control/agent-runner/work_external_review_context.py': 'e011a312a2efc6817815240089164cbc96910a1182730fe477d7c6a5dd284681',
+    'deploy/mission-control/agent-runner/work_external_review_context.py': '0c0ce4c96ec542843c202ebb29bd881680bee09c305f370828f27a75c44b2a95',
     'deploy/mission-control/agent-runner/work_external_workflow.py': 'ab7c70ae0c996bd88a351f0dc2f47c43f5f56ff533e6a6ec2cc09efd7f273f97',
     'deploy/mission-control/agent-runner/work_identity_contract.py': '8173ce291194e4e43d7536636a1468ce43f20a2e67c631d26489bd37f9477735',
     'deploy/mission-control/agent-runner/work_identity_store.py': '2c7b18856d4e402477aa625ba04484053214eeda910ad82f099a0063fbc225b6',
@@ -788,7 +788,7 @@ CONTENT_IDENTITY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_publication_config.py': 'c60b9463c6c137506e23ee29dab45220b0b45c7d1cd47f5bc82a326737503708',
     'deploy/mission-control/agent-runner/work_review.py': '1092d3017205e395be0c5bcb7f8a8af2cb2b7d6c87bf0c61578a9d128fd7d9f1',
     'deploy/mission-control/agent-runner/work_store.py': '0840e4ff2ac2b3939488b3a79baaf9260c2b35cd4f9629d3e01314dd1b5ab7b7',
-    'deploy/mission-control/agent-runner/work_worker.py': '37ba4e2691b6bdc7b6846ddc85862cb8174da95aad6ca909eb23b02308773dcf',
+    'deploy/mission-control/agent-runner/work_worker.py': '2d46903b522b9df1430c4731aaeb57dff696069d068bea2df301115d63b8c127',
     'deploy/mission-control/agent-runner/work_workflow.py': 'e139df7ac02ae6eb04e3e45b5e2761c86511502882d30410709ab1e8c98fb729',
     'docs/README.md': 'eb87245ac52fcfcc5a029a116ee4a853f6de1dbbcf8e2e9a6c16be2230f91033',
     'docs/architecture/README.md': '1e44e052542a4ec8c8defbf779aaf9ac3ee501e29bb12c2c7bf509b2c7a1a622',
@@ -817,11 +817,11 @@ CONTENT_IDENTITY_CONTEXT_SHA256 = {
 
 # Private matched-executor recovery; preserve every historical context and SQL.
 NATIVE_POSTFIX_CONTEXT_SHA256 = {
-    'AGENT_WORK.md': 'f52b28a670b00625efb786eece23440cfaff6610e15c5ac22ba4abbd4122999d',
+    'AGENT_WORK.md': 'dac145ee95587d8719bef7e3bc523eca9fb06d3ad9b341729562afd28a7ea399',
     'deploy/mission-control/agent-runner/setup-runner.sh': 'b4081924bcb6e016c719fe2adce92f6d6588d0933b877200bee1ca85946b83c5',
     'deploy/mission-control/agent-runner/test_native_ci_postfix.py': 'fe78df60156e544afd1f3ad89c10e677ec85da9a038faf20c68a2a1a2c045379',
     'deploy/mission-control/agent-runner/test_native_ci_postfix_proof.py': 'cb3e1456e3528d9517ee16d9089e51138175b124a44cf1df10ad09ae8a5e1443',
-    'deploy/mission-control/agent-runner/work_identity_contract.py': '8f0184585d57d05a15c5f8aea574fa61be36846408ce572459c612c4e4f2d3de',
+    'deploy/mission-control/agent-runner/work_identity_contract.py': '8dd55de1ba81cbaa25fd6ddd240fc7c2ee9029eb194bff3dfc8ef9824b91e597',
     'deploy/mission-control/agent-runner/work_native_ci_postfix.py': 'a4f132955d40768fb2bd6e695addda8b190147c65facc11a153d391d59785a0d',
     'deploy/mission-control/agent-runner/work_native_ci_postfix_proof.py': '9ca911005982d27abd974f5d16540a5cc105d7f69d1dbee3f505c416ccc503ad',
 }
@@ -830,15 +830,15 @@ NATIVE_POSTFIX_CONTEXT_SHA256 = {
 # Scoped runner/verifier policy-parity and gate-manifest mismatch diagnostics;
 # preserves all applied SQL, protected gate paths, and legacy authority AST pins.
 VERIFIER_POLICY_PARITY_CONTEXT_SHA256 = {
-    'deploy/mission-control/agent-runner/setup-runner.sh': '287d8cda18dfc90eddf752cbbe39baca0a00d998503e5047eb1cd00db0fe6b92',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'df815d6db2cef6ccb7c59554351485e160ec1cb4b59624b3b44639edd2a5d256',
     'deploy/mission-control/agent-runner/test_verifier_policy_parity.py': '1ca1c28b6b1ccd10b1c4edb99d875014e79d250c0a91dd4245d3046734af9ec0',
     'deploy/mission-control/agent-runner/test_work_artifact_identity.py': 'fe2066e23a7eb505c38de3d68da8846036ba55ada85710ab3477315784f77a99',
-    'deploy/mission-control/agent-runner/work_ci_contract.py': '9746eb0484cc42677c05d8999c661d707ce62ee1d6c8c2e9a93bdfb1ea82a3c9',
+    'deploy/mission-control/agent-runner/work_ci_contract.py': '9d850a97997133882efa5cc3d899cd4559000ed865a7bab1665b5401b7f76027',
     'deploy/mission-control/agent-runner/work_ci_phases.py': '5b1704aaf4580183db26a4d6dabfb3b0517529325c150eda2e04094bf62add68',
     'deploy/mission-control/agent-runner/work_delivery_repair.py': '193859469ddda803936086966aa0ede657ecae06636dabfb7dc5ae4516496160',
-    'deploy/mission-control/agent-runner/work_external_delivery.py': '886615442806819fd9e4bba7b72bd0ffbd074e1f4137e8317e659e32866d40ce',
-    'deploy/mission-control/agent-runner/work_native_jenkins.py': '9e2c73c569d21f28b506d0a63a633794f4e9bc4071232ed9cf174e4f1eae9ff3',
-    'deploy/mission-control/jenkins/verify-candidate.py': 'ec9ddf29f8e6a6abe6bc7abf275abd6024218d1d2a2ab5fe318cfe7ea4d4e7f8',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '0525feeddcf9783fc7e88c021c7a8b39f654940c3e573b0a926efab1c1c31a48',
+    'deploy/mission-control/agent-runner/work_native_jenkins.py': '0d75260a93a5b4d2fc599bf7d62d01cbb19cc296a1b089ca4f4937037dc10371',
+    'deploy/mission-control/jenkins/verify-candidate.py': '62aa87d01f9eab687312fd6459c5c68f2ea060905dc7c8c4e3dd6826c1a56fc0',
 }
 
 
@@ -856,11 +856,11 @@ TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_work_owner_fence.py': '4a593b1d8e51437ac381680963693fc8b284fccce949cea45f292e750cab093a',
     'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '14459447a7081cc1c1202ef81c5e4c6a8f0615efffe2cb277b9525e68efe81d7',
     'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '7f004e631c7e522325754c5245170be4bfd9ace93a72057d4240792acdc841ab',
-    'deploy/mission-control/agent-runner/work_external_workflow.py': 'acbefa3017613f8c8b36017385bda0a834e666ba9792035599ea7e268fe5f2d4',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': 'a82e9085c6c18a0a641706a8b65884ccafc022b04626ac3f6a1cd5d845281907',
     'deploy/mission-control/agent-runner/work_retry_events.py': 'bbe50a0aaa71219786c51af7e5df644c465db07cf659d5e86d75408b1770acc7',
-    'deploy/mission-control/agent-runner/work_store.py': '24a278c08c613561a471ee0912ea8e7c21b59363cc3a94a46966c8ed28bae1c6',
+    'deploy/mission-control/agent-runner/work_store.py': '753065d6efd8d455cc28de84e12e60f0c25d6646072ecdd011086eb27d8e769e',
     'deploy/mission-control/agent-runner/work_worker_store.py': '32d0cc335f0391fbda9b837c34bb4d0a42ca4dc4c2187d4c3e268841a6d4e719',
-    'deploy/mission-control/agent-runner/work_workflow.py': '3fe24d4ebf0779bf639e93b892f2af534226a3613189574e2c370eaf3d374cb9',
+    'deploy/mission-control/agent-runner/work_workflow.py': '9742629558d39ca74f5046f99b218f787481a6866f2459c7f278c9af3bc3492b',
     'deploy/mission-control/sql/apply.sql': '52d86a3e53378d9ceea51a397ebc2dfe2cdd8a55eacc3c0be9bc0689bc491a14',
     'deploy/mission-control/sql/management/grant-runner.sql': 'e0ee97b4cd8beb309f622b75e13cf3d88e61b876998b50538131c2749848fcc6',
     'deploy/mission-control/sql/management/repair-stale-terminal-projections.sql': '306c2530b863b16fc62d3812f9cda1b447ea593510c2a524d0d5b4a8f05aa4d5',
@@ -874,8 +874,8 @@ TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256 = {
 # reconciliation and complete parallel test execution. Historical maps and SQL
 # remain immutable provenance; only the three scoped future-recipe selectors
 # below change their guard AST. This is not approval or deployment authority.
-EVENT_STREAM_STABILITY_CONTEXT_SHA256 = {'AGENTS.md': 'fe75a58fd9ab3690d231bfa33d4e2ff6b9a9b1e4a6b939b6e36eb81de9c14fce', 'AGENT_WORK.md': 'dac145ee95587d8719bef7e3bc523eca9fb06d3ad9b341729562afd28a7ea399', 'deploy/mission-control/agent-runner/setup-runner.sh': '0ff1b4192378ad2c69366e64633878f8709e9bd602a18b28c086c259f51748c7', 'deploy/mission-control/agent-runner/test_agents_runtime_integration.py': '0a424b2d54294c18d7e3020ca5aafd07e0e3d8ea9ad704702597ebfddbb67563', 'deploy/mission-control/agent-runner/test_backend_main_parallel.py': '186c1cacba27c8d553cc20be060647d4e6f4c7a03bb93f0190a852ac54ce0fb9', 'deploy/mission-control/agent-runner/test_external_artifact_repair.py': '4265691920f84e320c4ed95ba7d5be5fb6cdf211dc13e0432c8b5f829b2efc4e', 'deploy/mission-control/agent-runner/test_external_content_identity.py': '872bda34f49a3ba1a3cfc5bc0c0b37858308d78d428640f883bab653701e2148', 'deploy/mission-control/agent-runner/test_external_flow.py': '2df06cfc8b86e223f59bc9bc371f1930d7ff0e7231a72c8c3501636ce23d2cd0', 'deploy/mission-control/agent-runner/test_external_main_refresh.py': 'eb2fbda414580812a9c116ae134b479e47271ad8ab6dc50d23abaff26f89fde1', 'deploy/mission-control/agent-runner/test_grok_auth_cleanup.py': '089dbc3c6be479baa92ed820ad5fd49833754c26edf270e1535063c0f3103cbe', 'deploy/mission-control/agent-runner/test_grok_trust.py': '8c3a614dd97c45c5787693ba8f0d9a551b75f2ab4f9eea87dc122174739b802f', 'deploy/mission-control/agent-runner/test_muse_auth_cleanup.py': '13a68a7cc0d001e04d3e3fa30d358cfb5673577ca628221956524eb4001f7d87', 'deploy/mission-control/agent-runner/test_native_ci_reconcile_stability.py': '18a0a78fd6c6c1cc21121845099fe03f2e894518a206b050255981f195687a0f', 'deploy/mission-control/agent-runner/test_provider_authority_ci_policy.py': '5e50260d16d72d561ba10c4e203002d7c4de94e945cf5ade4e68347b1ea3a70a', 'deploy/mission-control/agent-runner/test_provider_cooldown.py': '0fe7cd04099786b7a230c0aeb3622fff7baef2ac53ede3705fb38bdc0f67ffe8', 'deploy/mission-control/agent-runner/test_provider_model_route.py': '16c03d73b595c0f1a6fb149bf1caa8d7f48df7b81c8a89488dd35f55179d3f4f', 'deploy/mission-control/agent-runner/test_provider_quota_audit.py': 'f867a78be8e08e78922a09989dcb9b1180023e5fdc59edf9c82bfd35340e4d80', 'deploy/mission-control/agent-runner/test_provider_quota_diagnostics.py': 'cbcd1c4638d975807c92bdb73948b3377347c3d0ad130011e9b6bc15df81d797', 'deploy/mission-control/agent-runner/test_stopped_binary_pin.py': 'a6b400468c10eae7d2d5d92d68539369d013d00c51f3adf95efdd1c1c862bfe4', 'deploy/mission-control/agent-runner/test_work_grok.py': '60a11986c8c9145f174ba9615a0602ea24a8681f810867971733df66ecc48703', 'deploy/mission-control/agent-runner/work_ci_contract.py': '9d850a97997133882efa5cc3d899cd4559000ed865a7bab1665b5401b7f76027', 'deploy/mission-control/agent-runner/work_config.py': '8f63edf1d8d6e820e35213362932f6ad2a3d85b131fdc104b6bdf0cc9babda28', 'deploy/mission-control/agent-runner/work_executor.py': 'f7126e21fd865c6b3ad3ddee0681c6010e05bf18938aee12c2b3ce4204747a79', 'deploy/mission-control/agent-runner/work_external_delivery.py': '0525feeddcf9783fc7e88c021c7a8b39f654940c3e573b0a926efab1c1c31a48', 'deploy/mission-control/agent-runner/work_external_review_context.py': '0c0ce4c96ec542843c202ebb29bd881680bee09c305f370828f27a75c44b2a95', 'deploy/mission-control/agent-runner/work_external_workflow.py': 'a82e9085c6c18a0a641706a8b65884ccafc022b04626ac3f6a1cd5d845281907', 'deploy/mission-control/agent-runner/work_identity_contract.py': '8dd55de1ba81cbaa25fd6ddd240fc7c2ee9029eb194bff3dfc8ef9824b91e597', 'deploy/mission-control/agent-runner/work_native_jenkins.py': '0d75260a93a5b4d2fc599bf7d62d01cbb19cc296a1b089ca4f4937037dc10371', 'deploy/mission-control/agent-runner/work_provider_cooldown.py': '0e92de7b12eb4f21af8da55d0086b4bdfdd6c6daf18f7baa8f39fb90d80932cb', 'deploy/mission-control/agent-runner/work_provider_model_route.py': '8c36f1ec1c3e7ddde7036132f26e0304639459aeef0d1565ca20fdc23fbe810f', 'deploy/mission-control/agent-runner/work_quota_diagnostics.py': 'c080b2401827a47b06df72f1d3f71b88f888743720df7796fc78ef1e98c10528', 'deploy/mission-control/agent-runner/work_store.py': '20b071ab13be70af58c26b1914cfa3fc796cc64dea07fa8e8c7d7d093caa1410', 'deploy/mission-control/agent-runner/work_worker.py': '4ec3f71e4ff162cf9ee53794240cf69791db43e87bcaebaf5b68664b6ce5472d', 'deploy/mission-control/agent-runner/work_worker_config.py': 'fb497d37c7c6af50d5c85fdc74e7a43e5896552dd9fbdf1a889d74f9a83f2336', 'deploy/mission-control/agent-runner/work_workflow.py': 'a7c56620752fc167441ea7c814d125f7b67fac4352c2fbe8654d935845f85b73', 'deploy/mission-control/backend-suites.py': 'c8be37b4959a6401afc83cc2f23f47cab4591862efc6824a0cf7270683df893e', 'deploy/mission-control/jenkins/verify-candidate.py': '62aa87d01f9eab687312fd6459c5c68f2ea060905dc7c8c4e3dd6826c1a56fc0', 'docs/architecture/external-agent-workflow.md': 'd4b977856102f6c027013f7110b06a15b031b96d2238a6de00ddf118726f5c9e', 'docs/reports/event-stream-stability-20261125.md': '7f9219aec96c7df0a31a6f40435c5b455b8d8c69f13ca45197a4226fbe0427c2'}
-EVENT_STREAM_STABILITY_GUARD_AST_SHA256 = {'work_workflow.py::WorkflowStore.retry_native_timeout': '4f260de8444a5467f762f02a94baa5949d50eee7350ff2df3edbab69ff422cf8', 'work_workflow.py::WorkflowStore.retry_peer_verdict': '909f97fd129487202654b7c131ff15f9f6944f95b54e5d0d45f8806b6902b5ec', 'work_workflow.py::WorkflowStore.retry_preparation': 'cc948756f1707d4f8393ab4eb2c5adc1c6d065e2e65d32304707dd456514c259'}
+EVENT_STREAM_STABILITY_CONTEXT_SHA256 = {'AGENTS.md': 'fe75a58fd9ab3690d231bfa33d4e2ff6b9a9b1e4a6b939b6e36eb81de9c14fce', 'AGENT_WORK.md': 'dac145ee95587d8719bef7e3bc523eca9fb06d3ad9b341729562afd28a7ea399', 'deploy/mission-control/agent-runner/setup-runner.sh': 'df815d6db2cef6ccb7c59554351485e160ec1cb4b59624b3b44639edd2a5d256', 'deploy/mission-control/agent-runner/test_agents_runtime_integration.py': '0a424b2d54294c18d7e3020ca5aafd07e0e3d8ea9ad704702597ebfddbb67563', 'deploy/mission-control/agent-runner/test_backend_main_parallel.py': '186c1cacba27c8d553cc20be060647d4e6f4c7a03bb93f0190a852ac54ce0fb9', 'deploy/mission-control/agent-runner/test_external_artifact_repair.py': '4265691920f84e320c4ed95ba7d5be5fb6cdf211dc13e0432c8b5f829b2efc4e', 'deploy/mission-control/agent-runner/test_external_content_identity.py': '872bda34f49a3ba1a3cfc5bc0c0b37858308d78d428640f883bab653701e2148', 'deploy/mission-control/agent-runner/test_external_flow.py': '2df06cfc8b86e223f59bc9bc371f1930d7ff0e7231a72c8c3501636ce23d2cd0', 'deploy/mission-control/agent-runner/test_external_main_refresh.py': 'eb2fbda414580812a9c116ae134b479e47271ad8ab6dc50d23abaff26f89fde1', 'deploy/mission-control/agent-runner/test_grok_auth_cleanup.py': '089dbc3c6be479baa92ed820ad5fd49833754c26edf270e1535063c0f3103cbe', 'deploy/mission-control/agent-runner/test_grok_trust.py': '8c3a614dd97c45c5787693ba8f0d9a551b75f2ab4f9eea87dc122174739b802f', 'deploy/mission-control/agent-runner/test_muse_auth_cleanup.py': '13a68a7cc0d001e04d3e3fa30d358cfb5673577ca628221956524eb4001f7d87', 'deploy/mission-control/agent-runner/test_native_ci_reconcile_stability.py': '18a0a78fd6c6c1cc21121845099fe03f2e894518a206b050255981f195687a0f', 'deploy/mission-control/agent-runner/test_provider_authority_ci_policy.py': '5e50260d16d72d561ba10c4e203002d7c4de94e945cf5ade4e68347b1ea3a70a', 'deploy/mission-control/agent-runner/test_provider_cooldown.py': '0fe7cd04099786b7a230c0aeb3622fff7baef2ac53ede3705fb38bdc0f67ffe8', 'deploy/mission-control/agent-runner/test_provider_model_route.py': '16c03d73b595c0f1a6fb149bf1caa8d7f48df7b81c8a89488dd35f55179d3f4f', 'deploy/mission-control/agent-runner/test_provider_quota_audit.py': 'f867a78be8e08e78922a09989dcb9b1180023e5fdc59edf9c82bfd35340e4d80', 'deploy/mission-control/agent-runner/test_provider_quota_diagnostics.py': 'cbcd1c4638d975807c92bdb73948b3377347c3d0ad130011e9b6bc15df81d797', 'deploy/mission-control/agent-runner/test_stopped_binary_pin.py': 'a6b400468c10eae7d2d5d92d68539369d013d00c51f3adf95efdd1c1c862bfe4', 'deploy/mission-control/agent-runner/test_work_grok.py': '60a11986c8c9145f174ba9615a0602ea24a8681f810867971733df66ecc48703', 'deploy/mission-control/agent-runner/work_ci_contract.py': '9d850a97997133882efa5cc3d899cd4559000ed865a7bab1665b5401b7f76027', 'deploy/mission-control/agent-runner/work_config.py': '8f63edf1d8d6e820e35213362932f6ad2a3d85b131fdc104b6bdf0cc9babda28', 'deploy/mission-control/agent-runner/work_executor.py': 'f7126e21fd865c6b3ad3ddee0681c6010e05bf18938aee12c2b3ce4204747a79', 'deploy/mission-control/agent-runner/work_external_delivery.py': '0525feeddcf9783fc7e88c021c7a8b39f654940c3e573b0a926efab1c1c31a48', 'deploy/mission-control/agent-runner/work_external_review_context.py': '0c0ce4c96ec542843c202ebb29bd881680bee09c305f370828f27a75c44b2a95', 'deploy/mission-control/agent-runner/work_external_workflow.py': 'a82e9085c6c18a0a641706a8b65884ccafc022b04626ac3f6a1cd5d845281907', 'deploy/mission-control/agent-runner/work_identity_contract.py': '8dd55de1ba81cbaa25fd6ddd240fc7c2ee9029eb194bff3dfc8ef9824b91e597', 'deploy/mission-control/agent-runner/work_native_jenkins.py': '0d75260a93a5b4d2fc599bf7d62d01cbb19cc296a1b089ca4f4937037dc10371', 'deploy/mission-control/agent-runner/work_provider_cooldown.py': '0e92de7b12eb4f21af8da55d0086b4bdfdd6c6daf18f7baa8f39fb90d80932cb', 'deploy/mission-control/agent-runner/work_provider_model_route.py': '8c36f1ec1c3e7ddde7036132f26e0304639459aeef0d1565ca20fdc23fbe810f', 'deploy/mission-control/agent-runner/work_quota_diagnostics.py': 'c080b2401827a47b06df72f1d3f71b88f888743720df7796fc78ef1e98c10528', 'deploy/mission-control/agent-runner/work_store.py': '753065d6efd8d455cc28de84e12e60f0c25d6646072ecdd011086eb27d8e769e', 'deploy/mission-control/agent-runner/work_worker.py': '2d46903b522b9df1430c4731aaeb57dff696069d068bea2df301115d63b8c127', 'deploy/mission-control/agent-runner/work_worker_config.py': '6d6aa51c4e488464d9334cb6e65dd5be5ba174a30def23662768151845248d27', 'deploy/mission-control/agent-runner/work_workflow.py': '9742629558d39ca74f5046f99b218f787481a6866f2459c7f278c9af3bc3492b', 'deploy/mission-control/backend-suites.py': 'c8be37b4959a6401afc83cc2f23f47cab4591862efc6824a0cf7270683df893e', 'deploy/mission-control/jenkins/verify-candidate.py': '62aa87d01f9eab687312fd6459c5c68f2ea060905dc7c8c4e3dd6826c1a56fc0', 'docs/architecture/external-agent-workflow.md': 'd4b977856102f6c027013f7110b06a15b031b96d2238a6de00ddf118726f5c9e', 'docs/reports/event-stream-stability-20261125.md': '7f9219aec96c7df0a31a6f40435c5b455b8d8c69f13ca45197a4226fbe0427c2'}
+EVENT_STREAM_STABILITY_GUARD_AST_SHA256 = {'work_workflow.py::WorkflowStore.retry_native_timeout': '55a811143ae008f186635c27e400ff03de1a2c3e9370031851c52761cba48359', 'work_workflow.py::WorkflowStore.retry_peer_verdict': 'eeb6e8775967dac05ea64a91ddbb7687cd1d729c3ec6513051c2386682b20ab5', 'work_workflow.py::WorkflowStore.retry_preparation': '8e25dc5ac3d7729e6f3dcfc21bbfb59ff9e3875272a1d9e7e88d7b270c888c4b'}
 
 def qualified_source(relative, expected):
     if relative in EVENT_STREAM_STABILITY_CONTEXT_SHA256:
