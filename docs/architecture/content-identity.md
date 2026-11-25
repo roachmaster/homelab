@@ -8,8 +8,9 @@ checkout locations and formatted patches remain useful provenance and delivery
 coordinates.
 
 **Source implementation, selected explicitly; live activation is separate.**
-The new `content-v2` protocol is opt-in. Existing work keeps the
-`legacy-v1` protocol and its original receipts. Native publication selects
+The new `content-v2` protocol is opt-in. Existing queued or indexed native
+generations and existing external workflow records keep `legacy-v1` and their
+original receipts. Native publication selects
 `native_identity_protocol=content-v2` with an explicit UTC
 `native_identity_after` admission cutoff. External workflow creation selects
 `WorkConfig.identity_protocol=content-v2` and freezes it in workflow state.
@@ -61,7 +62,7 @@ validation precede I/O; acquisition performs the reads. The pure manifest and
 policy values need neither a registry nor an empty factory.
 
 Normal Git consumers receive
-`GitArtifactProviderFactory(git, limits).create()` and call its ready
+`GitArtifactProviderFactory(git, limits=...).create()` and call its ready
 `GitArtifactProvider.acquire(repository, revision)`. The alternate
 `ArtifactSourceFactory(config, git=ready_git).create().acquire()` accepts
 `GitSourceConfig`, `DirectorySourceConfig` or `MemorySourceConfig`. These are
@@ -98,6 +99,11 @@ the selected protocol, artifact, policy and verification identity with its
 review generation. Writing it successfully is a precondition for effectful
 execution. A lease or admission failure rejects the operation before those
 effects.
+
+`work_identity_store` publishes complete snapshots under a private per-path lock.
+It syncs a temporary file, atomically publishes it, and syncs the directory.
+Replay compares the existing canonical record; it cannot overwrite a generation.
+Read-side directory sync also covers a process stopping just after publication.
 
 On resume, the worker loads and validates that envelope. It does not silently
 enumerate the currently installed runtime, recompute a new verification ID and

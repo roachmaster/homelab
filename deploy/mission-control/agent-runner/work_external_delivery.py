@@ -493,8 +493,8 @@ class TrustedDeliveryPort:
             if previous['intent_sha256'] != identity:
                 raise ValueError('Prepared candidate replay conflict')
             if protocol=='content-v2':
-                from work_external_review_context import strict_json
-                record=strict_json(read_private(directory/'identity-manifest.json',owner=os.geteuid(),maximum=16*1024*1024))
+                from work_identity_store import read_identity_snapshot
+                record=read_identity_snapshot(directory/'identity-manifest.json')
                 self.identities.validate_snapshot(record['snapshot'],previous['candidate']['content_identity'])
                 if record['intent_sha256']!=identity or record['reference']!=previous['candidate']['content_identity']:
                     raise ValueError('Saved content preparation binding changed')
@@ -564,8 +564,8 @@ class TrustedDeliveryPort:
         content_reference=None
         identity_path=directory/'identity-manifest.json'
         if protocol=='content-v2' and identity_path.exists():
-            from work_external_review_context import strict_json
-            record=strict_json(read_private(identity_path,owner=os.geteuid(),maximum=16*1024*1024))
+            from work_identity_store import read_identity_snapshot
+            record=read_identity_snapshot(identity_path)
             content_reference=record['reference']
             self.identities.validate_snapshot(record['snapshot'],content_reference)
             if (record['intent_sha256']!=identity or record['candidate_commit']!=clean
@@ -650,10 +650,10 @@ class TrustedDeliveryPort:
         if protocol not in ('legacy-v1','content-v2'):raise ValueError('Unknown CI identity protocol')
         if protocol=='legacy-v1' and reference is None and not identity_path.exists():return None
         from work_external_identity import ExternalCandidateIdentityProvider,ci_policy_body
-        from work_external_review_context import strict_json
+        from work_identity_store import read_identity_snapshot
         from work_artifact_identity import VerificationPolicySnapshot
         if reference is None or protocol!='content-v2':raise ValueError('Saved content generation cannot downgrade to legacy')
-        record=strict_json(read_private(identity_path,owner=os.geteuid(),maximum=16*1024*1024))
+        record=read_identity_snapshot(identity_path)
         ExternalCandidateIdentityProvider.validate_snapshot(record['snapshot'],reference)
         expected_scope={'workflow_id','project_alias','source_task_id','source_assignment_id','source_sha256'}
         if (reference!=record['reference'] or reference['verification']['generation']!=request['prepare_action_id']

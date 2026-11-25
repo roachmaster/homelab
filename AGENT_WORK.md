@@ -22,6 +22,16 @@ rewrite historical identities, reset live tasks, restart active workers, or
 claim that source publication is a portal rollout. No paid agent calls are
 needed for this implementation.
 
+The source implementation now contains pure typed manifests, bounded selected
+Git/directory/memory source adapters, shared crash-safe snapshot storage, native
+review/CI/publication wiring and external preparation/reviewer wiring. Native
+selection requires content-v2 plus an explicit UTC admission cutoff; external
+selection is frozen at workflow creation. Existing delegation, SQL/migrations,
+exact-candidate Jenkins transport, approval rules and retry counters are retained.
+Four UML views and a Rust-generated Design reader document the implemented path.
+Full qualification and actual source/deployment identities are recorded separately
+from component tests; this checkpoint activates no live protocol or worker.
+
 # Previous: Recover cancelled/parked Muse and Gemini work — 2026-11-25
 
 User asks to fix the cancelled Muse task and the attention-state Gemini portal

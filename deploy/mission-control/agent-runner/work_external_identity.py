@@ -3,10 +3,11 @@
 Git locates source and transports exact commits; these identity contracts hash
 file bytes and the explicitly frozen verification policy instead of Git output.
 """
-import fcntl,hashlib,os,stat
+import hashlib
 from uuid import UUID
 from work_artifact_identity import ArtifactManifest,VerificationPolicySnapshot,VerificationIdentity
 from work_external_review_context import canonical
+from work_identity_store import persist_identity_snapshot,read_identity_snapshot
 
 
 def ci_policy_body(plan,verifier_sha256):
@@ -18,39 +19,6 @@ def ci_policy_body(plan,verifier_sha256):
         'phase_plan':[{'phase_id':phase.phase_id,'kind':phase.kind,'argv':list(phase.argv),
             'logical_gate':phase.logical_gate} for phase in plan.phases],
         'verifier_sha256':verifier_sha256}
-
-
-def persist_identity_snapshot(path,value):
-    """Publish once, including against concurrent claims; never replace history."""
-    from work_external_delivery import read_private
-    from work_external_review_context import strict_json
-    raw=canonical(value)+b'\n'
-    if len(raw)>16*1024*1024:raise ValueError('Content identity snapshot exceeds its bound')
-    path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
-    lock=os.open(path.with_name(path.name+'.lock'),os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
-    info=os.fstat(lock)
-    if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid() or info.st_nlink!=1 or info.st_mode&0o077:
-        os.close(lock);raise ValueError('Unsafe identity persistence lock')
-    temporary=path.with_name(path.name+'.'+str(os.getpid())+'.'+os.urandom(8).hex()+'.new')
-    try:
-        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:
-            from work_publication import PublicationError
-            raise PublicationError('content_identity_registration_busy') from None
-        if path.exists():
-            if strict_json(read_private(path,owner=os.geteuid(),maximum=16*1024*1024))!=value:
-                raise ValueError('Existing verification generation cannot change identity')
-            return
-        descriptor=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-        with os.fdopen(descriptor,'wb') as stream:
-            stream.write(raw);stream.flush();os.fsync(stream.fileno())
-        os.replace(temporary,path)
-        directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
-        try:os.fsync(directory)
-        finally:os.close(directory)
-    finally:
-        if temporary.exists():temporary.unlink()
-        os.close(lock)
 
 
 def validate_content_identity(value):
