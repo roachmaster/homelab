@@ -878,9 +878,8 @@ BEGIN
     attempt_no = COALESCE(p_attempt_no, attempt_no),
     next_attempt_at = CASE WHEN COALESCE(p_requeue, false) THEN clock_timestamp() + attempt_no * interval '5 seconds' WHEN p_next_attempt_at IS NOT NULL THEN p_next_attempt_at::timestamptz ELSE next_attempt_at END,
     accepted_result_hash = CASE WHEN COALESCE(p_requeue, false) THEN NULL WHEN COALESCE(p_clear_accepted_result_hash, false) THEN NULL WHEN p_accepted_result_hash IS NOT NULL THEN decode(p_accepted_result_hash, 'hex') ELSE accepted_result_hash END
-  WHERE t.id = p_id AND NOT COALESCE(p_requeue, false) OR (attempt_no < 3 AND run_deadline > clock_timestamp() + attempt_no * interval '5 seconds') AND EXISTS (SELECT 1 FROM forge_agent.runs rr
-  JOIN forge_agent.conversations c ON c.id = rr.conversation_id
-  WHERE rr.id = t.run_id
+  WHERE t.id = p_id AND (NOT COALESCE(p_requeue, false) OR (attempt_no < 3 AND run_deadline > clock_timestamp() + attempt_no * interval '5 seconds')) AND EXISTS (SELECT 1 FROM forge_agent.conversations c
+  WHERE c.id = t.conversation_id
     AND c.owner_id = current_setting('forge.coding_owner', true))
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
@@ -987,7 +986,7 @@ BEGIN
     removed_at = CASE WHEN COALESCE(p_set_removed_at, false) THEN clock_timestamp() ELSE removed_at END,
     removal_reason = COALESCE(p_removal_reason, removal_reason),
     updated_at = clock_timestamp()
-  WHERE t.owner_id = p_owner_id AND t.id = p_id AND NOT COALESCE(p_require_unexpired, false) OR expires_at IS NULL OR expires_at > clock_timestamp()
+  WHERE t.owner_id = p_owner_id AND t.id = p_id AND (NOT COALESCE(p_require_unexpired, false) OR expires_at IS NULL OR expires_at > clock_timestamp())
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
@@ -1019,7 +1018,7 @@ BEGIN
     archive_base_revision = CASE WHEN COALESCE(p_manual_archive, false) THEN p_archive_base_revision ELSE archive_base_revision END,
     revision = revision + 1,
     updated_at = clock_timestamp()
-  WHERE t.owner_id = p_owner_id AND t.id = p_id AND NOT COALESCE(p_require_not_manually_archived, false) OR archive_reason IS DISTINCT FROM 'manual'
+  WHERE t.owner_id = p_owner_id AND t.id = p_id AND (NOT COALESCE(p_require_not_manually_archived, false) OR archive_reason IS DISTINCT FROM 'manual')
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
@@ -1147,7 +1146,7 @@ BEGIN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   WITH d AS (
-    DELETE FROM forge_agent.conversations AS c WHERE c.owner_id = p_owner_id AND c.id = ANY(p_ids) AND NOT EXISTS (SELECT 1 FROM forge_agent.runs r WHERE r.conversation_id = c.id) RETURNING *
+    DELETE FROM forge_agent.conversations AS c WHERE c.owner_id = p_owner_id AND c.id = ANY(p_ids::uuid[]) AND NOT EXISTS (SELECT 1 FROM forge_agent.runs r WHERE r.conversation_id = c.id) RETURNING *
   ) SELECT COALESCE(jsonb_agg(to_jsonb(d)), '[]'::jsonb) INTO deleted FROM d;
   RETURN jsonb_build_object('deleted', deleted);
 END;
@@ -1261,6 +1260,8 @@ BEGIN
       SELECT workflow_id, owner_id, project_alias, workflow_review_id, 'decide', p_source_key
       FROM forge_agent.coding_workflow_reviews
       WHERE workflow_review_id = p_workflow_review_id AND status = 'reviewing'
+        AND workflow_id = p_workflow_id
+        AND owner_id = current_setting('forge.coding_owner', true)
       ON CONFLICT DO NOTHING RETURNING * INTO r;
   ELSIF COALESCE(p_on_conflict_do_nothing, false) THEN
     INSERT INTO forge_agent.coding_workflow_actions (workflow_id, owner_id, project_alias, workflow_review_id, kind, source_key, source_publication_id, status, intent, finish_receipt)
@@ -1288,6 +1289,7 @@ BEGIN
   INSERT INTO forge_agent.coding_reviews (owner_id, project_alias, task_id, attempt_id, plan_decision_id, scope_plan_decision_id, reconciliation_receipt_id, base_revision, workspace_digest, parent_result_sha256, source_revision, review_no, round, stagnant_rounds, infrastructure_retries, previous_review_id, candidate_commit, summary, phase, owner_decision, findings, verified_finding_ids, verification, target_publication_id, source_publication_id, gate_manifest_sha256)
     SELECT s.owner_id, s.project_alias, s.task_id, s.attempt_id, s.plan_decision_id, s.scope_plan_decision_id, COALESCE(p_reconciliation_receipt_id, s.reconciliation_receipt_id), s.base_revision, s.workspace_digest, s.parent_result_sha256, COALESCE(p_source_revision, s.source_revision), (SELECT COALESCE(MAX(review_no), 0) + 1 FROM forge_agent.coding_reviews WHERE owner_id = s.owner_id AND project_alias = s.project_alias AND task_id = s.task_id), s.round, s.stagnant_rounds, CASE WHEN COALESCE(p_increment_infrastructure_retries, false) THEN s.infrastructure_retries + 1 ELSE s.infrastructure_retries END, s.review_id, s.candidate_commit, COALESCE(p_summary, s.summary), s.phase, s.owner_decision, s.findings, s.verified_finding_ids, CASE WHEN COALESCE(p_strip_verification_keys, false) THEN s.verification - 'failure_stage' - 'exception_type' ELSE s.verification END, s.target_publication_id, s.source_publication_id, s.gate_manifest_sha256
     FROM forge_agent.coding_reviews s WHERE s.review_id = p_source_review_id
+      AND s.owner_id = current_setting('forge.coding_owner', true)
     RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
