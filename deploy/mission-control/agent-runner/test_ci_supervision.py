@@ -794,6 +794,142 @@ class SupervisionBoundaryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn('Explicit --execute', result.stderr)
 
+    def test_prepare_source_records_closed_non_secret_reason_on_v3_policy_skew_and_failures(self):
+        with self.assertRaises(ValueError):
+            CI.PrepareSourceError('unknown_reason')
+        fixture = CargoCacheSupervisorIntegrationTest('test_main_scope_runs_the_full_gate')
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        commit = fixture._commit_change(
+            'deploy/mission-control/agent-runner/work_external_plan_override.py',
+            '# override policy fixture\n',
+            'Add protected v3 override file',
+        )
+        commit = fixture._commit_change(
+            'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql',
+            '-- migration fixture\n',
+            'Add protected v3 migration',
+        )
+        v3_checks = tuple(p.argv for p in CI.event_phases_for_scope('main'))
+        no_checks = lambda *a, **kw: self.fail('Fixed checks must not run after prepare_source failure')
+        empty_log_sha = hashlib.sha256(b'').hexdigest()
+
+        # 1. Publisher/verifier V3_PROTECTED_PATHS skew -> gate_manifest_mismatch
+        skewed_omitted = {
+            'deploy/mission-control/agent-runner/work_external_plan_override.py',
+            'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql',
+        }
+        real_predicate = CI.profile_protected_gate_path
+        def skewed_predicate(path, profile):
+            if path in skewed_omitted:
+                return False
+            return real_predicate(path, profile)
+        action = str(uuid4())
+        bundle = fixture._make_bundle(commit)
+        tree = fixture._git('rev-parse', commit + '^{tree}').decode().strip()
+        helper_digest, publisher_manifest = fixture._gate_manifest(
+            commit, v3_checks, profile=CI.EVENT_PROFILE, branch_scope='main',
+        )
+        sub_dir = fixture.spool / action
+        sub_dir.mkdir(mode=0o700)
+        (sub_dir / 'candidate.bundle').write_bytes(bundle)
+        (sub_dir / 'candidate.bundle').chmod(0o600)
+        req = {
+            'version': 3, 'action_id': action, 'workflow_id': str(uuid4()),
+            'project_alias': 'homelab', 'candidate_commit': commit, 'candidate_tree': tree,
+            'expected_main': commit, 'branch_scope': 'main',
+            'gate_manifest_sha256': publisher_manifest,
+            'bundle_sha256': hashlib.sha256(bundle).hexdigest(),
+            'verification_profile': CI.EVENT_PROFILE, 'correlation_id': str(uuid4()),
+        }
+        (sub_dir / 'request.json').write_bytes(CI.canonical(req) + b'\n')
+        (sub_dir / 'request.json').chmod(0o600)
+        with patch.object(CI, 'profile_protected_gate_path', side_effect=skewed_predicate):
+            skew_result, skew_log, _ = fixture._run_supervisor(
+                commit=commit, expected_main=commit, branch_scope='main',
+                profile=CI.EVENT_PROFILE, checks=v3_checks, action=action,
+                run_child_override=no_checks, cache_config_override={'enabled': False},
+            )
+        self.assertEqual(skew_result['status'], 'failed')
+        self.assertEqual(skew_result['failure'], 'verification_unavailable')
+        self.assertEqual(skew_result['failure_kind'], 'infrastructure')
+        self.assertEqual(skew_result['checks'], [])
+        self.assertEqual(skew_result['phase_results'], [])
+        self.assertEqual(skew_result['passed_kinds'], [])
+        self.assertTrue(skew_result['cleanup_confirmed'])
+        self.assertEqual(skew_result['log_sha256'], empty_log_sha)
+        self.assertEqual(skew_log, '')
+        self.assertEqual([s['name'] for s in skew_result['stages']], ['prepare_source', 'cleanup'])
+        prep = skew_result['stages'][0]
+        self.assertEqual(set(prep), {'name', 'status', 'reason', 'elapsed_ms'})
+        self.assertEqual(prep['status'], 'failed')
+        self.assertEqual(prep['reason'], 'gate_manifest_mismatch')
+        serialized = json.dumps(skew_result)
+        self.assertNotIn('work_external_plan_override', serialized)
+        self.assertNotIn('fixture-repo', serialized)
+
+        # 2. Installed verifier digest drift -> verifier_digest_mismatch
+        orig_read_bytes = Path.read_bytes
+        verifier_file = Path(CI.__file__)
+        verifier_reads = 0
+        def drifted_verifier(path_self):
+            nonlocal verifier_reads
+            if path_self == verifier_file:
+                verifier_reads += 1
+                if verifier_reads > 1:
+                    return b'drifted-verifier-content'
+            return orig_read_bytes(path_self)
+        with patch.object(Path, 'read_bytes', drifted_verifier):
+            drift_result, _, _ = fixture._run_supervisor(
+                commit=commit, expected_main=commit, branch_scope='main',
+                profile=CI.EVENT_PROFILE, checks=v3_checks,
+                run_child_override=no_checks, cache_config_override={'enabled': False},
+            )
+        self.assertGreaterEqual(verifier_reads, 2)
+        self.assertEqual(drift_result['failure'], 'verification_unavailable')
+        self.assertEqual(drift_result['stages'][0]['name'], 'prepare_source')
+        self.assertEqual(drift_result['stages'][0]['reason'], 'verifier_digest_mismatch')
+
+        # 3. Tracked build output -> source_bounds_exceeded without leaking path
+        dirty_commit = fixture._commit_change(
+            'src/rust/target/secret_tracked_output.txt', 'forbidden\n', 'Tracked target output',
+        )
+        bounds_result, _, _ = fixture._run_supervisor(
+            commit=dirty_commit, expected_main=dirty_commit, branch_scope='main',
+            profile=CI.EVENT_PROFILE, checks=v3_checks,
+            run_child_override=no_checks, cache_config_override={'enabled': False},
+        )
+        self.assertEqual(bounds_result['failure'], 'verification_unavailable')
+        self.assertEqual(bounds_result['stages'][0]['name'], 'prepare_source')
+        self.assertEqual(bounds_result['stages'][0]['reason'], 'source_bounds_exceeded')
+        self.assertNotIn('secret_tracked_output', json.dumps(bounds_result))
+
+        # 4. Bundle/git subprocess error -> checkout_failed without leaking stderr/paths
+        with patch.object(CI, 'import_verified_bundle',
+                          side_effect=subprocess.CalledProcessError(128, ['git'], output=b'/secret/bundle')):
+            checkout_result, _, _ = fixture._run_supervisor(
+                commit=commit, expected_main=commit, branch_scope='main',
+                profile=CI.EVENT_PROFILE, checks=v3_checks,
+                run_child_override=no_checks, cache_config_override={'enabled': False},
+            )
+        self.assertEqual(checkout_result['failure'], 'verification_unavailable')
+        self.assertEqual(checkout_result['stages'][0]['name'], 'prepare_source')
+        self.assertEqual(checkout_result['stages'][0]['reason'], 'checkout_failed')
+        self.assertNotIn('/secret/bundle', json.dumps(checkout_result))
+
+        # 5. Host OSError -> io_unavailable without leaking filesystem path
+        with patch.object(CI, 'create_short_tmp',
+                          side_effect=OSError(13, 'Permission denied', '/secret/private/tmp')):
+            io_result, _, _ = fixture._run_supervisor(
+                commit=commit, expected_main=commit, branch_scope='main',
+                profile=CI.EVENT_PROFILE, checks=v3_checks,
+                run_child_override=no_checks, cache_config_override={'enabled': False},
+            )
+        self.assertEqual(io_result['failure'], 'verification_unavailable')
+        self.assertEqual(io_result['stages'][0]['name'], 'prepare_source')
+        self.assertEqual(io_result['stages'][0]['reason'], 'io_unavailable')
+        self.assertNotIn('/secret/private/tmp', json.dumps(io_result))
+
 
 @unittest.skipUnless(TOOLCHAIN_AVAILABLE, 'Requires /opt/forge-ci/toolchain')
 class CargoCacheSupervisorIntegrationTest(unittest.TestCase):

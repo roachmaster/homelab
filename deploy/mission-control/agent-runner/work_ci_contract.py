@@ -3,9 +3,10 @@
 The privileged standalone verifier mirrors these closed data declarations;
 it never imports this source file from a candidate checkout.
 """
+import ast
 from dataclasses import dataclass
 import re
-from work_ci_phases import EVENT_PROFILE, event_phases_for_scope
+from work_ci_phases import ALL_FEATURES, EVENT_PROFILE, FEATURE_VARIANTS, event_phases_for_scope
 
 LEGACY_PROFILE = 'forge-sdlc-jenkins-v1'
 SCOPED_PROFILE = 'forge-sdlc-jenkins-v2'
@@ -82,14 +83,32 @@ V3_PROTECTED_PATHS = frozenset({
 })
 
 
+V3_PROTECTED_PREFIXES = (
+    'deploy/mission-control/sql/migrations/0031_',
+    'deploy/mission-control/sql/fragments/0031_',
+    'deploy/mission-control/sql/migrations/0032_',
+    'deploy/mission-control/sql/fragments/0032_',
+    'deploy/mission-control/sql/migrations/0033_',
+    'deploy/mission-control/sql/fragments/0033_',
+)
+V3_STATIC_PHASE_IDS = frozenset({
+    'source-preflight',
+    'script-tests',
+    'formatting',
+    'imports',
+    'dependencies',
+    'ui-compilation',
+    'ui-contracts',
+    'browser-driver-tests',
+    'browser-journeys',
+    'backend-main',
+    'backend-memory',
+})
+
+
 def protected_event_policy_path(path):
     return (path in V3_PROTECTED_PATHS
-        or path.startswith('deploy/mission-control/sql/migrations/0031_')
-        or path.startswith('deploy/mission-control/sql/fragments/0031_')
-        or path.startswith('deploy/mission-control/sql/migrations/0032_')
-        or path.startswith('deploy/mission-control/sql/fragments/0032_')
-        or path.startswith('deploy/mission-control/sql/migrations/0033_')
-        or path.startswith('deploy/mission-control/sql/fragments/0033_'))
+        or any(path.startswith(prefix) for prefix in V3_PROTECTED_PREFIXES))
 
 
 def scope_kind(scope):
@@ -186,3 +205,144 @@ class CiGateContractFactory:
 def contract_for_config(config):
     """Compatibility for old typed configs/fixtures which predate this field."""
     return CiGateContractFactory(getattr(config, 'verification_profile', LEGACY_PROFILE)).create()
+
+
+def _eval_pure_constant(node):
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'frozenset' and len(node.args) == 1 and not node.keywords):
+        value = ast.literal_eval(node.args[0])
+        if not isinstance(value, (set, tuple, list, frozenset)):
+            raise ValueError('Unsupported frozenset constant')
+        return frozenset(value)
+    return ast.literal_eval(node)
+
+
+def _is_event_profile_guard(node):
+    if not isinstance(node, ast.Compare) or len(node.ops) != 1 or not isinstance(node.ops[0], ast.Eq) or len(node.comparators) != 1:
+        return False
+    sides = (node.left, node.comparators[0])
+    has_profile = any(isinstance(side, ast.Name) and side.id == 'profile' for side in sides)
+    has_event = any(
+        (isinstance(side, ast.Name) and side.id == 'EVENT_PROFILE')
+        or (isinstance(side, ast.Constant) and side.value == EVENT_PROFILE)
+        for side in sides
+    )
+    return has_profile and has_event
+
+
+def _extract_event_gate_policy(fn_node, constants):
+    v3_paths = set()
+    v3_prefixes = set()
+    found_branch = False
+    for node in ast.walk(fn_node):
+        if not isinstance(node, ast.BoolOp) or not isinstance(node.op, ast.And):
+            continue
+        if not any(_is_event_profile_guard(value) for value in node.values):
+            continue
+        found_branch = True
+        for sub in ast.walk(node):
+            if (isinstance(sub, ast.Compare) and isinstance(sub.left, ast.Name)
+                    and sub.left.id == 'path' and len(sub.ops) == 1
+                    and isinstance(sub.ops[0], ast.In) and len(sub.comparators) == 1):
+                rhs = sub.comparators[0]
+                if isinstance(rhs, ast.Name) and rhs.id == 'V3_PROTECTED_PATHS':
+                    resolved = constants.get('V3_PROTECTED_PATHS')
+                else:
+                    try:
+                        resolved = _eval_pure_constant(rhs)
+                    except (ValueError, SyntaxError, TypeError):
+                        return None, None
+                if not isinstance(resolved, (set, frozenset)):
+                    return None, None
+                v3_paths.update(resolved)
+            elif (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
+                    and isinstance(sub.func.value, ast.Name) and sub.func.value.id == 'path'
+                    and sub.func.attr == 'startswith' and len(sub.args) == 1 and not sub.keywords
+                    and isinstance(sub.args[0], ast.Constant) and isinstance(sub.args[0].value, str)):
+                v3_prefixes.add(sub.args[0].value)
+    if not found_branch:
+        return None, None
+    return frozenset(v3_paths), frozenset(v3_prefixes)
+
+
+def verify_verifier_policy_parity(contract, verifier_source):
+    """Pure static AST check proving an installed verifier matches this gate contract."""
+    if not isinstance(contract, CiGateContract):
+        raise TypeError('Expected a typed CiGateContract')
+    if isinstance(verifier_source, bytes):
+        try:
+            text = verifier_source.decode('utf-8')
+        except UnicodeDecodeError:
+            raise ValueError('Installed verifier policy is unreadable') from None
+    elif isinstance(verifier_source, str):
+        text = verifier_source
+    else:
+        raise TypeError('Expected verifier source bytes or text')
+    try:
+        module = ast.parse(text)
+    except (SyntaxError, TypeError, ValueError):
+        raise ValueError('Installed verifier policy is unreadable') from None
+
+    constants = {}
+    functions = {}
+    for stmt in module.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            try:
+                constants[stmt.targets[0].id] = _eval_pure_constant(stmt.value)
+            except (ValueError, SyntaxError, TypeError):
+                pass
+        elif isinstance(stmt, ast.FunctionDef):
+            functions[stmt.name] = stmt
+
+    gate_fn = functions.get('profile_protected_gate_path')
+    if gate_fn is None:
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+    has_contract_path = any(
+        isinstance(node, ast.Constant)
+        and node.value == 'deploy/mission-control/agent-runner/work_ci_contract.py'
+        for node in ast.walk(gate_fn)
+    )
+    if not has_contract_path:
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+
+    if contract.profile == LEGACY_PROFILE:
+        if constants.get('CHECKS') != LEGACY_CHECKS:
+            raise ValueError('Installed verifier policy does not match active CI gate contract')
+        return
+
+    references_v2 = any(
+        isinstance(node, ast.Name) and node.id == 'V2_PROTECTED_PATHS'
+        for node in ast.walk(gate_fn)
+    )
+    if constants.get('V2_PROTECTED_PATHS') != V2_PROTECTED_PATHS or not references_v2:
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+
+    if contract.profile == SCOPED_PROFILE:
+        if (constants.get('SCOPED_BRANCH_CHECKS') != SCOPED_BRANCH_CHECKS
+                or constants.get('SCOPED_MAIN_CHECKS') != SCOPED_MAIN_CHECKS):
+            raise ValueError('Installed verifier policy does not match active CI gate contract')
+        return
+
+    if contract.profile == EVENT_PROFILE:
+        if (constants.get('EVENT_PROFILE') != EVENT_PROFILE
+                or constants.get('ALL_FEATURES') != ALL_FEATURES
+                or constants.get('FEATURE_VARIANTS') != FEATURE_VARIANTS):
+            raise ValueError('Installed verifier policy does not match active CI gate contract')
+        v3_paths, v3_prefixes = _extract_event_gate_policy(gate_fn, constants)
+        if v3_paths != V3_PROTECTED_PATHS or v3_prefixes != frozenset(V3_PROTECTED_PREFIXES):
+            raise ValueError('Installed verifier policy does not match active CI gate contract')
+        phase_fn = functions.get('event_phases_for_scope')
+        if phase_fn is None:
+            raise ValueError('Installed verifier policy does not match active CI gate contract')
+        static_phases = frozenset(
+            node.args[0].value
+            for node in ast.walk(phase_fn)
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'CiPhase' and node.args
+                and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str))
+        )
+        if static_phases != V3_STATIC_PHASE_IDS:
+            raise ValueError('Installed verifier policy does not match active CI gate contract')
+        return
+
+    raise ValueError('Unsupported Jenkins verification profile')

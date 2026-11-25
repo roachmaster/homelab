@@ -759,8 +759,20 @@ NATIVE_CI_CONTEXT_RECOVERY_SHA256 = {
     'deploy/mission-control/agent-runner/work_native_ci_reprepare.py': '7a506685c0974e9cc29fe93416416538b79e71dfffe553bb2e8058cd08ca5db4',
 }
 
+# Scoped diagnostic and bootstrap verifier-policy parity context; no SQL,
+# existing mutation transport, frozen bindings, or historical pins change.
+PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256 = {
+    'deploy/mission-control/agent-runner/test_ci_contract.py': '730426822c7ba6550dc135eeaee82dc1448ad965f3c45d820811045095d3e5e7',
+    'deploy/mission-control/agent-runner/test_ci_supervision.py': '117b068c06f87dac869de05cc9226ad131eec5dbcba70ebdc4b8c475fccbc712',
+    'deploy/mission-control/agent-runner/work_ci_contract.py': '26cd1f4bf88b4eba127f8847283e2b6294569cc4083ef6b2456c89e98f57dcc8',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '8536998f34129ddffadf841f634626dbaac4de63026f886f309b8403d346e168',
+    'deploy/mission-control/jenkins/verify-candidate.py': '299e69337ba0a0844414d39c04e388f2159420499222418f2a15b74583cb17af',
+}
+
 
 def qualified_source(relative, expected):
+    if relative in PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256:
+        return PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256[relative]
     if relative in NATIVE_CI_CONTEXT_RECOVERY_SHA256:
         return NATIVE_CI_CONTEXT_RECOVERY_SHA256[relative]
     if relative in JENKINS_PAGED_OBSERVER_CONTEXT_SHA256:
@@ -1072,6 +1084,19 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in NATIVE_CI_CONTEXT_RECOVERY_SHA256.items():
             with self.subTest(native_ci_context_source=relative):
                 self.assertNotIn("/sql/", relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_prepare_source_diagnostic_and_parity_context_is_scoped_and_exact(self):
+        self.assertEqual(set(PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256), {
+            'deploy/mission-control/agent-runner/test_ci_contract.py',
+            'deploy/mission-control/agent-runner/test_ci_supervision.py',
+            'deploy/mission-control/agent-runner/work_ci_contract.py',
+            'deploy/mission-control/agent-runner/work_external_delivery.py',
+            'deploy/mission-control/jenkins/verify-candidate.py',
+        })
+        for relative, expected in PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256.items():
+            with self.subTest(diagnostic_parity_source=relative):
+                self.assertNotIn('/sql/', relative)
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
