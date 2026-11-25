@@ -8,6 +8,11 @@ suite, or skipped test. The suites that need a database spin up their
 own disposable PostgreSQL 16 clusters; they never touch the live
 database.
 
+Main's agent-runner suite uses bounded fresh module processes with an exact
+discovery/execution inventory. Limits cap worker count and inherited per-process
+address space; the surrounding CI supervisor owns aggregate cgroup resources.
+Branch and preflight retain their original serial execution and coverage rules.
+
 Used by `make backend-suites` and by the `check` job in
 .github/workflows/rust.yml (main runs only).
 """
@@ -225,6 +230,8 @@ class MainProcessProvider:
                     not isinstance(value, (int, float)) or isinstance(value, bool) or
                     not math.isfinite(value) or value <= 0 for value in config[2:]):
             raise ValueError('Invalid main process limits')
+        if any(not hasattr(os, name) for name in ('waitid', 'P_PID', 'WNOWAIT', 'WEXITED', 'WNOHANG')):
+            raise RuntimeError('Main process ownership requires Linux non-reaping waitid')
         self.config = config
 
     def _start(self, root, name, body, cwd, env):
@@ -244,19 +251,52 @@ class MainProcessProvider:
 
     def _stop(self, child):
         process = child[0]
-        if process.poll() is None:
+        if process.returncode is not None:
+            return  # Already cleaned and reaped: its PID must never be signalled.
+        # Observe without reaping. The retained leader (including its zombie)
+        # prevents PID/process-group reuse until TERM/KILL cleanup is complete.
+        self._exited(child)
+        deadline = time.monotonic() + self.config.stop_grace_seconds
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            process.wait(timeout=self.config.stop_grace_seconds)
+            return
+        while not self._exited(child) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=self.config.stop_grace_seconds)
+
+    @staticmethod
+    def _exited(child):
+        return os.waitid(os.P_PID, child[0].pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+
+    def _wait_bounded(self, child, timeout, label):
+        while True:
+            if time.monotonic() - child[4] > timeout or child[2].stat().st_size > self.config.max_output_bytes:
+                raise RuntimeError(f'Main {label} exceeded its time/output bound')
+            if self._exited(child):
+                self._stop(child)
+                return
+            time.sleep(0.05)
+
+    def _quiesce(self, children):
+        errors = []
+        for child in children:
             try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                process.wait(timeout=self.config.stop_grace_seconds)
-            except subprocess.TimeoutExpired:
+                self._stop(child)
+            except BaseException as error:
+                errors.append(error)
+            finally:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
+                    child[3].close()
+                except BaseException as error:
+                    errors.append(error)
+        if errors:
+            raise RuntimeError(f'Main test cleanup could not be confirmed: {len(errors)} errors') from errors[0]
 
     def _result(self, child):
         process, result, log, _, _ = child
@@ -276,11 +316,7 @@ class MainProcessProvider:
             try:
                 inventory = self._start(root, 'inventory', {'kind': 'inventory', 'pattern': pattern}, start_dir, env)
                 active['inventory'] = inventory
-                try:
-                    inventory[0].wait(timeout=self.config.inventory_timeout_seconds)
-                except subprocess.TimeoutExpired:
-                    self._stop(inventory)
-                    raise RuntimeError('Main test discovery timed out')
+                self._wait_bounded(inventory, self.config.inventory_timeout_seconds, 'test discovery')
                 frozen = self._result(inventory)
                 inventory[3].close()
                 active.clear()
@@ -307,8 +343,9 @@ class MainProcessProvider:
                         if elapsed > self.config.group_timeout_seconds or child[2].stat().st_size > self.config.max_output_bytes:
                             self._stop(child)
                             raise RuntimeError(f'Main test group exceeded its time/output bound: {name}')
-                        if child[0].poll() is None:
+                        if not self._exited(child):
                             continue
+                        self._stop(child)
                         body = self._result(child)
                         ids = _checked_ids(body['ids'])
                         if ids != groups[name] or body['tests'] != len(ids) or any(
@@ -327,9 +364,7 @@ class MainProcessProvider:
                 print(f'SUITE_SUMMARY tests={len(completed)} skipped=0 failures=0 errors=0', flush=True)
                 return 0
             finally:
-                for child in active.values():
-                    self._stop(child)
-                    child[3].close()
+                self._quiesce(active.values())
 
 
 class MainProcessProviderFactory:
