@@ -245,9 +245,10 @@ class ExternalWorkflowStore:
         project=task['project_alias'];policy=self.policies[project];snapshot=policy.snapshot(self.catalog)
         if task['agent_profile']!=policy.author_profile or task['mode']!='plan' or task['latest_attempt_id'] is not None:raise Rejected(403,'denied')
         self._scope(cursor,project,policy.author_profile)
-        cursor.execute('''INSERT INTO forge_external_workflow.workflows(owner_id,project_alias,root_task_id,active_task_id,author_profile,reviewer_profile,policy_digest,snapshot,phase)
-          VALUES(%s,%s,%s,%s,%s,%s,%s,%s,'plan') ON CONFLICT(owner_id,project_alias,root_task_id) DO NOTHING RETURNING *''',
-          (self.owner,project,task['id'],task['id'],policy.author_profile,policy.reviewer_profile,snapshot['policy_digest'],Json(snapshot)))
+        identity_state=({'identity_protocol':'content-v2'} if self.config.identity_protocol=='content-v2' else {})
+        cursor.execute('''INSERT INTO forge_external_workflow.workflows(owner_id,project_alias,root_task_id,active_task_id,author_profile,reviewer_profile,policy_digest,snapshot,phase,state)
+          VALUES(%s,%s,%s,%s,%s,%s,%s,%s,'plan',%s) ON CONFLICT(owner_id,project_alias,root_task_id) DO NOTHING RETURNING *''',
+          (self.owner,project,task['id'],task['id'],policy.author_profile,policy.reviewer_profile,snapshot['policy_digest'],Json(snapshot),Json(identity_state)))
         w=cursor.fetchone()
         if not w:
             cursor.execute('SELECT * FROM forge_external_workflow.workflows WHERE(owner_id,project_alias,root_task_id)=(%s,%s,%s)',(self.owner,project,task['id']));return cursor.fetchone()
@@ -611,6 +612,9 @@ class ExternalWorkflowStore:
             if manifest['base_revision']!=w['state']['base_revision']:
                 return self._revise(cursor,w,'code',{'summary':'Rebase the existing implementation onto the configured base '+w['state']['base_revision']+' and return its exact candidate manifest.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
             request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':w['state']['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
+            identity_protocol=w['state'].get('identity_protocol','legacy-v1')
+            if identity_protocol not in ('legacy-v1','content-v2'):raise ValueError('Invalid frozen identity protocol')
+            if identity_protocol=='content-v2':request['identity_protocol']=identity_protocol
             if manifest.get('source_branch') is not None:
                 request['source_branch']=manifest['source_branch']
             prepare_key=artifact['sha256']
@@ -626,6 +630,13 @@ class ExternalWorkflowStore:
                 if not isinstance(candidate.get(key),str) or not HEX40.fullmatch(candidate[key]):raise ValueError('Unverified delivery candidate')
             if candidate['candidate_tree']!=manifest['candidate_tree'] or candidate['integration_base']!=w['state']['base_revision']:raise ValueError('Prepared source differs from author candidate or trusted base')
             if any(not isinstance(candidate.get(key),str) or not HEX64.fullmatch(candidate[key]) for key in ('diff_sha256','gate_source_sha256','gate_manifest_sha256')):raise ValueError('Candidate lacks exact gate/diff digests')
+            if identity_protocol=='content-v2':
+                from work_external_identity import validate_content_identity
+                if candidate.get('identity_protocol')!='content-v2':raise ValueError('Prepared candidate lost its content protocol')
+                content=validate_content_identity(candidate.get('content_identity'))
+                if content['verification']['generation']!=str(a['action_id']) or candidate.get('prepare_action_id')!=str(a['action_id']):
+                    raise ValueError('Content identity is bound to a different preparation generation')
+            elif 'content_identity' in candidate:raise ValueError('Legacy generation cannot change identity protocol')
             self._validate_prepared_branch_scope(candidate)
             changes=candidate.get('protected_gate_changes')
             if not isinstance(changes,list) or len(changes)>256 or any(not isinstance(change,dict) or not isinstance(change.get('finding_id'),str) for change in changes):raise ValueError('Invalid protected gate change manifest')
@@ -682,7 +693,7 @@ class ExternalWorkflowStore:
         recipe=w['snapshot']['recipes']['reviewer_review']
         root=self._task(cursor,w,w['root_task_id'])
         candidate=w['state'].get('candidate') if kind=='code' else None
-        target={'version':1,'kind':'external_database_review','workflow_id':str(w['workflow_id']),'review_id':str(review_id),'reviewer_task_id':str(task_id),
+        target={'version':2 if candidate and w['state'].get('identity_protocol')=='content-v2' else 1,'kind':'external_database_review','workflow_id':str(w['workflow_id']),'review_id':str(review_id),'reviewer_task_id':str(task_id),
                 'reviewer_profile':w['reviewer_profile'],'target_kind':kind,'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],
                 'source_sha256':artifact['sha256'],'source_revision':task['revision'],'source_base_revision':task['base_revision'],
                 'review_base_revision':candidate['candidate_commit'] if candidate else w['state']['base_revision'],'request_prompt':root['prompt'],

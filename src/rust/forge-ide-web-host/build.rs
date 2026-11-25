@@ -12,6 +12,7 @@ fn main() -> io::Result<()> {
         design::game_engine::SOURCE_PATH
     );
     println!("cargo:rerun-if-changed=../../../docs/design/implementation-status.md");
+    println!("cargo:rerun-if-changed=../../../docs/architecture/content-identity.md");
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo build output directory"));
     for (name, page) in [
         ("home.html", DesignPage::Home),
@@ -38,6 +39,7 @@ fn main() -> io::Result<()> {
         ("agent-usage.html", DesignPage::AgentUsage),
         ("agent-feedback-loop.html", DesignPage::AgentFeedback),
         ("autonomous-agents.html", DesignPage::AgentAutonomy),
+        ("content-identity.html", DesignPage::ContentIdentity),
         ("playtest.html", DesignPage::Playtest),
         ("studio.html", DesignPage::Studio),
     ] {

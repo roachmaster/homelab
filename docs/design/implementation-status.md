@@ -1,11 +1,20 @@
 # Current Forge implementation
 
-Updated 23 November 2026.
+Updated 25 November 2026.
 Active navigation is **Agents, Workbench, Home and Design**,
 with Agents as the default admitted view. Chat is temporarily inactive;
 Mail remains retired. Their PostgreSQL history and supported inert local
 snapshots remain preserved. The current source browser contract is **ABI15**; the
 native HTTP protocol remains version1.
+
+Source now includes an opt-in [content identity protocol](../architecture/content-identity.md)
+and its UML data, component and sequence views. Canonical SHA-256 source manifests,
+frozen verification policies and explicit generations are wired through native
+CI and external-agent review using factory-selected providers. Private atomic
+snapshots survive restart without reinterpreting runtime rules. Existing queued
+native generations and external workflow records keep their legacy bindings.
+The Rust Design reader exposes `/design/content-identity` when this source is
+deployed. Source implementation does not establish live protocol activation.
 
 The retry implementation uses **20 attempts for each unresolved failure event**
 across native and external agents. Compilation, test phases, reviews and feedback

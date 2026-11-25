@@ -88,6 +88,20 @@ const AGENT_FEEDBACK_HTML: &[u8] =
 const AGENT_AUTONOMY_HTML: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/autonomous-agents.html"));
 const AGENT_USAGE_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/agent-usage.html"));
+const CONTENT_IDENTITY_HTML: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/content-identity.html"));
+const CONTENT_IDENTITY_DATA: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/content-identity-data.svg"
+);
+const CONTENT_IDENTITY_COMPONENTS: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/content-identity-components.svg"
+);
+const CONTENT_IDENTITY_NATIVE: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/content-identity-native.svg"
+);
+const CONTENT_IDENTITY_EXTERNAL: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/content-identity-external.svg"
+);
 const CODING_AGENT_OWNERSHIP: &[u8] = include_bytes!(
     "../../../../docs/architecture/diagrams/mermaid/images/coding-agent-ownership.svg"
 );
@@ -267,6 +281,17 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         }
         "/design/agent-usage" | "/design/agent-usage/" => {
             Some(("text/html; charset=utf-8", AGENT_USAGE_HTML))
+        }
+        "/design/content-identity" | "/design/content-identity/" => {
+            Some(("text/html; charset=utf-8", CONTENT_IDENTITY_HTML))
+        }
+        "/design/content-identity/data.svg" => Some(("image/svg+xml", CONTENT_IDENTITY_DATA)),
+        "/design/content-identity/components.svg" => {
+            Some(("image/svg+xml", CONTENT_IDENTITY_COMPONENTS))
+        }
+        "/design/content-identity/native.svg" => Some(("image/svg+xml", CONTENT_IDENTITY_NATIVE)),
+        "/design/content-identity/external.svg" => {
+            Some(("image/svg+xml", CONTENT_IDENTITY_EXTERNAL))
         }
         "/design/agent-usage/providers.svg" => Some(("image/svg+xml", AGENT_USAGE_PROVIDERS)),
         "/design/agent-usage/collection.svg" => Some(("image/svg+xml", AGENT_USAGE_COLLECTION)),

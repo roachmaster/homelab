@@ -1,0 +1,28 @@
+classDiagram
+    direction TB
+    class ArtifactEntry {
+        +path
+        +mode
+        +size
+        +sha256
+    }
+    class ArtifactManifest {
+        +entries
+        +artifact_id
+        +canonical_bytes()
+        +from_dict()
+    }
+    class VerificationPolicySnapshot {
+        +policy_sha256
+        +canonical_bytes()
+        +from_dict()
+    }
+    class VerificationIdentity {
+        +artifact_id
+        +policy_sha256
+        +generation UUID
+        +verification_id
+    }
+    ArtifactManifest "1" *-- "0..*" ArtifactEntry : immutable file entries
+    VerificationIdentity ..> ArtifactManifest : binds SHA-256
+    VerificationIdentity ..> VerificationPolicySnapshot : binds SHA-256

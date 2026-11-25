@@ -770,9 +770,62 @@ PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256 = {
 }
 
 
+# Audited opt-in content identity source; no applied SQL or legacy authority change.
+CONTENT_IDENTITY_CONTEXT_SHA256 = {
+    'AGENT_WORK.md': '020493751a8712e1bfff33e2578075cd312ff4e4f53dd01a3c69b0fb56759023',
+    'deploy/mission-control/agent-runner/setup-runner.sh': '4a05e10774f0ced43ae482fff08c2f33a79666fa3e7c1cfc304f5cbacffc14b8',
+    'deploy/mission-control/agent-runner/test_external_content_identity.py': 'da4e8a5f9562201271b15eccfa1fd6159ef69d32c91797013ec0093dd0f284e0',
+    'deploy/mission-control/agent-runner/test_native_content_identity.py': '63d133ae4d6c3bed213ce00c48edd511c0a2a258f95a9b4b4c75457cff3d9d95',
+    'deploy/mission-control/agent-runner/test_work_artifact_identity.py': 'ba2bfa1a6189f38c6e21295e1c08eba8c0c565e43651b038179f7d49b0dce64a',
+    'deploy/mission-control/agent-runner/test_work_identity_store.py': '381b18cd7c9f519c0b16bb23a4848f0725f1b95515974871e6fe043ab58684e7',
+    'deploy/mission-control/agent-runner/work_artifact_identity.py': 'dd10cf60a3116a49aacbbba28475a8141beffde5322f94d622c9e3ca0ad8a920',
+    'deploy/mission-control/agent-runner/work_artifact_source.py': '3f900127a41b0c05c5054f78ba613e6f3b2b4de01b016811e935c4ba07c59dbc',
+    'deploy/mission-control/agent-runner/work_config.py': '3206e73d5879a52feceadf1214ebd4ad42b288869c643b4a423a85bc7e0ba4df',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '5f66919d4883791a57e8899ec349ca345ddb26fd3c4475dcf2a9c76b2318fcb4',
+    'deploy/mission-control/agent-runner/work_external_identity.py': '951fe253d8b696a50602bfade28c735fe87d9846f6e011be610daa0855587504',
+    'deploy/mission-control/agent-runner/work_external_review_context.py': 'e011a312a2efc6817815240089164cbc96910a1182730fe477d7c6a5dd284681',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': 'ab7c70ae0c996bd88a351f0dc2f47c43f5f56ff533e6a6ec2cc09efd7f273f97',
+    'deploy/mission-control/agent-runner/work_identity_contract.py': '8173ce291194e4e43d7536636a1468ce43f20a2e67c631d26489bd37f9477735',
+    'deploy/mission-control/agent-runner/work_identity_store.py': '2c7b18856d4e402477aa625ba04484053214eeda910ad82f099a0063fbc225b6',
+    'deploy/mission-control/agent-runner/work_native_identity.py': '225fe528dceccf4fb72cf71568c4a10aeb602533c28918eed4e9aff5023f20e2',
+    'deploy/mission-control/agent-runner/work_native_jenkins.py': '6cfd6527f60ee11b2adb9b32bf3a3343e49343a79b41aeffe9ffc80a4fdc1809',
+    'deploy/mission-control/agent-runner/work_publication.py': '3802f8287ba078438a92869a51dd86a3990ceffbe97e0ba52d6ef6409328da5f',
+    'deploy/mission-control/agent-runner/work_publication_config.py': '688af9e3c85fcb96e39c3e01d3767412ee0a44ce43c44b0668b5b2fa9b28d654',
+    'deploy/mission-control/agent-runner/work_review.py': '1092d3017205e395be0c5bcb7f8a8af2cb2b7d6c87bf0c61578a9d128fd7d9f1',
+    'deploy/mission-control/agent-runner/work_worker.py': '20eecb6e84cdffd34f5088ba864a91df23fd42bf30e1a7526a7912c22c9148da',
+    'docs/README.md': 'eb87245ac52fcfcc5a029a116ee4a853f6de1dbbcf8e2e9a6c16be2230f91033',
+    'docs/architecture/README.md': '1e44e052542a4ec8c8defbf779aaf9ac3ee501e29bb12c2c7bf509b2c7a1a622',
+    'docs/architecture/content-identity.md': '433979bcf86e54d9bdf6c32566168cf0c233257c53f9dd2a0cef8e32abe50419',
+    'docs/architecture/diagrams/mermaid/README.md': '422e1cffb92c7732ed87570884bdc0f693127a657b066ec4af2fe8775815277b',
+    'docs/architecture/diagrams/mermaid/content-identity-components.mmd': 'c7cadb78d6a61b9a01c76f6cfbfae4a8d38a3823d1deea655f7340698e56a9d2',
+    'docs/architecture/diagrams/mermaid/content-identity-data.mmd': '5cb75bd499e3f3e7ec0d6d1cad90becd53f6ab7e74c9e5001937bae924cfb1d2',
+    'docs/architecture/diagrams/mermaid/content-identity-external.mmd': '55d499bc85a15f2dd12ce2664c7578c17e22f2aa9297a8c03fcb1ba82cb3a4ed',
+    'docs/architecture/diagrams/mermaid/content-identity-native.mmd': 'ed112a4723e52f52981a5a36e4acf5ffc1430ce25b2abb376a2623f4c45c05be',
+    'docs/architecture/diagrams/mermaid/images/content-identity-components.svg': '8c511c92eba56bed33856256ee9b7226d4b4c5367838f682760cc81c032818b0',
+    'docs/architecture/diagrams/mermaid/images/content-identity-data.svg': '952c7f7353f4eb252baa419e8f1e4b02eb0b28d728538a5d4807057279707db8',
+    'docs/architecture/diagrams/mermaid/images/content-identity-external.svg': '60f45da2224c301246ee0f7ab8fca53ae52bb26e38a3f612b6d995094e2575dd',
+    'docs/architecture/diagrams/mermaid/images/content-identity-native.svg': '2f8d240fd63c7e47b79f45fdc01251ae358a6b5ced7bb41ff74aa0a3f6d95ca2',
+    'docs/architecture/diagrams/mermaid/render-manifest.json': 'fcb4bbd8ab3ad4cbdf2599b6d841bf8afd45a18661dc590e7e73b1ebd9476527',
+    'docs/architecture/diagrams/mermaid/render.py': '03b8519ab8d6349b22b1b151f6c6141c345b86a98fc55ea8498106865e8d6c05',
+    'docs/architecture/diagrams/mermaid/validate.mjs': 'f131ed6cf60a8a9a53e065ed10f860b816560d4b673ea0c158ef346acc0f3a52',
+    'docs/design/implementation-status.md': '2ce052d2ea0b72dc7848197902fcce89ee64fdde2f8e27832063a306d4d914c8',
+    'src/rust/forge-ide-web-host/build.rs': '70cb9106edb7fa7ff95558df93e2b1d96a725bc530df6fe07a1efbb255939d59',
+    'src/rust/forge-ide-web-host/src/assets.rs': '76e58af8b6879f8d42d98abace1aa839871e6773d7fcec7cd9d8dc9b713adbff',
+    'src/rust/forge-ide-web-host/src/design/content_identity.rs': '4420c267a346145dfbc673464bb7c61999a475faeee201973a0e9a544fd6b674',
+    'src/rust/forge-ide-web-host/src/design/landing.rs': 'a648264f98cab28ddac9a8e6c6885b62bb8f4145fd9088587fc7c56f2d70b0a5',
+    'src/rust/forge-ide-web-host/src/design/mod.rs': '675f2d6a69507e739cb1246efc221a68e14a2b3f61ba1f28de048b987f514ac8',
+    'src/rust/forge-ide-web-host/tests/consumer.rs': 'd27d35ae9bf1e8a5a4d8d89ed2addb5d844b99d56dc7d023e848a367ae9ce813',
+}
+
+
 def qualified_source(relative, expected):
+<<<<<<< HEAD
     if relative in PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256:
         return PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256[relative]
+=======
+    if relative in CONTENT_IDENTITY_CONTEXT_SHA256:
+        return CONTENT_IDENTITY_CONTEXT_SHA256[relative]
+>>>>>>> e49b02ae681e7336e4d8d32087f3f0c35e966744
     if relative in NATIVE_CI_CONTEXT_RECOVERY_SHA256:
         return NATIVE_CI_CONTEXT_RECOVERY_SHA256[relative]
     if relative in JENKINS_PAGED_OBSERVER_CONTEXT_SHA256:
@@ -1084,7 +1137,61 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in NATIVE_CI_CONTEXT_RECOVERY_SHA256.items():
             with self.subTest(native_ci_context_source=relative):
                 self.assertNotIn("/sql/", relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_content_identity_context_is_scoped_and_exact(self):
+        self.assertEqual(set(CONTENT_IDENTITY_CONTEXT_SHA256), {
+            'AGENT_WORK.md',
+            'deploy/mission-control/agent-runner/setup-runner.sh',
+            'deploy/mission-control/agent-runner/test_external_content_identity.py',
+            'deploy/mission-control/agent-runner/test_native_content_identity.py',
+            'deploy/mission-control/agent-runner/test_work_artifact_identity.py',
+            'deploy/mission-control/agent-runner/test_work_identity_store.py',
+            'deploy/mission-control/agent-runner/work_artifact_identity.py',
+            'deploy/mission-control/agent-runner/work_artifact_source.py',
+            'deploy/mission-control/agent-runner/work_config.py',
+            'deploy/mission-control/agent-runner/work_external_delivery.py',
+            'deploy/mission-control/agent-runner/work_external_identity.py',
+            'deploy/mission-control/agent-runner/work_external_review_context.py',
+            'deploy/mission-control/agent-runner/work_external_workflow.py',
+            'deploy/mission-control/agent-runner/work_identity_contract.py',
+            'deploy/mission-control/agent-runner/work_identity_store.py',
+            'deploy/mission-control/agent-runner/work_native_identity.py',
+            'deploy/mission-control/agent-runner/work_native_jenkins.py',
+            'deploy/mission-control/agent-runner/work_publication.py',
+            'deploy/mission-control/agent-runner/work_publication_config.py',
+            'deploy/mission-control/agent-runner/work_review.py',
+            'deploy/mission-control/agent-runner/work_worker.py',
+            'docs/README.md',
+            'docs/architecture/README.md',
+            'docs/architecture/content-identity.md',
+            'docs/architecture/diagrams/mermaid/README.md',
+            'docs/architecture/diagrams/mermaid/content-identity-components.mmd',
+            'docs/architecture/diagrams/mermaid/content-identity-data.mmd',
+            'docs/architecture/diagrams/mermaid/content-identity-external.mmd',
+            'docs/architecture/diagrams/mermaid/content-identity-native.mmd',
+            'docs/architecture/diagrams/mermaid/images/content-identity-components.svg',
+            'docs/architecture/diagrams/mermaid/images/content-identity-data.svg',
+            'docs/architecture/diagrams/mermaid/images/content-identity-external.svg',
+            'docs/architecture/diagrams/mermaid/images/content-identity-native.svg',
+            'docs/architecture/diagrams/mermaid/render-manifest.json',
+            'docs/architecture/diagrams/mermaid/render.py',
+            'docs/architecture/diagrams/mermaid/validate.mjs',
+            'docs/design/implementation-status.md',
+            'src/rust/forge-ide-web-host/build.rs',
+            'src/rust/forge-ide-web-host/src/assets.rs',
+            'src/rust/forge-ide-web-host/src/design/content_identity.rs',
+            'src/rust/forge-ide-web-host/src/design/landing.rs',
+            'src/rust/forge-ide-web-host/src/design/mod.rs',
+            'src/rust/forge-ide-web-host/tests/consumer.rs',
+        })
+        for relative, expected in CONTENT_IDENTITY_CONTEXT_SHA256.items():
+            with self.subTest(content_identity_source=relative):
+                self.assertNotIn("/sql/", relative)
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+        published={tuple(shlex.split(line,comments=True)) for line in (RUNNER / "setup-runner.sh").read_text().splitlines() if line.lstrip().startswith("publish ")}
+        for name in ("work_artifact_identity.py","work_artifact_source.py","work_identity_contract.py","work_identity_store.py","work_native_identity.py","work_external_identity.py"):
+            self.assertIn(("publish","$directory/"+name,"$target/"+name),published)
 
     def test_prepare_source_diagnostic_and_parity_context_is_scoped_and_exact(self):
         self.assertEqual(set(PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256), {

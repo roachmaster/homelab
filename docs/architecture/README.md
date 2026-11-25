@@ -12,6 +12,12 @@ The [current implementation reference](../design/implementation-status.md) and [
 
 ## Coding-agent dispatch and usage
 
+[Source content and verification identity](content-identity.md) separates task
+UUIDs, canonical artifact digests and frozen policy/generation snapshots. Its
+[portal reader](https://portal.thedevex.com/design/content-identity) includes
+data, component and native/external sequence views. Content-v2 is selected
+explicitly; historical v1 work and exact-candidate CI/publication remain intact.
+
 [Task correlation and event envelopes](proposals/forge-task-event-envelope.md)
 documents implemented M21 trace identities and the ABI12 bounded task reader.
 The full correlation and every typed event are available through explicit paging;

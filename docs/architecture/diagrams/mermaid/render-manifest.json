@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "b64faca0f7b8939084e78f4089dc1a1510a17a34af0372cbb5b92544114b96fb",
-    "validate.mjs": "bc1e910167266932c90c7d84725f3e97aa34c97027baf26d39188fbef5280a4e"
+    "render.py": "03b8519ab8d6349b22b1b151f6c6141c345b86a98fc55ea8498106865e8d6c05",
+    "validate.mjs": "f131ed6cf60a8a9a53e065ed10f860b816560d4b673ea0c158ef346acc0f3a52"
   },
   "diagrams": [
     {
@@ -277,6 +277,30 @@
       "source_sha256": "51394454e7365220e66df261b7860f670a2c140473e38c837d6374d5752e63f1",
       "svg": "images/agent-usage-collection.svg",
       "svg_sha256": "670e8dd40f5ff7b7f51460cde28cb43d384de455efa71f800546b6c36550eb8e"
+    },
+    {
+      "source": "content-identity-data.mmd",
+      "source_sha256": "5cb75bd499e3f3e7ec0d6d1cad90becd53f6ab7e74c9e5001937bae924cfb1d2",
+      "svg": "images/content-identity-data.svg",
+      "svg_sha256": "952c7f7353f4eb252baa419e8f1e4b02eb0b28d728538a5d4807057279707db8"
+    },
+    {
+      "source": "content-identity-components.mmd",
+      "source_sha256": "c7cadb78d6a61b9a01c76f6cfbfae4a8d38a3823d1deea655f7340698e56a9d2",
+      "svg": "images/content-identity-components.svg",
+      "svg_sha256": "8c511c92eba56bed33856256ee9b7226d4b4c5367838f682760cc81c032818b0"
+    },
+    {
+      "source": "content-identity-native.mmd",
+      "source_sha256": "ed112a4723e52f52981a5a36e4acf5ffc1430ce25b2abb376a2623f4c45c05be",
+      "svg": "images/content-identity-native.svg",
+      "svg_sha256": "2f8d240fd63c7e47b79f45fdc01251ae358a6b5ced7bb41ff74aa0a3f6d95ca2"
+    },
+    {
+      "source": "content-identity-external.mmd",
+      "source_sha256": "55d499bc85a15f2dd12ce2664c7578c17e22f2aa9297a8c03fcb1ba82cb3a4ed",
+      "svg": "images/content-identity-external.svg",
+      "svg_sha256": "60f45da2224c301246ee0f7ab8fca53ae52bb26e38a3f612b6d995094e2575dd"
     }
   ]
 }
