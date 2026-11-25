@@ -53,6 +53,14 @@ class RetryEventProvider:
         cursor.execute('SELECT forge_agent.retry_event_resolve(%s,%s,%s,%s,%s,%s,%s) AS event',
             (*self._scope(scope),kind,source_id,digest,phase_id))
         return self._result(cursor)
+    def resolve_open_scope(self,cursor,scope):
+        args=self._scope(scope)
+        cursor.execute("SELECT to_regprocedure('forge_agent.retry_event_resolve_open_scope(text,text,uuid)') IS NOT NULL AS available")
+        row=cursor.fetchone();available=row['available'] if isinstance(row,dict) else row[0]
+        if not available:return 0
+        cursor.execute('SELECT forge_agent.retry_event_resolve_open_scope(%s,%s,%s) AS resolved',args)
+        row=cursor.fetchone()
+        return int(row['resolved'] if isinstance(row,dict) else row[0])
     def adopt_legacy(self,cursor,event_id,used,source_id,digest):
         if type(used) is not int or not 0<=used<=AGENT_RETRY_LIMIT:raise ValueError('Invalid retained event count')
         self._proof('planning',source_id,digest)

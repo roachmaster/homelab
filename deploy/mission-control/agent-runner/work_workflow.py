@@ -270,8 +270,40 @@ class WorkflowStore:
     def _phase(self,cursor,w,phase):
         cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND enabled AND phase NOT IN('completed','cancelled','escalated') AND phase IS DISTINCT FROM %s",(phase,w['workflow_id'],phase))
 
+    def _retry_scope(self,w):
+        from work_retry_events import RetryScope
+        return RetryScope(self.store.owner,w['project_alias'],'native_workflow',w['workflow_id'])
+
+    def _cancel_workflow(self,cursor,w,reason):
+        reason=reason[:2048]
+        cursor.execute("UPDATE forge_agent.coding_workflows SET phase='cancelled',enabled=false,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled','escalated')",(w['workflow_id'],))
+        cursor.execute("SELECT id,project_alias,status,revision FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status NOT IN('completed','cancelled','cancel_requested') FOR UPDATE",(w['workflow_id'],))
+        affected=cursor.fetchall()
+        cursor.execute("UPDATE forge_agent.coding_tasks SET cancelled_at=CASE WHEN status='running' THEN NULL ELSE clock_timestamp() END,status=CASE WHEN status='running' THEN 'cancel_requested' ELSE 'cancelled' END,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND status NOT IN('completed','cancelled','cancel_requested')",(w['workflow_id'],))
+        cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='cancelled',lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('pending','leased')",(w['workflow_id'],))
+        for affected_task in affected:
+            affected_target='cancel_requested' if affected_task['status']=='running' else 'cancelled'
+            insert_event(cursor,self.store.owner,affected_task['project_alias'],affected_task['id'],affected_target,
+                         {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
+                          'workflow_id':str(w['workflow_id'])},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
+                         cause_detail=reason)
+        if self.retry_events is not None:
+            self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
+
     def _escalate(self,cursor,w,reason):
         reason=reason[:2048]
+        cursor.execute("SELECT status FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],w['root_task_id']))
+        root=cursor.fetchone()
+        cursor.execute("SELECT phase FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(w['workflow_id'],))
+        current=cursor.fetchone()
+        current_phase=current['phase'] if current is not None else w['phase']
+        if current_phase in {'completed','cancelled'}:
+            if self.retry_events is not None:
+                self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
+            return
+        if current_phase not in {'completed','cancelled','escalated'} and root is not None and root['status'] in {'cancelled','cancel_requested'}:
+            self._cancel_workflow(cursor,w,reason)
+            return
         cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=false,phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
         cursor.execute("SELECT id,project_alias,status,revision FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running') FOR UPDATE",(w['workflow_id'],))
         affected=cursor.fetchall()
@@ -285,6 +317,8 @@ class WorkflowStore:
                          {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
                           'workflow_id':str(w['workflow_id'])},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
+        if self.retry_events is not None:
+            self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
 
     @staticmethod
     def _native_deadline_phase(task_id):
@@ -957,10 +991,14 @@ class WorkflowStore:
         """Authoritative replay fills missed callbacks using immutable source keys."""
         cursor.execute("SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND phase NOT IN('completed','cancelled','escalated') ORDER BY created_at",(self.store.owner,))
         for w in cursor.fetchall():
-            try:self._current_policy(w)
-            except Rejected:self._escalate(cursor,w,'Workflow delegation or role grant is no longer current.');continue
             cursor.execute("SELECT t.*,a.phase AS attempt_phase,a.result_sha256,a.reservation_active,a.lease_expires_at,a.published_at FROM forge_agent.coding_tasks t LEFT JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id) WHERE t.owner_id=%s AND t.project_alias=%s AND t.workflow_id=%s ORDER BY t.created_at",(self.store.owner,w['project_alias'],w['workflow_id']))
             tasks=cursor.fetchall()
+            root=next((t for t in tasks if t['id']==w['root_task_id']),None)
+            if root is not None and root['status'] in {'cancelled','cancel_requested'}:
+                self._cancel_workflow(cursor,w,'Workflow root task was cancelled.')
+                continue
+            try:self._current_policy(w)
+            except Rejected:self._escalate(cursor,w,'Workflow delegation or role grant is no longer current.');continue
             for t in tasks:
                 if t['status'] in {'quota_blocked','blocked_auth','blocked_permission','needs_reconcile','failed'}:
                     self._escalate(cursor,w,'Agent stopped: '+t['status']);break
