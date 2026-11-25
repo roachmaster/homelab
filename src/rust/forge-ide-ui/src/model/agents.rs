@@ -1837,10 +1837,11 @@ impl Agents {
                 self.warning
                     || pending && !reader
                     || self.retry.is_some()
-                    || !reader && self
-                        .task
-                        .as_ref()
-                        .is_some_and(|t| t.status == WorkStatus::CancelRequested),
+                    || !reader
+                        && self
+                            .task
+                            .as_ref()
+                            .is_some_and(|t| t.status == WorkStatus::CancelRequested),
             ),
             visible(
                 "agents-usage-status",
@@ -2168,7 +2169,13 @@ impl Agents {
             text(
                 "agents-task-title",
                 self.task.as_ref().map_or_else(
-                    || if self.warning { "Task unavailable".into() } else { "Loading task…".into() },
+                    || {
+                        if self.warning {
+                            "Task unavailable".into()
+                        } else {
+                            "Loading task…".into()
+                        }
+                    },
                     |t| {
                         t.title
                             .clone()
@@ -2564,7 +2571,12 @@ impl Agents {
         ]);
         view.lists.push(ListBinding {
             id: "agents-tasks",
-            context: Some(format!("{}:{}:{}", self.project, self.task_scope.value(), self.list_cursor.as_deref().unwrap_or(""))),
+            context: Some(format!(
+                "{}:{}:{}",
+                self.project,
+                self.task_scope.value(),
+                self.list_cursor.as_deref().unwrap_or("")
+            )),
             empty_message: if self.warning {
                 "Tasks unavailable. Refresh to recover the authoritative list."
             } else if pending {
@@ -2597,9 +2609,13 @@ impl Agents {
                     icon: RowIcon::Symbol,
                     kind_label: "Coding task",
                     parent: None,
-                    secondary: t.retry_event.as_ref().map_or_else(String::new, triage::retry_budget),
+                    secondary: t
+                        .retry_event
+                        .as_ref()
+                        .map_or_else(String::new, triage::retry_budget),
                     depth: 0,
-                    selected: self.list_selected.as_ref().or(self.selected.as_ref()) == Some(&t.task_id),
+                    selected: self.list_selected.as_ref().or(self.selected.as_ref())
+                        == Some(&t.task_id),
                     expanded: None,
                     action: RowAction::OpenAgentTask {
                         task_id: t.task_id.clone(),
@@ -2607,9 +2623,19 @@ impl Agents {
                     toggle: None,
                     summary: Some(RowSummary {
                         badge: self.task_summary_badge(t),
-                        tag: self.catalog.as_ref()
-                            .and_then(|catalog| catalog.profiles.iter().find(|profile| profile.alias == t.agent_profile))
-                            .map_or_else(|| t.agent_profile.clone(), |profile| profile.label.clone()),
+                        tag: self
+                            .catalog
+                            .as_ref()
+                            .and_then(|catalog| {
+                                catalog
+                                    .profiles
+                                    .iter()
+                                    .find(|profile| profile.alias == t.agent_profile)
+                            })
+                            .map_or_else(
+                                || t.agent_profile.clone(),
+                                |profile| profile.label.clone(),
+                            ),
                         time: triage::task_time(t, self.now_ms),
                     }),
                 })
@@ -2751,7 +2777,11 @@ impl Agents {
         self.project_workflow(view, compose, reader);
         self.project_delivery(view, active && work, reader, pending);
         self.project_stage_diagram(view, active && work && reader);
-        self.project_triage(view, active && work && reader, active && work && !locked && !pending);
+        self.project_triage(
+            view,
+            active && work && reader,
+            active && work && !locked && !pending,
+        );
         self.project_history(view, active && work && reader);
         self.project_retry_event(view, reader);
     }

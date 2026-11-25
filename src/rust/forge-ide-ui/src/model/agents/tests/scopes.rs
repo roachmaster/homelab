@@ -138,7 +138,14 @@ fn authoritative_workflow_phase_overrides_cancelled_author_in_task_rows() {
                 badge("Needs attention", BadgeTone::Warning),
                 "{profile}: {status:?} is a stopped author, not a cancelled workflow"
             );
-            assert_eq!(row.summary.as_ref().unwrap().tag, if profile == "agy-primary" { "Gemini" } else { profile });
+            assert_eq!(
+                row.summary.as_ref().unwrap().tag,
+                if profile == "agy-primary" {
+                    "Gemini"
+                } else {
+                    profile
+                }
+            );
             assert_eq!(agents.tasks[0].status, status);
         }
     }

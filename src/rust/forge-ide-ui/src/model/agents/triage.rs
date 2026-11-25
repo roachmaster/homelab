@@ -3,7 +3,10 @@
 use super::*;
 
 pub(super) fn task_title(title: Option<&str>, task_id: &str) -> String {
-    title.map_or_else(|| format!("Task {}", &task_id[..8]), |value| compact_words(value, 96))
+    title.map_or_else(
+        || format!("Task {}", &task_id[..8]),
+        |value| compact_words(value, 96),
+    )
 }
 
 /// Compact prose at a word boundary, with an explicit omission marker. A single
@@ -14,11 +17,16 @@ fn compact_words(value: &str, limit: usize) -> String {
         return value;
     }
     let prefix: String = value.chars().take(limit).collect();
-    prefix.rfind(' ').map_or(value, |end| format!("{}…", &prefix[..end]))
+    prefix
+        .rfind(' ')
+        .map_or(value, |end| format!("{}…", &prefix[..end]))
 }
 
 pub(super) fn task_time(task: &WorkTaskSummary, now: u64) -> TimeView {
-    let update = latest_update(task.delivery.as_ref().map(|d| d.updated_at.as_str()), task.updated_at.as_deref());
+    let update = latest_update(
+        task.delivery.as_ref().map(|d| d.updated_at.as_str()),
+        task.updated_at.as_deref(),
+    );
     let (label, exact) = update.map_or(("Created", task.created_at.as_str()), |at| ("Updated", at));
     TimeView {
         label: format!("{label} {}", relative_time(exact, now)),
@@ -28,7 +36,13 @@ pub(super) fn task_time(task: &WorkTaskSummary, now: u64) -> TimeView {
 
 fn latest_update<'a>(left: Option<&'a str>, right: Option<&'a str>) -> Option<&'a str> {
     match (left, right) {
-        (Some(left), Some(right)) => Some(if work_timestamp_key(left) >= work_timestamp_key(right) { left } else { right }),
+        (Some(left), Some(right)) => {
+            Some(if work_timestamp_key(left) >= work_timestamp_key(right) {
+                left
+            } else {
+                right
+            })
+        }
         (left, right) => left.or(right),
     }
 }
@@ -36,7 +50,9 @@ fn latest_update<'a>(left: Option<&'a str>, right: Option<&'a str>) -> Option<&'
 pub(super) fn retry_budget(event: &WorkRetryEvent) -> String {
     format!(
         "{} retry budget · {} of {} used · {}",
-        event.kind.label(), event.used, event.limit,
+        event.kind.label(),
+        event.used,
+        event.limit,
         match event.status {
             WorkRetryStatus::Open => "Open",
             WorkRetryStatus::Resolved => "Resolved",
@@ -51,11 +67,20 @@ pub(super) fn task_retry_event(task: &WorkTaskDetail) -> Option<&WorkRetryEvent>
         task.retry_event.as_ref(),
         task.workflow.as_ref().and_then(|w| w.retry_event.as_ref()),
         task.review.as_ref().and_then(|r| r.retry_event.as_ref()),
-        task.delivery.as_ref().and_then(|d| d.repair.retry_event.as_ref()),
+        task.delivery
+            .as_ref()
+            .and_then(|d| d.repair.retry_event.as_ref()),
     ];
-    candidates.into_iter().flatten().find(|event| {
-        matches!(event.status, WorkRetryStatus::Open | WorkRetryStatus::Exhausted)
-    }).or_else(|| candidates.into_iter().flatten().next())
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|event| {
+            matches!(
+                event.status,
+                WorkRetryStatus::Open | WorkRetryStatus::Exhausted
+            )
+        })
+        .or_else(|| candidates.into_iter().flatten().next())
 }
 
 struct Summary {
@@ -66,8 +91,19 @@ struct Summary {
 }
 
 impl Summary {
-    fn new(now: impl Into<String>, kind: &'static str, tone: BadgeTone, why: impl Into<String>, next: impl Into<String>) -> Self {
-        Self { now: badge(now, tone), kind, why: why.into(), next: next.into() }
+    fn new(
+        now: impl Into<String>,
+        kind: &'static str,
+        tone: BadgeTone,
+        why: impl Into<String>,
+        next: impl Into<String>,
+    ) -> Self {
+        Self {
+            now: badge(now, tone),
+            kind,
+            why: why.into(),
+            next: next.into(),
+        }
     }
 }
 
@@ -77,12 +113,17 @@ impl Agents {
             id: "agents-attention",
             disabled: !enabled,
             pressed: Some(self.task_scope == WorkListScope::Attention),
-            action: Some(RowAction::SelectAgentTaskScope { value: WorkListScope::Attention.value().into() }),
+            action: Some(RowAction::SelectAgentTaskScope {
+                value: WorkListScope::Attention.value().into(),
+            }),
         });
-        view.texts.push(text("agents-attention", self.scope_counts.as_ref().map_or_else(
-            || "Needs attention".into(),
-            |counts| format!("Needs attention ({})", counts.attention),
-        )));
+        view.texts.push(text(
+            "agents-attention",
+            self.scope_counts.as_ref().map_or_else(
+                || "Needs attention".into(),
+                |counts| format!("Needs attention ({})", counts.attention),
+            ),
+        ));
         view.visibility.push(visible("agents-triage", reader));
         let summary = self.triage();
         view.texts.extend([
@@ -90,16 +131,38 @@ impl Agents {
             text("agents-triage-kind", summary.kind),
             text("agents-triage-why", summary.why),
             text("agents-triage-next", summary.next),
-            text("agents-task-updated", self.task.as_ref().map_or_else(String::new, |task| {
-                let updated = latest_update(task.delivery.as_ref().map(|d| d.updated_at.as_str()),
-                    self.tasks.iter().find(|item| item.task_id == task.task_id
-                        && item.correlation_id == task.correlation_id && item.revision == task.revision)
-                        .and_then(|item| item.updated_at.as_deref()));
-                format!("Task · {}\nAgent · {}\nTask status · {}\nCreated · {}\n{}", task.task_id, task.agent_profile,
-                    task.status.label(), task.created_at, updated.map_or_else(|| "Last task update not reported".into(), |at| format!("Last update · {at}")))
-            })),
+            text(
+                "agents-task-updated",
+                self.task.as_ref().map_or_else(String::new, |task| {
+                    let updated = latest_update(
+                        task.delivery.as_ref().map(|d| d.updated_at.as_str()),
+                        self.tasks
+                            .iter()
+                            .find(|item| {
+                                item.task_id == task.task_id
+                                    && item.correlation_id == task.correlation_id
+                                    && item.revision == task.revision
+                            })
+                            .and_then(|item| item.updated_at.as_deref()),
+                    );
+                    format!(
+                        "Task · {}\nAgent · {}\nTask status · {}\nCreated · {}\n{}",
+                        task.task_id,
+                        task.agent_profile,
+                        task.status.label(),
+                        task.created_at,
+                        updated.map_or_else(
+                            || "Last task update not reported".into(),
+                            |at| format!("Last update · {at}")
+                        )
+                    )
+                }),
+            ),
         ]);
-        view.badges.push(BadgeBinding { id: "agents-triage-now", badge: summary.now });
+        view.badges.push(BadgeBinding {
+            id: "agents-triage-now",
+            badge: summary.now,
+        });
     }
 
     fn triage(&self) -> Summary {
@@ -109,27 +172,55 @@ impl Agents {
                 "Use Retry saved request to check the same operation before changing this task.");
         }
         if self.pending.as_ref().is_some_and(WorkRequest::is_mutation) {
-            return Summary::new("Request pending", "Waiting", BadgeTone::Neutral,
+            return Summary::new(
+                "Request pending",
+                "Waiting",
+                BadgeTone::Neutral,
                 "The requested action has not been confirmed.",
-                "Wait for its authoritative response. This view does not establish success.");
+                "Wait for its authoritative response. This view does not establish success.",
+            );
         }
         if self.warning {
-            return Summary::new("Update unavailable", "Unavailable", BadgeTone::Warning,
-                self.task.as_ref().map_or_else(|| self.status.clone(), |_| format!("{} Evidence below is the last accepted snapshot.", self.status)),
-                "Refresh agents to recover the current task state.");
+            return Summary::new(
+                "Update unavailable",
+                "Unavailable",
+                BadgeTone::Warning,
+                self.task.as_ref().map_or_else(
+                    || self.status.clone(),
+                    |_| {
+                        format!(
+                            "{} Evidence below is the last accepted snapshot.",
+                            self.status
+                        )
+                    },
+                ),
+                "Refresh agents to recover the current task state.",
+            );
         }
         let Some(task) = self.task.as_ref() else {
             return if self.pending.is_some() {
-                Summary::new("Loading task…", "Loading", BadgeTone::Neutral,
-                    "Task details have not been received.", "Wait for the task response; no progress is assumed.")
+                Summary::new(
+                    "Loading task…",
+                    "Loading",
+                    BadgeTone::Neutral,
+                    "Task details have not been received.",
+                    "Wait for the task response; no progress is assumed.",
+                )
             } else {
-                Summary::new("Task state unavailable", "Unavailable", BadgeTone::Neutral,
-                    "No task details have been accepted.", "Refresh agents to load the task.")
+                Summary::new(
+                    "Task state unavailable",
+                    "Unavailable",
+                    BadgeTone::Neutral,
+                    "No task details have been accepted.",
+                    "Refresh agents to load the task.",
+                )
             };
         };
         let mut summary = self.task_triage(task);
         if matches!(self.pending, Some(WorkRequest::WorkGet { .. })) {
-            summary.why.push_str(" Showing the last accepted state while refreshing.");
+            summary
+                .why
+                .push_str(" Showing the last accepted state while refreshing.");
         }
         summary
     }
@@ -144,13 +235,19 @@ impl Agents {
         }
         if stage_diagram::is_workflow_root_task(task) {
             if let Some(delivery) = task.delivery.as_ref().filter(|_| {
-                task.workflow.as_ref().map_or(!task.workflow_required && task.status == WorkStatus::Completed,
-                    |w| w.phase == WorkWorkflowPhase::Completed)
+                task.workflow.as_ref().map_or(
+                    !task.workflow_required && task.status == WorkStatus::Completed,
+                    |w| w.phase == WorkWorkflowPhase::Completed,
+                )
             }) {
                 return delivery_triage(delivery);
             }
         }
-        if let Some(workflow) = task.workflow.as_ref().filter(|_| stage_diagram::is_workflow_root_task(task)) {
+        if let Some(workflow) = task
+            .workflow
+            .as_ref()
+            .filter(|_| stage_diagram::is_workflow_root_task(task))
+        {
             return self.workflow_triage(task, workflow);
         }
         if task.workflow_required && stage_diagram::is_workflow_root_task(task) {
@@ -170,9 +267,13 @@ impl Agents {
                 "Review the workflow evidence and coordinate recovery with its operator. This screen does not grant a retry or approval override.");
         }
         if workflow.phase == Phase::Cancelled {
-            return Summary::new("Cancelled", "Stopped", BadgeTone::Neutral,
+            return Summary::new(
+                "Cancelled",
+                "Stopped",
+                BadgeTone::Neutral,
                 "The workflow is cancelled. Its assignment and history are retained.",
-                "No automatic continuation is reported.");
+                "No automatic continuation is reported.",
+            );
         }
         if workflow.phase == Phase::Completed {
             return Summary::new("Merged", "Complete", BadgeTone::Success,
@@ -181,11 +282,17 @@ impl Agents {
         }
         // Enablement is supplied only in list responses. Do not infer it from a
         // retry count or raw author status, or borrow a different task revision.
-        let enabled = self.tasks.iter().find(|summary| {
-            summary.task_id == task.task_id && summary.project_alias == task.project_alias
-                && summary.correlation_id == task.correlation_id && summary.revision == task.revision
-                && summary.workflow_phase == Some(workflow.phase)
-        }).and_then(|summary| summary.workflow_enabled);
+        let enabled = self
+            .tasks
+            .iter()
+            .find(|summary| {
+                summary.task_id == task.task_id
+                    && summary.project_alias == task.project_alias
+                    && summary.correlation_id == task.correlation_id
+                    && summary.revision == task.revision
+                    && summary.workflow_phase == Some(workflow.phase)
+            })
+            .and_then(|summary| summary.workflow_enabled);
         if enabled == Some(false) {
             return Summary::new("Workflow paused", "Your action", BadgeTone::Warning,
                 format!("The accepted task list reports this workflow disabled in {}.", workflow.phase.label().to_lowercase()),
@@ -205,18 +312,29 @@ impl Agents {
             Phase::Completed | Phase::Cancelled | Phase::Escalated => unreachable!("terminal phases returned above"),
         };
         let mut summary = Summary::new(workflow.phase.label(), kind, BadgeTone::Accent, why, next);
-        if let Some(event) = task_retry_event(task).filter(|event| event.status == WorkRetryStatus::Open) {
-            summary.why.push_str(&format!(" An open {} retry event is recorded.", event.kind.label().to_lowercase()));
+        if let Some(event) =
+            task_retry_event(task).filter(|event| event.status == WorkRetryStatus::Open)
+        {
+            summary.why.push_str(&format!(
+                " An open {} retry event is recorded.",
+                event.kind.label().to_lowercase()
+            ));
             if enabled == Some(true) {
                 summary.kind = "Automatic retry";
                 summary.next.push_str(" The enabled workflow controls retry admission; no manual retry is requested here.");
             } else {
-                summary.next.push_str(" The retry event alone does not confirm automatic admission.");
+                summary
+                    .next
+                    .push_str(" The retry event alone does not confirm automatic admission.");
             }
         }
         if enabled.is_none() {
-            if summary.kind == "Automatic" { summary.kind = "Workflow"; }
-            summary.why.push_str(" Workflow enablement is not reported for this snapshot.");
+            if summary.kind == "Automatic" {
+                summary.kind = "Workflow";
+            }
+            summary
+                .why
+                .push_str(" Workflow enablement is not reported for this snapshot.");
         }
         summary
     }
@@ -239,13 +357,17 @@ impl Agents {
                 "Wait for the publication result. Accept and Resume stay unavailable until it settles.");
         }
         if self.finished_plan() {
-            return Summary::new("Plan ready for your review", "Your action", BadgeTone::Accent,
+            return Summary::new(
+                "Plan ready for your review",
+                "Your action",
+                BadgeTone::Accent,
                 "A saved plan and stopped attempt are available for a decision.",
                 if self.can_decide_plan(WorkPlanDecision::Resume) {
                     "Read the plan, then Resume to approve implementation, Revise with a review note, or Cancel."
                 } else {
                     "Read the plan and use a supported decision below. Resume and Revise remain guarded by the configured agent capabilities."
-                });
+                },
+            );
         }
         if self.can_accept() {
             return Summary::new("Ready for your final review", "Your action", BadgeTone::Accent,
@@ -263,19 +385,30 @@ impl Agents {
                 "Read the saved evidence. Any supported linked repair is optional and preserves this completed parent.");
         }
         if let Some(review) = task.review.as_ref() {
-            let reason = review.handoff_reason.as_deref().filter(|reason| !reason.is_empty())
+            let reason = review
+                .handoff_reason
+                .as_deref()
+                .filter(|reason| !reason.is_empty())
                 .unwrap_or("The accepted review and verification state governs the next action.");
             if self.can_retry_publication() {
                 return Summary::new("Publication failed", "Your action", BadgeTone::Warning, reason,
                     "Review the failure evidence, then use Retry publication for the guarded verification and publication path.");
             }
             if self.can_decide_review(WorkReviewDecision::RetryInfrastructure) {
-                return Summary::new(review_stage(&review.stage), "Your action", BadgeTone::Warning, reason,
-                    "Review the verification evidence, then use Retry verification if appropriate.");
+                return Summary::new(
+                    review_stage(&review.stage),
+                    "Your action",
+                    BadgeTone::Warning,
+                    reason,
+                    "Review the verification evidence, then use Retry verification if appropriate.",
+                );
             }
-            if review.stage == "awaiting_decision" && review.review_id.is_some()
-                && task.mode == WorkMode::Implement && !task.status.is_processing()
-                && !matches!(task.status, WorkStatus::Completed | WorkStatus::Cancelled) {
+            if review.stage == "awaiting_decision"
+                && review.review_id.is_some()
+                && task.mode == WorkMode::Implement
+                && !task.status.is_processing()
+                && !matches!(task.status, WorkStatus::Completed | WorkStatus::Cancelled)
+            {
                 return Summary::new("Review decision required", "Your action", BadgeTone::Accent, reason,
                     "Review the candidate and findings. Approval requires the existing evidence checks; repair or handoff requires your review note.");
             }
@@ -284,14 +417,21 @@ impl Agents {
                     "Wait for the current verification or repair result. Required checks and review still apply.");
             }
             if self.can_start_repair() || self.can_decide_review(WorkReviewDecision::Repair) {
-                return Summary::new(review_stage(&review.stage), "Your action", BadgeTone::Warning, reason,
+                return Summary::new(
+                    review_stage(&review.stage),
+                    "Your action",
+                    BadgeTone::Warning,
+                    reason,
                     if task.status == WorkStatus::Completed {
                         "Review the findings, then use Start linked repair to preserve the completed parent."
                     } else {
                         "Review the findings and your note, then use Request repair for this candidate."
-                    });
+                    },
+                );
             }
-            if review.can_repair && !matches!(task.status, WorkStatus::Cancelled | WorkStatus::Completed) {
+            if review.can_repair
+                && !matches!(task.status, WorkStatus::Cancelled | WorkStatus::Completed)
+            {
                 return Summary::new(review_stage(&review.stage), "Review", BadgeTone::Warning, reason,
                     "Read the findings. Repair stays unavailable until the current candidate, review note and agent capability requirements are met.");
             }
@@ -314,7 +454,13 @@ impl Agents {
             WorkStatus::NeedsReconcile => ("Your action", "The previous attempt must be reconciled before another execution.", "Review the attempt evidence with the operator. Resume remains unavailable until reconciliation is confirmed."),
             WorkStatus::Failed => ("Your action", "The task reports a failure; no successful result is established.", "Review its evidence and event history. Use only the recovery actions admitted for this task."),
         };
-        Summary::new(task.status.label(), kind, task_badge(task.status).tone, why, next)
+        Summary::new(
+            task.status.label(),
+            kind,
+            task_badge(task.status).tone,
+            why,
+            next,
+        )
     }
 }
 
@@ -348,6 +494,15 @@ fn delivery_triage(delivery: &WorkDelivery) -> Summary {
             },
         },
     };
-    Summary::new(phase.label, kind, phase.tone,
-        if why.is_empty() { String::from("No detailed reason was supplied for this delivery state.") } else { compact_words(why, 240) }, next)
+    Summary::new(
+        phase.label,
+        kind,
+        phase.tone,
+        if why.is_empty() {
+            String::from("No detailed reason was supplied for this delivery state.")
+        } else {
+            compact_words(why, 240)
+        },
+        next,
+    )
 }

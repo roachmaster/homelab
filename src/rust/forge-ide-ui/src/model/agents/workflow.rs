@@ -12,8 +12,12 @@ impl Agents {
         }
         if let Some(delivery) = task.delivery.as_ref().filter(|_| {
             task.workflow_phase.map_or_else(
-                || task.status == WorkStatus::Completed
-                    && !task.workflow_required.unwrap_or(self.workflow_policy().is_some()),
+                || {
+                    task.status == WorkStatus::Completed
+                        && !task
+                            .workflow_required
+                            .unwrap_or(self.workflow_policy().is_some())
+                },
                 |phase| phase == WorkWorkflowPhase::Completed,
             )
         }) {
@@ -290,10 +294,11 @@ impl Agents {
 
     pub(super) fn project_retry_event(&self, view: &mut ViewModel, reader: bool) {
         let stopped = self.task.as_ref().is_some_and(|task| {
-            task.workflow.as_ref().map_or(
-                task.status == WorkStatus::Cancelled,
-                |workflow| workflow.phase == WorkWorkflowPhase::Cancelled,
-            )
+            task.workflow
+                .as_ref()
+                .map_or(task.status == WorkStatus::Cancelled, |workflow| {
+                    workflow.phase == WorkWorkflowPhase::Cancelled
+                })
         });
         let event = self.task.as_ref().and_then(triage::task_retry_event);
         view.visibility

@@ -7,7 +7,12 @@ fn projection(agents: &Agents) -> ViewModel {
 }
 
 fn content<'a>(view: &'a ViewModel, id: &str) -> &'a str {
-    &view.texts.iter().find(|binding| binding.id == id).unwrap().text
+    &view
+        .texts
+        .iter()
+        .find(|binding| binding.id == id)
+        .unwrap()
+        .text
 }
 
 fn workflow_reader(kind: WorkWorkflowKind, phase: WorkWorkflowPhase) -> Agents {
@@ -40,21 +45,53 @@ fn retry_revision_and_operator_action_are_distinct_for_native_and_muse() {
         workflow.plan_revisions = 29;
         workflow.code_revisions = 41;
         workflow.retry_event = Some(WorkRetryEvent {
-            event_id: KEY.into(), kind: WorkRetryKind::Planning, used: 1,
-            limit: MAX_AGENT_RETRIES, status: WorkRetryStatus::Open,
+            event_id: KEY.into(),
+            kind: WorkRetryKind::Planning,
+            used: 1,
+            limit: MAX_AGENT_RETRIES,
+            status: WorkRetryStatus::Open,
         });
         let view = projection(&agents);
         assert_eq!(content(&view, "agents-triage-now"), "Revising plan");
         assert_eq!(content(&view, "agents-triage-kind"), "Automatic retry");
-        assert_eq!(content(&view, "agents-retry-event"), "Plan review retry budget · 1 of 20 used · Open");
-        assert_eq!(content(&view, "agents-workflow-revisions"), "Plan revisions 29 · Code revisions 41");
-        let diagram = view.flow_diagrams.iter().find(|d| d.id == "agents-stage-diagram").unwrap();
-        assert!(diagram.branches.iter().any(|b| b.detail.starts_with("Plan revisions 29")));
-        assert!(diagram.branches.iter().all(|b| !b.detail.contains("29/3") && !b.detail.contains("41/3")));
+        assert_eq!(
+            content(&view, "agents-retry-event"),
+            "Plan review retry budget · 1 of 20 used · Open"
+        );
+        assert_eq!(
+            content(&view, "agents-workflow-revisions"),
+            "Plan revisions 29 · Code revisions 41"
+        );
+        let diagram = view
+            .flow_diagrams
+            .iter()
+            .find(|d| d.id == "agents-stage-diagram")
+            .unwrap();
+        assert!(diagram
+            .branches
+            .iter()
+            .any(|b| b.detail.starts_with("Plan revisions 29")));
+        assert!(diagram
+            .branches
+            .iter()
+            .all(|b| !b.detail.contains("29/3") && !b.detail.contains("41/3")));
         assert!(!agents.can_accept());
         assert!(!agents.can_resume());
-        for id in ["agents-accept", "agents-resume", "agents-review-approve", "agents-review-retry"] {
-            assert!(!view.visibility.iter().rev().find(|v| v.id == id).unwrap().visible);
+        for id in [
+            "agents-accept",
+            "agents-resume",
+            "agents-review-approve",
+            "agents-review-retry",
+        ] {
+            assert!(
+                !view
+                    .visibility
+                    .iter()
+                    .rev()
+                    .find(|v| v.id == id)
+                    .unwrap()
+                    .visible
+            );
         }
 
         let task = agents.task.as_mut().unwrap();
@@ -68,14 +105,20 @@ fn retry_revision_and_operator_action_are_distinct_for_native_and_muse() {
         let view = projection(&agents);
         assert_eq!(content(&view, "agents-triage-now"), "Needs attention");
         assert_eq!(content(&view, "agents-triage-kind"), "Your action");
-        assert_eq!(content(&view, "agents-triage-why"), "Independent review requires operator recovery.");
+        assert_eq!(
+            content(&view, "agents-triage-why"),
+            "Independent review requires operator recovery."
+        );
         assert!(content(&view, "agents-retry-event").ends_with("Exhausted"));
         assert!(!content(&view, "agents-retry-event").contains("stopped"));
         assert!(!content(&view, "agents-triage-next").contains("Resume"));
         agents.status = WorkStatus::Cancelled.label().into();
         agents.pending = Some(WorkRequest::WorkEvents {
-            request_id: "history-pending".into(), project_alias: "workspace".into(),
-            task_id: TASK.into(), after_sequence: 0, limit: 50,
+            request_id: "history-pending".into(),
+            project_alias: "workspace".into(),
+            task_id: TASK.into(),
+            after_sequence: 0,
+            limit: 50,
         });
         let view = projection(&agents);
         assert!(!view.visibility.iter().find(|v| v.id == "agents-status").unwrap().visible,
@@ -88,8 +131,11 @@ fn retry_revision_and_operator_action_are_distinct_for_native_and_muse() {
 fn missing_or_disabled_enablement_never_promises_automatic_retry() {
     let mut agents = workflow_reader(WorkWorkflowKind::Native, WorkWorkflowPhase::PlanRevision);
     agents.task.as_mut().unwrap().retry_event = Some(WorkRetryEvent {
-        event_id: KEY.into(), kind: WorkRetryKind::Planning, used: 0,
-        limit: MAX_AGENT_RETRIES, status: WorkRetryStatus::Open,
+        event_id: KEY.into(),
+        kind: WorkRetryKind::Planning,
+        used: 0,
+        limit: MAX_AGENT_RETRIES,
+        status: WorkRetryStatus::Open,
     });
     agents.tasks[0].workflow_enabled = Some(false);
     let view = projection(&agents);
@@ -104,7 +150,10 @@ fn missing_or_disabled_enablement_never_promises_automatic_retry() {
 
 #[test]
 fn linked_review_uses_own_lifecycle_and_does_not_offer_parent_actions() {
-    let mut agents = workflow_reader(WorkWorkflowKind::ExternalDatabase, WorkWorkflowPhase::CodeReview);
+    let mut agents = workflow_reader(
+        WorkWorkflowKind::ExternalDatabase,
+        WorkWorkflowPhase::CodeReview,
+    );
     let task = agents.task.as_mut().unwrap();
     task.mode = WorkMode::Review;
     task.agent_profile = "codex-primary".into();
@@ -121,14 +170,20 @@ fn linked_review_uses_own_lifecycle_and_does_not_offer_parent_actions() {
 fn manual_plan_action_requires_actual_saved_result_and_existing_guards() {
     let agents = finished_plan(WorkStatus::AwaitingReview);
     let view = projection(&agents);
-    assert_eq!(content(&view, "agents-triage-now"), "Plan ready for your review");
+    assert_eq!(
+        content(&view, "agents-triage-now"),
+        "Plan ready for your review"
+    );
     assert_eq!(content(&view, "agents-triage-kind"), "Your action");
     assert!(agents.can_decide_plan(WorkPlanDecision::Resume));
     assert!(content(&view, "agents-triage-next").contains("Resume to approve implementation"));
     let mut absent = agents;
     absent.task.as_mut().unwrap().result = None;
     let view = projection(&absent);
-    assert_ne!(content(&view, "agents-triage-now"), "Plan ready for your review");
+    assert_ne!(
+        content(&view, "agents-triage-now"),
+        "Plan ready for your review"
+    );
     assert!(!absent.can_decide_plan(WorkPlanDecision::Resume));
 }
 
@@ -169,13 +224,32 @@ fn delivery_and_worker_readiness_stay_separate_and_latest_update_is_exact() {
     listed.updated_at = Some("2026-11-19T18:20:00Z".into());
     agents.tasks = vec![listed];
     let view = projection(&agents);
-    assert_eq!(content(&view, "agents-triage-now"), "Main verification queued");
+    assert_eq!(
+        content(&view, "agents-triage-now"),
+        "Main verification queued"
+    );
     assert_eq!(content(&view, "agents-worker"), "Worker ready");
     assert!(content(&view, "agents-triage-next").contains("Worker readiness"));
-    let row = &view.lists.iter().find(|l| l.id == "agents-tasks").unwrap().rows[0];
-    assert_eq!(row.summary.as_ref().unwrap().time.exact.as_deref(), Some("2026-11-19T18:20:00Z"));
+    let row = &view
+        .lists
+        .iter()
+        .find(|l| l.id == "agents-tasks")
+        .unwrap()
+        .rows[0];
+    assert_eq!(
+        row.summary.as_ref().unwrap().time.exact.as_deref(),
+        Some("2026-11-19T18:20:00Z")
+    );
     assert!(content(&view, "agents-task-updated").contains("Last update · 2026-11-19T18:20:00Z"));
-    agents.task.as_mut().unwrap().delivery.as_mut().unwrap().release.status = WorkReleaseStatus::Deployed;
+    agents
+        .task
+        .as_mut()
+        .unwrap()
+        .delivery
+        .as_mut()
+        .unwrap()
+        .release
+        .status = WorkReleaseStatus::Deployed;
     let view = projection(&agents);
     assert_eq!(content(&view, "agents-triage-now"), "Deployment unverified");
     assert_eq!(content(&view, "agents-triage-kind"), "Unavailable");
@@ -183,38 +257,94 @@ fn delivery_and_worker_readiness_stay_separate_and_latest_update_is_exact() {
 
     // A completed author and retained delivery cannot outrank an escalated or
     // missing required workflow in either the inbox, summary or stage path.
-    agents.task.as_mut().unwrap().workflow.as_mut().unwrap().phase = WorkWorkflowPhase::Escalated;
+    agents
+        .task
+        .as_mut()
+        .unwrap()
+        .workflow
+        .as_mut()
+        .unwrap()
+        .phase = WorkWorkflowPhase::Escalated;
     agents.tasks = vec![agents.task.as_ref().unwrap().summary()];
     let view = projection(&agents);
     assert_eq!(content(&view, "agents-triage-now"), "Needs attention");
-    assert_eq!(agents.task_summary_badge(&agents.tasks[0]).label, "Needs attention");
+    assert_eq!(
+        agents.task_summary_badge(&agents.tasks[0]).label,
+        "Needs attention"
+    );
     assert!(WorkListScope::Attention.accepts(&agents.tasks[0]));
-    assert!(view.flow_diagrams.iter().find(|d| d.id == "agents-stage-diagram").unwrap()
-        .nodes.iter().all(|node| !node.id.starts_with("delivery_")));
+    assert!(view
+        .flow_diagrams
+        .iter()
+        .find(|d| d.id == "agents-stage-diagram")
+        .unwrap()
+        .nodes
+        .iter()
+        .all(|node| !node.id.starts_with("delivery_")));
     agents.task.as_mut().unwrap().workflow = None;
     agents.tasks = vec![agents.task.as_ref().unwrap().summary()];
     let view = projection(&agents);
-    assert_eq!(content(&view, "agents-triage-now"), "Workflow state unavailable");
-    assert_eq!(agents.task_summary_badge(&agents.tasks[0]).label, "Workflow state unavailable");
-    assert!(view.flow_diagrams.iter().find(|d| d.id == "agents-stage-diagram").unwrap()
-        .nodes.iter().all(|node| !node.id.starts_with("delivery_")));
+    assert_eq!(
+        content(&view, "agents-triage-now"),
+        "Workflow state unavailable"
+    );
+    assert_eq!(
+        agents.task_summary_badge(&agents.tasks[0]).label,
+        "Workflow state unavailable"
+    );
+    assert!(view
+        .flow_diagrams
+        .iter()
+        .find(|d| d.id == "agents-stage-diagram")
+        .unwrap()
+        .nodes
+        .iter()
+        .all(|node| !node.id.starts_with("delivery_")));
 }
 
 #[test]
 fn attention_shortcut_uses_accepted_counts_and_existing_server_scope() {
     let mut agents = ready();
-    agents.scope_counts = Some(WorkScopeCounts { active: 4, attention: 3, history: 8, all: 15 });
+    agents.scope_counts = Some(WorkScopeCounts {
+        active: 4,
+        attention: 3,
+        history: 8,
+        all: 15,
+    });
     let view = projection(&agents);
     assert_eq!(content(&view, "agents-attention"), "Needs attention (3)");
-    let button = view.buttons.iter().find(|b| b.id == "agents-attention").unwrap();
-    assert_eq!(button.action, Some(RowAction::SelectAgentTaskScope { value: "attention".into() }));
+    let button = view
+        .buttons
+        .iter()
+        .find(|b| b.id == "agents-attention")
+        .unwrap();
+    assert_eq!(
+        button.action,
+        Some(RowAction::SelectAgentTaskScope {
+            value: "attention".into()
+        })
+    );
     assert_eq!(button.pressed, Some(false));
-    let effects = step(&mut agents, UiEvent::SelectAgentTaskScope { value: "attention".into() }, "scope");
-    assert!(matches!(&effects[0], UiEffect::Work(WorkRequest::WorkList {
-        status_filter: Some(WorkListFilter::Scope(WorkListScope::Attention)), ..
-    })));
+    let effects = step(
+        &mut agents,
+        UiEvent::SelectAgentTaskScope {
+            value: "attention".into(),
+        },
+        "scope",
+    );
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkList {
+            status_filter: Some(WorkListFilter::Scope(WorkListScope::Attention)),
+            ..
+        })
+    ));
     let view = projection(&agents);
-    let button = view.buttons.iter().find(|b| b.id == "agents-attention").unwrap();
+    let button = view
+        .buttons
+        .iter()
+        .find(|b| b.id == "agents-attention")
+        .unwrap();
     assert_eq!(button.pressed, Some(true));
     assert!(button.disabled);
 }
@@ -227,23 +357,47 @@ fn return_and_background_refresh_keep_list_identity_and_reject_late_detail() {
     agents.list_cursor = Some(KEY.into());
     agents.list_history.push(None);
     let context = projection(&agents).lists[0].context.clone();
-    step(&mut agents, UiEvent::OpenAgentTask { task_id: TASK.into() }, "open");
+    step(
+        &mut agents,
+        UiEvent::OpenAgentTask {
+            task_id: TASK.into(),
+        },
+        "open",
+    );
     let effects = step(&mut agents, UiEvent::AgentsBack {}, "back");
-    assert!(matches!(&effects[0], UiEffect::Work(WorkRequest::WorkList { cursor: Some(value), .. }) if value == KEY));
+    assert!(
+        matches!(&effects[0], UiEffect::Work(WorkRequest::WorkList { cursor: Some(value), .. }) if value == KEY)
+    );
     assert_eq!(agents.selected, None);
     assert_eq!(agents.list_selected.as_deref(), Some(TASK));
     assert_eq!(agents.list_history, vec![None]);
-    step(&mut agents, UiEvent::Work(WorkResponse::WorkOpened {
-        request_id: "open".into(), task: Box::new(detail(WorkStatus::Running)),
-    }), "late");
+    step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkOpened {
+            request_id: "open".into(),
+            task: Box::new(detail(WorkStatus::Running)),
+        }),
+        "late",
+    );
     assert!(agents.task.is_none());
     let tasks = agents.tasks.clone();
-    step(&mut agents, UiEvent::Work(WorkResponse::WorkListed {
-        request_id: "back".into(), project_alias: "workspace".into(), tasks,
-        next_cursor: None, scope_counts: None,
-    }), "listed");
+    step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkListed {
+            request_id: "back".into(),
+            project_alias: "workspace".into(),
+            tasks,
+            next_cursor: None,
+            scope_counts: None,
+        }),
+        "listed",
+    );
     let view = projection(&agents);
-    let list = view.lists.iter().find(|list| list.id == "agents-tasks").unwrap();
+    let list = view
+        .lists
+        .iter()
+        .find(|list| list.id == "agents-tasks")
+        .unwrap();
     assert_eq!(list.context, context);
     assert!(list.rows[0].selected);
     assert_eq!(agents.pane, Pane::List);
@@ -252,15 +406,29 @@ fn return_and_background_refresh_keep_list_identity_and_reject_late_detail() {
 #[test]
 fn loading_and_failed_attention_list_never_claim_empty_success() {
     let mut agents = ready();
-    step(&mut agents, UiEvent::SelectAgentTaskScope { value: "attention".into() }, "list");
+    step(
+        &mut agents,
+        UiEvent::SelectAgentTaskScope {
+            value: "attention".into(),
+        },
+        "list",
+    );
     assert_eq!(projection(&agents).lists[0].empty_message, "Loading tasks…");
     agents.network_failed("list", "watch".into(), &mut vec![]);
-    assert!(projection(&agents).lists[0].empty_message.contains("unavailable"));
+    assert!(projection(&agents).lists[0]
+        .empty_message
+        .contains("unavailable"));
     agents.pane = Pane::Reader;
     let view = projection(&agents);
     assert_eq!(content(&view, "agents-triage-now"), "Update unavailable");
     assert_eq!(content(&view, "agents-triage-kind"), "Unavailable");
-    assert!(view.flow_diagrams.iter().find(|d| d.id == "agents-stage-diagram").unwrap().nodes.is_empty());
+    assert!(view
+        .flow_diagrams
+        .iter()
+        .find(|d| d.id == "agents-stage-diagram")
+        .unwrap()
+        .nodes
+        .is_empty());
 }
 
 #[test]
@@ -275,15 +443,32 @@ fn readable_rows_keep_full_assignment_and_exact_times_available() {
     agents.tasks = vec![listed];
     agents.task = Some(task.clone());
     let view = projection(&agents);
-    let row = &view.lists.iter().find(|l| l.id == "agents-tasks").unwrap().rows[0];
+    let row = &view
+        .lists
+        .iter()
+        .find(|l| l.id == "agents-tasks")
+        .unwrap()
+        .rows[0];
     assert!(row.label.ends_with('…'));
     assert!(row.label.chars().count() <= 97);
     assert!(title.starts_with(row.label.trim_end_matches('…')));
-    assert!(row.summary.as_ref().unwrap().time.label.starts_with("Updated "));
+    assert!(row
+        .summary
+        .as_ref()
+        .unwrap()
+        .time
+        .label
+        .starts_with("Updated "));
     assert!(content(&view, "agents-task-updated").contains("2026-11-19T18:20:00Z"));
     assert_eq!(content(&view, "agents-task-prompt"), task.prompt);
     agents.tasks[0].updated_at = None;
     let view = projection(&agents);
-    assert!(view.lists[0].rows[0].summary.as_ref().unwrap().time.label.starts_with("Created "));
+    assert!(view.lists[0].rows[0]
+        .summary
+        .as_ref()
+        .unwrap()
+        .time
+        .label
+        .starts_with("Created "));
     assert!(content(&view, "agents-task-updated").contains("Last task update not reported"));
 }

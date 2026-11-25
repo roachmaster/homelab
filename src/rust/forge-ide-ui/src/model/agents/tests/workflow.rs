@@ -198,10 +198,7 @@ fn event_retry_progress_is_independent_of_lifetime_revision_history() {
     task.retry_event = Some(event.clone());
     assert!(task.is_valid());
     let task_summary = task.summary();
-    assert_eq!(
-        agents.task_summary_badge(&task_summary).label,
-        "Repairing"
-    );
+    assert_eq!(agents.task_summary_badge(&task_summary).label, "Repairing");
     let mut view = ViewModel::default();
     agents.project(&mut view, true, true, true);
     assert!(view

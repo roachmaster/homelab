@@ -30,10 +30,24 @@ input-presentation suite (a Node diagnostic, not generated/WASM/browser evidence
 `make ui-qa` stopped at prerequisites: Cargo is absent, as are the locked browser
 dependencies. `make portal-style-check` likewise stopped at Cargo/rustfmt.
 No dependencies were installed and no real assignments were used. Fixture PNG
-capture and actual browser acceptance remain unverified. Existing PR CI runs
-Rust gates and browser-harness checks but skips full browser journeys; the
-connected tools currently provide no authenticated workflow-dispatch path.
-Feature-branch publication and actual hosted results are the next checkpoint.
+capture and actual browser acceptance remain unverified. The feature branch is
+published as review PR #23. A read-only GitHub query confirmed both Rust CI and
+IDE browser acceptance are disabled_manually; no hosted run or status exists for
+the published source. That policy remains unchanged. Even when enabled, ordinary
+PR browser jobs skip the full journey. The connected tools provide no
+authenticated workflow-dispatch path.
+
+Formatting follow-up: the official Rust Playground formatter processed 16 changed
+Rust files with edition 2021, correcting 7. Child module declarations were
+temporarily opaque for single-file formatting and restored unchanged; no skip
+attribute was added to the repository. Independent review found no semantic or
+literal changes. Automatic approval review then blocked further external source
+uploads because that separate service was not explicitly authorized. That route
+was stopped; the remaining 2 files passed local formatting review. No toolchain
+was installed. This is not a Cargo formatting, native test, generation, WASM or
+browser gate. Those checks and source-bound before/after screenshots still need
+a prepared runner. Live portal verification remains for Dot after Leo approves
+the next step; no deployment or main change occurred.
 
 # Previous: Stabilize the event stream and measure bottlenecks — 2026-11-25
 

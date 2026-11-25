@@ -370,7 +370,8 @@ impl Agents {
         let show = visible_now && self.task.is_some();
         view.visibility.push(visible("agents-stage-panel", show));
         let Some(task) = self.task.as_ref().filter(|_| show) else {
-            view.texts.push(text("agents-current-stage", "Current stage unavailable"));
+            view.texts
+                .push(text("agents-current-stage", "Current stage unavailable"));
             view.flow_diagrams.push(FlowDiagramBinding {
                 id: "agents-stage-diagram",
                 track_label: String::new(),
@@ -395,11 +396,10 @@ impl Agents {
         let current_stage = if self.warning {
             "Update unavailable · stage evidence is the last accepted snapshot".into()
         } else {
-            diagram
-                .nodes
-                .iter()
-                .find(|node| node.current)
-                .map_or_else(|| "No current stage reported".into(), |node| node.label.clone())
+            diagram.nodes.iter().find(|node| node.current).map_or_else(
+                || "No current stage reported".into(),
+                |node| node.label.clone(),
+            )
         };
         view.texts.push(text("agents-current-stage", current_stage));
         view.flow_diagrams.push(diagram);
@@ -484,7 +484,10 @@ fn build_diagram(
             binding.current_badge.label
         )
     } else {
-        format!("No current stage reported · {} · {stream_status}", binding.current_badge.label)
+        format!(
+            "No current stage reported · {} · {stream_status}",
+            binding.current_badge.label
+        )
     };
 
     let (trace_label, trace_hops) = build_trace_hops(trace, events_loaded, now_ms);
@@ -589,8 +592,12 @@ fn build_workflow_diagram(
                 FlowStageState::Current
             };
             let count_label = match workflow.phase {
-                WorkWorkflowPhase::PlanRevision => Some(format!("Plan revisions {}", workflow.plan_revisions)),
-                WorkWorkflowPhase::Repair => Some(format!("Code revisions {}", workflow.code_revisions)),
+                WorkWorkflowPhase::PlanRevision => {
+                    Some(format!("Plan revisions {}", workflow.plan_revisions))
+                }
+                WorkWorkflowPhase::Repair => {
+                    Some(format!("Code revisions {}", workflow.code_revisions))
+                }
                 _ => stats.and_then(stats_count_label),
             };
             let phase_stats = match workflow.phase {
