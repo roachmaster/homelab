@@ -143,6 +143,11 @@ MODE_ORDER = ("plan", "review", "implement")
 
 
 def _timestamp(value):
+    # The proxy returns rows as JSON, so timestamptz columns arrive as
+    # ISO strings where the direct connection returns datetimes; accept
+    # both so the read DTOs are identical on either transport.
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
     formatted = value.astimezone(UTC).isoformat().replace("+00:00", "Z")
     if len(formatted.encode("utf-8")) > 80:
         raise ValueError("Formatted timestamp exceeds wire bound")
@@ -258,6 +263,12 @@ def _parse_result_cursor(cursor):
     return match.group(1), int(match.group(2))
 
 
+def _read_query(cursor, name, params):
+    """Run a named fixed read query on either transport (see proxy_client.run_read_query)."""
+    from proxy_client import run_read_query
+    return run_read_query(cursor, name, params)
+
+
 class WorkStore:
     """Owner- and project-scoped durable store for coding jobs, results, and control receipts."""
 
@@ -350,14 +361,9 @@ class WorkStore:
         if not isinstance(config, WorkConfig) or config.owner != self._owner:
             raise ValueError("Catalog requires matching frozen WorkConfig")
         with self._transaction(read_only=True) as cursor:
-            cursor.execute("""
-                SELECT worker_id, policy_digest, projects, profiles, observed_at,
-                       (observed_at >= clock_timestamp() - make_interval(secs => %s)) AS is_fresh
-                FROM forge_agent.coding_worker_readiness
-                WHERE owner_id = %s
-                ORDER BY observed_at DESC, worker_id ASC
-            """, (WORKER_FRESHNESS_SECONDS, self._owner))
-            rows = cursor.fetchall()
+            rows = _read_query(cursor, "worker_readiness_catalog",
+                               {"max_age_seconds": WORKER_FRESHNESS_SECONDS,
+                                "owner_id": self._owner})
             external = self._external.catalogue(cursor) if self._external is not None else ()
 
         if not rows:
@@ -416,12 +422,8 @@ class WorkStore:
                     advertised_profile_modes.setdefault(alias, set()).update(valid)
 
         with self._transaction(read_only=True) as cursor:
-            cursor.execute("""SELECT DISTINCT ON(a.project_alias) a.project_alias,a.finish_receipt->'receipt'->>'merge_commit' AS merge_commit
-             FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w USING(workflow_id)
-             WHERE a.owner_id=%s AND a.kind='merge' AND a.status='completed' AND a.finish_receipt->>'status'='merged'
-             AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'
-             ORDER BY a.project_alias,a.updated_at DESC,a.action_id DESC""",(self._owner,))
-            for merged in cursor.fetchall():
+            for merged in _read_query(cursor, "merge_commit_by_project",
+                                    {"owner_id": self._owner}):
                 if merged['project_alias'] in config.project_workflows:
                     advertised_revisions[merged['project_alias']]=merged['merge_commit']
 
@@ -486,15 +488,10 @@ class WorkStore:
                 "pg_catalog.hashtextextended(%s::text, %s::bigint))",
                 (lock_scope, ADVISORY_LOCK_SALT),
             )
-            cursor.execute("""
-                SELECT t.intent_digest, e.payload AS receipt_json
-                FROM forge_agent.coding_tasks t
-                JOIN forge_agent.coding_events e
-                  ON (e.owner_id, e.project_alias, e.task_id) = (t.owner_id, t.project_alias, t.id)
-                 AND e.sequence = 1
-                WHERE t.owner_id = %s AND t.project_alias = %s AND t.idempotency_key = %s
-            """, (self._owner, project_alias, idempotency_key))
-            existing = cursor.fetchone()
+            rows = _read_query(cursor, "task_receipt_by_idempotency",
+                               {"owner_id": self._owner, "project_alias": project_alias,
+                                "idempotency_key": idempotency_key})
+            existing = rows[0] if rows else None
             if existing is not None:
                 if existing["intent_digest"] != intent_digest:
                     raise Rejected(409, "idempotency_conflict")
@@ -520,11 +517,9 @@ class WorkStore:
             if trusted_main is not None and trusted_main!=base_revision:raise Rejected(409,"result_mismatch")
             workflow=resolve_workflow()
             if workflow is not None:
-                cursor.execute("""SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head FROM forge_agent.coding_workflow_actions a
-                 JOIN forge_agent.coding_workflows w USING(workflow_id) WHERE a.owner_id=%s AND a.project_alias=%s AND a.kind='merge' AND a.status='completed'
-                 AND a.finish_receipt->>'status'='merged' AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'
-                 ORDER BY a.updated_at DESC,a.action_id DESC LIMIT 1""",(self._owner,project_alias))
-                merged=cursor.fetchone()
+                rows = _read_query(cursor, "merge_head",
+                                  {"owner_id": self._owner, "project_alias": project_alias})
+                merged = rows[0] if rows else None
                 trusted_head=trusted_main or (merged["head"] if merged else None)
                 if trusted_head is not None and trusted_head!=base_revision:raise Rejected(409,'result_mismatch')
                 auto_repair=True
@@ -713,27 +708,14 @@ class WorkStore:
                     raise Rejected(400, "invalid_request")
                 cursor_created_at = anchor["created_at"]
 
-            cursor.execute(f"""
-                SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, t.mode, t.agent_profile,
-                       t.recipe_digest, t.status, t.revision, t.created_at, t.title, t.workflow_id,
-                       t.workflow_required, w.phase AS workflow_phase
-                FROM forge_agent.coding_tasks t
-                LEFT JOIN forge_agent.coding_workflows w
-                  ON (w.owner_id, w.project_alias, w.workflow_id) =
-                     (t.owner_id, t.project_alias, t.workflow_id)
-                WHERE t.owner_id = %s AND t.project_alias = %s
-                  {external_filter}
-                  AND (%s::text IS NULL OR t.status = %s::text)
-                  AND (%s::timestamptz IS NULL OR (t.created_at, t.id) > (%s::timestamptz, %s::uuid))
-                ORDER BY t.created_at ASC, t.id ASC
-                LIMIT %s
-            """, (
-                self._owner, project_alias,
-                status_filter, status_filter,
-                cursor_created_at, cursor_created_at, cursor_task_id,
-                limit + 1,
-            ))
-            rows = cursor.fetchall()
+            rows = _read_query(cursor, "tasks_page",
+                               {"owner_id": self._owner,
+                                "project_alias": project_alias,
+                                "exclude_external": external_filter != "",
+                                "status_filter": status_filter,
+                                "cursor_created_at": cursor_created_at,
+                                "cursor_id": cursor_task_id,
+                                "limit": limit + 1})
             if self.retry_events is not None:
                 for row in rows:row["retry_event"]=self._retry_projection(cursor,row)
             if self._delivery_enabled:
@@ -884,15 +866,10 @@ class WorkStore:
             task = cursor.fetchone()
             if task is None:
                 raise Rejected(404, "not_found")
-            cursor.execute("""
-                SELECT event_id, correlation_id, sequence, event_kind, created_at, payload
-                FROM forge_agent.coding_events
-                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
-                  AND sequence > %s
-                ORDER BY sequence ASC
-                LIMIT %s
-            """, (self._owner, project_alias, task_id, after_sequence, limit))
-            rows = cursor.fetchall()
+            rows = _read_query(cursor, "coding_events_after",
+                               {"owner_id": self._owner, "project_alias": project_alias,
+                                "task_id": task_id, "sequence": after_sequence,
+                                "limit": limit})
             cursor.execute("""SELECT attempt_id FROM forge_agent.coding_attempts
                 WHERE owner_id=%s AND project_alias=%s AND task_id=%s""", (self._owner,project_alias,task_id))
             owned_attempts = {str(row["attempt_id"]) for row in cursor.fetchall()}
@@ -976,29 +953,11 @@ class WorkStore:
                 if not 0 <= offset_bytes < total_bytes:
                     raise Rejected(400, "invalid_request")
 
-            db_cursor.execute("""
-                WITH spans AS (
-                    SELECT chunk_index, content, byte_length,
-                           coalesce(
-                               sum(byte_length) OVER (
-                                   ORDER BY chunk_index
-                                   ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-                               ),
-                               0
-                           ) AS start_byte,
-                           sum(byte_length) OVER (ORDER BY chunk_index) AS end_byte
-                    FROM forge_agent.coding_result_chunks
-                    WHERE owner_id = %s AND project_alias = %s
-                      AND task_id = %s AND attempt_id = %s
-                )
-                SELECT chunk_index, content, byte_length, start_byte, end_byte
-                FROM spans
-                WHERE end_byte > %s AND start_byte < %s
-                ORDER BY chunk_index ASC
-            """, (
-                self._owner, project_alias, task_id, attempt_id,
-                offset_bytes, offset_bytes + limit_bytes,
-            ))
+            rows = _read_query(db_cursor, "result_chunks_page",
+                               {"owner_id": self._owner, "project_alias": project_alias,
+                                "task_id": task_id, "attempt_id": attempt_id,
+                                "end_byte": offset_bytes,
+                                "start_byte": offset_bytes + limit_bytes})
             rows = db_cursor.fetchall()
 
         if not rows:
@@ -1048,8 +1007,10 @@ class WorkStore:
         )
         with self._transaction() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",(self._owner+"\n"+project_alias,ADVISORY_LOCK_SALT))
-            cursor.execute("SELECT w.root_task_id FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id WHERE t.owner_id=%s AND t.project_alias=%s AND t.id=%s",(self._owner,project_alias,task_id))
-            scope=cursor.fetchone()
+            rows = _read_query(cursor, "workflow_root_task",
+                               {"owner_id": self._owner, "project_alias": project_alias,
+                                "task_id": task_id})
+            scope = rows[0] if rows else None
             if scope and scope['root_task_id']!=task_id:
                 cursor.execute("SELECT id FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self._owner,project_alias,scope['root_task_id']))
             cursor.execute("""
@@ -1361,13 +1322,10 @@ class WorkStore:
                     or rec["attempt_id"] != task["latest_attempt_id"]):
                 raise Rejected(409, "stale_reconciliation")
 
-            cursor.execute("""
-                SELECT count(*) FILTER (WHERE reservation_active OR lease_expires_at IS NOT NULL) AS reserved,
-                       bool_or(attempt_id = %s AND phase = 'stopped') AS attempt_stopped
-                FROM forge_agent.coding_attempts
-                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
-            """, (rec["attempt_id"], self._owner, project_alias, task_id))
-            attempt_check = cursor.fetchone()
+            rows = _read_query(cursor, "attempt_reservation",
+                               {"attempt_id": rec["attempt_id"], "owner_id": self._owner,
+                                "project_alias": project_alias, "task_id": task_id})
+            attempt_check = rows[0]
             if attempt_check["reserved"] > 0 or not attempt_check["attempt_stopped"]:
                 raise Rejected(409, "reconcile_required")
 
@@ -1472,23 +1430,30 @@ class WorkStore:
             external=cursor.fetchone()
             if external:kind,scope='external_workflow',external['workflow_id']
             else:
-                cursor.execute('SELECT coalesce(repair_root_task_id,id) AS root FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s',
-                    (self._owner,task['project_alias'],task['id']))
-                root=cursor.fetchone()
+                rows = _read_query(cursor, "task_root",
+                                  {"owner_id": self._owner,
+                                   "project_alias": task["project_alias"],
+                                   "task_id": task["id"]})
+                root = rows[0] if rows else None
                 if not root:return None
                 kind,scope='manual_task',root['root']
         return self.retry_events.project(cursor,RetryScope(self._owner,task['project_alias'],kind,UUID(str(scope))))
 
     def _workflow_projection(self,cursor,task):
         if task.get("workflow_id") is None:return None
-        cursor.execute("SELECT w.*,coalesce(b.repair_rounds,0) AS code_revisions FROM forge_agent.coding_workflows w LEFT JOIN forge_agent.coding_review_budget b ON(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id) WHERE w.owner_id=%s AND w.project_alias=%s AND w.workflow_id=%s",(self._owner,task["project_alias"],task["workflow_id"]))
-        w=cursor.fetchone()
+        rows = _read_query(cursor, "workflow_with_budget",
+                           {"owner_id": self._owner, "project_alias": task["project_alias"],
+                            "workflow_id": task["workflow_id"]})
+        w = rows[0] if rows else None
         if w is None:return None
         p=w["snapshot"]
         limits={key:p[key] for key in ('max_plan_revisions','max_code_revisions')}
-        cursor.execute("SELECT payload FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND event_kind='checkpoint' AND payload->>'stage'='retry_policy_updated' AND payload->>'policy'='forge-agent-retry-v1' AND payload->>'workflow_id'=%s AND payload->>'snapshot_digest'=%s ORDER BY sequence DESC LIMIT 1",
-            (self._owner,w['project_alias'],w['root_task_id'],str(w['workflow_id']),w['policy_digest']))
-        allowance=cursor.fetchone()
+        rows = _read_query(cursor, "retry_policy_checkpoint",
+                           {"owner_id": self._owner, "project_alias": w["project_alias"],
+                            "task_id": w["root_task_id"],
+                            "workflow_id": str(w["workflow_id"]),
+                            "snapshot_digest": w["policy_digest"]})
+        allowance = rows[0] if rows else None
         if allowance:
             for key in limits:
                 if allowance['payload'].get(key)==AGENT_RETRY_LIMIT:
@@ -1635,16 +1600,10 @@ class WorkStore:
                 cursor.execute('SELECT forge_agent.amend_agent_retry_policy(%s,%s,%s)',(project_alias,root_task_id,Json(dict(p))))
 
     def _hosted_green(self,cursor,task):
-        cursor.execute("""SELECT h.required_green FROM forge_agent.coding_publications p
-            JOIN forge_agent.coding_reviews r ON r.review_id=p.review_id AND r.status='approved'
-            JOIN LATERAL(SELECT x.required_green FROM forge_agent.coding_hosted_checks x
-              WHERE x.publication_id=p.publication_id AND x.candidate_commit=p.commit_sha
-              ORDER BY x.observed_at DESC,x.observation_id DESC LIMIT 1)h ON true
-            WHERE p.owner_id=%s AND p.project_alias=%s AND p.task_id=%s AND p.attempt_id=%s
-              AND p.status='published' AND p.commit_sha=r.candidate_commit
-            ORDER BY p.created_at DESC LIMIT 1""",
-            (self._owner,task['project_alias'],task['id'],task['latest_attempt_id']))
-        value=cursor.fetchone()
+        rows = _read_query(cursor, "publication_required_green",
+                           {"owner_id": self._owner, "project_alias": task["project_alias"],
+                            "task_id": task["id"], "attempt_id": task["latest_attempt_id"]})
+        value = rows[0] if rows else None
         return bool(value and value['required_green'])
 
     def _pipeline_projection(self,cursor,task,row):
@@ -1689,11 +1648,11 @@ class WorkStore:
         if not flags['review_required']:
             cursor.execute('SELECT 1 FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s LIMIT 1',(self._owner,task['project_alias'],task['id']))
             if cursor.fetchone() is None:return None
-        cursor.execute("""SELECT r.*,coalesce((SELECT(b.policy->>'max_rounds')::integer FROM forge_agent.coding_review_budget b JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,coalesce(t.repair_root_task_id,t.id))=(b.owner_id,b.project_alias,b.root_task_id) WHERE t.owner_id=r.owner_id AND t.project_alias=r.project_alias AND t.id=r.task_id),p.max_rounds,%s) AS max_rounds FROM forge_agent.coding_reviews r
-            LEFT JOIN forge_agent.coding_review_policy p USING(owner_id,project_alias)
-            WHERE r.owner_id=%s AND r.project_alias=%s AND r.task_id=%s ORDER BY r.review_no DESC LIMIT 1""",
-            (AGENT_RETRY_LIMIT,self._owner,task['project_alias'],task['id']))
-        row=cursor.fetchone()
+        rows = _read_query(cursor, "review_with_max_rounds",
+                           {"fallback_max_rounds": AGENT_RETRY_LIMIT,
+                            "owner_id": self._owner, "project_alias": task["project_alias"],
+                            "task_id": task["id"]})
+        row = rows[0] if rows else None
         green=self._hosted_green(cursor,task) if task['latest_attempt_id'] else False
         value={'stage':'waiting_for_result','review_id':None,'feedback_id':None,'round':0,'max_rounds':AGENT_RETRY_LIMIT,
             'open_findings':0,'verified_findings':0,'latest_check_status':None,'toolchain':None,'handoff_reason':None,
@@ -1842,8 +1801,10 @@ class WorkStore:
             return result
 
     def _append_review_retry(self,cursor,task,review,note,*,authority=None):
-        cursor.execute("SELECT coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE b.owner_id=%s AND b.project_alias=%s AND b.root_task_id=%s),p.max_infrastructure_retries) AS max_infrastructure_retries FROM forge_agent.coding_review_policy p WHERE owner_id=%s AND project_alias=%s",(self._owner,task['project_alias'],task['repair_root_task_id'] or task['id'],self._owner,task['project_alias']))
-        policy=cursor.fetchone()
+        rows = _read_query(cursor, "max_infrastructure_retries",
+                           {"owner_id": self._owner, "project_alias": task["project_alias"],
+                            "root_task_id": task["repair_root_task_id"] or task["id"]})
+        policy = rows[0] if rows else None
         from work_owner_reverification import BoundOwnerVerificationAuthority
         manual = isinstance(authority, BoundOwnerVerificationAuthority) and authority.store is self
         if not policy or not manual and review['infrastructure_retries']>=policy['max_infrastructure_retries']:

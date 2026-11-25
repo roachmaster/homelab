@@ -425,38 +425,38 @@ ENTRY_POINTS = {
 READ_TABLES = {
     "forge_agent.coding_tasks": (["owner_id", "project_alias", "id", "status", "workflow_id", "mode"], "created_at", ("owner",)),
     "forge_agent.coding_workflows": (["workflow_id", "owner_id", "project_alias", "root_task_id", "phase"], "created_at", ("owner",)),
-    "forge_agent.coding_workflow_reviews": (["workflow_review_id", "workflow_id", "status"], "created_at", ("join", "JOIN forge_agent.coding_workflows wf ON wf.workflow_id = t.workflow_id", "wf.owner_id")),
-    "forge_agent.coding_workflow_actions": (["action_id", "workflow_id", "status", "kind"], "created_at", ("join", "JOIN forge_agent.coding_workflows wf ON wf.workflow_id = t.workflow_id", "wf.owner_id")),
+    "forge_agent.coding_workflow_reviews": (["workflow_review_id", "workflow_id", "status", "owner_id", "project_alias"], "created_at", ("join", "JOIN forge_agent.coding_workflows wf ON wf.workflow_id = t.workflow_id", "wf.owner_id")),
+    "forge_agent.coding_workflow_actions": (["action_id", "workflow_id", "status", "kind", "source_key", "workflow_review_id", "source_publication_id"], "created_at", ("join", "JOIN forge_agent.coding_workflows wf ON wf.workflow_id = t.workflow_id", "wf.owner_id")),
     "forge_agent.coding_events": (["owner_id", "project_alias", "task_id", "event_kind"], "sequence", ("owner",)),
     "forge_agent.coding_control_receipts": (["owner_id", "project_alias", "task_id", "idempotency_key", "action"], "created_at", ("owner",)),
-    "forge_agent.coding_reviews": (["review_id", "task_id", "status"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
-    "forge_agent.coding_attempts": (["owner_id", "project_alias", "task_id", "attempt_id"], "started_at", ("owner",)),
-    "forge_agent.coding_publications": (["publication_id", "task_id", "status"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_reviews": (["review_id", "task_id", "status", "owner_id", "project_alias", "attempt_id", "phase"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_attempts": (["owner_id", "project_alias", "task_id", "attempt_id", "agent_profile", "published_at"], "started_at", ("owner",)),
+    "forge_agent.coding_publications": (["publication_id", "task_id", "status", "owner_id", "project_alias", "attempt_id", "review_id"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
     "forge_agent.coding_result_chunks": (["owner_id", "project_alias", "task_id"], "created_at", ("owner",)),
-    "forge_agent.coding_reconciliation_receipts": (["owner_id", "project_alias", "task_id"], "created_at", ("owner",)),
-    "forge_agent.coding_plan_decisions": (["decision_id", "task_id"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_reconciliation_receipts": (["owner_id", "project_alias", "task_id", "receipt_id", "attempt_id", "task_revision"], "created_at", ("owner",)),
+    "forge_agent.coding_plan_decisions": (["decision_id", "task_id", "owner_id", "project_alias", "decision"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
     "forge_agent.coding_review_budget": (["owner_id", "project_alias", "root_task_id"], "root_task_id", ("owner",)),
     "forge_agent.coding_review_policy": (["owner_id", "project_alias"], "owner_id", ("owner",)),
     "forge_agent.coding_worker_grants": (["worker_role", "owner_id", "project_alias", "agent_profile", "mode"], "granted_at", ("owner",)),
-    "forge_agent.coding_usage_refresh_requests": (["refresh_id", "owner_id", "project_alias", "status"], "requested_at", ("owner",)),
+    "forge_agent.coding_usage_refresh_requests": (["refresh_id", "owner_id", "project_alias", "status", "profile_alias"], "requested_at", ("owner",)),
     "forge_agent.coding_worker_readiness": (["worker_role", "owner_id", "worker_id"], "observed_at", ("owner",)),
     "forge_agent.gpu_worker_readiness": (["worker_name", "model_id"], "seen_at", ("role", "worker_name", {"coordinator", "operator"})),
     "forge_agent.coding_retry_events": (["event_id", "scope_id", "status"], "created_at", ("owner",)),
     "forge_agent.coding_feedback": (["feedback_id", "task_id", "review_id"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
-    "forge_agent.coding_hosted_checks": (["task_id", "observation_id"], "observed_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_hosted_checks": (["task_id", "observation_id", "owner_id", "project_alias", "publication_id", "candidate_commit"], "observed_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
     "forge_agent.conversations": (["id", "owner_id"], "created_at", ("owner",)),
-    "forge_agent.runs": (["id", "conversation_id", "status", "request_id", "distributed"], "created_at", ("join", "JOIN forge_agent.conversations c ON c.id = t.conversation_id", "c.owner_id")),
+    "forge_agent.runs": (["id", "conversation_id", "status", "request_id", "distributed", "ide_chat_owner_id", "ide_chat_id"], "created_at", ("join", "JOIN forge_agent.conversations c ON c.id = t.conversation_id", "c.owner_id")),
     "forge_agent.messages": (["conversation_id", "position", "run_id"], "position", ("join", "JOIN forge_agent.conversations c ON c.id = t.conversation_id", "c.owner_id")),
     "forge_agent.tool_calls": (["run_id", "call_id"], "created_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
     "forge_agent.tool_results": (["run_id", "call_id"], "recorded_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
     "forge_agent.run_events": (["run_id", "sequence"], "sequence", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
-    "forge_agent.ide_workspace_tabs": (["owner_id", "tab_id"], "touched_at", ("owner",)),
+    "forge_agent.ide_workspace_tabs": (["owner_id", "tab_id", "snapshot"], "touched_at", ("owner",)),
     "forge_agent.ide_workspace_history": (["owner_id"], "revision", ("owner",)),
     "forge_agent.ide_chats": (["owner_id", "id", "removed_at", "title", "expires_at"], "updated_at", ("owner",)),
-    "forge_agent.jenkins_events": (["event_id", "owner_id", "project_alias", "job_name"], "sequence", ("owner",)),
-    "forge_agent.jenkins_event_deliveries": (["delivery_row_id", "event_id", "status", "consumer_name"], "created_at", ("join", "JOIN forge_agent.jenkins_events je ON je.event_id = t.event_id", "je.owner_id")),
+    "forge_agent.jenkins_events": (["event_id", "owner_id", "project_alias", "job_name", "jenkins_instance", "delivery_id", "commit_sha"], "sequence", ("owner",)),
+    "forge_agent.jenkins_event_deliveries": (["delivery_row_id", "event_id", "status", "consumer_name", "owner_id"], "created_at", ("join", "JOIN forge_agent.jenkins_events je ON je.event_id = t.event_id", "je.owner_id")),
     "forge_agent.jenkins_observations": (["owner_id", "project_alias", "jenkins_instance", "job_name", "observation_key"], "updated_at", ("owner",)),
-    "forge_agent.inference_results": (["run_id"], "accepted_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
+    "forge_agent.inference_results": (["run_id", "attempt_token"], "accepted_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
     "forge_agent.mail_threads": (["owner_id", "id"], "updated_at", ("owner",)),
     "forge_agent.mail_messages": (["owner_id", "thread_id", "sequence", "run_id"], "sequence", ("owner",)),
     "forge_agent.coding_provider_usage": (["owner_id", "profile_alias"], "updated_at", ("owner",)),
@@ -749,6 +749,16 @@ READ_QUERIES = {
         "AND policy_digest = ANY(%(policy_digests)s) "
         "AND observed_at >= clock_timestamp() - interval '90 seconds'",
         [("owner_id", "text", True), ("policy_digests", "text[]", True)]),
+    # work_store: the readiness catalogue, with a per-row freshness flag
+    # computed from the caller's max-age window (not a fixed 90 seconds).
+    "worker_readiness_catalog": (
+        "SELECT worker_id, policy_digest, projects, profiles, observed_at, "
+        "(observed_at >= clock_timestamp() "
+        "- make_interval(secs => %(max_age_seconds)s)) AS is_fresh "
+        "FROM forge_agent.coding_worker_readiness "
+        "WHERE owner_id = %(owner_id)s "
+        "ORDER BY observed_at DESC, worker_id ASC",
+        [("max_age_seconds", "integer", True), ("owner_id", "text", True)]),
 
     # work_store: a workflow with its review budget's code revisions.
     "workflow_with_budget": (
@@ -878,11 +888,57 @@ READ_QUERIES = {
          ("task_id", "uuid", True), ("attempt_id", "uuid", True),
          ("end_byte", "integer", True), ("start_byte", "integer", True)]),
     # work_store: the root task of a workflow.
+    # work_workflow: workflows still open (not completed, cancelled, or
+    # escalated), oldest first, for the coordinator's recover sweep.
+    "workflows_open": (
+        "SELECT * FROM forge_agent.coding_workflows "
+        "WHERE owner_id = %(owner_id)s "
+        "AND phase NOT IN ('completed', 'cancelled', 'escalated') "
+        "ORDER BY created_at",
+        [("owner_id", "text", True)]),
     "workflow_root_task": (
         "SELECT w.root_task_id FROM forge_agent.coding_tasks t "
         "JOIN forge_agent.coding_workflows w ON w.workflow_id = t.workflow_id "
         "WHERE t.owner_id = %(owner_id)s "
         "AND t.project_alias = %(project_alias)s AND t.id = %(task_id)s",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True)]),
+    # work_store: the list_tasks page. The external filter is a flag:
+    # when an external workflow is configured for the project, internal
+    # (external-workflow) tasks are excluded via is_internal; otherwise
+    # the conjunct is TRUE. The caller passes limit+1 for the next-page
+    # probe, exactly as the inline query did.
+    "tasks_page": (
+        "SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, "
+        "t.mode, t.agent_profile, t.recipe_digest, t.status, t.revision, "
+        "t.created_at, t.title, t.workflow_id, t.workflow_required, "
+        "w.phase AS workflow_phase "
+        "FROM forge_agent.coding_tasks t "
+        "LEFT JOIN forge_agent.coding_workflows w "
+        "ON (w.owner_id, w.project_alias, w.workflow_id) = "
+        "(t.owner_id, t.project_alias, t.workflow_id) "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = %(project_alias)s "
+        "AND (NOT %(exclude_external)s OR NOT "
+        "forge_external_workflow_api.is_internal(t.owner_id, "
+        "t.project_alias, t.id)) "
+        "AND (%(status_filter)s::text IS NULL "
+        "OR t.status = %(status_filter)s::text) "
+        "AND (%(cursor_created_at)s::timestamptz IS NULL "
+        "OR (t.created_at, t.id) > "
+        "(%(cursor_created_at)s::timestamptz, %(cursor_id)s::uuid)) "
+        "ORDER BY t.created_at ASC, t.id ASC LIMIT %(limit)s",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("exclude_external", "boolean", True),
+         ("status_filter", "text", False),
+         ("cursor_created_at", "timestamptz", False),
+         ("cursor_id", "uuid", False), ("limit", "integer", True)]),
+    # work_store: a task's repair root (itself when it has no repair root).
+    "task_root": (
+        "SELECT coalesce(repair_root_task_id, id) AS root "
+        "FROM forge_agent.coding_tasks "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND id = %(task_id)s",
         [("owner_id", "text", True), ("project_alias", "text", True),
          ("task_id", "uuid", True)]),
     # work_store: how many attempts are reserved, and whether one
@@ -1006,6 +1062,14 @@ READ_QUERIES = {
         [("workflow_id", "uuid", True), ("owner_id", "text", True),
          ("project_alias", "text", True), ("policy", "text", True),
          ("task_id", "uuid", True), ("before", "timestamptz", True)]),
+    # work_owner_reverification / work_owner_control: how many completed
+    # native-deadline-retry decisions does this workflow have?
+    "deadline_retry_count": (
+        "SELECT count(*) AS n FROM forge_agent.coding_workflow_actions "
+        "WHERE workflow_id = %(workflow_id)s AND kind = 'decide' "
+        "AND status = 'completed' "
+        "AND source_key LIKE 'native-deadline-retry:%%'",
+        [("workflow_id", "uuid", True)]),
     # work_owner_control / work_workflow: is a workflow busy? The four
     # call sites differ in the task statuses, the attempts branch, and
     # the publication statuses; all three are parameters.
@@ -1403,7 +1467,7 @@ CALLER_ALLOWLISTS = {
         },
         "op": {"coding_task_insert", "coding_task_update", "coding_workflow_insert", "coding_workflow_update", "coding_workflow_review_insert", "coding_workflow_review_update", "coding_workflow_action_insert", "coding_workflow_action_update", "coding_event_insert", "coding_control_receipt_insert", "coding_review_insert", "coding_review_insert_copy", "coding_review_update", "coding_plan_decision_insert", "coding_review_policy_upsert", "coding_review_budget_insert", "coding_worker_grant_insert", "coding_usage_refresh_request_insert", "ide_conversation_insert", "ide_conversation_delete", "ide_run_insert", "ide_run_update", "ide_run_delete", "ide_message_insert", "ide_tool_call_insert", "ide_tool_call_update", "ide_tool_call_update_by_run", "ide_tool_result_insert", "ide_run_event_insert", "ide_workspace_tab_insert", "ide_workspace_tab_update", "ide_workspace_tab_delete", "ide_workspace_history_insert", "ide_workspace_history_update", "ide_chat_insert", "ide_chat_update", "mail_thread_insert", "mail_thread_update", "mail_message_insert", "jenkins_event_insert", "jenkins_event_delivery_insert", "jenkins_event_delivery_update", "jenkins_observation_insert", "inference_result_delete", "ext_workflow_insert", "ext_workflow_update", "ext_task_insert", "ext_context_insert", "ext_review_insert", "ext_review_update", "ext_action_insert", "ext_action_update", "ext_plan_approve_override_insert", "ext_workflow_cancel", "coding_workflow_cancel", "workflow_action_lease", "ide_run_admit", "ide_run_claim_next", "ide_tool_started", "ide_tool_finished", "ide_interrupt_conversation_runs", "ide_tool_calls_mark_outcome_unknown", "workflow_retry_allowance_amend"},
         "read": "*",
-        "readq": {"action_source_count", "attempt_reservation", "attempt_result_content", "attempts_leased", "blocked_witnessed", "coding_events_after", "deadline_retry_actions", "gpu_ready_models", "gpu_worker_ready", "ide_chat_source", "ide_chats_visible", "ide_tabs_beyond_offset", "inference_ready_runs", "jenkins_next_sequence", "mail_page", "mail_thread_messages", "max_infrastructure_retries", "max_review_no", "merge_commit_by_project", "merge_head", "message_totals", "needs_reconcile_witnessed", "publication_required_green", "published_with_green", "recent_completed_transcripts", "result_chunks_page", "resume_receipt", "retry_policy_checkpoint", "review_root_tasks", "review_with_max_rounds", "run_chat_mail", "run_detail", "run_events_after", "run_fingerprint_by_conversation", "run_fingerprint_by_mail", "run_has_chat_or_mail", "run_last_error", "run_mail_source", "run_messages_with_source_prompt", "run_queue_totals", "sibling_failure", "stale_distributed_runs", "sweep_escalated_reviews", "sweep_handoff_reviews", "sweep_needs_reconcile", "sweep_orphan_tasks", "sweep_publication_failures", "sweep_retry_policy_workflows", "task_receipt_by_idempotency", "tasks_with_attempts", "usage_refresh_pending", "verification_retries_sum", "worker_readiness_fresh", "workflow_action_by_receipt_review", "workflow_actions_by_source_or_policy", "workflow_actions_by_source_or_policy_exists", "workflow_actions_by_source_or_policy_request", "workflow_busy", "workflow_root_task", "workflow_with_budget", "writer_active"},
+        "readq": {"action_source_count", "attempt_reservation", "attempt_result_content", "attempts_leased", "blocked_witnessed", "coding_events_after", "deadline_retry_actions", "deadline_retry_count", "gpu_ready_models", "gpu_worker_ready", "ide_chat_source", "ide_chats_visible", "ide_tabs_beyond_offset", "inference_ready_runs", "jenkins_next_sequence", "mail_page", "mail_thread_messages", "max_infrastructure_retries", "max_review_no", "merge_commit_by_project", "merge_head", "message_totals", "needs_reconcile_witnessed", "publication_required_green", "published_with_green", "recent_completed_transcripts", "result_chunks_page", "resume_receipt", "retry_policy_checkpoint", "review_root_tasks", "review_with_max_rounds", "run_chat_mail", "run_detail", "run_events_after", "run_fingerprint_by_conversation", "run_fingerprint_by_mail", "run_has_chat_or_mail", "run_last_error", "run_mail_source", "run_messages_with_source_prompt", "run_queue_totals", "sibling_failure", "stale_distributed_runs", "sweep_escalated_reviews", "sweep_handoff_reviews", "sweep_needs_reconcile", "sweep_orphan_tasks", "sweep_publication_failures", "sweep_retry_policy_workflows", "task_receipt_by_idempotency", "task_root", "tasks_page", "tasks_with_attempts", "usage_refresh_pending", "verification_retries_sum", "worker_readiness_catalog", "worker_readiness_fresh", "workflow_action_by_receipt_review", "workflow_actions_by_source_or_policy", "workflow_actions_by_source_or_policy_exists", "workflow_actions_by_source_or_policy_request", "workflow_busy", "workflow_root_task", "workflow_with_budget", "workflows_open", "writer_active"},
         "notify": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_external_delivery", "forge_jenkins_events", "forge_coding_usage_refresh"},
         "subscribe": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_agent_results", "forge_jenkins_events"},
     },

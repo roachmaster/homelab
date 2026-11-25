@@ -676,10 +676,84 @@ class ReadQueryTest(unittest.TestCase):
             "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", ())
         self.assertIsInstance(result, StaticResult)
 
+    def test_repeatable_read_bare_is_a_noop(self):
+        # WorkStore.get/list_tasks/_list_task_scope/events request
+        # REPEATABLE READ (without READ ONLY) when an external workflow
+        # is present; all four are read-only paths, so the snapshot
+        # request degrades to per-operation reads like the READ ONLY
+        # form. A read-then-write flow still fails on its FOR UPDATE.
+        result = translate(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", ())
+        self.assertIsInstance(result, StaticResult)
+
+    def test_proxy_path_runs_new_coordinator_readqs(self):
+        transport = FakeTransport()
+        transport.caller = "coordinator"
+        transport.results["readq.deadline_retry_count"] = {
+            "rows": [{"n": 2}]}
+        transport.results["readq.task_root"] = {
+            "rows": [{"root": "00000000-0000-0000-0000-000000000001"}]}
+        transport.results["readq.worker_readiness_catalog"] = {
+            "rows": [{"worker_id": "w1", "is_fresh": True}]}
+        transport.results["readq.workflows_open"] = {"rows": []}
+        connection = ProxyConnection(
+            ProxyClient("http://127.0.0.1:18087", "coordinator", token="<redacted>"))
+        connection.client = transport
+        cursor = connection.cursor()
+        rows = proxy_client.run_read_query(
+            cursor, "deadline_retry_count",
+            {"workflow_id": "00000000-0000-0000-0000-000000000001"})
+        self.assertEqual(rows, [{"n": 2}])
+        rows = proxy_client.run_read_query(
+            cursor, "task_root",
+            {"owner_id": "mission-control", "project_alias": "homelab",
+             "task_id": "00000000-0000-0000-0000-000000000001"})
+        self.assertEqual(
+            rows, [{"root": "00000000-0000-0000-0000-000000000001"}])
+        rows = proxy_client.run_read_query(
+            cursor, "worker_readiness_catalog",
+            {"max_age_seconds": 90, "owner_id": "mission-control"})
+        self.assertEqual(rows, [{"worker_id": "w1", "is_fresh": True}])
+        rows = proxy_client.run_read_query(
+            cursor, "workflows_open", {"owner_id": "mission-control"})
+        self.assertEqual(rows, [])
+        self.assertEqual(
+            [request[0] for request in transport.requests],
+            ["readq.deadline_retry_count", "readq.task_root",
+             "readq.worker_readiness_catalog", "readq.workflows_open"])
+
     def test_savepoint_still_unsupported(self):
         from proxy_statements import UnsupportedStatement
         with self.assertRaises(UnsupportedStatement):
             translate("SAVEPOINT sp1", ())
+
+
+class RestoreActionJobTest(unittest.TestCase):
+    """work_workflow._restore_action_job: the composite's to_jsonb
+    renders UUIDs and timestamps as strings; the process() job
+    contract carries native types."""
+
+    def test_restores_uuids_and_timestamps(self):
+        from work_workflow import _restore_action_job
+        job = _restore_action_job({
+            "action_id": "00000000-0000-0000-0000-000000000001",
+            "workflow_id": "00000000-0000-0000-0000-000000000002",
+            "workflow_review_id": None,
+            "lease_token": "00000000-0000-0000-0000-000000000003",
+            "created_at": "2026-11-25T10:00:00+00:00",
+            "updated_at": "2026-11-25T10:00:00+00:00",
+            "lease_expires_at": None,
+            "status": "leased",
+        })
+        from uuid import UUID
+        from datetime import datetime
+        self.assertIsInstance(job["action_id"], UUID)
+        self.assertIsInstance(job["workflow_id"], UUID)
+        self.assertIsNone(job["workflow_review_id"])
+        self.assertIsInstance(job["lease_token"], UUID)
+        self.assertIsInstance(job["created_at"], datetime)
+        self.assertIsNone(job["lease_expires_at"])
+        self.assertEqual(job["status"], "leased")
 
 
 class TransportSelectionTest(unittest.TestCase):

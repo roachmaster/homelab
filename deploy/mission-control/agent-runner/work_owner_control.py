@@ -25,6 +25,12 @@ MAX_OWNER_SOURCE_ACTIONS = 32
 OWNER_VERIFY_RETRY = 'forge-owner-verification-retry-v1'
 
 
+def _read_query(cursor, name, params):
+    """Run a named fixed read query on either transport (see proxy_client.run_read_query)."""
+    from proxy_client import run_read_query
+    return run_read_query(cursor, name, params)
+
+
 def verification_source_key(workflow_id):
     return 'owner-verification-retry:' + str(workflow_id)
 
@@ -122,10 +128,12 @@ def _followup_replay(cursor,store,task,action,request,digest):
 def _owner_source_history(flow, cursor, task, first):
     """Validate the immutable manual source ledger, independent of live policy."""
     store=flow.store
-    cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND (source_key=%s OR source_key LIKE %s OR intent->>'policy'=ANY(%s)) ORDER BY created_at,action_id LIMIT %s",
-        (task['workflow_id'],owner_source_key(task['workflow_id']),'owner-code-resume-v2:'+str(task['workflow_id'])+':%',
-         [OWNER_CODE_RESUME,OWNER_CODE_FOLLOWUP],MAX_OWNER_SOURCE_ACTIONS+1))
-    history=cursor.fetchall()
+    history = _read_query(cursor, "workflow_actions_by_source_or_policy",
+                          {"workflow_id": task["workflow_id"],
+                           "source_key": owner_source_key(task["workflow_id"]),
+                           "source_pattern": "owner-code-resume-v2:" + str(task["workflow_id"]) + ":%",
+                           "policies": [OWNER_CODE_RESUME, OWNER_CODE_FOLLOWUP],
+                           "limit": MAX_OWNER_SOURCE_ACTIONS + 1})
     if not history or history[0]['action_id']!=first['action_id']or len(history)>MAX_OWNER_SOURCE_ACTIONS:
         raise Rejected(409,'reconcile_required')
     previous=None;peers=set()
@@ -388,8 +396,12 @@ class NativeOwnerControl:
                 raise Rejected(409, 'reconcile_required')
             if flow._artifact(cursor, task['id'], attempt['attempt_id'])['result_sha256'] != q['parent_result_sha256']:
                 raise Rejected(409, 'result_mismatch')
-            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested')) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s AND p.status IN('pending','checking','publishing')) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy", (w['workflow_id'],)*5)
-            if cursor.fetchone()['busy']:
+            rows = _read_query(cursor, "workflow_busy",
+                {"workflow_id": w["workflow_id"],
+                 "task_statuses": ["queued", "running", "cancel_requested"],
+                 "include_attempts": True,
+                 "publication_statuses": ["pending", "checking", "publishing"]})
+            if rows[0]["busy"]:
                 raise Rejected(409, 'reconcile_required')
             cursor.execute('SELECT * FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
                            (store.owner, command.project_alias, task['repair_root_task_id'] or task['id']))
@@ -403,8 +415,10 @@ class NativeOwnerControl:
                 raise Rejected(403, 'denied')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='checks',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s", (w['workflow_id'],))
             flow._grant(cursor, w, p['reviewer_profile'], 'review')
-            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'", (store.owner, [x[0] for x in NATIVE_POLICIES.values()]))
-            if not _ready_for_recipe(cursor.fetchall(), command.project_alias, p['reviewer_profile'], 'review', recipe_from_snapshot(p, 'reviewer_review')):
+            rows = _read_query(cursor, "worker_readiness_fresh",
+                {"owner_id": store.owner,
+                 "policy_digests": [x[0] for x in NATIVE_POLICIES.values()]})
+            if not _ready_for_recipe(rows, command.project_alias, p['reviewer_profile'], 'review', recipe_from_snapshot(p, 'reviewer_review')):
                 raise Rejected(503, 'unavailable')
             authority = BoundPreparationRetryAuthority(store, cursor, w['workflow_id'], task['id'], task['latest_attempt_id'], task['revision'], q['review_id'])
             receipt = store.review_decide(**vars(command), _authority=authority, actor=operator_actor(store.owner))
@@ -413,10 +427,11 @@ class NativeOwnerControl:
             cursor.execute("UPDATE forge_agent.coding_reviews SET candidate_commit=NULL,gate_manifest_sha256=NULL,verification='{}'::jsonb,owner_decision=NULL WHERE review_id=%s AND status='pending' AND previous_review_id=%s", (receipt['review_id'], q['review_id']))
             if cursor.rowcount != 1:
                 raise Rejected(409, 'reconcile_required')
-            cursor.execute("SELECT count(*) AS n FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE 'native-deadline-retry:%%'", (w['workflow_id'],))
-            deadline_recoveries = cursor.fetchone()['n']
-            cursor.execute("SELECT coalesce(sum(greatest(q.infrastructure_retries-previous.infrastructure_retries,0)),0)::integer AS n FROM forge_agent.coding_reviews q JOIN forge_agent.coding_reviews previous ON previous.review_id=q.previous_review_id JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.review_id<>%s", (w['workflow_id'], receipt['review_id']))
-            verification_retries = cursor.fetchone()['n']
+            rows = _read_query(cursor, "deadline_retry_count", {"workflow_id": w["workflow_id"]})
+            deadline_recoveries = rows[0]["n"]
+            rows = _read_query(cursor, "verification_retries_sum",
+                {"workflow_id": w["workflow_id"], "review_id": receipt["review_id"]})
+            verification_retries = rows[0]["n"]
             intent = dict(policy=OWNER_VERIFY_RETRY, request=request, workflow_id=str(w['workflow_id']),
                 source_attempt_id=str(attempt['attempt_id']), source_result_sha256=q['parent_result_sha256'],
                 source_review_id=str(q['review_id']), source_workspace_digest=q['workspace_digest'],
@@ -474,15 +489,20 @@ class NativeOwnerControl:
                         or saved.get('status') != 'owner_continued' or receipt != expected):
                     raise Rejected(409, 'reconcile_required')
                 return dict(receipt)
-            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s AND kind='decide' AND (source_key LIKE %s OR intent->>'policy'=%s) AND intent->'request'->>'task_id'=%s AND intent->'request'->>'idempotency_key'=%s LIMIT 2",
-                (store.owner,command.project_alias,task['workflow_id'],'owner-code-resume-v2:'+str(task['workflow_id'])+':%',OWNER_CODE_FOLLOWUP,str(task['id']),command.idempotency_key))
-            saved=cursor.fetchall()
+            saved = _read_query(cursor, "workflow_actions_by_source_or_policy_request",
+                {"owner_id": store.owner, "project_alias": command.project_alias,
+                 "workflow_id": task["workflow_id"],
+                 "source_pattern": "owner-code-resume-v2:" + str(task["workflow_id"]) + ":%",
+                 "policy": OWNER_CODE_FOLLOWUP, "task_id": str(task["id"]),
+                 "idempotency_key": command.idempotency_key})
             if len(saved)>1:raise Rejected(409,'reconcile_required')
             if saved:return _followup_replay(cursor,store,task,saved[0],request,digest)
             if prior is None:
-                cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND (source_key LIKE %s OR intent->>'policy'=%s)) AS orphaned",
-                    (task['workflow_id'],'owner-code-resume-v2:'+str(task['workflow_id'])+':%',OWNER_CODE_FOLLOWUP))
-                if cursor.fetchone()['orphaned']:raise Rejected(409,'reconcile_required')
+                rows = _read_query(cursor, "workflow_actions_by_source_or_policy_exists",
+                    {"workflow_id": task["workflow_id"],
+                     "source_pattern": "owner-code-resume-v2:" + str(task["workflow_id"]) + ":%",
+                     "policy": OWNER_CODE_FOLLOWUP})
+                if rows[0]["orphaned"]:raise Rejected(409,'reconcile_required')
             history = _owner_source_history(flow,cursor,task,prior) if followup else []
             cursor.execute('SELECT * FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND idempotency_key=%s',
                 (store.owner, command.project_alias, command.task_id, command.idempotency_key))
@@ -619,8 +639,12 @@ class NativeOwnerControl:
                     or attempt['published_at'] is None or attempt['result_sha256'] != q['parent_result_sha256']
                     or attempt['recipe_digest'] != recipe.digest or attempt['pinned_recipe'] != recipe.to_dict()):
                 raise Rejected(409, 'reconcile_required')
-            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested')) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s AND p.status IN('pending','checking','publishing')) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy", (w['workflow_id'],)*5)
-            if cursor.fetchone()['busy']:
+            rows = _read_query(cursor, "workflow_busy",
+                {"workflow_id": w["workflow_id"],
+                 "task_statuses": ["queued", "running", "cancel_requested"],
+                 "include_attempts": True,
+                 "publication_statuses": ["pending", "checking", "publishing"]})
+            if rows[0]["busy"]:
                 raise Rejected(409, 'reconcile_required')
             cursor.execute('SELECT * FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
                 (store.owner, command.project_alias, task['repair_root_task_id'] or task['id']))
@@ -634,8 +658,9 @@ class NativeOwnerControl:
                 if not flow.config.profiles[profile].execution_enabled:
                     raise Rejected(403, 'denied')
                 flow._grant(cursor, w, profile, mode)
-            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'", (store.owner, [x[0] for x in NATIVE_POLICIES.values()]))
-            ready = cursor.fetchall()
+            ready = _read_query(cursor, "worker_readiness_fresh",
+                {"owner_id": store.owner,
+                 "policy_digests": [x[0] for x in NATIVE_POLICIES.values()]})
             if any(not _ready_for_recipe(ready, command.project_alias, profile, mode, recipe_from_snapshot(p, entry))
                     for profile, mode, entry in ((p['author_profile'], 'implement', 'author_implement'), (p['reviewer_profile'], 'review', 'reviewer_review'))):
                 raise Rejected(503, 'unavailable')

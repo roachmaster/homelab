@@ -1348,6 +1348,167 @@ class MigratedQueueStoreDbTest(ProxyDbTestCase, FixtureMixin):
                                     "ready": False}])
 
 
+class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
+    """C3c1: the coordinator's pure reads and the workflow action lease
+    operate through the live proxy end to end (WorkStore.get/events/
+    list_tasks via the readq-backed reads; WorkflowStore.claim via the
+    workflow_action_lease composite). The locked flows (submit/cancel/
+    decide/repair/...) still use FOR UPDATE reads and are not covered
+    here; they need composites of their own (C3c2).
+    """
+
+    def setUp(self):
+        super().setUp()
+        import proxy_client
+        from work_store import WorkStore
+        self.store = WorkStore(
+            "mission-control", {"homelab"},
+            proxy_client.connect_factory(
+                f"http://127.0.0.1:{self.proxy_port}", "coordinator",
+                token_file=os.path.join(
+                    self.cluster.root, "coordinator.token")))
+        self._task_ids = []
+        self._workflow_ids = []
+
+    def tearDown(self):
+        # Runs before the parent tearDown closes the fixture cursor.
+        self._cleanup()
+        super().tearDown()
+
+    def _cleanup(self):
+        for workflow_id in self._workflow_ids:
+            self.fixture_sql(
+                "UPDATE forge_agent.coding_tasks SET workflow_id = NULL"
+                " WHERE workflow_id = %s", (workflow_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.coding_workflow_actions"
+                " WHERE workflow_id = %s", (workflow_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.coding_workflows"
+                " WHERE workflow_id = %s", (workflow_id,))
+        for task_id in self._task_ids:
+            self.fixture_sql(
+                "DELETE FROM forge_agent.coding_events"
+                " WHERE task_id = %s", (task_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.coding_tasks"
+                " WHERE id = %s", (task_id,))
+        self._task_ids = []
+        self._workflow_ids = []
+
+    def _insert_workflow(self, task_id, snapshot=None):
+        workflow_id = _uuid()
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_workflows"
+            " (workflow_id, owner_id, project_alias, root_task_id,"
+            " policy_digest, snapshot)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
+            (workflow_id, "mission-control", "homelab", task_id,
+             POLICY64, json.dumps(snapshot or {
+                 "max_plan_revisions": 20, "max_code_revisions": 20,
+                 "author_profile": "muse",
+                 "reviewer_profile": "codex", "auto_merge": True})))
+        self._workflow_ids.append(workflow_id)
+        self.fixture_sql(
+            "UPDATE forge_agent.coding_tasks SET workflow_id = %s"
+            " WHERE id = %s", (workflow_id, task_id))
+        return workflow_id
+
+    def test_events_read_through_the_proxy(self):
+        from uuid import UUID
+        task_id = self.insert_task()
+        self._task_ids.append(task_id)
+        correlation = self.fixture_sql(
+            "SELECT correlation_id FROM forge_agent.coding_tasks"
+            " WHERE id = %s", (task_id,))[0][0]
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_events"
+            " (owner_id, project_alias, task_id, sequence, event_kind,"
+            " payload, correlation_id)"
+            " VALUES (%s, %s, %s, 1, 'queued', '{}', %s)",
+            ("mission-control", "homelab", task_id, correlation))
+        record = self.store.events(
+            project_alias="homelab", task_id=UUID(task_id))
+        self.assertEqual(record["status"], "queued")
+        self.assertEqual(
+            [(event["kind"], event["sequence"])
+             for event in record["events"]],
+            [("queued", 1)])
+        self.assertEqual(record["next_sequence"], 1)
+
+    def test_get_read_through_the_proxy(self):
+        from uuid import UUID
+        task_id = self.insert_task()
+        self._task_ids.append(task_id)
+        workflow_id = self._insert_workflow(task_id)
+        detail = self.store.get(
+            project_alias="homelab", task_id=UUID(task_id))
+        self.assertEqual(detail["status"], "queued")
+        self.assertEqual(detail["workflow"]["workflow_id"], workflow_id)
+        self.assertEqual(detail["workflow"]["phase"], "plan")
+        self.assertEqual(detail["workflow"]["max_plan_revisions"], 20)
+        self.assertEqual(detail["workflow"]["author_profile"], "muse")
+        self.assertEqual(detail["workflow"]["code_revisions"], 0)
+
+    def test_list_tasks_read_through_the_proxy(self):
+        task_id = self.insert_task()
+        self._task_ids.append(task_id)
+        page = self.store.list_tasks(project_alias="homelab")
+        self.assertIn(task_id,
+                      [item["task_id"] for item in page["tasks"]])
+
+    def test_workflow_claim_leases_through_the_proxy(self):
+        from types import SimpleNamespace
+        from uuid import UUID
+        from work_retry_policy import AGENT_RETRY_LIMIT
+        from work_workflow import WorkflowStore
+
+        class _ClaimPolicy:
+            def snapshot(self, catalog, repair_policy):
+                return {"policy_digest": POLICY64}
+
+        task_id = self.insert_task()
+        self._task_ids.append(task_id)
+        workflow_id = self._insert_workflow(task_id)
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_workflow_actions"
+            " (workflow_id, owner_id, project_alias, kind, source_key,"
+            " status) VALUES (%s, %s, %s, 'decide', 'db-test-claim',"
+            " 'pending')",
+            (workflow_id, "mission-control", "homelab"))
+        config = SimpleNamespace(
+            repair_policy={"max_rounds": AGENT_RETRY_LIMIT,
+                           "max_stagnant_rounds": AGENT_RETRY_LIMIT,
+                           "max_infrastructure_retries": AGENT_RETRY_LIMIT},
+            project_workflows={"homelab": _ClaimPolicy()},
+            allowed_modes={"plan", "review", "implement"},
+            profiles={})
+        flow = WorkflowStore(config, None, self.store)
+        job = flow.claim("db-test-worker")
+        self.assertIsNotNone(job)
+        self.assertEqual(job["status"], "leased")
+        self.assertEqual(job["worker_id"], "db-test-worker")
+        self.assertIsInstance(job["action_id"], UUID)
+        self.assertIsInstance(job["lease_token"], UUID)
+        self.assertIsInstance(job["workflow_id"], UUID)
+        rows = self.fixture_sql(
+            "SELECT status, worker_id, lease_token"
+            " FROM forge_agent.coding_workflow_actions"
+            " WHERE action_id = %s", (str(job["action_id"]),))
+        self.assertEqual(
+            [(row[0], row[1], str(row[2])) for row in rows],
+            [("leased", "db-test-worker", str(job["lease_token"]))])
+        self.assertIsNone(flow.claim("db-test-worker"))
+        audit = self.fixture_sql(
+            "SELECT operation FROM forge_pg_proxy.audit"
+            " WHERE db_role = 'forge_agent'"
+            " AND operation = 'entry.workflow_action_lease'")
+        # Two claim() calls above: the first leased the action, the
+        # second ran the composite again and found nothing to lease.
+        # Both executions are audited.
+        self.assertEqual(len(audit), 2)
+
+
 class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
     """Finding 11: preparation and cutover are separate, verifiable
     stages — an ordinary apply.sql run stops at preparation."""

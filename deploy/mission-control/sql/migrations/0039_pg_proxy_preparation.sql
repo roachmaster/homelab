@@ -1149,9 +1149,9 @@ GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_observation_insert TO forge
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.workflow_action_lease(p_worker_id text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
-DECLARE a forge_agent.coding_workflow_actions%ROWTYPE;
+DECLARE leased forge_agent.coding_workflow_actions%ROWTYPE;
 BEGIN
-  SELECT a.* INTO a FROM forge_agent.coding_workflow_actions a
+  SELECT a.* INTO leased FROM forge_agent.coding_workflow_actions a
   JOIN forge_agent.coding_workflows w ON w.workflow_id = a.workflow_id
   WHERE a.owner_id = current_setting('forge.coding_owner', true)
     AND a.kind IN ('review', 'decide') AND w.enabled
@@ -1165,8 +1165,8 @@ BEGIN
         lease_token = gen_random_uuid(),
         lease_expires_at = clock_timestamp() + interval '60 seconds',
         updated_at = clock_timestamp()
-    WHERE action_id = a.action_id RETURNING * INTO a;
-  RETURN to_jsonb(a);
+    WHERE action_id = leased.action_id RETURNING * INTO leased;
+  RETURN to_jsonb(leased);
 END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.workflow_action_lease(text) FROM PUBLIC;
