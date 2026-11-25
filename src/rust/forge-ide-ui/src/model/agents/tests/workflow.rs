@@ -216,6 +216,80 @@ fn event_retry_progress_is_independent_of_lifetime_revision_history() {
 }
 
 #[test]
+fn terminal_projection_badges_preserve_live_retries_and_settle_terminal_states() {
+    let cases = [
+        (
+            WorkWorkflowPhase::Repair,
+            WorkRetryKind::Review,
+            2,
+            WorkRetryStatus::Open,
+            "Addressing code review · Retry 2/20",
+        ),
+        (
+            WorkWorkflowPhase::Checks,
+            WorkRetryKind::Verification,
+            0,
+            WorkRetryStatus::Open,
+            "Retrying verification · Retry 0/20",
+        ),
+        (
+            WorkWorkflowPhase::Repair,
+            WorkRetryKind::FeedbackDelivery,
+            1,
+            WorkRetryStatus::Open,
+            "Recovering feedback delivery · Retry 1/20",
+        ),
+        (
+            WorkWorkflowPhase::Escalated,
+            WorkRetryKind::Review,
+            2,
+            WorkRetryStatus::Resolved,
+            "Needs attention",
+        ),
+        (
+            WorkWorkflowPhase::Escalated,
+            WorkRetryKind::Verification,
+            0,
+            WorkRetryStatus::Resolved,
+            "Needs attention",
+        ),
+        (
+            WorkWorkflowPhase::Cancelled,
+            WorkRetryKind::FeedbackDelivery,
+            1,
+            WorkRetryStatus::Resolved,
+            "Cancelled",
+        ),
+        (
+            WorkWorkflowPhase::Escalated,
+            WorkRetryKind::Review,
+            MAX_AGENT_RETRIES,
+            WorkRetryStatus::Exhausted,
+            "Code review needs attention · Retry 20/20",
+        ),
+    ];
+    for (phase, kind, used, status, expected_label) in cases {
+        let mut agents = autonomous(phase);
+        let task = agents.task.as_mut().unwrap();
+        let event = WorkRetryEvent {
+            event_id: KEY.into(),
+            kind,
+            used,
+            limit: MAX_AGENT_RETRIES,
+            status,
+        };
+        task.workflow.as_mut().unwrap().retry_event = Some(event.clone());
+        task.retry_event = Some(event);
+        assert!(task.is_valid());
+        let task_summary = task.summary();
+        assert_eq!(
+            agents.task_summary_badge(&task_summary).label,
+            expected_label
+        );
+    }
+}
+
+#[test]
 fn configured_assignment_uses_pinned_roles_without_manual_selections_and_retries_exact_policy() {
     let mut agents = ready();
     configure(&mut agents);

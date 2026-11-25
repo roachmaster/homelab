@@ -278,7 +278,7 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                         hba=hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest())
                 before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
-                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(38,)])
+                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(39,)])
                 self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(27,)])
                 self.assertEqual(execute("SELECT has_function_privilege('muse_events','forge_agent._coding_owner_continuation_fenced(uuid)','EXECUTE')"),[(False,)])
             finally:cluster.stop()

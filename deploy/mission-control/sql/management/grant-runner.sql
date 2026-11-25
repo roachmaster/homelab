@@ -167,3 +167,11 @@ GRANT EXECUTE ON FUNCTION forge_agent.delivery_projection(text,uuid),forge_agent
  forge_agent.delivery_repair_admit(uuid,integer,uuid,text),
  forge_agent.delivery_repair_claim(text),forge_agent.delivery_repair_renew(uuid,integer,uuid),forge_agent.delivery_repair_checkpoint(uuid,integer,uuid,jsonb),forge_agent.delivery_repair_finish(uuid,integer,uuid,text,jsonb,text) TO forge_agent;
 \endif
+
+-- M39: terminal-scope open retry settlement.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=39) AS has_terminal_retry_settlement
+\gset
+\if :has_terminal_retry_settlement
+GRANT EXECUTE ON FUNCTION forge_agent.retry_event_resolve_open_scope(text,text,uuid) TO forge_agent,forge_coding_reconciler;
+GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.retry_event_resolve_open_scope(text,text,uuid) TO forge_coding_reconciler;
+\endif

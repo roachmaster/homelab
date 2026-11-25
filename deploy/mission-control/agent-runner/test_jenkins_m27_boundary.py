@@ -835,7 +835,35 @@ VERIFIER_POLICY_PARITY_CONTEXT_SHA256 = {
 }
 
 
+# Scoped terminal workflow/retry projection settlement (M39); preserves all
+# applied M01-M38 SQL, protected gate paths, and legacy authority AST pins.
+TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256 = {
+    'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '98b968640a507f1ed803d3851965abb3a527e8566546e12858622fc3ee7ee6f2',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': 'e8a804630fd74c0f16dd570429e290123cd207a65ecd7ba2307dc68fbbc9d421',
+    'deploy/mission-control/agent-runner/test_muse_read_access.py': 'b10f06398892815dd9436b1cea984aa65e63a0171ed85a7014754fc620069c2e',
+    'deploy/mission-control/agent-runner/test_native_deadline_events.py': '3f597b988104a2af1c50748b4e8d45e3883c53d4e84aac5d2208c6049fe850ac',
+    'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'ead5f9cc49c8c365d0fc886cf12f7749555d23244fb216b8e55a80b0db42226e',
+    'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': 'b77e04b6e3bef7633d8381c95f307f30f3665481980669c7b82ea66a579af265',
+    'deploy/mission-control/agent-runner/test_work_muse_intake.py': '73a2ddf65741c1fcbe2faa61e8f886d949d410a326a08a8f327c2b29d2083fad',
+    'deploy/mission-control/agent-runner/test_work_owner_fence.py': '4a593b1d8e51437ac381680963693fc8b284fccce949cea45f292e750cab093a',
+    'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '14459447a7081cc1c1202ef81c5e4c6a8f0615efffe2cb277b9525e68efe81d7',
+    'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '7f004e631c7e522325754c5245170be4bfd9ace93a72057d4240792acdc841ab',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': 'acbefa3017613f8c8b36017385bda0a834e666ba9792035599ea7e268fe5f2d4',
+    'deploy/mission-control/agent-runner/work_retry_events.py': 'bbe50a0aaa71219786c51af7e5df644c465db07cf659d5e86d75408b1770acc7',
+    'deploy/mission-control/agent-runner/work_store.py': '7d0b70b16a0ddd3b497dbb08005586eba9575ac660f1afb3ae2a35583b5d8440',
+    'deploy/mission-control/agent-runner/work_worker_store.py': '32d0cc335f0391fbda9b837c34bb4d0a42ca4dc4c2187d4c3e268841a6d4e719',
+    'deploy/mission-control/agent-runner/work_workflow.py': '750e5b9dd03366c71d2bac6047bbee471e3be5cdfbb0a549f6dfc0d561106a67',
+    'deploy/mission-control/sql/apply.sql': 'dcf8bf2d2b80b327404bf104cc69f381a209729e7ea5186f17257fafd3569e8d',
+    'deploy/mission-control/sql/management/grant-runner.sql': 'bb516abcc17107c11c6c8cbb785a2a950db35b23b05b8737c083f53936efb7d6',
+    'deploy/mission-control/sql/management/repair-stale-terminal-projections.sql': '306c2530b863b16fc62d3812f9cda1b447ea593510c2a524d0d5b4a8f05aa4d5',
+    'deploy/mission-control/sql/migrations/0039_terminal_retry_settlement.sql': 'a1707d8137a103a0fa351c71e1646334059ff16d00a1688380ecd6a4b77a00ee',
+    'src/rust/forge-ide-ui/src/model/agents/tests/workflow.rs': 'e633d28fd043613c23b8744d59c61dd43f597d3b3373df418680db7c1911a229',
+}
+
+
 def qualified_source(relative, expected):
+    if relative in TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256:
+        return TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256[relative]
     if relative in VERIFIER_POLICY_PARITY_CONTEXT_SHA256:
         return VERIFIER_POLICY_PARITY_CONTEXT_SHA256[relative]
     if relative in NATIVE_POSTFIX_CONTEXT_SHA256:
@@ -1239,6 +1267,21 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in VERIFIER_POLICY_PARITY_CONTEXT_SHA256.items():
             with self.subTest(verifier_policy_parity_source=relative):
                 self.assertNotIn('/sql/', relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_terminal_projection_settlement_overlay_is_scoped_and_preserves_applied_migrations(self):
+        self.assertIn('deploy/mission-control/sql/migrations/0039_terminal_retry_settlement.sql', TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256)
+        self.assertIn('deploy/mission-control/sql/management/repair-stale-terminal-projections.sql', TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256)
+        self.assertIn('deploy/mission-control/agent-runner/test_terminal_projection_settlement.py', TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256)
+        for relative, expected in TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256.items():
+            with self.subTest(terminal_projection_source=relative):
+                self.assertTrue(
+                    relative.startswith('deploy/mission-control/')
+                    or relative == 'src/rust/forge-ide-ui/src/model/agents/tests/workflow.rs'
+                )
+                self.assertNotIn('/fragments/', relative)
+                if '/migrations/' in relative:
+                    self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0039_terminal_retry_settlement.sql')
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
