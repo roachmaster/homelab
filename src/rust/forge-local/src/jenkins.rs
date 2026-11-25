@@ -18,6 +18,11 @@ pub enum JenkinsCommand {
         job: String,
         limit: u8,
     },
+    BuildPage {
+        job: String,
+        offset: u32,
+        limit: u8,
+    },
     StopBuild {
         job: String,
         number: u64,
@@ -45,6 +50,7 @@ impl JenkinsCommand {
             Self::Jobs => CommandKind::JenkinsJobs,
             Self::QueueList => CommandKind::JenkinsQueueList,
             Self::RecentBuilds { .. } => CommandKind::JenkinsRecentBuilds,
+            Self::BuildPage { .. } => CommandKind::JenkinsBuildPage,
             Self::StopBuild { .. } => CommandKind::JenkinsStopBuild,
             Self::Build { .. } => CommandKind::JenkinsBuild,
             Self::Queue { .. } => CommandKind::JenkinsQueue,
@@ -60,6 +66,7 @@ impl JenkinsCommand {
             Self::Jobs => Request::Jobs,
             Self::QueueList => Request::QueueList,
             Self::RecentBuilds { job, limit } => Request::RecentBuilds { job, limit },
+            Self::BuildPage { job, offset, limit } => Request::BuildPage { job, offset, limit },
             Self::StopBuild { job, number } => Request::StopBuild { job, number },
             Self::Build { job, parameters } => Request::Build { job, parameters },
             Self::Queue { id } => Request::Queue { id },
@@ -122,6 +129,30 @@ impl<C> DescribeCommand for JenkinsTask<C> {
                         name: "job",
                         help: "Job name, with folders separated by /",
                         data_type: DataType::Text,
+                        presence: Presence::Required,
+                    },
+                    ArgumentDescriptor {
+                        name: "limit",
+                        help: "Maximum build count, 1 through 50",
+                        data_type: DataType::U64,
+                        presence: Presence::Optional { default: Some("50") },
+                    },
+                ],
+            },
+            CommandDescriptor {
+                name: "jenkins.build-page",
+                help: "Read one bounded build history page as JSON; host owns stable pagination",
+                arguments: &[
+                    ArgumentDescriptor {
+                        name: "job",
+                        help: "Job name, with folders separated by /",
+                        data_type: DataType::Text,
+                        presence: Presence::Required,
+                    },
+                    ArgumentDescriptor {
+                        name: "offset",
+                        help: "Zero-based build history offset, 0 through 100000",
+                        data_type: DataType::U64,
                         presence: Presence::Required,
                     },
                     ArgumentDescriptor {
@@ -225,6 +256,7 @@ impl<C: IoClient<Request = Request, Response = Response, Error = Error>> Task fo
                 | (Response::Jobs(_), CommandKind::JenkinsJobs)
                 | (Response::QueueList(_), CommandKind::JenkinsQueueList)
                 | (Response::RecentBuilds(_), CommandKind::JenkinsRecentBuilds)
+                | (Response::BuildPage(_), CommandKind::JenkinsBuildPage)
                 | (Response::StopRequested, CommandKind::JenkinsStopBuild)
                 | (Response::Queued(_), CommandKind::JenkinsBuild)
                 | (Response::Queue(_), CommandKind::JenkinsQueue)
@@ -247,6 +279,7 @@ where
         ("jenkins.jobs", CommandKind::JenkinsJobs),
         ("jenkins.queue-list", CommandKind::JenkinsQueueList),
         ("jenkins.recent-builds", CommandKind::JenkinsRecentBuilds),
+        ("jenkins.build-page", CommandKind::JenkinsBuildPage),
         ("jenkins.stop-build", CommandKind::JenkinsStopBuild),
         ("jenkins.build", CommandKind::JenkinsBuild),
         ("jenkins.queue", CommandKind::JenkinsQueue),

@@ -174,6 +174,10 @@ The registered commands are:
 - `jenkins.build-status JOB NUMBER`: one build observation.
 - `jenkins.cancel ID`: request queue cancellation; requires mutation opt-in.
 - `jenkins.queue-list`: one JSON queue snapshot, at most50 items.
+- `jenkins.build-page JOB OFFSET [LIMIT]`: one read-only JSON build-history page;
+  offset0–100000, limit1–50 (default50). Returns explicit `offset`, `truncated`
+  and nullable `next_offset`; never scans or resubmits automatically. The caller
+  must bound paging and detect history changes before interpreting absence.
 - `jenkins.recent-builds JOB [LIMIT]`: one JSON recent-build snapshot; default50,
   range1–50, including observed queue IDs and selected public parameters.
 - `jenkins.stop-build JOB NUMBER`: request graceful stop of a known build;
