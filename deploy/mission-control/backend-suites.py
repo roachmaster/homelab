@@ -268,7 +268,47 @@ class MainProcessProvider:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        self._wait_group_quiescent(process.pid)
         process.wait(timeout=self.config.stop_grace_seconds)
+
+    def _wait_group_quiescent(self, group_id):
+        # Waiting for an already-dead leader does not wait for its descendants.
+        # Keep that leader unreaped until every remaining group member is dead.
+        deadline = time.monotonic() + self.config.stop_grace_seconds
+        while self._group_has_live_members(group_id, deadline):
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Main process group termination could not be confirmed')
+            # A fork already in flight when KILL was sent can finish afterward.
+            # The retained leader still fences this group against PID reuse.
+            try:
+                os.killpg(group_id, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            time.sleep(0.02)
+
+    @staticmethod
+    def _group_has_live_members(group_id, deadline):
+        with os.scandir('/proc') as entries:
+            observed = 0
+            for entry in entries:
+                if not entry.name.isdecimal():
+                    continue
+                observed += 1
+                if observed > 65536 or time.monotonic() >= deadline:
+                    raise RuntimeError('Main process group observation exceeded its bound')
+                try:
+                    with open('/proc/' + entry.name + '/stat', 'rb') as stream:
+                        record = stream.read(4097)
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                # comm can contain spaces and parentheses; fields after its
+                # final closing parenthesis begin with state, ppid and pgrp.
+                fields = record.rsplit(b')', 1)[-1].split()
+                if len(record) > 4096 or len(fields) < 3:
+                    raise RuntimeError('Main process group state is unavailable')
+                if int(fields[2]) == group_id and fields[0] not in (b'Z', b'X', b'x'):
+                    return True
+        return False
 
     @staticmethod
     def _exited(child):
