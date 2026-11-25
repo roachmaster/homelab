@@ -1404,6 +1404,15 @@ DECLARE
   target text;
   new_revision bigint;
   manual_root uuid;
+  ew_row forge_external_workflow.workflows%ROWTYPE;
+  child forge_agent.coding_tasks%ROWTYPE;
+  cleanup_rows forge_external_workflow.actions[];
+  act forge_external_workflow.actions%ROWTYPE;
+  cleanup_idx integer;
+  new_action_id uuid;
+  inserted_id uuid;
+  child_status text;
+  child_cause text;
   receipt jsonb;
 BEGIN
   IF p_expected_revision < 1 OR p_expected_revision > 9007199254740991 THEN
@@ -1415,6 +1424,189 @@ BEGIN
            p_expected_revision, to_json(p_project_alias), to_json(p_task_id::text)),
     'UTF8')), 'hex');
 
+  -- External-workflow scope (WorkStore.cancel's external path, merged
+  -- from main's portal fix): a task linked to an external workflow
+  -- cancels the whole external workflow. The external workflow row is
+  -- locked before any coding_tasks row, matching the lock order of
+  -- ExternalWorkflowStore and of the direct implementation.
+  SELECT w.* INTO ew_row FROM forge_external_workflow.workflows w
+  JOIN forge_external_workflow.tasks x USING (workflow_id)
+  WHERE (x.owner_id, x.project_alias, x.task_id) =
+        (current_setting('forge.coding_owner', true), p_project_alias, p_task_id)
+  FOR UPDATE OF w;
+  IF FOUND THEN
+    IF p_task_id <> ew_row.root_task_id THEN
+      RETURN jsonb_build_object('error', 'not_cancellable');
+    END IF;
+    SELECT * INTO task_row FROM forge_agent.coding_tasks
+    WHERE (owner_id, project_alias, id) =
+          (current_setting('forge.coding_owner', true), p_project_alias, p_task_id)
+    FOR UPDATE;
+    IF NOT FOUND THEN
+      RETURN jsonb_build_object('error', 'not_found');
+    END IF;
+    SELECT action, intent_digest, receipt_json INTO prior
+      FROM forge_agent.coding_control_receipts
+      WHERE (owner_id, project_alias, task_id, idempotency_key) =
+            (current_setting('forge.coding_owner', true), p_project_alias, p_task_id,
+             p_idempotency_key);
+    IF FOUND THEN
+      IF prior.action <> 'cancel' OR prior.intent_digest <> digest THEN
+        RETURN jsonb_build_object('error', 'idempotency_conflict');
+      END IF;
+      RETURN prior.receipt_json;
+    END IF;
+    IF task_row.revision <> p_expected_revision
+       OR p_expected_revision >= 9007199254740991 THEN
+      RETURN jsonb_build_object('error', 'revision_conflict');
+    END IF;
+    IF ew_row.phase IN ('completed', 'cancelled', 'escalated', 'merging') THEN
+      RETURN jsonb_build_object('error', 'not_cancellable');
+    END IF;
+
+  IF p_actor_kind NOT IN ('operator', 'coordinator', 'worker', 'agent', 'service', 'system') THEN
+    RAISE EXCEPTION 'invalid event actor' USING ERRCODE = '22023';
+  END IF;
+  IF p_actor_id IS NULL OR length(p_actor_id) = 0 OR length(p_actor_id) > 128 THEN
+    RAISE EXCEPTION 'invalid event actor' USING ERRCODE = '22023';
+  END IF;
+  IF p_cause NOT IN ('operator_request', 'workflow_cancelled', 'budget_exhausted', 'superseded') THEN
+    RAISE EXCEPTION 'invalid_request' USING ERRCODE = '22023';
+  END IF;
+
+    actor := jsonb_build_object('kind', p_actor_kind, 'id', p_actor_id);
+    -- Children: every linked task in a cancellable status, locked in
+    -- creation order. A child with a live attempt is cancel_requested;
+    -- the rest are cancelled outright.
+    FOR child IN
+      SELECT t.* FROM forge_agent.coding_tasks t
+      JOIN forge_external_workflow.tasks x
+        ON (x.owner_id, x.project_alias, x.task_id) = (t.owner_id, t.project_alias, t.id)
+      WHERE x.workflow_id = ew_row.workflow_id
+        AND t.status IN ('queued', 'running', 'awaiting_review', 'needs_reconcile',
+                         'blocked_auth', 'blocked_permission', 'quota_blocked')
+      ORDER BY t.created_at, t.id
+      FOR UPDATE OF t
+    LOOP
+      child_status := CASE WHEN EXISTS(
+        SELECT FROM forge_agent.coding_attempts
+        WHERE (owner_id, project_alias, task_id) =
+              (current_setting('forge.coding_owner', true), p_project_alias, child.id)
+          AND (phase <> 'stopped' OR reservation_active
+               OR lease_expires_at IS NOT NULL))
+        THEN 'cancel_requested' ELSE 'cancelled' END;
+      UPDATE forge_agent.coding_tasks
+        SET status = child_status,
+            cancelled_at = CASE WHEN child_status = 'cancelled'
+                                THEN clock_timestamp() ELSE NULL END,
+            revision = revision + 1, updated_at = clock_timestamp()
+        WHERE (owner_id, project_alias, id) =
+              (current_setting('forge.coding_owner', true), p_project_alias, child.id);
+      child_cause := CASE WHEN child.id = p_task_id THEN p_cause
+                          ELSE 'workflow_cancelled' END;
+      INSERT INTO forge_agent.coding_events
+        (owner_id, project_alias, task_id, sequence, event_kind, payload)
+        SELECT current_setting('forge.coding_owner', true), p_project_alias,
+               child.id, COALESCE(MAX(sequence), 0) + 1, child_status,
+               jsonb_build_object('base_revision', child.revision,
+                                  'revision', child.revision + 1,
+                                  'workflow_id', ew_row.workflow_id::text,
+                                  'actor', actor, 'cause', child_cause)
+        FROM forge_agent.coding_events
+        WHERE owner_id = current_setting('forge.coding_owner', true)
+          AND project_alias = p_project_alias AND task_id = child.id;
+    END LOOP;
+    -- Delivery cleanup: the verify actions are observed BEFORE the
+    -- queued/leased update (their pre-update receipts feed the cleanup
+    -- intents), exactly as the direct implementation reads them.
+    SELECT ARRAY(SELECT a FROM forge_external_workflow.actions a
+                 WHERE a.workflow_id = ew_row.workflow_id AND a.kind = 'verify'
+                   AND a.status IN ('queued', 'leased', 'failed'))
+      INTO cleanup_rows;
+    UPDATE forge_external_workflow.actions
+      SET status = 'failed',
+          result = jsonb_build_object(
+            'status', 'failed', 'receipt', '{}'::jsonb,
+            'summary', 'Workflow admission stopped before delivery completed.'),
+          lease_token = NULL, lease_role = NULL, lease_until = NULL,
+          updated_at = clock_timestamp()
+      WHERE workflow_id = ew_row.workflow_id AND status IN ('queued', 'leased');
+    IF cleanup_rows IS NOT NULL AND cardinality(cleanup_rows) > 0 THEN
+      FOR cleanup_idx IN 1 .. cardinality(cleanup_rows) LOOP
+        act := cleanup_rows[cleanup_idx];
+        new_action_id := gen_random_uuid();
+        inserted_id := NULL;
+        INSERT INTO forge_external_workflow.actions
+          (action_id, workflow_id, owner_id, project_alias,
+           workflow_revision, kind, source_key, intent)
+        VALUES (new_action_id, ew_row.workflow_id,
+                current_setting('forge.coding_owner', true), p_project_alias,
+                ew_row.revision, 'cancel', act.action_id::text,
+                jsonb_build_object(
+                  'target_action_id', act.action_id::text,
+                  'target_kind', act.kind,
+                  'target_request', act.intent,
+                  'target_receipt', COALESCE(act.result -> 'receipt', '{}'::jsonb),
+                  'workflow_id', ew_row.workflow_id::text,
+                  'project_alias', p_project_alias,
+                  'correlation_id', task_row.correlation_id::text,
+                  'action_id', new_action_id::text))
+        ON CONFLICT (workflow_id, kind, source_key) DO NOTHING
+        RETURNING action_id INTO inserted_id;
+        IF inserted_id IS NOT NULL THEN
+          PERFORM pg_notify('forge_external_delivery', '');
+        END IF;
+      END LOOP;
+    END IF;
+    UPDATE forge_external_workflow.workflows
+      SET phase = 'cancelled', enabled = false, revision = revision + 1,
+          updated_at = clock_timestamp()
+      WHERE workflow_id = ew_row.workflow_id AND revision = ew_row.revision
+      RETURNING revision INTO new_revision;
+    IF new_revision IS NULL THEN
+      RETURN jsonb_build_object('error', 'result_mismatch');
+    END IF;
+    -- Checkpoint event on the root task (coordinator actor, no cause),
+    -- then the terminal settlement of the scope's open retry events.
+    INSERT INTO forge_agent.coding_events
+      (owner_id, project_alias, task_id, sequence, event_kind, payload)
+      SELECT current_setting('forge.coding_owner', true), p_project_alias,
+             p_task_id, COALESCE(MAX(sequence), 0) + 1, 'checkpoint',
+             jsonb_build_object(
+               'workflow_id', ew_row.workflow_id::text, 'phase', 'cancelled',
+               'summary', 'User cancelled the complete external workflow.',
+               'actor', jsonb_build_object('kind', 'coordinator',
+                                           'id', 'forge-coordinator'))
+      FROM forge_agent.coding_events
+      WHERE owner_id = current_setting('forge.coding_owner', true)
+        AND project_alias = p_project_alias AND task_id = p_task_id;
+    PERFORM forge_agent.retry_event_resolve_open_scope(
+      p_project_alias, 'external_workflow', ew_row.workflow_id);
+    UPDATE forge_agent.coding_tasks
+      SET revision = p_expected_revision + 1, updated_at = clock_timestamp()
+      WHERE (owner_id, project_alias, id) =
+            (current_setting('forge.coding_owner', true), p_project_alias, p_task_id);
+    receipt := jsonb_build_object('project_alias', p_project_alias,
+      'task_id', p_task_id::text, 'base_revision', p_expected_revision,
+      'revision', p_expected_revision + 1, 'status', 'cancelled',
+      'actor', actor);
+    INSERT INTO forge_agent.coding_control_receipts
+      (owner_id, project_alias, task_id, action, idempotency_key,
+       intent_digest, base_revision, result_revision, receipt_json)
+    VALUES (current_setting('forge.coding_owner', true), p_project_alias,
+            p_task_id, 'cancel', p_idempotency_key, digest,
+            p_expected_revision, p_expected_revision + 1, receipt);
+    PERFORM pg_notify('forge_coding_jobs', '');
+    RETURN receipt;
+  END IF;
+  -- The native/manual scopes serialize against submit/accept/merge
+  -- through the (owner, project) advisory lock. It is taken HERE,
+  -- after the external scope has been ruled out: the external scope
+  -- must wait on the external workflow row without holding it (the
+  -- lock order the direct implementation and its tests require).
+  PERFORM pg_advisory_xact_lock(hashtextextended(
+    current_setting('forge.coding_owner', true) || chr(10) || p_project_alias,
+    2026111901));
   -- Scope: the task's workflow root; lock the root task if it differs.
   SELECT w.root_task_id INTO scope_rec FROM forge_agent.coding_tasks t
   JOIN forge_agent.coding_workflows w ON w.workflow_id = t.workflow_id
@@ -2254,3 +2446,4 @@ GRANT SELECT ON forge_external_agent.artifacts TO muse_proxy_writer;
 GRANT SELECT ON forge_external_agent.assignments TO muse_proxy_writer;
 GRANT SELECT ON forge_external_agent.readiness TO muse_proxy_writer;
 GRANT SELECT ON forge_external_agent.scope_grants TO muse_proxy_writer;
+

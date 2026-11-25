@@ -732,7 +732,10 @@ class TerminalProjectionSettlementTest(unittest.TestCase):
             t_cancel.start()
             # Direct WorkStore.cancel must wait on the external workflow lock BEFORE
             # acquiring any coding_tasks or advisory lock (no lock-order cycle).
-            blocked = wait_for_blocked_query("forge_external_workflow.workflows")
+            # The cancel runs as the coding_workflow_cancel composite, so the
+            # blocked session's query text is the composite call; it waits on
+            # the same workflow row lock inside the function.
+            blocked = wait_for_blocked_query("coding_workflow_cancel")
             self.assertTrue(blocked, "Expected direct WorkStore.cancel to wait on external workflow lock")
             cancel_pid = blocked[0]["pid"]
             held_task_locks = self.rows(
@@ -764,7 +767,7 @@ class TerminalProjectionSettlementTest(unittest.TestCase):
         )
 
         # Direction 2: Direct WorkStore.cancel locks external workflow -> tasks first and pauses
-        # inside _resolve_open_retries, while ExternalWorkflowStore.run_once and
+        # at its retry settlement, while ExternalWorkflowStore.run_once and
         # ExternalWorkflowStore.cancel run concurrently on the same workflow.
         self.cluster.admin_exec("UPDATE forge_external_agent.scope_grants SET enabled=true")
         wf2, root2 = self.submit_external_workflow()
@@ -774,15 +777,19 @@ class TerminalProjectionSettlementTest(unittest.TestCase):
             scope_id=wf2, kind="feedback_delivery", used=1,
         )
 
-        direct_locked = threading.Event()
-        release_direct = threading.Event()
-        orig_resolve = self.ext_service._store._resolve_open_retries
-
-        def paused_resolve(cursor, project_alias, scope_kind, scope_id):
-            direct_locked.set()
-            if not release_direct.wait(timeout=5.0):
-                raise AssertionError("Timed out waiting to release direct WorkStore.cancel")
-            return orig_resolve(cursor, project_alias, scope_kind, scope_id)
+        # The direct cancel runs as the coding_workflow_cancel composite:
+        # its settlement step updates the scope's open retry rows, so
+        # holding ev2's row lock pauses it mid-cancel — after it has
+        # locked the external workflow, before it settles — at exactly
+        # the point the inline implementation paused in
+        # _resolve_open_retries.
+        hold = self.cluster.connect("postgres")
+        hold_cursor = hold.cursor()
+        hold_cursor.execute(
+            "SELECT event_id FROM forge_agent.coding_retry_events"
+            " WHERE event_id = %s FOR UPDATE",
+            (UUID(ev2["event_id"]),),
+        )
 
         direct_result = {}
         ext_cancel_result = {}
@@ -809,12 +816,13 @@ class TerminalProjectionSettlementTest(unittest.TestCase):
             except BaseException as exc:
                 ext_cancel_result["error"] = exc
 
-        self.ext_service._store._resolve_open_retries = paused_resolve
         t_direct = threading.Thread(target=run_direct, daemon=True)
         t_ext_cancel = threading.Thread(target=run_ext_cancel, daemon=True)
         try:
             t_direct.start()
-            self.assertTrue(direct_locked.wait(timeout=5.0))
+            # The direct cancel blocks settling ev2 (held above) while
+            # holding the external workflow lock.
+            self.assertTrue(wait_for_blocked_query("coding_workflow_cancel"))
             # ExternalWorkflowStore.run_once uses SKIP LOCKED and completes cleanly without blocking.
             self.assertFalse(self.ext_flow.run_once())
             # Concurrent ExternalWorkflowStore.cancel waits on the same workflow lock, then
@@ -822,10 +830,10 @@ class TerminalProjectionSettlementTest(unittest.TestCase):
             t_ext_cancel.start()
             self.assertTrue(wait_for_blocked_query("forge_external_workflow.workflows"))
         finally:
-            release_direct.set()
+            hold.commit()
+            hold.close()
             t_direct.join(timeout=10.0)
             t_ext_cancel.join(timeout=10.0)
-            self.ext_service._store._resolve_open_retries = orig_resolve
 
         self.assertNotIn("error", direct_result, f"Direct cancel failed: {direct_result.get('error')!r}")
         self.assertNotIn("error", ext_cancel_result, f"External cancel failed: {ext_cancel_result.get('error')!r}")

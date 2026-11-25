@@ -1816,10 +1816,10 @@ class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
             "SELECT version FROM forge_agent.schema_migrations"
             " ORDER BY version")
         versions = [row[0] for row in rows]
-        self.assertEqual(versions[-1], 39)
-        self.assertNotIn(40, versions)
+        self.assertEqual(versions[-1], 40)
+        self.assertNotIn(41, versions)
         version, _, name = _parse_cutover_sql()
-        self.assertEqual((version, name), (40, "pg_proxy_cutover"))
+        self.assertEqual((version, name), (41, "pg_proxy_cutover"))
 
     def test_verify_sql_passes_at_preparation(self):
         ok, output = self.cluster.run_verifier(
