@@ -841,6 +841,7 @@ TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '98b968640a507f1ed803d3851965abb3a527e8566546e12858622fc3ee7ee6f2',
     'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': 'e8a804630fd74c0f16dd570429e290123cd207a65ecd7ba2307dc68fbbc9d421',
     'deploy/mission-control/agent-runner/test_muse_read_access.py': 'b10f06398892815dd9436b1cea984aa65e63a0171ed85a7014754fc620069c2e',
+    'deploy/mission-control/agent-runner/test_native_ci_postfix.py': '5c5b29ef5b82d3a830ea00ef55928ac0f363109e47f39f88fef171dc34aeea9d',
     'deploy/mission-control/agent-runner/test_native_deadline_events.py': '3f597b988104a2af1c50748b4e8d45e3883c53d4e84aac5d2208c6049fe850ac',
     'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'ead5f9cc49c8c365d0fc886cf12f7749555d23244fb216b8e55a80b0db42226e',
     'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': '3f61c8ae67ed8a5345d61e22b0743ff344ec5879e009ca5ae723c2c0652fd6b3',

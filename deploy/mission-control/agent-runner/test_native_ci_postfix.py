@@ -26,7 +26,6 @@ class NativePostfixTest(unittest.TestCase):
     verdict=fixtures.AutonomousWorkflowTest.verdict
     finish_plan_round=fixtures.AutonomousWorkflowTest.finish_plan_round
     checked_implementation=fixtures.AutonomousWorkflowTest.checked_implementation
-    preparation_failure=preparation.PreparationRetryTest.preparation_failure
     rows=preparation.PreparationRetryTest.rows
     @classmethod
     def setUpClass(cls):cls.cluster=DisposablePostgresCluster().start();cls.addClassCleanup(cls.cluster.stop)
@@ -48,19 +47,33 @@ class NativePostfixTest(unittest.TestCase):
                 'checks':[{'check_id':'fixed-check-'+str(i+1),'status':'not_run','head_sha':candidate}for i in range(45)]},
             'retry_observation':{'failure_kind':'infrastructure','passed_kinds':[],'passed_phase_ids':[],'phase_id':'infrastructure','stage_evidence_digest':'a'*64}}
     def failed(self):
-        author,child,plan,source,job,raw,request=self.preparation_failure(reason=REASON)
-        task=self.row('SELECT * FROM forge_agent.coding_tasks WHERE id=%s',(child.task_id,));review=self.row('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s',(job['review_id'],))
+        _admitted,author,critic,_source=self.checked_implementation(linked=True)
+        self.publish(critic,self.verdict(critic,'revise'))
+        self.assertTrue(self.coordinator.run_once())
+        child=self.claim('agy-v2');self.assertIsNotNone(child);self.assertEqual(child.parent_task_id,author.task_id)
+        rec=self.publish(child,'Repair complete. Preserve provider ownership and the approved Plan.')
+        self.db.queue_review(child,rec);self.coordinator.run_once()
+        job=self.db.review_claim('checks');self.assertIsNotNone(job)
+        task=self.row('SELECT * FROM forge_agent.coding_tasks WHERE id=%s',(child.task_id,))
         workflow=self.row('SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=%s',(task['workflow_id'],));flow=self.coordinator.store
+        self.assertEqual(workflow['phase'],'checks')
         with flow._transaction()as cursor:
-            event=flow.retry_events.observe_failure(cursor,flow._retry_scope(workflow),'infrastructure',job['review_id'],'a'*64,phase_id='infrastructure')
+            event=flow.retry_events.observe_failure(cursor,flow._retry_scope(workflow),'infrastructure','fixture-infra-prior','0'*64,phase_id='infrastructure')
             for i in range(20):flow.retry_events.reserve(cursor,event['event_id'],'fixture-spent-'+str(i))
             exhausted=flow.retry_events.reserve(cursor,event['event_id'],'fixture-exhausted-probe')
             self.assertEqual(exhausted['status'],'exhausted')
-            flow.retry_events.observe_failure(cursor,flow._retry_scope(workflow),'infrastructure',job['review_id'],'a'*64,phase_id='infrastructure')
-            flow.retry_events.bind_review(cursor,UUID(job['review_id']),event['event_id'],'review-fix.'+job['review_id'])
-        self.write('UPDATE forge_agent.coding_reviews SET infrastructure_retries=20 WHERE review_id=%s',(review['review_id'],))
-        review=self.row('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s',(review['review_id'],))
-        command=NativeCiPostfix('homelab',UUID(child.task_id),task['revision'],review['review_id'],UUID(str(request['reconciliation_receipt_id'])),UUID(event['event_id']),
+        self.db.review_finish(job,self.failed_outcome(job))
+        self.write('UPDATE forge_agent.coding_reviews SET infrastructure_retries=20 WHERE review_id=%s',(job['review_id'],))
+        self.coordinator.run_once()
+        task=self.row('SELECT * FROM forge_agent.coding_tasks WHERE id=%s',(child.task_id,))
+        review=self.row('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s',(job['review_id'],))
+        workflow=self.row('SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=%s',(task['workflow_id'],))
+        self.assertEqual((workflow['phase'],workflow['escalation_reason']),('escalated',REASON))
+        infra=self.row('SELECT * FROM forge_agent.coding_retry_events WHERE event_id=%s',(event['event_id'],))
+        self.assertEqual((infra['status'],infra['used'],infra['source_id'],infra['source_digest']),('exhausted',20,job['review_id'],'a'*64))
+        review_events=self.rows("SELECT status,used FROM forge_agent.coding_retry_events WHERE scope_kind='native_workflow' AND scope_id=%s AND kind='review'",(workflow['workflow_id'],))
+        self.assertEqual(review_events,[('resolved',1)])
+        command=NativeCiPostfix('homelab',UUID(child.task_id),task['revision'],review['review_id'],UUID(rec),UUID(event['event_id']),
             'f'*40,'b'*64,'postfix-fixture','Retry only checks after the independently proven installed helper correction.')
         class Proof:
             calls=0
