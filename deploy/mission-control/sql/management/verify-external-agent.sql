@@ -21,7 +21,7 @@ BEGIN
 ('forge_external_agent_api.claim(text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=22) THEN '71bf496f1093265d61265fbc9171cc1e9f3f00c3f383508d8cba894aca9b8893' ELSE '9c028a7060095d201506e623e536f39d45e28432d29992485c5e75a2dc81b8b1' END,'external_writer'),
 ('forge_external_agent_api.renew(uuid,integer,uuid)','1a8f4d3e147ec4788069a7a326a30eaf5d8466b222d67b24584f9e3dbd6164cd','external_writer'),
 ('forge_external_agent_api.progress(uuid,integer,uuid,text)','81b76cbc125c3547613652c7d30aecad3882aa552ebb5c2d03569d8fb0938f60','external_writer'),
-('forge_external_agent_api.finish(uuid,integer,uuid,text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN '2815981ff0590cc66a72894d90a44e4f6745c938141decb501677d9d954aa096' ELSE 'f1a6021104181e3ad54a100552aca86da51ace1df6caece3e3c66ed66916a8b7' END,'external_writer'),
+('forge_external_agent_api.finish(uuid,integer,uuid,text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN 'd5d8127b3d21a609c4a57375911b8a5576d6c3f39f6dbc6e359b934b7b6a81ac' ELSE 'f1a6021104181e3ad54a100552aca86da51ace1df6caece3e3c66ed66916a8b7' END,'external_writer'),
 ('forge_external_agent_api.release(uuid,integer,uuid)','d451c3028a608ebe4d207a2ede38003fe8cafc60f3f9f07195e0616e9fc799d6','external_writer'),
 ('forge_external_agent._artifact(uuid)','13730c4876efc64c5eaccc7d5d53c53c4743713c824961402a7b007a97fea72c','owner'),
 ('forge_external_agent_api.artifact(uuid)','d5f044d5aa5cfe4f9e62c9fa3336eb1d5b3f4a6ddc9e6ae5ac034f1af04880e4','external'),

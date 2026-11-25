@@ -17,7 +17,10 @@ Operation names:
   (existing API schemas plus the new ``forge_pg_proxy_api`` entry
   points for direct writes).
 - ``read.<table>`` — a bounded point/list read (equality filters
-  only on registered key columns, fixed column list, capped LIMIT).
+  only on registered key columns, fixed column list, capped LIMIT,
+  optional offset and order direction).
+- ``read.<table>.count`` / ``read.<table>.exists`` — aggregate
+  variants of the same read (same filters and owner scope).
 - ``notify.<channel>`` — emit a ``pg_notify`` on a registered
   channel (issued inside the triggering transaction).
 
@@ -50,6 +53,7 @@ MAX_BODY = 1 << 20
 MAX_NOTIFICATION_WAIT = 30
 READ_LIMIT_DEFAULT = 100
 READ_LIMIT_MAX = 1000
+READ_OFFSET_MAX = 100000
 
 # Channels the proxy fans out (one LISTEN connection each).
 # "forge_coding_usage_refresh" is the real usage-refresh channel
@@ -80,7 +84,16 @@ class Rejected(Exception):
 
 
 def validate_value(kind, value):
-    """Validate one argument value against its declared kind."""
+    """Validate one argument value against its declared kind.
+
+    None (SQL NULL) passes through for every kind: Postgres
+    parameters are nullable unless the function body rejects NULL,
+    and the function/column constraint is the authority on whether
+    a NULL is valid — the proxy must not reject the valid DAO calls
+    that pass NULLs (e.g. publication_finish with a null branch,
+    commit, or PR URL on a failed publication)."""
+    if value is None:
+        return None
     if kind == "text":
         if not isinstance(value, str) or len(value) > 1 << 20:
             raise Rejected(400, "invalid_argument")
@@ -115,30 +128,68 @@ def validate_value(kind, value):
 
 
 def validate_args(params, args):
-    """Validate a named-arg object against [(name, kind, required), ...].
+    """Validate a named-arg object against [(name, kind, required[, has_default]), ...].
 
-    Missing optional parameters become None. Unknown or missing
-    required arguments are rejected. Returns ordered values.
+    Missing optional parameters become None, except a parameter whose
+    SQL signature carries a DEFAULT: an omitted one becomes the
+    USE_DEFAULT sentinel, which the caller renders as the SQL DEFAULT
+    keyword (passing NULL explicitly would bypass the default and,
+    for pending_reconciliations, trip the function's own NULL check).
+    Unknown or missing required arguments are rejected. Returns
+    ordered values.
     """
     if not isinstance(args, dict):
         raise Rejected(400, "invalid_argument")
-    expected = {name for name, _, _ in params}
+    expected = {param[0] for param in params}
     if set(args) - expected:
         raise Rejected(400, "invalid_argument")
     values = []
-    for name, kind, required in params:
+    for param in params:
+        name, kind, required = param[0], param[1], param[2]
+        has_default = len(param) > 3 and param[3]
         if name not in args:
             if required:
                 raise Rejected(400, "invalid_argument")
-            values.append(None)
+            values.append(USE_DEFAULT if has_default else None)
         else:
             values.append(validate_value(kind, args[name]))
     return values
 
 
-def func_params(params):
-    """Function-catalog params are all required."""
-    return [(name, kind, True) for name, kind in params]
+class _UseDefault:
+    """Sentinel: render the SQL DEFAULT keyword for this argument."""
+
+    def __repr__(self):
+        return "USE_DEFAULT"
+
+
+USE_DEFAULT = _UseDefault()
+
+
+# Parameters whose SQL signature carries a DEFAULT (found by parsing
+# the migration sources; the catalog comment above says to keep it in
+# sync with them). These are optional in the request: when the caller
+# omits one, the proxy passes the SQL DEFAULT instead of NULL.
+# Every other catalog parameter is required; an explicitly passed
+# NULL is valid and is passed through (see validate_value).
+FUNC_OPTIONAL_PARAMS = {
+    'forge_agent.retry_event_observe': frozenset({
+        'p_passed_kinds', 'p_phase_id', 'p_passed_phase_ids'}),
+    'forge_agent.retry_event_resolve': frozenset({'p_phase_id'}),
+    'forge_coding_reconciler_api.pending_reconciliations': frozenset({
+        'p_limit'}),
+}
+
+
+def func_params(full, params):
+    """Function-catalog params as (name, kind, required, has_default).
+
+    Required-ness comes from the SQL signature: a parameter with a
+    DEFAULT is optional, every other catalog parameter is required.
+    """
+    optional = FUNC_OPTIONAL_PARAMS.get(full, frozenset())
+    return [(name, kind, name not in optional, name in optional)
+            for name, kind in params]
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +231,7 @@ FUNC_CATALOG = {
     'forge_coding_reconciler_api.native_merge_failure': [['p_merge', 'uuid'], ['p_token', 'uuid'], ['p_failure', 'jsonb']],
     'forge_coding_reconciler_api.owner_continuation_capability': [],
     'forge_coding_reconciler_api.owner_continuation_fenced': [['p_scope', 'jsonb']],
-    'forge_coding_reconciler_api.pending_reconciliations': [['p_limit', 'text']],
+    'forge_coding_reconciler_api.pending_reconciliations': [['p_limit', 'integer']],
     'forge_coding_reconciler_api.post_merge_available': [['p_owner', 'text']],
     'forge_coding_reconciler_api.post_merge_checkpoint': [['p_id', 'uuid'], ['p_generation', 'integer'], ['p_token', 'uuid'], ['p_request', 'jsonb']],
     'forge_coding_reconciler_api.post_merge_claim': [['p_worker', 'text']],
@@ -335,9 +386,13 @@ ENTRY_POINTS = {
 # - ("owner",): the table has its own owner_id column.
 # - ("join", <JOIN clause>, <owner expr>): the owner comes from a
 #   joined owned table (t is the primary table's alias).
-# - ("role", <column>): the row belongs to the caller's DB role
-#   (gpu_worker_readiness has no owner column; its key is the worker
-#   role name, i.e. session_user).
+# - ("role", <column>[, <exempt callers>]): the row belongs to the
+#   caller's DB role (gpu_worker_readiness has no owner column; its
+#   key is the worker role name, i.e. session_user). The optional
+#   exempt set names callers that may read every row (the
+#   coordinator and operator monitor GPU workers, so they must be
+#   able to filter worker_name freely and see all rows; the GPU
+#   caller itself holds no read allowlist at all).
 # ---------------------------------------------------------------------------
 READ_TABLES = {
     "forge_agent.coding_tasks": (["owner_id", "project_alias", "id", "status", "workflow_id", "mode"], "created_at", ("owner",)),
@@ -357,7 +412,7 @@ READ_TABLES = {
     "forge_agent.coding_worker_grants": (["worker_role", "owner_id", "project_alias", "agent_profile", "mode"], "granted_at", ("owner",)),
     "forge_agent.coding_usage_refresh_requests": (["refresh_id", "owner_id", "project_alias", "status"], "requested_at", ("owner",)),
     "forge_agent.coding_worker_readiness": (["worker_role", "owner_id", "worker_id"], "observed_at", ("owner",)),
-    "forge_agent.gpu_worker_readiness": (["worker_name", "model_id"], "seen_at", ("role", "worker_name")),
+    "forge_agent.gpu_worker_readiness": (["worker_name", "model_id"], "seen_at", ("role", "worker_name", {"coordinator", "operator"})),
     "forge_agent.coding_retry_events": (["event_id", "scope_id", "status"], "created_at", ("owner",)),
     "forge_agent.coding_feedback": (["feedback_id", "task_id", "review_id"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
     "forge_agent.coding_hosted_checks": (["task_id", "observation_id"], "observed_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
@@ -577,8 +632,14 @@ class Caller:
         if operation.startswith("op."):
             return operation[3:] in self.allowlist["op"]
         if operation.startswith("read."):
+            # Aggregate variants share the table's allowlist entry.
+            table = operation[5:]
+            for suffix in (".count", ".exists"):
+                if table.endswith(suffix):
+                    table = table[:-len(suffix)]
+                    break
             allowed = self.allowlist["read"]
-            return allowed == "*" or operation[5:] in allowed
+            return allowed == "*" or table in allowed
         if operation.startswith("notify."):
             return operation[7:] in self.allowlist["notify"]
         if operation.startswith("subscribe."):
@@ -662,7 +723,7 @@ class Proxy:
             full = operation[3:]
             if full not in FUNC_CATALOG:
                 raise Rejected(400, "unknown_operation")
-            params = func_params(FUNC_CATALOG[full])
+            params = func_params(full, FUNC_CATALOG[full])
             return ("function", full, params, True)
         if operation.startswith("op."):
             name = operation[3:]
@@ -672,9 +733,15 @@ class Proxy:
             return ("entry", name, params, True)
         if operation.startswith("read."):
             table = operation[5:]
+            mode = "rows"
+            for suffix in (".count", ".exists"):
+                if table.endswith(suffix):
+                    table = table[:-len(suffix)]
+                    mode = suffix[1:]
+                    break
             if table not in READ_TABLES:
                 raise Rejected(400, "unknown_operation")
-            return ("read", table, None, False)
+            return ("read_" + mode, table, None, False)
         if operation.startswith("notify."):
             channel = operation[7:]
             if channel not in NOTIFY_CHANNELS:
@@ -696,7 +763,8 @@ class Proxy:
             return self.notify(caller, target)
         if is_write:
             return self._execute_write(caller, kind, target, params, args)
-        return self._execute_read(caller, target, args)
+        return self._execute_read(caller, target, args,
+                                  mode=kind[len("read_"):])
 
     def _execute_write(self, caller, kind, target, params, args):
         # Validate before opening a connection: a rejected request must
@@ -710,11 +778,19 @@ class Proxy:
                     cur.execute("SET LOCAL forge.coding_owner = %s",
                                 (caller.owner,))
                     if kind == "function":
+                        placeholders, call_values = [], []
+                        for value in values:
+                            if value is USE_DEFAULT:
+                                # An omitted parameter with a SQL
+                                # DEFAULT: pass the default, not NULL.
+                                placeholders.append("DEFAULT")
+                            else:
+                                placeholders.append("%s")
+                                call_values.append(value)
                         cur.execute(
-                            f"SELECT {target}(%s"
-                            + ", %s" * (len(values) - 1) + ")"
-                            if values else f"SELECT {target}()",
-                            values)
+                            f"SELECT {target}({', '.join(placeholders)})"
+                            if placeholders else f"SELECT {target}()",
+                            call_values)
                     else:  # entry point
                         cur.execute(
                             f"SELECT forge_pg_proxy_api.{target}(%s"
@@ -742,7 +818,15 @@ class Proxy:
             finally:
                 self._checkin(caller.role, conn)
 
-    def _execute_read(self, caller, table, args):
+    def _execute_read(self, caller, table, args, mode="rows"):
+        """One fixed read: rows, count, or exists.
+
+        Rows: SELECT t.* with the registered filters and owner scope,
+        fixed ORDER BY (ascending, or descending with order_desc),
+        capped LIMIT plus an offset for paging. Count/exists reuse
+        exactly the same filters and owner scope, so a status check
+        sees the same rows the list read would return.
+        """
         args = args or {}
         keys, order, owner = READ_TABLES[table]
         filters = args.get("filter", {})
@@ -760,25 +844,46 @@ class Proxy:
         if not isinstance(limit, int) or isinstance(limit, bool) \
                 or not 1 <= limit <= READ_LIMIT_MAX:
             raise Rejected(400, "invalid_argument")
+        offset = args.get("offset", 0)
+        if not isinstance(offset, int) or isinstance(offset, bool) \
+                or not 0 <= offset <= READ_OFFSET_MAX:
+            raise Rejected(400, "invalid_argument")
+        order_desc = args.get("order_desc", False)
+        if not isinstance(order_desc, bool):
+            raise Rejected(400, "invalid_argument")
         if owner[0] == "owner":
             owner_pred, owner_values = "t.owner_id = %s", [caller.owner]
             join = ""
         elif owner[0] == "join":
             owner_pred, owner_values = f"{owner[2]} = %s", [caller.owner]
             join = f" {owner[1]}"
-        else:  # role scope: the row belongs to the caller's DB role
-            if "worker_name" in filters \
-                    and filters["worker_name"] != caller.role:
-                raise Rejected(403, "not_allowed")
-            owner_pred = f"t.{owner[1]} = %s"
-            owner_values = [caller.role]
+        else:  # role scope: the row belongs to the caller's DB role,
+            # unless the caller is exempt (coordinator/operator
+            # monitor other roles' rows, e.g. GPU readiness).
+            exempt = len(owner) > 2 and caller.name in owner[2]
+            if exempt:
+                owner_pred, owner_values = "TRUE", []
+            else:
+                if "worker_name" in filters \
+                        and filters["worker_name"] != caller.role:
+                    raise Rejected(403, "not_allowed")
+                owner_pred = f"t.{owner[1]} = %s"
+                owner_values = [caller.role]
             join = ""
         where = " AND ".join([owner_pred]
                              + [f"t.{key} = %s" for key in filters])
         values = owner_values + [filters[key] for key in filters]
-        sql = (f"SELECT t.* FROM {table} t{join} WHERE {where} "
-               f"ORDER BY t.{order} LIMIT %s")
-        values.append(limit)
+        if mode == "count":
+            sql = (f"SELECT count(*) AS count FROM {table} t{join} "
+                   f"WHERE {where}")
+        elif mode == "exists":
+            sql = (f"SELECT EXISTS(SELECT 1 FROM {table} t{join} "
+                   f"WHERE {where}) AS \"exists\"")
+        else:
+            direction = "DESC" if order_desc else "ASC"
+            sql = (f"SELECT t.* FROM {table} t{join} WHERE {where} "
+                   f"ORDER BY t.{order} {direction} LIMIT %s OFFSET %s")
+            values = values + [limit, offset]
         conn = self._checkout(caller.role)
         try:
             with closing(conn.cursor(
@@ -787,9 +892,15 @@ class Proxy:
                 cur.execute("SET LOCAL forge.coding_owner = %s",
                             (caller.owner,))
                 cur.execute(sql, values)
-                rows = [encode_row(row) for row in cur.fetchall()]
+                if mode == "rows":
+                    rows = [encode_row(row) for row in cur.fetchall()]
+                    cur.execute("COMMIT")
+                    return {"rows": rows}
+                row = cur.fetchone()
                 cur.execute("COMMIT")
-                return {"rows": rows}
+                if mode == "count":
+                    return {"count": row["count"]}
+                return {"exists": bool(row["exists"])}
         except Exception as error:
             conn.rollback()
             raise Rejected(503, "database_error") from error

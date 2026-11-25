@@ -2,7 +2,10 @@
 -- Creates the audit log and entry points, grants the
 -- writer principal the mutating external EXECUTE, grants
 -- each caller role SELECT on its allowlisted read tables
--- (plus schema USAGE), and resolves the
+-- (plus schema USAGE), grants each entry point EXECUTE
+-- only to the roles whose proxy allowlist contains it
+-- (per-caller-role admission; preparation widens no
+-- privilege), and resolves the
 -- writer identity to the muse_events grant in _scope/_locked/finish/_housekeep.
 -- The forge_pg_proxy and muse_proxy_writer roles are created by
 -- provision.sql (run before apply.sql; forge_agent_owner has no
@@ -61,10 +64,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_task_insert(text, text, uuid, text, text, text, text, text, text, text, jsonb, text, text, boolean, boolean, boolean, uuid, uuid, text, uuid, uuid, text, uuid, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_insert(p_owner_id text, p_project_alias text, p_root_task_id uuid, p_policy_digest text, p_snapshot jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -83,10 +82,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_insert(text, text, uuid, text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_event_insert(p_owner_id text, p_project_alias text, p_task_id uuid, p_event_kind text, p_payload jsonb, p_progress_attempt_id uuid, p_progress_sequence integer, p_correlation_id uuid, p_first boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -106,9 +101,6 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_event_insert(text, text, uuid, text, jsonb, uuid, integer, uuid, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_event_insert TO forge_agent;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_event_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_event_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_event_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_event_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_control_receipt_insert(p_owner_id text, p_project_alias text, p_task_id uuid, p_action text, p_idempotency_key text, p_intent_digest text, p_base_revision bigint, p_result_revision bigint, p_receipt_json jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -127,10 +119,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_control_receipt_insert(text, text, uuid, text, text, text, bigint, bigint, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_control_receipt_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_control_receipt_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_control_receipt_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_control_receipt_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_control_receipt_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_insert(p_owner_id text, p_project_alias text, p_task_id uuid, p_attempt_id uuid, p_plan_decision_id uuid, p_scope_plan_decision_id uuid, p_reconciliation_receipt_id uuid, p_base_revision text, p_workspace_digest text, p_parent_result_sha256 text, p_source_revision bigint, p_round integer, p_previous_review_id uuid, p_candidate_commit text, p_summary text, p_phase text, p_owner_decision jsonb, p_findings jsonb, p_verification jsonb, p_target_publication_id uuid, p_source_publication_id uuid, p_gate_manifest_sha256 text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -149,10 +137,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_review_insert(text, text, uuid, uuid, uuid, uuid, uuid, text, text, text, bigint, integer, uuid, text, text, text, jsonb, jsonb, jsonb, uuid, uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_plan_decision_insert(p_decision_id uuid, p_owner_id text, p_project_alias text, p_task_id uuid, p_plan_attempt_id uuid, p_plan_sha256 text, p_source_revision bigint, p_base_revision text, p_decision text, p_agent_profile text, p_note text, p_idempotency_key text, p_receipt_json jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -171,10 +155,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_plan_decision_insert(uuid, text, text, uuid, uuid, text, bigint, text, text, text, text, text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_plan_decision_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_plan_decision_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_plan_decision_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_plan_decision_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_plan_decision_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_policy_upsert(p_owner_id text, p_project_alias text, p_version text, p_max_rounds integer, p_max_stagnant_rounds integer, p_max_infrastructure_retries integer, p_required_hosted_checks text[])
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -194,10 +174,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_review_policy_upsert(text, text, text, integer, integer, integer, text[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_policy_upsert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_policy_upsert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_policy_upsert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_policy_upsert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_policy_upsert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_budget_insert(p_owner_id text, p_project_alias text, p_root_task_id uuid, p_policy jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -217,10 +193,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_review_budget_insert(text, text, uuid, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_budget_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_budget_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_budget_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_budget_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_budget_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_worker_grant_insert(p_worker_role text, p_owner_id text, p_project_alias text, p_agent_profile text, p_mode text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -239,10 +211,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_worker_grant_insert(text, text, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_worker_grant_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_worker_grant_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_worker_grant_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_worker_grant_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_worker_grant_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert(p_owner_id text, p_profile_alias text, p_project_alias text, p_status text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -262,9 +230,6 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert(text, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert TO forge_agent;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_conversation_insert(p_id uuid, p_owner_id text, p_title text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -284,10 +249,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_conversation_insert(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_insert(p_id uuid, p_conversation_id uuid, p_request_id text, p_model_id text, p_status text, p_ide_chat_owner_id text, p_ide_chat_id uuid, p_ide_chat_revision bigint, p_distributed boolean, p_run_deadline text, p_next_attempt_at text, p_mail_owner_id text, p_mail_thread_id uuid, p_mail_source_run_id uuid)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -311,10 +272,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_run_insert(uuid, uuid, text, text, text, text, uuid, bigint, boolean, text, text, text, uuid, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_message_insert(p_conversation_id uuid, p_position bigint, p_run_id uuid, p_role text, p_content text, p_tool_call_id text, p_tool_result_call_id text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -335,10 +292,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_message_insert(uuid, bigint, uuid, text, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_message_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_message_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_message_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_message_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_message_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_call_insert(p_run_id uuid, p_call_id text, p_tool_name text, p_arguments jsonb, p_status text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -361,10 +314,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_call_insert(uuid, text, text, jsonb, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_result_insert(p_run_id uuid, p_call_id text, p_outcome text, p_exit_code integer, p_stdout text, p_stderr text, p_output_truncated boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -386,10 +335,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_result_insert(uuid, text, text, integer, text, text, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_result_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_result_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_result_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_result_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_result_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_event_insert(p_run_id uuid, p_event_type text, p_data jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -411,10 +356,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_run_event_insert(uuid, text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_event_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_event_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_event_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_event_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_event_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_tab_insert(p_owner_id text, p_tab_id text, p_lease text, p_revision bigint, p_base_history_revision bigint, p_base_history_fingerprint text, p_snapshot jsonb, p_chat_history_enabled boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -434,10 +375,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_insert(text, text, text, bigint, bigint, text, jsonb, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_history_insert(p_owner_id text, p_revision bigint, p_transcripts jsonb, p_chat_history_active boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -457,10 +394,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_workspace_history_insert(text, bigint, jsonb, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_chat_insert(p_owner_id text, p_id uuid, p_title text, p_messages jsonb, p_revision bigint, p_expires_on text, p_time_zone text, p_expires_at text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -480,10 +413,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_chat_insert(text, uuid, text, jsonb, bigint, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.mail_thread_insert(p_owner_id text, p_id uuid, p_subject text, p_profile_id text, p_context_remaining_tokens integer)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -502,10 +431,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.mail_thread_insert(text, uuid, text, text, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.mail_message_insert(p_owner_id text, p_thread_id uuid, p_run_id uuid, p_role text, p_content text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -524,10 +449,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.mail_message_insert(text, uuid, uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_message_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_message_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_message_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_message_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_message_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.jenkins_event_insert(p_owner_id text, p_project_alias text, p_sequence bigint, p_jenkins_instance text, p_job_name text, p_delivery_id text, p_event_kind text, p_build_number integer, p_queue_id bigint, p_commit_sha text, p_branch text, p_build_result text, p_stage_name text, p_stage_status text, p_duration_ms integer, p_build_url text, p_summary text, p_correlation_id text, p_occurred_at text, p_payload_sha256 text, p_actor text, p_backfilled boolean, p_reconciled boolean, p_completion_time_estimated boolean, p_started_at text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -546,10 +467,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.jenkins_event_insert(text, text, bigint, text, text, text, text, integer, bigint, text, text, text, text, text, integer, text, text, text, text, text, text, boolean, boolean, boolean, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.jenkins_event_delivery_insert(p_event_id uuid, p_owner_id text, p_project_alias text, p_event_sequence bigint, p_consumer_name text, p_status text, p_max_attempts integer)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -568,10 +485,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_insert(uuid, text, text, bigint, text, text, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_workflow_insert(p_owner_id text, p_project_alias text, p_root_task_id uuid, p_active_task_id uuid, p_author_profile text, p_reviewer_profile text, p_policy_digest text, p_snapshot jsonb, p_phase text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -591,10 +504,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_workflow_insert(text, text, uuid, uuid, text, text, text, jsonb, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_task_insert(p_owner_id text, p_project_alias text, p_task_id uuid, p_workflow_id uuid, p_role text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -613,10 +522,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_task_insert(text, text, uuid, uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_task_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_task_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_task_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_task_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_task_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_context_insert(p_assignment_id uuid, p_content text, p_sha256 text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -637,10 +542,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_context_insert(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_context_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_context_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_context_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_context_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_context_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_review_insert(p_review_id uuid, p_workflow_id uuid, p_owner_id text, p_project_alias text, p_source_task_id uuid, p_source_assignment_id uuid, p_source_sha256 text, p_target_kind text, p_reviewer_task_id uuid, p_target_json text, p_target_sha256 text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -659,10 +560,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_review_insert(uuid, uuid, text, text, uuid, uuid, text, text, uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_action_insert(p_action_id uuid, p_workflow_id uuid, p_owner_id text, p_project_alias text, p_workflow_revision bigint, p_kind text, p_source_key text, p_intent jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -681,10 +578,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_action_insert(uuid, uuid, text, text, bigint, text, text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert(p_owner_id text, p_project_alias text, p_workflow_id uuid, p_root_task_id uuid, p_actor_kind text, p_actor_id text, p_reason text, p_acceptance_ref text, p_plan_task_id uuid, p_plan_assignment_id uuid, p_plan_sha256 text, p_prior_workflow_revision bigint, p_prior_root_revision bigint, p_prior_phase text, p_prior_plan_revisions integer, p_prior_review_id uuid, p_prior_escalation_reason text, p_retry_event_id uuid, p_idempotency_key text, p_intent_digest text, p_implement_task_id uuid, p_implement_assignment_id uuid, p_receipt jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -703,10 +596,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert(text, text, uuid, uuid, text, text, text, text, uuid, uuid, text, bigint, bigint, text, integer, uuid, text, uuid, text, text, uuid, uuid, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_task_update(p_owner_id text, p_project_alias text, p_id uuid, p_status text, p_mode text, p_revision bigint, p_agent_profile text, p_pinned_recipe jsonb, p_recipe_digest text, p_cancelled_at text, p_set_cancelled_at_now boolean, p_clear_cancelled_at boolean, p_accepted_at text, p_set_accepted_at_now boolean, p_touch_accepted_at boolean, p_clear_accepted_at boolean, p_latest_attempt_id uuid, p_resume_workspace_digest text, p_plan_decision_id uuid, p_feedback_id uuid, p_feedback_sha256 text, p_legacy_resume_note text, p_auto_repair boolean, p_review_required boolean, p_workflow_required boolean, p_workflow_id uuid, p_workflow_review_id uuid, p_workflow_feedback_review_id uuid, p_clear_workflow_feedback_review_id boolean, p_workflow_feedback_sha256 text, p_clear_workflow_feedback_sha256 boolean, p_title text, p_review_note text, p_bump_revision boolean, p_cancel_transition boolean, p_cancel_or_request_transition boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -749,10 +638,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_task_update(text, text, uuid, text, text, bigint, text, jsonb, text, text, boolean, boolean, text, boolean, boolean, boolean, uuid, text, uuid, uuid, text, text, boolean, boolean, boolean, uuid, uuid, uuid, boolean, text, boolean, text, text, boolean, boolean, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_update(p_workflow_id uuid, p_phase text, p_enabled boolean, p_escalation_reason text, p_plan_revisions_delta integer, p_snapshot jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -774,10 +659,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_update(uuid, text, boolean, text, integer, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_review_update(p_workflow_review_id uuid, p_status text, p_diagnostics jsonb, p_target_json text, p_target_sha256 text, p_reviewer_task_id uuid, p_reviewer_attempt_id uuid, p_reviewer_result_sha256 text, p_verdict_json text, p_verdict_sha256 text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -803,10 +684,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_review_update(uuid, text, jsonb, text, text, uuid, uuid, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_action_update(p_action_id uuid, p_status text, p_worker_id text, p_clear_worker_id boolean, p_lease_token uuid, p_clear_lease_token boolean, p_lease_expires_at text, p_clear_lease_expires_at boolean, p_lease_60s boolean, p_intent jsonb, p_finish_receipt jsonb, p_finish_token uuid, p_clear_finish_token boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -830,10 +707,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_action_update(uuid, text, text, boolean, uuid, boolean, text, boolean, boolean, jsonb, jsonb, uuid, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_update(p_review_id uuid, p_status text, p_owner_decision jsonb, p_clear_owner_decision boolean, p_findings jsonb, p_summary text, p_reason text, p_feedback_id uuid, p_candidate_commit text, p_clear_candidate_commit boolean, p_gate_manifest_sha256 text, p_clear_gate_manifest_sha256 boolean, p_verification jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -859,10 +732,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_review_update(uuid, text, jsonb, boolean, jsonb, text, text, uuid, text, boolean, text, boolean, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_update(p_id uuid, p_status text, p_ide_chat_revision bigint, p_lease_owner text, p_clear_lease_owner boolean, p_lease_until text, p_clear_lease_until boolean, p_attempt_token uuid, p_clear_attempt_token boolean, p_attempt_no integer, p_next_attempt_at text, p_accepted_result_hash text, p_clear_accepted_result_hash boolean, p_requeue boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -888,10 +757,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_run_update(uuid, text, bigint, text, boolean, text, boolean, uuid, boolean, integer, text, text, boolean, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_call_update(p_run_id uuid, p_call_id text, p_status text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -911,10 +776,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_call_update(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_tab_update(p_owner_id text, p_tab_id text, p_revision bigint, p_base_history_revision bigint, p_base_history_fingerprint text, p_snapshot jsonb, p_clear_snapshot boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -938,10 +799,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_update(text, text, bigint, bigint, text, jsonb, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_history_update(p_owner_id text, p_revision bigint, p_bump_revision boolean, p_transcripts jsonb, p_chat_history_active boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -963,10 +820,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_workspace_history_update(text, bigint, boolean, jsonb, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_chat_update(p_owner_id text, p_id uuid, p_title text, p_clear_title boolean, p_messages jsonb, p_expires_on text, p_clear_expires_on boolean, p_time_zone text, p_clear_time_zone boolean, p_expires_at text, p_clear_expires_at boolean, p_bump_revision boolean, p_set_removed_at boolean, p_removal_reason text, p_set_retention_if_fresh boolean, p_require_unexpired boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -994,10 +847,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_chat_update(text, uuid, text, boolean, jsonb, text, boolean, text, boolean, text, boolean, boolean, boolean, text, boolean, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.mail_thread_update(p_owner_id text, p_id uuid, p_latest_run_id uuid, p_context_remaining_tokens integer, p_archive boolean, p_archive_base_revision bigint, p_manual_archive boolean, p_require_not_manually_archived boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1026,10 +875,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.mail_thread_update(text, uuid, uuid, integer, boolean, bigint, boolean, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.mail_thread_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.jenkins_event_delivery_update(p_delivery_row_id uuid, p_status text, p_worker_id text, p_clear_worker_id boolean, p_lease_token uuid, p_clear_lease_token boolean, p_lease_expires_at text, p_clear_lease_expires_at boolean, p_lease_expires_in_secs integer, p_next_attempt_delay_secs integer, p_last_error text, p_default_last_error text, p_receipt_digest text, p_increment_attempt_count boolean, p_set_consumed_at_now boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1055,10 +900,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_update(uuid, text, text, boolean, uuid, boolean, text, boolean, integer, integer, text, text, text, boolean, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_event_delivery_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_workflow_update(p_workflow_id uuid, p_active_task_id uuid, p_phase text, p_plan_revisions integer, p_code_revisions integer, p_enabled boolean, p_state jsonb, p_bump_revision boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1082,10 +923,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_workflow_update(uuid, uuid, text, integer, integer, boolean, jsonb, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_review_update(p_review_id uuid, p_status text, p_reviewer_attempt_id uuid, p_reviewer_result_sha256 text, p_verdict jsonb, p_receipt jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1107,10 +944,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_review_update(uuid, text, uuid, text, jsonb, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_review_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_action_update(p_action_id uuid, p_status text, p_lease_token uuid, p_clear_lease_token boolean, p_lease_role text, p_clear_lease_role boolean, p_lease_until text, p_clear_lease_until boolean, p_result jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1132,10 +965,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_action_update(uuid, text, uuid, boolean, text, boolean, text, boolean, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_update TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_update TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_update TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_update TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_action_update TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_conversation_delete(p_owner_id text, p_ids text[])
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1153,10 +982,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_conversation_delete(text, text[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_delete TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_delete TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_delete TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_delete TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_conversation_delete TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_delete(p_ide_chat_owner_id text, p_ide_chat_id uuid)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1174,10 +999,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_run_delete(text, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_delete TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_delete TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_delete TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_delete TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_delete TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_tab_delete(p_owner_id text, p_tab_ids text[])
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1195,10 +1016,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_delete(text, text[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_delete TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_delete TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_delete TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_delete TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_tab_delete TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.inference_result_delete(p_run_id uuid)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1216,10 +1033,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.inference_result_delete(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.inference_result_delete TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.inference_result_delete TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.inference_result_delete TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.inference_result_delete TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.inference_result_delete TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_review_insert(p_workflow_id uuid, p_owner_id text, p_project_alias text, p_target_kind text, p_source_task_id uuid, p_source_attempt_id uuid, p_source_result_sha256 text, p_source_revision bigint, p_source_review_id uuid, p_candidate_commit text, p_gate_manifest_sha256 text, p_supersedes_workflow_review_id uuid, p_review_generation integer, p_supersedes_review_id uuid, p_workflow_review_id uuid, p_on_conflict_do_nothing boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1242,10 +1055,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_review_insert(uuid, text, text, text, uuid, uuid, text, bigint, uuid, text, text, uuid, integer, uuid, uuid, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_review_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_action_insert(p_workflow_id uuid, p_owner_id text, p_project_alias text, p_kind text, p_source_key text, p_workflow_review_id uuid, p_source_publication_id uuid, p_status text, p_intent jsonb, p_finish_receipt jsonb, p_only_if_reviewing boolean, p_on_conflict_do_nothing boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1276,10 +1085,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_action_insert(uuid, text, text, text, text, uuid, uuid, text, jsonb, jsonb, boolean, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_insert_copy(p_source_review_id uuid, p_reconciliation_receipt_id uuid, p_summary text, p_source_revision bigint, p_increment_infrastructure_retries boolean, p_strip_verification_keys boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1297,10 +1102,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_review_insert_copy(uuid, uuid, text, bigint, boolean, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert_copy TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert_copy TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert_copy TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert_copy TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_insert_copy TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.jenkins_observation_insert(p_owner_id text, p_project_alias text, p_jenkins_instance text, p_job_name text, p_observation_key text, p_build_number integer, p_queue_id bigint, p_last_event_id uuid, p_last_event_sequence bigint, p_last_event_kind text, p_commit_sha text, p_branch text, p_build_result text, p_stage_name text, p_stage_status text, p_duration_ms integer, p_build_url text, p_summary text, p_occurred_at text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1322,10 +1123,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.jenkins_observation_insert(text, text, text, text, text, integer, bigint, uuid, bigint, text, text, text, text, text, text, integer, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_observation_insert TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_observation_insert TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_observation_insert TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_observation_insert TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.jenkins_observation_insert TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.workflow_action_lease(p_worker_id text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1352,10 +1149,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.workflow_action_lease(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.workflow_action_lease TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.workflow_action_lease TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.workflow_action_lease TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.workflow_action_lease TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.workflow_action_lease TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_workflow_cancel(p_project_alias text, p_task_id uuid, p_expected_revision bigint, p_idempotency_key text, p_actor_kind text, p_actor_id text, p_cause text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1572,10 +1365,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_workflow_cancel(text, uuid, bigint, text, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_cancel TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_cancel TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_cancel TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_cancel TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_workflow_cancel TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_cancel(p_project_alias text, p_task_id uuid, p_expected_revision bigint, p_idempotency_key text, p_actor_kind text, p_actor_id text, p_cause text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
@@ -1777,10 +1566,6 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_cancel(text, uuid, bigint, text, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_cancel TO forge_agent;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_cancel TO forge_coding_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_cancel TO forge_coding_reconciler;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_cancel TO forge_gpu_worker;
-GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_cancel TO muse_proxy_writer;
 
 CREATE OR REPLACE FUNCTION forge_external_agent._scope(p_project text,p_profile text) RETURNS forge_external_agent.scope_grants LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
 DECLARE g forge_external_agent.scope_grants%ROWTYPE;n bigint;effective name;
@@ -1831,7 +1616,7 @@ BEGIN
  INSERT INTO forge_external_agent.artifacts(assignment_id,sha256,content,summary,submitted_at,principal,generation,recipe_digest) VALUES(p_id,digest,p_content,p_summary,stamp,effective,p_gen,a.intent->>'recipe_digest');
  UPDATE forge_agent.coding_tasks SET status='awaiting_review',revision=revision+1,updated_at=stamp WHERE(owner_id,project_alias,id)=(a.owner_id,a.project_alias,a.task_id);
  UPDATE forge_external_agent.assignments SET status='submitted',lease_token=NULL,lease_until=NULL,finish_token=p_token,finish_intent=intent_hash,receipt=r,updated_at=stamp WHERE assignment_id=p_id;
- PERFORM forge_external_agent._event(a,'awaiting_review',r);RETURN r;
+ PERFORM forge_external_agent._event(a,'awaiting_review',r||jsonb_build_object('actor',jsonb_build_object('kind','agent','id',a.profile_alias)));RETURN r;
 END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_external_agent_api.finish(uuid,integer,uuid,text,text) FROM PUBLIC;
@@ -1975,10 +1760,6 @@ GRANT SELECT ON forge_agent.coding_worker_grants TO forge_coding_worker;
 GRANT SELECT ON forge_agent.coding_workflow_actions TO forge_coding_worker;
 GRANT SELECT ON forge_agent.coding_workflow_reviews TO forge_coding_worker;
 GRANT SELECT ON forge_agent.coding_workflows TO forge_coding_worker;
-GRANT USAGE ON SCHEMA forge_agent TO forge_gpu_worker;
-GRANT SELECT ON forge_agent.gpu_worker_readiness TO forge_gpu_worker;
-GRANT SELECT ON forge_agent.inference_results TO forge_gpu_worker;
-GRANT SELECT ON forge_agent.runs TO forge_gpu_worker;
 GRANT USAGE ON SCHEMA forge_agent TO muse_proxy_writer;
 GRANT USAGE ON SCHEMA forge_external_agent TO muse_proxy_writer;
 GRANT SELECT ON forge_agent.coding_events TO muse_proxy_writer;

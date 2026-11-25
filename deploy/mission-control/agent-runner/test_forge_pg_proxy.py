@@ -30,6 +30,12 @@ class FakeCursor:
         if sql.strip() == "SELECT 1":
             self._row = (1,)
             return
+        if sql.strip().startswith("SELECT count(*)"):
+            self._row = {"count": 3}
+            return
+        if "SELECT EXISTS(" in sql:
+            self._row = {"exists": True}
+            return
         if "forge_pg_proxy_api.audit" in sql:
             if self.connection.fail_audit:
                 raise RuntimeError("audit unavailable")
@@ -381,30 +387,118 @@ class ProxyReadTest(unittest.TestCase):
         self.assertIn("wf.owner_id = %s", selects[0])
 
     def test_role_scoped_reads_bind_the_callers_role(self):
+        # The coordinator monitors GPU workers, so it is exempt from
+        # the role scope: it may filter worker_name freely (including
+        # the GPU role) or read all rows with no worker predicate.
         instance, created = make_proxy()
-        gpu = instance.callers["gpu"]
-        # The GPU worker may not read at all (allowlist), so use the
-        # coordinator's view of the table shape via a direct call:
-        # gpu_worker_readiness is role-scoped to the reader's role.
         coordinator = instance.callers["coordinator"]
         instance.execute(coordinator,
                          "read.forge_agent.gpu_worker_readiness",
-                         {"filter": {"worker_name": "forge_agent"}})
+                         {"filter": {"worker_name": "forge_gpu_worker"}})
         selects = [(sql, params) for sql, params in created[0].statements
                    if sql.startswith("SELECT t.* FROM")]
         self.assertEqual(len(selects), 1)
         self.assertIn("t.worker_name = %s", selects[0][0])
-        self.assertEqual(selects[0][1][0], "forge_agent")
+        self.assertEqual(selects[0][1][0], "forge_gpu_worker")
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        instance.execute(coordinator,
+                         "read.forge_agent.gpu_worker_readiness", {})
+        selects = [(sql, params) for sql, params in created[0].statements
+                   if sql.startswith("SELECT t.* FROM")]
+        self.assertEqual(len(selects), 1)
+        self.assertNotIn("worker_name", selects[0][0])
+        # A non-exempt caller is still bound to its own role.
+        instance, created = make_proxy()
+        restricted = proxy.Caller(
+            "custom", "forge_coding_worker", "mission-control", "worker",
+            {"fn": set(), "op": set(),
+             "read": {"forge_agent.gpu_worker_readiness"},
+             "notify": set(), "subscribe": set()})
+        instance.callers["custom"] = restricted
         with self.assertRaises(proxy.Rejected) as caught:
             instance.execute(
-                coordinator, "read.forge_agent.gpu_worker_readiness",
+                restricted, "read.forge_agent.gpu_worker_readiness",
                 {"filter": {"worker_name": "forge_gpu_worker"}})
         self.assertEqual(caught.exception.code, "not_allowed")
+        instance.execute(restricted,
+                         "read.forge_agent.gpu_worker_readiness", {})
+        selects = [(sql, params) for sql, params in created[0].statements
+                   if sql.startswith("SELECT t.* FROM")]
+        self.assertEqual(len(selects), 1)
+        self.assertIn("t.worker_name = %s", selects[0][0])
+        self.assertEqual(selects[0][1][0], "forge_coding_worker")
         # And the GPU caller itself may not read the table at all.
+        instance, _ = make_proxy()
+        gpu = instance.callers["gpu"]
         with self.assertRaises(proxy.Rejected) as caught:
             instance.execute(gpu, "read.forge_agent.gpu_worker_readiness",
                              {})
         self.assertEqual(caught.exception.code, "not_allowed")
+
+    def test_reads_count_and_exists_share_filters_and_scope(self):
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        result = instance.execute(
+            coordinator, "read.forge_agent.coding_tasks.count",
+            {"filter": {"status": "queued"}})
+        self.assertEqual(result, {"count": 3})
+        counts = [sql for sql, _ in created[0].statements
+                  if sql.startswith("SELECT count(*)")]
+        self.assertEqual(len(counts), 1)
+        self.assertIn("t.owner_id = %s", counts[0])
+        self.assertIn("t.status = %s", counts[0])
+        result = instance.execute(
+            coordinator, "read.forge_agent.coding_tasks.exists",
+            {"filter": {"status": "queued"}})
+        self.assertEqual(result, {"exists": True})
+        exists = [sql for sql, _ in created[0].statements
+                  if "SELECT EXISTS(" in sql]
+        self.assertEqual(len(exists), 1)
+        self.assertIn("t.owner_id = %s", exists[0])
+        # The same scope rules apply: a foreign owner filter is
+        # refused for the aggregate forms too.
+        with self.assertRaises(proxy.Rejected) as caught:
+            instance.execute(
+                coordinator, "read.forge_agent.coding_tasks.count",
+                {"filter": {"owner_id": "other-owner"}})
+        self.assertEqual(caught.exception.code, "not_allowed")
+        # Aggregates share the table's allowlist entry.
+        worker = instance.callers["worker"]
+        with self.assertRaises(proxy.Rejected) as caught:
+            instance.execute(
+                worker, "read.forge_agent.coding_publications.count", {})
+        self.assertEqual(caught.exception.code, "not_allowed")
+        with self.assertRaises(proxy.Rejected) as caught:
+            instance.execute(coordinator, "read.forge_agent.nope.count",
+                             {})
+        self.assertEqual(caught.exception.code, "unknown_operation")
+
+    def test_reads_paginate_and_order(self):
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        instance.execute(coordinator, "read.forge_agent.coding_tasks",
+                         {"limit": 5, "offset": 10, "order_desc": True})
+        selects = [(sql, params) for sql, params in created[0].statements
+                   if sql.startswith("SELECT t.* FROM")]
+        self.assertEqual(len(selects), 1)
+        self.assertIn("ORDER BY t.created_at DESC LIMIT %s OFFSET %s",
+                      selects[0][0])
+        self.assertEqual(selects[0][1][-2:], [5, 10])
+        # Defaults: ascending order from offset 0.
+        instance.execute(coordinator, "read.forge_agent.coding_tasks", {})
+        selects = [(sql, params) for sql, params in created[0].statements
+                   if sql.startswith("SELECT t.* FROM")]
+        self.assertEqual(len(selects), 2)
+        self.assertIn("ORDER BY t.created_at ASC LIMIT %s OFFSET %s",
+                      selects[1][0])
+        self.assertEqual(selects[1][1][-2:], [100, 0])
+        for bad in ({"offset": -1}, {"offset": 100001},
+                    {"offset": "10"}, {"order_desc": "yes"}):
+            with self.assertRaises(proxy.Rejected) as caught:
+                instance.execute(coordinator,
+                                 "read.forge_agent.coding_tasks", bad)
+            self.assertEqual(caught.exception.code, "invalid_argument")
 
     def test_reads_reject_unknown_tables_and_columns(self):
         instance, _ = make_proxy()
@@ -705,6 +799,79 @@ class ProxyCatalogTest(unittest.TestCase):
                              "host": "127.0.0.1", "port": 5432}}
             with self.assertRaises(ValueError):
                 proxy.build_proxy(config)
+
+    def test_argument_validation_accepts_nulls(self):
+        # Finding review-function-nullability-contract: validation
+        # must accept the SQL NULLs valid DAO calls contain (a failed
+        # publication has no branch, commit, or PR URL); the function
+        # and column constraints decide whether a NULL is valid.
+        values = proxy.validate_args(
+            proxy.func_params(
+                "forge_coding_reconciler_api.publication_finish",
+                proxy.FUNC_CATALOG[
+                    "forge_coding_reconciler_api.publication_finish"]),
+            {"p_publication_id": "00000000-0000-0000-0000-000000000001",
+             "p_lease_token": "00000000-0000-0000-0000-000000000002",
+             "p_status": "failed", "p_branch": None,
+             "p_commit_sha": None, "p_pr_url": None,
+             "p_summary": "failed"})
+        self.assertEqual(values[3:], [None, None, None, "failed"])
+        for kind in ("text", "uuid", "integer", "bigint", "boolean",
+                     "jsonb", "text[]"):
+            self.assertIsNone(proxy.validate_value(kind, None))
+        # Wrong types are still rejected.
+        with self.assertRaises(proxy.Rejected):
+            proxy.validate_args([("n", "integer", True)], {"n": "3"})
+        with self.assertRaises(proxy.Rejected):
+            proxy.validate_args([("id", "uuid", True)],
+                                {"id": "not-a-uuid"})
+
+    def test_pending_reconciliations_limit_is_integer(self):
+        # The registry said text although the SQL parameter is integer.
+        params = proxy.func_params(
+            "forge_coding_reconciler_api.pending_reconciliations",
+            proxy.FUNC_CATALOG[
+                "forge_coding_reconciler_api.pending_reconciliations"])
+        self.assertEqual(params, [("p_limit", "integer", False, True)])
+
+    def test_omitted_defaulted_param_renders_sql_default(self):
+        # A parameter with a SQL DEFAULT is optional; omitting it must
+        # render the DEFAULT keyword, not NULL (pending_reconciliations
+        # rejects NULL; retry_event_observe defaults to empty arrays).
+        instance, created = make_proxy()
+        reconciler = instance.callers["reconciler"]
+        instance.execute(
+            reconciler,
+            "fn.forge_coding_reconciler_api.pending_reconciliations", {})
+        calls = [(sql, params) for sql, params in created[0].statements
+                 if "pending_reconciliations" in sql]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][0],
+            "SELECT forge_coding_reconciler_api.pending_reconciliations(DEFAULT)")
+        self.assertEqual(calls[0][1], [])
+        instance.execute(
+            reconciler,
+            "fn.forge_coding_reconciler_api.pending_reconciliations",
+            {"p_limit": 10})
+        calls = [(sql, params) for sql, params in created[0].statements
+                 if "pending_reconciliations" in sql]
+        self.assertEqual(calls[-1][0],
+                         "SELECT forge_coding_reconciler_api.pending_reconciliations(%s)")
+        self.assertEqual(calls[-1][1], [10])
+        coordinator = instance.callers["coordinator"]
+        instance.execute(
+            coordinator, "fn.forge_agent.retry_event_observe",
+            {"p_project": "homelab", "p_scope_kind": "task",
+             "p_scope_id": "00000000-0000-0000-0000-000000000001",
+             "p_kind": "build", "p_source_id": "src",
+             "p_digest": "a" * 64})
+        calls = [(sql, params) for sql, params in created[1].statements
+                 if "retry_event_observe" in sql]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][0],
+            "SELECT forge_agent.retry_event_observe(%s, %s, %s, %s, %s, %s, DEFAULT, DEFAULT, DEFAULT)")
 
     def test_argument_validation_rejects_wrong_types(self):
         with self.assertRaises(proxy.Rejected):
