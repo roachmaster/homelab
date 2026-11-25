@@ -127,6 +127,42 @@ its tests and qualification/report records; installed application modules remain
 byte-identical to the live2ee824e release. A fresh source-observed main CI run
 must establish the complete new-source gate; no failed87 receipt is rewritten.
 
+The exact32588ab local full backend rerun passed1571tests, zero skips/failures;
+1560 agent-runner IDs match execution. Jenkins88 passed all45 earlier checks and
+its17 process lifecycle tests, then its executor service was explicitly restarted
+at22:31:22, killing the final backend check. This was a remoting disconnect,
+not a reported failed test or OOM. The old protected progress contains exactly
+45completed checks and one started check with no exit; do not invent its exit.
+A separate SSHAPT rclone installation overlapped the restart. The installed
+Ubuntu needrestart hook makes this a strong correlation; no recordedDBus caller
+proves attribution. The targeted exact-unit needrestart override now defers
+package-triggeredCIagent restarts; package updates/other services remain unchanged.
+It was installed through the reviewed policy-only mode without restarting a unit.
+The interrupted action requires source-bound stopped-process cleanup and a truthful
+FAILED/infrastructure receipt before its ordinary cancel consumer can finish.
+A fresh legitimate source observation must obtain complete CI; no interrupted
+receipt can authorize release.
+
+The running Opus backup also genuinely exhausted its provider allowance at22:08.
+Its workflow remains enabled inImplement, its approved Plan and stopped workspace
+are bound, and its process lease is released. The coordinator recorded one quota
+wait with0reset resumptions used; provider reset is2026-11-26at01:53:09UTC.
+The durable model cooldown withholds Opus while Gemini work continues. No paid
+credit fallback or repeated model probes are used. This is an allowance wait,
+not human attention or a lost event. Account percentages remainunsupported_headless.
+
+The scoped package-restart deferral was installed at
+/etc/needrestart/conf.d/99-forge-ci-agent.conf (root0644), without restarting
+any service. Its exact service pattern and dedicated installer mode passed
+focused Perl/installer tests and independent audit. The reviewed private CI88
+interruption cleanup passed readonly preflight, then ran under exclusive locks.
+It archived original evidence, proved the retired executor invocation and idle
+build account, performed real cleanup, and wroteFAILED/verification_unavailable
+with45observed completed checks and explicit unknown final exit. The ordinary
+cancel consumer then closedde0e59bd asfailed withcleanup_confirmed=true and
+receiptSHA4e26170138bb76240f7e81e2fd11ae3a57ae52fe77ed09c1173eca12806cb80f.
+No task or CI success was synthesized; the fresh main must still pass its gates.
+
 # Previous: Git-independent artifact and verification identities — 2026-11-25
 
 User requests implementing the content-identity design described after task

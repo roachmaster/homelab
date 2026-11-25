@@ -9,6 +9,35 @@ the trusted `forge-exact-candidate` pipeline described below.
 
 ## Current CI pipeline
 
+### Package updates and planned agent restarts
+
+Ubuntu 24.04's installed `needrestart` APT hook automatically restarts affected
+services after package transactions. Such a restart stops every process in
+`forge-jenkins-ci-agent.service`, including a running verification build.
+`setup-ci.py` installs a root-owned 0644 fragment at
+`/etc/needrestart/conf.d/99-forge-ci-agent.conf` that defers automatic restart
+of this exact service. The agent remains visible as requiring a deferred
+restart. Package installation and all other service restart policies remain
+unchanged. See the installed `/usr/share/doc/needrestart/README.Ubuntu` and
+`/etc/needrestart/needrestart.conf` for the packaged behavior and `override_rc`.
+
+To apply just this policy to an existing executor after reviewing the script:
+
+```sh
+sudo python3 -B deploy/mission-control/jenkins/setup-ci.py \
+  --agent-restart-deferral-only --execute
+```
+
+This mode needs no controller credentials and performs no service restart or
+job submission. Full and native-only provisioning also install this policy.
+To apply pending security updates to the running agent, temporarily mark
+`forge-mission-control-ci` offline in Jenkins, wait for its executor and owned
+verification processes to finish and clean up, then restart only
+`forge-jenkins-ci-agent.service`. Verify its authenticated reconnection to the
+same node before returning the node online. Preserve any interrupted build's
+real failure and cleanup receipt; a new successful verification must come from
+the normal exact-source CI path.
+
 The exclusive `forge-mission-control-ci` node has one executor and label
 `forge-ci`; controller executors remain zero. `forge-jenkins-ci-agent.service`
 connects through WebSocket. `forge-exact-candidate` invokes the root-owned
