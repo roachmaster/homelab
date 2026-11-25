@@ -63,6 +63,8 @@ class PublicationConfig:
     release_enabled: bool = False
     release_actor_sha256: str | None = None
     jenkins_events: JenkinsEventsConfig | None = None
+    native_identity_protocol: str = 'legacy-v1'
+    native_identity_after: str | None = None
 
     @property
     def state_root(self):
@@ -77,7 +79,7 @@ def parse_config(raw, worker, *, source_path=None):
         "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode", "jenkins_verification_profile", "jenkins_verification_scope",
         "post_merge_enabled", "post_merge_jenkins_delivery_config", "delivery_enabled",
         "source_observation_enabled", "source_observation_interval_seconds", "release_enabled",
-        "release_actor_sha256", "jenkins_events"
+        "release_actor_sha256", "jenkins_events", "native_identity_protocol", "native_identity_after"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -126,6 +128,12 @@ def parse_config(raw, worker, *, source_path=None):
     hosted_provider = raw.get("hosted_provider", "github-actions")
     if not isinstance(hosted_provider, str) or hosted_provider not in {"github-actions", "jenkins"}:
         raise ValueError("Invalid hosted verification provider")
+    from work_native_identity import NativeIdentityConfig
+    native_identity_protocol=raw.get('native_identity_protocol','legacy-v1')
+    native_identity_after=raw.get('native_identity_after')
+    NativeIdentityConfig(worker.state_root/'publication',native_identity_protocol,native_identity_after)
+    if native_identity_protocol!='legacy-v1' and hosted_provider!='jenkins':
+        raise ValueError('Content identity requires the selected native Jenkins consumer')
     delivery_path = raw.get("jenkins_delivery_config")
     if hosted_provider == "jenkins":
         if delivery_path is None:
@@ -189,7 +197,8 @@ def parse_config(raw, worker, *, source_path=None):
                              tuple(tuple(row) for row in required), merge_enabled, merge_method,
                              hosted_provider, delivery_path, delivery_mode, profile, execution_scope,
                              post_merge_enabled, post_merge_delivery, delivery_enabled,
-                             observation, interval, release_enabled, actor_digest, jenkins_events)
+                             observation, interval, release_enabled, actor_digest, jenkins_events,
+                             native_identity_protocol,native_identity_after)
 
 
 def _parse_jenkins_events(raw, hosted_provider):

@@ -176,8 +176,9 @@ def gate_source_digest(git, repository, head, *, profile=LEGACY_PROFILE):
 
 class ReviewedCandidateProvider:
     """Parent-only immutable review receipts and exact candidate acquisition."""
-    def __init__(self, config, git):
+    def __init__(self, config, git, *,identity_provider=None):
         self.config, self.git = config, git
+        self.identities=identity_provider
 
     def directory(self, review_id):
         path = self.config.state_root / uuid(review_id)
@@ -230,6 +231,11 @@ class ReviewedCandidateProvider:
         if repository.is_symlink() or not repository.is_dir():
             raise PublicationError("review_candidate_changed")
         self.git.verify(repository, job["candidate_commit"])
+        if 'content_identity' in manifest:
+            if self.identities is None:raise PublicationError('native_identity_provider_required')
+            self.identities.acquire({**job,'integration_base':manifest['integration_base']},repository,
+                reference=manifest['content_identity'])
+            return repository,job['candidate_commit']
         source_digest = gate_source_digest(self.git, repository, job["candidate_commit"],
             profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE))
         if (manifest.get("gate_source_sha256") != source_digest
@@ -395,14 +401,20 @@ class ReviewWorker:
                     candidate_digest = WorkspaceLease(repository, self.config.worker.projects[job["project_alias"]],
                         repository / ".git", job["task_id"], head).digest()
                 require_lease()
-                source_gate_digest = gate_source_digest(self.git, repository, head,
-                    profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE))
-                check_job = {**check_job, 'candidate_commit': head, 'integration_base': integration_base,
-                    'gate_manifest_sha256': gate_manifest_sha256(self.config.checks,
-                        self.config.required_hosted_checks, source_gate_digest)}
-                changed = self.git._git(repository, "diff", "--name-only", "-z", job["base_revision"], head).split(b"\0")
-                gate_changes = any(protected_gate_path(path.decode("utf-8"),
-                    profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE)) for path in changed if path)
+                check_job = {**check_job,'candidate_commit':head,'integration_base':integration_base}
+                identity_snapshot=(self.native_ci.prepare_identity(check_job,repository)
+                    if self.native_ci is not None and getattr(self.config,'native_identity_protocol','legacy-v1')=='content-v2'else None)
+                if identity_snapshot is not None:
+                    frozen=identity_snapshot['provenance'];source_gate_digest=frozen['native_gate_source_sha256']
+                    gate_changes=frozen['gate_changes_require_review'];selected_gate=frozen['native_gate_manifest_sha256']
+                else:
+                    source_gate_digest = gate_source_digest(self.git, repository, head,
+                        profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE))
+                    selected_gate=gate_manifest_sha256(self.config.checks,self.config.required_hosted_checks,source_gate_digest)
+                    changed = self.git._git(repository, "diff", "--name-only", "-z", job["base_revision"], head).split(b"\0")
+                    gate_changes = any(protected_gate_path(path.decode("utf-8"),
+                        profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE)) for path in changed if path)
+                check_job={**check_job,'gate_manifest_sha256':selected_gate}
                 stage = "checks"
                 try:
                     report = self.checks.run(check_job, repository, lost)
@@ -465,6 +477,9 @@ class ReviewWorker:
                     "checks_passed": report.checks_passed}
                 if native_binding is not None:
                     manifest['native_ci'] = native_binding
+                if identity_snapshot is not None and head==tested_head:
+                    manifest['version']=2;manifest['content_identity']=self.native_ci.identities.reference(identity_snapshot)
+                    manifest['gate_manifest_sha256']=identity_snapshot['provenance']['native_gate_manifest_sha256']
                 if delivery_failure is not None:
                     manifest['delivery_failure'] = delivery_failure
                 if report.cleanup_confirmed:
