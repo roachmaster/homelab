@@ -814,7 +814,7 @@ CONTENT_IDENTITY_CONTEXT_SHA256 = {
 # Private matched-executor recovery; preserve every historical context and SQL.
 NATIVE_POSTFIX_CONTEXT_SHA256 = {
     'AGENT_WORK.md': 'f52b28a670b00625efb786eece23440cfaff6610e15c5ac22ba4abbd4122999d',
-    'deploy/mission-control/agent-runner/setup-runner.sh': '149f3f31cf7ee57fd0a686661d01dc84b1bfdff0e24bfc04e1015894aae563f8',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'b4081924bcb6e016c719fe2adce92f6d6588d0933b877200bee1ca85946b83c5',
     'deploy/mission-control/agent-runner/test_native_ci_postfix.py': 'fe78df60156e544afd1f3ad89c10e677ec85da9a038faf20c68a2a1a2c045379',
     'deploy/mission-control/agent-runner/test_native_ci_postfix_proof.py': 'cb3e1456e3528d9517ee16d9089e51138175b124a44cf1df10ad09ae8a5e1443',
     'deploy/mission-control/agent-runner/work_identity_contract.py': '8f0184585d57d05a15c5f8aea574fa61be36846408ce572459c612c4e4f2d3de',
