@@ -27,7 +27,7 @@ from work_external_delivery_store import ExternalDeliveryStoreFactory
 from work_ci_contract import (LEGACY_CHECKS, LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE,
     CiGateContractFactory, contract_for_config, verify_verifier_policy_parity)
 from work_verification import protected_retry_observation
-from work_external_review_context import EXTERNAL_DIFF_FLAGS
+from work_external_review_context import EXTERNAL_DIFF_FLAGS, ExternalSourceIntegration
 
 LOG = logging.getLogger('forge-external-delivery')
 SHA = re.compile('[0-9a-f]{40}')
@@ -507,21 +507,59 @@ class TrustedDeliveryPort:
             self.git(None, 'init', '--bare', str(repository))
         elif repository.is_symlink():
             raise ValueError('Unsafe Git quarantine')
-        expected = self.source_head(project)
-        if expected != sha(request['base_revision']):
-            return {'status': 'main_changed', 'expected_main': expected}
+        # The author artifact remains immutable. Freeze the trusted integration
+        # separately, before any content snapshot, import, review or CI effect.
+        # A retry must not silently select newer main for the same action.
+        from work_identity_store import read_identity_snapshot, persist_identity_snapshot
+        integration_path = directory / 'integration.json'
+        frozen = None
+        if integration_path.exists():
+            saved = read_identity_snapshot(integration_path, maximum=4096)
+            if not isinstance(saved,dict) or set(saved)!={'intent_sha256','integration'} or saved['intent_sha256']!=identity:
+                raise ValueError('Prepared integration replay conflict')
+            frozen = ExternalSourceIntegration.from_dict(saved['integration'])
+            expected = frozen.integration_base
+        elif protocol=='content-v2' and (directory/'identity-manifest.json').exists():
+            # Resume pre-upgrade preparation without retargeting its snapshot.
+            prior = read_identity_snapshot(directory/'identity-manifest.json')
+            if prior['intent_sha256']!=identity:raise ValueError('Prepared content replay conflict')
+            expected = sha(prior['integration_base'])
+        else:
+            expected = self.source_head(project)
+        authored_base = sha(request['base_revision'])
         raw = sha(request['candidate_commit'])
         claimed_tree = sha(request['candidate_tree'])
         self.git(repository, '-c', 'credential.helper=!/usr/bin/gh auth git-credential',
-            'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--', remote, expected, raw)
+            'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--', remote, expected, raw, authored_base)
         require_lease()
         if self.git(repository, 'rev-parse', raw + '^{tree}').decode().strip() != claimed_tree:
             raise ValueError('Author candidate tree mismatch')
-        try:
-            self.git(repository, 'merge-base', '--is-ancestor', expected, raw)
-        except PublicationError:
-            return {'status': 'main_changed', 'expected_main': expected}
-        listing = self.git(repository, 'ls-tree', '-r', '-z', '--full-tree', raw)
+        for descendant in (raw, expected):
+            if self.git(repository, 'merge-base', '--all', authored_base, descendant).decode().strip()!=authored_base:
+                raise ValueError('Author candidate and trusted main must descend from the supplied base')
+        prepared_tree = claimed_tree
+        if expected!=authored_base:
+            # --stdin reports clean/conflicted status inside the bounded output;
+            # a command/transport error is never mistaken for a source conflict.
+            # No checkout, index, hook, agent branch or remote ref is modified.
+            merged = self.git(repository, '-c', 'core.hooksPath=/dev/null', 'merge-tree',
+                '--write-tree', '--stdin', '--no-messages', data=(expected+' '+raw+'\n').encode())
+            pieces = merged.split(b'\0')
+            if len(pieces)<3 or pieces[0] not in (b'0',b'1'):
+                raise ValueError('Malformed trusted merge observation')
+            prepared_tree = sha(pieces[1].decode('ascii'))
+            if pieces[0]==b'0':
+                if frozen is not None:raise ValueError('Frozen clean integration can no longer be reproduced')
+                return {'status': 'main_changed', 'expected_main': expected, 'reason':'source_conflict'}
+            if pieces!=[b'1',prepared_tree.encode(),b'',b'']:
+                raise ValueError('Ambiguous trusted merge observation')
+        integration = ExternalSourceIntegration(request['action_id'],authored_base,raw,claimed_tree,expected,prepared_tree)
+        if frozen is not None and frozen!=integration:
+            raise ValueError('Frozen source integration changed')
+        require_lease()
+        persist_identity_snapshot(integration_path,{'intent_sha256':identity,'integration':integration.to_dict()},maximum=4096)
+        claimed_tree = prepared_tree
+        listing = self.git(repository, 'ls-tree', '-r', '-z', '--full-tree', claimed_tree)
         files = {}
         total = 0
         for index, record in enumerate(listing.split(b'\0')):
@@ -551,15 +589,12 @@ class TrustedDeliveryPort:
                    'GIT_COMMITTER_DATE': '@' + str(epoch) + ' +0000'}
             clean = self.git(repository, 'commit-tree', claimed_tree, '-p', expected,
                 data=('Verified Forge workflow ' + request['workflow_id'] + '\n').encode(), env=env).decode().strip()
-        resolved_source_branch, branch_scope = self._resolve_branch_scope(
-            repository,
-            remote,
-            expected=expected,
-            raw=raw,
-            clean=clean,
-            requested_branch=requested_branch,
-            require_lease=require_lease,
-        )
+        if raw==authored_base and clean==expected and requested_branch in (None,'main'):
+            resolved_source_branch, branch_scope = 'main', 'main'
+        else:
+            resolved_source_branch, branch_scope = self._resolve_branch_scope(
+                repository, remote, expected=expected, raw=raw, clean=clean,
+                requested_branch=requested_branch, require_lease=require_lease)
         contract = contract_for_config(self.config)
         content_reference=None
         identity_path=directory/'identity-manifest.json'
@@ -633,6 +668,8 @@ class TrustedDeliveryPort:
             'gate_source_sha256': source_digest, 'gate_manifest_sha256': gate,
             'protected_gate_changes': gate_changes, 'no_change': clean == expected,
             'prepare_action_id': request['action_id']}
+        if expected!=authored_base:
+            result['source_integration']=integration.to_dict()
         if content_reference is not None:
             result.update(content_identity=content_reference,identity_protocol='content-v2')
         durable_json(result_path, {'intent_sha256': identity, 'candidate': result})
@@ -1019,7 +1056,9 @@ class ExternalDeliveryWorker:
             elif action.kind == 'prepare':
                 candidate = self.delivery.prepare_candidate(request, require_lease)
                 result = {'status': candidate.get('status', 'passed'), 'receipt': candidate,
-                          'summary': 'Exact external candidate prepared for independent review.'}
+                          'summary': ('Trusted source integration found conflicts; the preserved candidate needs its original author.'
+                                      if candidate.get('reason')=='source_conflict' else
+                                      'Exact external candidate prepared for independent review.')}
             elif action.kind == 'verify':
                 result = self.delivery.verify(request, require_lease)
             elif action.kind == 'merge':

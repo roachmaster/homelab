@@ -32,7 +32,7 @@ sequenceDiagram
     C->>P: Approved Plan / Muse Implement assignment + full context
     M->>P: Finish candidate commit/tree/base manifest
     C->>P: Queue trusted candidate preparation
-    D->>D: Quarantine raw candidate / produce clean same-tree commit
+    D->>D: Quarantine author source / integrate trusted main / freeze clean candidate
     D->>P: Checkpoint clean commit/tree/diff/gate manifest
     C->>P: Queue independent native code review
     N->>N: Review full approved Plan + exact complete diff
@@ -98,6 +98,26 @@ actual merge commit and tree. None advances `refs/forge/verified-main` or create
 a native source-approval receipt; that native provider retains its original
 receipt semantics.
 
+### Main advances while an external author works
+
+An author submission retains its original task base, commit, tree, assignment
+and artifact digest. Trusted preparation fetches that source and current main
+into its private bare quarantine, verifies both descend from the supplied base,
+and computes a bounded `merge-tree --write-tree --stdin --no-messages` merge.
+A clean merge needs no additional author turn. The typed
+`ExternalSourceIntegration` receipt binds the original source to the integrated
+tree and current main. An immutable `integration.json` freezes this selection
+before import, review or CI, so a retry cannot retarget its action to newer main.
+Legacy full-index patch checks and content-v2 manifests describe the actual
+integrated source; both still require fresh independent review and exact CI.
+
+If main advances after successful CI, the coordinator reserves the existing
+merge event once and queues a new preparation generation for the same author
+artifact. Prior review/CI receipts remain immutable; their references are cleared
+from the new selection. Only a confirmed source conflict returns work to the
+original author with the approved Plan and preserved artifact. Transport errors
+remain bounded delivery observations, and no retry budget is reset.
+
 ## Jenkins execution and recovery
 
 `deploy/mission-control/jenkins/setup-ci.py --execute` provisions the fixed
@@ -128,7 +148,7 @@ blind second POST. Duplicate conflicting runs or incomplete observations cannot
 establish success or absence. Cancellation waits for an actual cancelled queue
 or a stopped build with the supervisor's cleanup receipt.
 
-Publication imports a same-tree commit with public main as its sole parent.
+Publication imports the prepared integrated tree with public main as its sole parent.
 Private author history stays in quarantine. After independent approval and all
 three exact-source gates, the worker publishes this clean candidate and performs
 a non-forced main update. Main movement requires fresh integration, review and
