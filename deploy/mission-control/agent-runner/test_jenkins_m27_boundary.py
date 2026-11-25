@@ -683,7 +683,7 @@ PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_external_plan_override.py': 'd7ac2a2aa3500799ec98128bcb9d8d14ac22f298769c14590a3e61828d3e5f8c',
     'deploy/mission-control/agent-runner/work_external_workflow.py': '3e0687fc5036c196ec10c1fda8a41a8fdc9c18604b5543c628540c08db471cb7',
     'deploy/mission-control/jenkins/verify-candidate.py': 'b9543660ae152263012f4e34420acc90429e407050f3a2fdafcde0725f397510',
-    'deploy/mission-control/sql/apply.sql': 'fa98aed54bd2e3b424a4a3978db0da3ffd5f35fcad94d3488b152566121d10fe',
+    'deploy/mission-control/sql/apply.sql': '3f7a2953b3e214121b1427f9ce78fcf7e47bfa71a6f4cf4dd74c3f171ad5e8cc',
     'deploy/mission-control/sql/management/grant-external-workflows.sql': '09ef88eb14016a91d113abdd73159a8c5119cdda6c4d868a3cbde415c98db8a3',
     'deploy/mission-control/sql/management/verify-external-workflows.sql': '4d667f38bbbc3fd49fec1f3a4472c3ca92761adf8765c1aec108d0172c70cde0',
     'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql': '4e231e802726cde93a949d99b591aed3be3153abfa239bf7525959c24f49cf81',
@@ -757,7 +757,7 @@ JENKINS_PAGED_OBSERVER_CONTEXT_SHA256 = {
 # existing mutation transport, or historical source pin is changed.
 NATIVE_CI_CONTEXT_RECOVERY_SHA256 = {
     'AGENT_WORK.md': 'c826ecfe8352eb1143993002c9acb74db3ff73a29ee8134646908e4659f4753c',
-    'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'b6251feea117702a7ea09f048485f5909b2c541e78d42946eb4632b8de848a51',
     'deploy/mission-control/agent-runner/test_native_ci_reprepare.py': 'ad1e395a60ccb09a495a15e48573b58df99d1eedc81eb47b458a2ae41e7674f0',
     'deploy/mission-control/agent-runner/work_native_ci_reprepare.py': '7a506685c0974e9cc29fe93416416538b79e71dfffe553bb2e8058cd08ca5db4',
 }
