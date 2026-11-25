@@ -3707,6 +3707,102 @@ async function agentsJourney() {
     for(const id of ['agents-progress-panel','agents-result-panel'])await check(page.locator('#'+id)).toBeHidden();
     await screenshot(page,'ide-agents-external-workflow.png');
 
+    // Verify per-agent persistent branches on overview & interactive correlation CI/CD stages in reader.
+    const branchActionId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const mainActionId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const cicdConsoleLog='[stage] compiling workspace\nerror[E0308]: mismatched types <script>window.__forgeCicdXss=true</script><img src=x onerror=window.__forgeCicdXss=true>\n'
+      +'console detail line '.repeat(40)+'END_OF_CICD_LOG\n';
+    relay.setCorrelationCicd(externalWorkflowTask,{
+      branch_state:{
+        project_alias:'workspace',
+        agent_profile:'muse-db-primary',
+        branch_name:'forge/agent/muse-db-primary',
+        branch_scope:'branch/forge-agent-muse-db-primary-0123456789abcdef',
+        head_commit_sha:'e'.repeat(40),
+        fetched_main_sha:'f'.repeat(40),
+        fetched_main_at:'2026-11-19T18:00:00Z',
+        sync_status:'synced_with_main',
+        conflict_paths:[],
+        cache_status:'hit_branch',
+        cache_updated_at:'2026-11-19T18:00:00Z',
+        last_task_id:externalWorkflowTask,
+        last_correlation_id:null,
+        reservation_status:'active',
+        active_scope_kind:'external_workflow',
+        active_scope_id:'33333333-3333-4333-8333-333333333333',
+        active_root_task_id:externalWorkflowTask,
+        active_task_id:externalWorkflowTask,
+        active_pr_url:'https://github.com/roachmaster/homelab/pull/101',
+        reservation_epoch:2,
+        reservation_blocker:null,
+      },
+      waiting_on_branch_owner:false,
+      runs:[
+        {
+          run_id:branchActionId,action_id:branchActionId,job_name:'forge-native-verify',build_number:42,
+          pipeline_scope:'branch',commit_sha:'e'.repeat(40),branch_name:'forge/agent/muse-db-primary',
+          branch_scope:'branch/forge-agent-muse-db-primary-0123456789abcdef',
+          phase:'complete',availability:'available',status:'failed',
+          started_at:'2026-11-19T18:00:00Z',completed_at:'2026-11-19T18:01:00Z',
+          stages:[
+            {stage_id:'compile',label:'Compile',status:'passed',returncode:0,duration_ms:1200,error_count:0,has_console_log:true,log_byte_count:128,sub_phases:[]},
+            {stage_id:'unit-tests',label:'Unit & In-Memory Tests',status:'failed',returncode:101,duration_ms:4300,tests_passed:964,tests_failed:1,tests_skipped:0,error_count:1,error_excerpt:'error[E0308]: mismatched types <script>window.__forgeCicdXss=true</script>',test_framework:'cargo-test',test_cases:[{name:'tests::failing_case',status:'failed'}],has_console_log:true,log_byte_count:cicdConsoleLog.length,sub_phases:[{phase_id:'all-features-unit-tests',phase_kind:'tests',label:'all-features-unit-tests',status:'failed',returncode:101,duration_ms:4300,tests_passed:964,tests_failed:1,tests_skipped:0}]},
+          ],
+        },
+        {
+          run_id:mainActionId,action_id:mainActionId,job_name:'forge-main-post-merge',build_number:43,
+          pipeline_scope:'main',commit_sha:'f'.repeat(40),branch_name:'main',branch_scope:'main',
+          phase:'complete',availability:'available',status:'passed',
+          started_at:'2026-11-19T18:02:00Z',completed_at:'2026-11-19T18:04:00Z',
+          stages:[
+            {stage_id:'real-browser',label:'Real Browser (28 groups)',status:'passed',returncode:0,duration_ms:32000,tests_passed:28,tests_failed:0,tests_skipped:0,error_count:0,test_framework:'ui-qa',test_cases:[{name:'group-01-agents',status:'passed'}],has_console_log:false,log_byte_count:0,sub_phases:[]},
+          ],
+        },
+      ],
+    },{
+      [`${branchActionId}:unit-tests:console`]:{content:cicdConsoleLog,pageSize:200,tests_passed:964,tests_failed:1,tests_skipped:0,test_cases:[{name:'tests::failing_case',status:'failed'}]},
+    });
+    await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-cicd-panel')).toBeVisible();
+    await check(page.locator('#agents-cicd-branch')).toHaveText('forge/agent/muse-db-primary');
+    await check(page.locator('#agents-cicd-sync')).toContainText('Synced with main');
+    await check(page.locator('#agents-cicd-cache')).toContainText('Branch cache hit');
+    await check(page.locator('#agents-cicd-owner')).toContainText('Owned by this task');
+    // Latest run (Main CI #43) auto-selected with 28/28 tests.
+    await check(page.locator('#agents-cicd-stages-diagram .fg-flow-dot-button[data-stage-id="real-browser"]')).toHaveAttribute('aria-pressed','true');
+    await check(page.locator('#agents-cicd-stages-diagram .fg-flow-dot-button[data-stage-id="real-browser"]')).toContainText('28/28 tests');
+    // Switch to Branch CI #42 run -> auto-selects failed Unit & In-Memory Tests dot.
+    await page.locator(`#agents-cicd-runs [data-row-id="${branchActionId}"] .fg-row-select`).click();
+    const unitDot=page.locator('#agents-cicd-stages-diagram .fg-flow-dot-button[data-stage-id="unit-tests"]');
+    await check(unitDot).toHaveAttribute('aria-pressed','true');
+    await check(page.locator('#agents-cicd-log-content')).toContainText('error[E0308]: mismatched types');
+    await check(page.locator('#agents-cicd-panel script,#agents-cicd-panel img')).toHaveCount(0);
+    assert.equal(await page.evaluate(()=>globalThis.__forgeCicdXss),undefined,'CI/CD stage output renders strictly as textContent');
+    // Inspect Tests tab and Console paged log.
+    await page.locator('#agents-cicd-tab-tests').click();
+    await check(page.locator('#agents-cicd-tab-tests')).toHaveAttribute('aria-pressed','true');
+    await check(page.locator('#agents-cicd-log-content')).toContainText('964 passed, 1 failed, 0 skipped');
+    await page.locator('#agents-cicd-tab-console').click();
+    await check(page.locator('#agents-cicd-log-content')).toContainText('[stage] compiling workspace');
+    await check(page.locator('#agents-cicd-log-next')).toBeEnabled();
+    await page.locator('#agents-cicd-log-next').click();
+    await check(page.locator('#agents-cicd-log-prev')).toBeEnabled();
+    // Keyboard select passing Compile dot and confirm focus survives refresh.
+    const compileDot=page.locator('#agents-cicd-stages-diagram .fg-flow-dot-button[data-stage-id="compile"]');
+    await compileDot.focus();await page.keyboard.press('Enter');
+    await check(compileDot).toHaveAttribute('aria-pressed','true');
+    await check(page.locator('#agents-cicd-log-status')).toContainText('0 errors');
+    for(const width of [320,390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'CI/CD stage inspector fits viewport');
+      assert.equal(await compileDot.evaluate(node=>node.getBoundingClientRect().height>=44),true,'interactive CI/CD stage dot meets 44px touch target');
+    }
+    await screenshot(page,'ide-agents-cicd-stages.png');
+    await page.locator('#agents-back').click();
+    await check(page.locator('#agents-branches-panel')).toBeVisible();
+    await check(page.locator('#agents-branches-list')).toContainText('forge/agent/agy-primary');
+    await check(page.locator('#agents-branches-list')).toContainText('Synced with main');
+
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);

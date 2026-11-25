@@ -31,6 +31,7 @@ fn add_external(agents: &mut Agents) {
         backend: WorkBackend::Muse,
         model: "External runner".into(),
         modes: vec![WorkMode::Plan, WorkMode::Review],
+        branch: None,
         transport: Some(WorkTransport::ExternalDb),
     });
 }
@@ -492,6 +493,7 @@ fn new_assignment_cannot_discard_an_inflight_initial_or_refreshed_catalog() {
                 profiles: incoming.profiles,
                 worker_status: incoming.worker_status,
                 observed_at: incoming.observed_at,
+                agent_branches: vec![],
             }),
             "loaded",
         );

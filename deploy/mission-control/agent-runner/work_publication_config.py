@@ -10,6 +10,11 @@ from work_worker_config import (DatabaseConfig, WorkerConfig, absolute_path, ide
                                 load_config as load_worker)
 from work_verification import DEFAULT_REQUIRED_HOSTED_CHECKS
 from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory
+from work_agent_branch import (
+    AgentBranchPolicy,
+    PERSISTENT_BRANCH_POLICY,
+    validate_branch_policy,
+)
 from jenkins_events import validate_identifier as validate_jenkins_identifier
 
 CONFIG_ENV = "FORGE_PUBLICATION_CONFIG"
@@ -63,10 +68,19 @@ class PublicationConfig:
     release_enabled: bool = False
     release_actor_sha256: str | None = None
     jenkins_events: JenkinsEventsConfig | None = None
+    branch_policy: str = PERSISTENT_BRANCH_POLICY
+    agent_branches: MappingProxyType = MappingProxyType({})
 
     @property
     def state_root(self):
         return self.worker.state_root / "publication"
+
+    def resolved_branch_policy(self):
+        return AgentBranchPolicy.from_worker_and_overrides(
+            self.worker.profiles,
+            policy=self.branch_policy,
+            project_overrides=self.agent_branches,
+        )
 
 
 def parse_config(raw, worker, *, source_path=None):
@@ -77,7 +91,7 @@ def parse_config(raw, worker, *, source_path=None):
         "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode", "jenkins_verification_profile", "jenkins_verification_scope",
         "post_merge_enabled", "post_merge_jenkins_delivery_config", "delivery_enabled",
         "source_observation_enabled", "source_observation_interval_seconds", "release_enabled",
-        "release_actor_sha256", "jenkins_events"
+        "release_actor_sha256", "jenkins_events", "branch_policy", "agent_branches"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -183,13 +197,36 @@ def parse_config(raw, worker, *, source_path=None):
     elif actor_digest is not None:
         raise ValueError('Unused portal release actor')
     jenkins_events = _parse_jenkins_events(raw.get("jenkins_events"), hosted_provider)
+    branch_policy = validate_branch_policy(raw.get("branch_policy", PERSISTENT_BRANCH_POLICY))
+    raw_agent_branches = raw.get("agent_branches", {})
+    if not isinstance(raw_agent_branches, dict):
+        raise ValueError("Invalid agent_branches configuration")
+    frozen_agent_branches = {}
+    for project_alias, mapping in raw_agent_branches.items():
+        project_alias = identifier(project_alias)
+        if project_alias not in repositories or not isinstance(mapping, dict):
+            raise ValueError("Invalid agent_branches project entry")
+        proj_map = {}
+        for prof_alias, branch in mapping.items():
+            prof_alias = identifier(prof_alias)
+            if prof_alias not in worker.profiles or not isinstance(branch, str):
+                raise ValueError("Invalid agent_branches profile entry")
+            proj_map[prof_alias] = branch
+        frozen_agent_branches[project_alias] = MappingProxyType(proj_map)
+    # Validate complete resolved branch assignments and per-project uniqueness at freeze.
+    AgentBranchPolicy.from_worker_and_overrides(
+        worker.profiles,
+        policy=branch_policy,
+        project_overrides=frozen_agent_branches,
+    )
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
                              absolute_path(source_path) if source_path else None,
                              tuple(tuple(row) for row in required), merge_enabled, merge_method,
                              hosted_provider, delivery_path, delivery_mode, profile, execution_scope,
                              post_merge_enabled, post_merge_delivery, delivery_enabled,
-                             observation, interval, release_enabled, actor_digest, jenkins_events)
+                             observation, interval, release_enabled, actor_digest, jenkins_events,
+                             branch_policy, MappingProxyType(frozen_agent_branches))
 
 
 def _parse_jenkins_events(raw, hosted_provider):

@@ -20,10 +20,35 @@ const resultText = '## Fixture agent result\n\nVerified first section.\n\n'
 const bytes = Buffer.from(resultText);
 const digest = createHash('sha256').update(bytes).digest('hex');
 const profiles = [
-  { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review', 'implement'] },
-  { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review', 'implement'] },
-  { alias: 'grok-primary', label: 'Grok', backend: 'grok', model: 'grok-4.7', modes: ['review'] },
+  { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review', 'implement'], branch: 'forge/agent/agy-primary' },
+  { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review', 'implement'], branch: 'forge/agent/codex-primary' },
+  { alias: 'grok-primary', label: 'Grok', backend: 'grok', model: 'grok-4.7', modes: ['review'], branch: 'forge/agent/grok-primary' },
 ];
+function defaultAgentBranches() {
+  return profiles.map((p, idx) => ({
+    project_alias: project,
+    agent_profile: p.alias,
+    branch_name: p.branch,
+    branch_scope: `branch/forge-agent-${p.alias}-0123456789abcde${idx}`,
+    head_commit_sha: 'e'.repeat(40),
+    fetched_main_sha: base,
+    fetched_main_at: time,
+    sync_status: 'synced_with_main',
+    conflict_paths: [],
+    cache_status: idx === 0 ? 'hit_branch' : 'hit_main',
+    cache_updated_at: time,
+    last_task_id: null,
+    last_correlation_id: null,
+    reservation_status: 'idle',
+    active_scope_kind: null,
+    active_scope_id: null,
+    active_root_task_id: null,
+    active_task_id: null,
+    active_pr_url: null,
+    reservation_epoch: idx,
+    reservation_blocker: null,
+  }));
+}
 
 function task(status, number, input = {}) {
   const taskId = number === 0 ? '11111111-1111-4111-8111-111111111111' : randomUUID();
@@ -97,7 +122,8 @@ function detail(t) {
   delete fields.updated_at;
   if(t.external_result)return {...fields,prompt:t.prompt,acceptance_criteria:t.acceptance_criteria,
     attempt:null,result:null,reconciliation_receipt_id:null,workflow_required:t.workflow_required===true,workflow:t.workflow??null,
-    external_result:t.external_result};
+    external_result:t.external_result,
+    ...(t.correlation_cicd ? { correlation_cicd: t.correlation_cicd } : {})};
   return {
     ...fields, prompt: t.prompt, acceptance_criteria: t.acceptance_criteria,
     attempt: t.status === 'queued' ? null : { attempt_id: t.attempt_id, worker_id: 'fixture-worker', phase: processing ? 'running' : 'stopped', started_at: time, finished_at: processing ? null : time, summary: processing ? t.public_summary ?? 'The fixture agent is working.' : 'Fixture process scope stopped.' },
@@ -105,6 +131,7 @@ function detail(t) {
     reconciliation_receipt_id: null,
     ...(t.publication ? { publication: t.publication } : {}),
     ...(t.review ? { review:t.review } : {}),
+    ...(t.correlation_cicd ? { correlation_cicd: t.correlation_cicd } : {}),
     workflow_required:t.workflow_required===true,workflow:t.workflow??null,
   };
 }
@@ -163,7 +190,7 @@ export async function startAgentsRelay() {
       const send = (status, kind, fields = {}) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ protocol_version: 1, event: { kind, request_id: requestId, ...fields } })); };
       const failed = (status, code) => send(status, input.kind.startsWith('usage_') ? 'usage_failed' : 'work_failed', { code });
       if (input.kind === 'work_catalog') {
-        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}),...(faults.projectDelivery?{delivery:faults.projectDelivery}:{}),...(faults.externalWorkflow?{external_workflow:externalWorkflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time }); return;
+        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}),...(faults.projectDelivery?{delivery:faults.projectDelivery}:{}),...(faults.externalWorkflow?{external_workflow:externalWorkflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time, agent_branches: faults.agentBranches ?? defaultAgentBranches() }); return;
       }
       if (input.project_alias !== project) { failed(403, 'denied'); return; }
       if (input.kind === 'usage_overview' || input.kind === 'usage_detail') {
@@ -339,6 +366,42 @@ export async function startAgentsRelay() {
         }
         send(200, input.kind === 'work_accept' ? 'work_accepted' : 'work_cancel_recorded', receipt); return;
       }
+      if (input.kind === 'work_cicd_stage_log') {
+        if (input.correlation_id !== selected.correlation_id) { failed(403, 'denied'); return; }
+        const logs = selected.cicd_stage_logs ?? {};
+        const key = `${input.action_id}:${input.stage_id}:${input.view}`;
+        const entry = logs[key];
+        if (!entry) { failed(404, 'not_found'); return; }
+        const full = Buffer.from(entry.content ?? '', 'utf8');
+        const logDigest = createHash('sha256').update(full).digest('hex');
+        const [cursorDigest, rawOffset] = input.cursor?.split('.') ?? [logDigest, '0'];
+        const offset = Number(rawOffset);
+        if (cursorDigest !== logDigest || !Number.isSafeInteger(offset) || offset < 0 || offset > full.length) { failed(409, 'result_mismatch'); return; }
+        const limit = Math.min(input.limit_bytes ?? 32768, entry.pageSize ?? 32768);
+        let end = Math.min(full.length, offset + limit);
+        while (end < full.length && (full[end] & 0xc0) === 0x80) end--;
+        const content = full.subarray(offset, end).toString('utf8');
+        send(200, 'work_cicd_stage_log_page', {
+          project_alias: project,
+          task_id: selected.task_id,
+          correlation_id: selected.correlation_id,
+          action_id: input.action_id,
+          stage_id: input.stage_id,
+          view: input.view,
+          content,
+          truncated: end < full.length,
+          total_bytes: full.length,
+          byte_offset: offset,
+          next_cursor: end < full.length ? `${logDigest}.${end}` : null,
+          prev_cursor: offset > 0 ? `${logDigest}.${Math.max(0, offset - limit)}` : null,
+          tests_passed: entry.tests_passed ?? null,
+          tests_failed: entry.tests_failed ?? null,
+          tests_skipped: entry.tests_skipped ?? null,
+          test_cases: entry.test_cases ?? [],
+          error_excerpt: entry.error_excerpt ?? null,
+        });
+        return;
+      }
       if (input.kind === 'work_result') {
         if (!['awaiting_review', 'completed'].includes(selected.status) || input.attempt_id !== selected.attempt_id) { failed(404, 'not_found'); return; }
         const [cursorDigest, rawOffset] = input.cursor?.split('.') ?? [digest, '0'];
@@ -365,7 +428,13 @@ export async function startAgentsRelay() {
     },
     reviewSnapshot(taskId){const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');return JSON.parse(JSON.stringify(detail(selected)));},
     enableAutonomy(){faults.autonomousPolicy=true;},
-    enableExternal(){if(profiles.some(p=>p.alias==='muse-db-primary'))return;profiles.push({alias:'muse-db-primary',label:'Muse database runner',backend:'muse',model:'External runner',modes:['plan','review'],transport:'external_db'});},
+    enableExternal(){if(profiles.some(p=>p.alias==='muse-db-primary'))return;profiles.push({alias:'muse-db-primary',label:'Muse database runner',backend:'muse',model:'External runner',modes:['plan','review'],branch:'forge/agent/muse-db-primary',transport:'external_db'});},
+    setCorrelationCicd(taskId,cicd,stageLogs={}){
+      const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');
+      selected.correlation_cicd={...cicd,correlation_id:selected.correlation_id};
+      selected.cicd_stage_logs=stageLogs;
+      selected.revision++;
+    },
     enableExternalWorkflow(){faults.externalWorkflow=true;profiles.find(p=>p.alias==='muse-db-primary').modes=['plan','review','implement'];},
     addHistory(){const next=task('awaiting_review',tasks.size,{prompt:'Complete event history fixture'});next.events=[];next.sequence=0;for(let i=1;i<=61;i++)event(next,'checkpoint',{attempt_id:next.attempt_id,sequence:Math.min(i,128),stage:i===1?'plan':'progress',summary:`History checkpoint ${i}. Literal <img src=x onerror=globalThis.__historyExecuted=true> remains text.`});tasks.set(next.task_id,next);return next.task_id;},
     get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},

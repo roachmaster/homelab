@@ -691,8 +691,95 @@ PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256 = {
     'docs/architecture/proposals/external-plan-approve-override.md': 'e92b81b24667616c915bdb18a7d1f2d4f3bc831bcadd0e43cdbe9d7192b6f31b',
 }
 
+# Exact additive M39 correlation CI/CD stages, persistent per-agent cached
+# branches with exclusive active-workflow ownership, and ABI 16 stage inspector
+# source overlay. All applied migrations (0001..0038), predecessor provenance
+# maps, and legacy owner/publication AST guards remain unchanged.
+CICD_STAGES_BRANCH_CONTEXT_SHA256 = {
+    'deploy/mission-control/agent-runner/README.md': '0f9d0233b8a08bda3a23fe01a3eb75ac889fce5c3b4a037159da2352cc37b729',
+    'deploy/mission-control/agent-runner/jenkins_api.py': 'ab8f339ecdcfad3bbdaabc2e249fbf9027265dd9f1ad906a56d33737bf193d54',
+    'deploy/mission-control/agent-runner/jenkins_events.py': '8c3c16c60b97bca510ab1c5a3988e5ea36053a964757761c32b6574e98a3cd63',
+    'deploy/mission-control/agent-runner/jenkins_store.py': '7e6992d6ffdbdeb83b6fcee5ff06b7179ab6f80899c74db99a3b369629475d72',
+    'deploy/mission-control/agent-runner/setup-runner.sh': '03a174a0ae932f7dae54f8f402920ca65671682d5923748a4088b1890dc24921',
+    'deploy/mission-control/agent-runner/test_agent_branch_ownership.py': 'cb7a9af3e39a7fe0637f566f2f3704511467fb9a5f718b0789f75287b4c8ee22',
+    'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '98b968640a507f1ed803d3851965abb3a527e8566546e12858622fc3ee7ee6f2',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': 'bd2b52a03c14e85e4dc4fcbb47500b2ab5d7de836a872471c1ac21b9f26483da',
+    'deploy/mission-control/agent-runner/test_muse_read_access.py': '523110a6d8b305681c6d617ebc8b1f422a7c1bfeaa901dcf3ee53d0016981f1c',
+    'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'ead5f9cc49c8c365d0fc886cf12f7749555d23244fb216b8e55a80b0db42226e',
+    'deploy/mission-control/agent-runner/test_work_event_attribution.py': 'fb34d68a153b8e66854184c443202f48e956cfeab9a27c62868f32f67806336b',
+    'deploy/mission-control/agent-runner/test_work_muse_intake.py': '73a2ddf65741c1fcbe2faa61e8f886d949d410a326a08a8f327c2b29d2083fad',
+    'deploy/mission-control/agent-runner/test_work_owner_fence.py': 'e4cf4a9ce4e77b359cbcee32e37ac2a7126b0d39e7619dd900823153e8026d73',
+    'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '14459447a7081cc1c1202ef81c5e4c6a8f0615efffe2cb277b9525e68efe81d7',
+    'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '7f004e631c7e522325754c5245170be4bfd9ace93a72057d4240792acdc841ab',
+    'deploy/mission-control/agent-runner/work_agent_branch.py': 'eaa779ab509f84062c32226f03e26f4e96f1369304d96537783de8748468524a',
+    'deploy/mission-control/agent-runner/work_api.py': 'ef22c77e33dd9ce4cd57e79ee891848f46152f9bbe0bb2282b7fb60d9ffaa779',
+    'deploy/mission-control/agent-runner/work_cicd_artifacts.py': 'f73dfe2752c50cbd9be1ea531e6f6836339b4a2b30afd999e266242da7d0758f',
+    'deploy/mission-control/agent-runner/work_config.py': 'e1b1c6b966067a58eaf6c9fe1ad1aa80d7abb86e457b0216e791ba98f84f091d',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '47665472f25ba86a186d7972068cd00e95367f62f5b87f048f59815acd72b97b',
+    'deploy/mission-control/agent-runner/work_external_delivery_store.py': '7bea3aeb4ccf731ea371195e6fd71d27f6d56f4f361db545217fc22972a2496c',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': 'e89afc285fa1cafe96a847c17dc0f739b5aad3448ed3b351421b7aa4ddc86bb8',
+    'deploy/mission-control/agent-runner/work_jenkins_lifecycle.py': '63a435604469ef62a3ed400c003c3618f7d027c64229b24945c081da24b20f5f',
+    'deploy/mission-control/agent-runner/work_merge.py': '7bdda40cbe88f76e3deb5dd11b2a33154d83ba1d6ccec7bd5c891c91cab0dd23',
+    'deploy/mission-control/agent-runner/work_native_jenkins.py': 'a9785fe205c69fc2b35dbbc5e915e156cc9962b0ac80a0e72cf706e85b06567b',
+    'deploy/mission-control/agent-runner/work_pipeline_projection.py': '09eeb65e9f2723b5350bd739ee2a316806e66ecd19cae5811ff4b5a21f0b0dd0',
+    'deploy/mission-control/agent-runner/work_post_merge.py': '599ce450d3ccb971f7b76b782d2c44bbb0ae59db7f9cc2904ad4b916d9e1eca6',
+    'deploy/mission-control/agent-runner/work_publication.py': '7055322d057b3db5aed6fbbd1d0c7a3db1d1e623d41df8e6c7415c29671b9b7d',
+    'deploy/mission-control/agent-runner/work_publication_clients.py': '1da92fdb1efd79f9392bb9ee2f1e6e95ad239fba1a49840e8c5ec2cd27f1a96c',
+    'deploy/mission-control/agent-runner/work_publication_config.py': '8199cbb4c1a5078d2fda32f7e29285b90eea33bb26abed9acce3cc2dd95c22a5',
+    'deploy/mission-control/agent-runner/work_review.py': '961bcb631fcd3122b93a3839fb3577707d7145f479e1f1c1417dded0f11a4008',
+    'deploy/mission-control/agent-runner/work_store.py': '4f1d2840790e35e445d9bf7733c09032f8cb3799cd905c0ac1158c771404a2a8',
+    'deploy/mission-control/agent-runner/work_worker_config.py': 'e02708b7aa73f71726b3a1adaf20dcc28b490520cf46a48fb85081fd8f76f57c',
+    'deploy/mission-control/agent-runner/work_worker_store.py': '5385c15507237c74ee4ed69b7b674f31a5e110f5f39bf2d97ba636a18e829ae4',
+    'deploy/mission-control/jenkins/README.md': '5018b9c5ddfce67f5e72e91e24e4bb70834a3a4599d0270e21553270b1cbdea6',
+    'deploy/mission-control/jenkins/verify-candidate.py': '6655b5a5095f06602c1e608a36a0b7d8b6c1cc6bc80bfa752517a0ea0fe67b85',
+    'deploy/mission-control/sql/apply.sql': '98a2eead723a56b6dfbeb0cf3756d87c286b9f305d5557fa23b320823c2f89a6',
+    'deploy/mission-control/sql/management/grant-muse-read-access.sql': '92ba5b2ad29b68fd12e0429fbd9f4d7c02fc6d76c19fa0f33ad97a1572e13bd9',
+    'deploy/mission-control/sql/management/grant-runner.sql': '963857ed1889a03e212ae0440b470aca1efd37b6d55257c0decf72c2ee37306f',
+    'deploy/mission-control/sql/management/verify-cicd-stages.sql': '9c5e6041ecced7f28e27bc5f5377c1cec07858926eaf438983862ff15036d8de',
+    'deploy/mission-control/sql/management/verify-jenkins-events.sql': '889dca14aba51e6915fafce28f3fd819ea801c865fd3f9728e13c1431e1434ff',
+    'deploy/mission-control/sql/management/verify-muse-read-access.sql': '5053857dd7a4b6951827457db9d4902694174bc7eadee3e6de54115001bef06d',
+    'deploy/mission-control/sql/management/verify-runner-privileges.sql': 'be3012fa1df92bab52618045d43e914c637995edb7941be3866dedf88a56a8d3',
+    # Unmodified HEAD (57a0aca8) bytes from M36 NOT VALID progress check grandfathering.
+    'deploy/mission-control/sql/management/verify-task-events.sql': '942ab0db7b9f2e0cceaaf64d4d7c73fe16c9fa5cc306d4a7ba5b1f432b4510ed',
+    'deploy/mission-control/sql/management/verify.sql': 'ffc4fa0d1d98f99e6c9ba35dc1bb06d31d042063f875523a20ba7ab955c82cbe',
+    'deploy/mission-control/sql/migrations/0039_agent_branch_and_cicd_stages.sql': 'a5603ca8268b3a2ea5ab3a59f4ed056d5233a1ad896575221201a249297037ae',
+    'docs/architecture/ci-pipeline.md': '2dc46be7dd0f7c2030b482ac796f742bffa2028c5484eab1ef0bd7a2dedc17a1',
+    'docs/architecture/external-agent-workflow.md': 'b4dfeeaa649a4817cfb2df596f5dc63d42c2ec13fd6a7bff4c6bc22bce5381e1',
+    'docs/architecture/forge-jenkins.md': 'be5856a2feba5af5604fbc944fed7fc1208cb9ede61774ec43fce311f9dff01d',
+    'docs/design/implementation-status.md': '7252f475e224340daf96a131492fafce8bb5a9a1559cc891af4c30713ca9c5c1',
+    'src/rust/forge-ide-ui/src/model.rs': 'ec086d8a75409717d6db02fca9940b62a8a732e9a2d7a9a81b489b1ddca7a7d3',
+    'src/rust/forge-ide-ui/src/model/agents.rs': '36d8d83b2521ff164430f35d156d9fbe48c2701bf176f0cec3e37a03417563da',
+    'src/rust/forge-ide-ui/src/model/agents/cicd.rs': '0afc537a9a87dbb2e97ec926e48d394c4bf67af079429d2d9c9fb5a0ac3d2889',
+    'src/rust/forge-ide-ui/src/model/agents/pipeline_diagram.rs': 'f173158324e7427fdcf2214d29e4613123b851e90e6675d1fab9404aa187220e',
+    'src/rust/forge-ide-ui/src/model/agents/stage_diagram.rs': '99b7e9104f7412c61ce2633a487973da6073842e04670473386507b1fd8f9c94',
+    'src/rust/forge-ide-ui/src/model/agents/tests.rs': '1718126352ef224df34d32d967438e1df76acf0560903b2350c527a6b055fedc',
+    'src/rust/forge-ide-ui/src/model/agents/tests/workflow.rs': '2c18404c6862fe2cd5b12a0dc82782dfb98398a4bc4c8a32268ca8cc7bb28edc',
+    'src/rust/forge-ide-ui/src/protocol.rs': '732f3f787e8c0b56cf0fc06695c712bfcbe9097aa95a4bcb9c8f7c741a4ef117',
+    'src/rust/forge-ide-ui/src/protocol/work.rs': '973cd8b4f3f47f450e2d9c240b33221ea01149aee6d0345c8c5f71a57c7a3861',
+    'src/rust/forge-ide-ui/src/protocol/work/cicd.rs': '81ed10e69af4c5a527ea3774816a283271727121b9a3049a3685ff94fdbd881c',
+    'src/rust/forge-ide-ui/src/view.rs': 'a1424e5bfed08afa7730efa1c23d0fc9d5ba5b102182ef299eb331c377e446bf',
+    'src/rust/forge-ide-ui/tests/mail_archive.rs': '18aa392240b3a584c7bef20d5e274a45418225d9f859b88da6ad218186f8ff95',
+    'src/rust/forge-ide-ui/tests/wasm_abi.mjs': '77a9ecd08dddf2d1a4ea56d1529b22c2d5c80434f6272164f0c33f39d7cd4c85',
+    'src/rust/forge-ide-ui/tests/worker_glue.mjs': '841cf0eb1ae0a6f7dbf03fa4b1c4788490d1ce723658ac9aaf2370698896105f',
+    'src/rust/forge-ide-web-host/src/work.rs': 'c5eb0aeedefd93f9a5d32855a52e3a35af4d2a761a98bc90c84b1c8b7966551a',
+    'src/rust/forge-ide-web-host/tests/consumer/work.rs': '968ea1da862c4b1c472c2e29ccaa6d49f977c880ff975b554f707520bf5c8602',
+    'src/rust/forge-ide-web/README.md': '06f630619f7853abf834cf0474a1f9ce033493da8919dfd51d1782cfaeb3b1d1',
+    'src/rust/forge-ide-web/src/generate/application.rs': 'c271db0b49918c798891e88fa2e698b18037e2644f4074969d9c3e4d544066e6',
+    'src/rust/forge-ide-web/src/generate/application/cicd.rs': '84aab54b106edbf4f1e35cdc54172b1d7687553f746ae9a1f1470c8e8f466bff',
+    'src/rust/forge-ide-web/src/generate/javascript.rs': 'b8d76c7bd49789ab075148f2d192affab06558c05fab4e93f02ddf38122cc416',
+    'src/rust/forge-ide-web/src/generate/mod.rs': '98de5b59f2bc58f7e8d764db049e1cb2a1b2c1514f79547664cb4edfd8943856',
+    'src/rust/forge-ide-web/src/wasm.rs': 'c9443fda7ddc6209bccbdf2c5b9e8308f13e63f6fcf8d37e800ba5cac490fc01',
+    'src/rust/forge-ide-web/tests/browser/agents-relay.mjs': 'ffb2017fbf479099e5ecb12ffb9ee0f35aa02cf8ddd34f45b4ca059c049c8195',
+    'src/rust/forge-ide-web/tests/browser/journey.mjs': 'c5dfa0b44eef5ccfd3e4aad39948dab106a36cd8bcac9ffcc7e63b5cb413cd16',
+    'src/rust/forge-ide-web/tests/generation.rs': 'f353d5233ec6d98339b7d42a9396d8cfd4ab878cd1b78d8d5871cd464b711d74',
+    'src/rust/forge-ide-web/tests/playtest-wire.mjs': 'a0c7cc8448914d01dea0ba52e65b359bbf55f7fa95cc865da59902d305c7eb67',
+    'src/rust/forge-ide-web/ui/styles.yaml': 'bea39f2f3d08d4f4ee3124ed3a59412bc028719d4d5d7879a1cc1260aa2fdceb',
+}
+
 
 def qualified_source(relative, expected):
+    if relative in CICD_STAGES_BRANCH_CONTEXT_SHA256:
+        return CICD_STAGES_BRANCH_CONTEXT_SHA256[relative]
     if relative in PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256:
         return PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256[relative]
     if relative in MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256:
@@ -712,6 +799,7 @@ STRICT_VERIFIER_FILES = {
     "verify-native-jenkins.sql",
     "verify-native-delivery.sql",
     "verify-jenkins-events.sql",
+    "verify-cicd-stages.sql",
     "verify-external-agent.sql",
     "verify-muse-read-access.sql",
     "verify-task-events.sql",
@@ -872,7 +960,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     relative.startswith(('src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/'))
                     or relative == 'docs/design/implementation-status.md'
                 )
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
 
     def test_pipeline_diagram_overlay_is_scoped_and_exact(self):
         self.assertEqual(len(PIPELINE_DIAGRAM_CONTEXT_SHA256), 52)
@@ -918,13 +1006,40 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 )
                 if '/migrations/' in relative or '/fragments/' in relative:
                     self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql')
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                actual = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
+                self.assertEqual(actual, expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected))
         published = {
             tuple(shlex.split(line, comments=True))
             for line in (RUNNER / 'setup-runner.sh').read_text().splitlines()
             if line.lstrip().startswith('publish ')
         }
         self.assertIn(('publish', '$directory/work_external_plan_override.py', '$target/work_external_plan_override.py'), published)
+
+    def test_cicd_stages_and_persistent_branch_overlay_is_scoped_and_preserves_applied_migrations(self):
+        self.assertIn('deploy/mission-control/agent-runner/work_agent_branch.py', CICD_STAGES_BRANCH_CONTEXT_SHA256)
+        self.assertIn('deploy/mission-control/agent-runner/work_cicd_artifacts.py', CICD_STAGES_BRANCH_CONTEXT_SHA256)
+        self.assertIn('deploy/mission-control/sql/migrations/0039_agent_branch_and_cicd_stages.sql', CICD_STAGES_BRANCH_CONTEXT_SHA256)
+        for relative, expected in CICD_STAGES_BRANCH_CONTEXT_SHA256.items():
+            with self.subTest(cicd_branch_source=relative):
+                self.assertTrue(
+                    relative.startswith(('deploy/mission-control/', 'src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/'))
+                    or relative in {
+                        'docs/architecture/ci-pipeline.md',
+                        'docs/architecture/external-agent-workflow.md',
+                        'docs/architecture/forge-jenkins.md',
+                        'docs/design/implementation-status.md',
+                    }
+                )
+                if '/migrations/' in relative or '/fragments/' in relative:
+                    self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0039_agent_branch_and_cicd_stages.sql')
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+        published = {
+            tuple(shlex.split(line, comments=True))
+            for line in (RUNNER / 'setup-runner.sh').read_text().splitlines()
+            if line.lstrip().startswith('publish ')
+        }
+        self.assertIn(('publish', '$directory/work_agent_branch.py', '$target/work_agent_branch.py'), published)
+        self.assertIn(('publish', '$directory/work_cicd_artifacts.py', '$target/work_cicd_artifacts.py'), published)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:

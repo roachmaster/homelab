@@ -2,6 +2,7 @@
 
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
+import hashlib
 import json
 import psycopg2
 import re
@@ -454,14 +455,100 @@ class WorkStore:
                 "backend": profile.backend,
                 "model": profile.model,
                 "modes": [m for m in MODE_ORDER if m in modes],
+                "branch": profile.branch,
                 **({"transport": "external_db"} if profile.is_external else {}),
             })
+        agent_branches = self._agent_branch_states(config)
         return {
             "projects": projects,
             "profiles": profiles,
             "worker_status": worker_status,
             "observed_at": observed_at,
+            "agent_branches": agent_branches,
         }
+
+    def _branch_row_to_dto(self, row):
+        return {
+            "project_alias": row["project_alias"],
+            "agent_profile": row["agent_profile"],
+            "branch_name": row["branch_name"],
+            "branch_scope": row["branch_scope"],
+            "head_commit_sha": row.get("head_commit_sha"),
+            "fetched_main_sha": row.get("fetched_main_sha"),
+            "fetched_main_at": _timestamp(row["fetched_main_at"]) if row.get("fetched_main_at") is not None else None,
+            "sync_status": row.get("sync_status") or "unknown",
+            "conflict_paths": list(row.get("conflict_paths") or []),
+            "cache_status": row.get("cache_status") or "unknown",
+            "cache_updated_at": _timestamp(row["cache_updated_at"]) if row.get("cache_updated_at") is not None else None,
+            "last_task_id": str(row["last_task_id"]) if row.get("last_task_id") is not None else None,
+            "last_correlation_id": str(row["last_correlation_id"]) if row.get("last_correlation_id") is not None else None,
+            "reservation_status": row.get("reservation_status") or "idle",
+            "active_scope_kind": row.get("active_scope_kind"),
+            "active_scope_id": str(row["active_scope_id"]) if row.get("active_scope_id") is not None else None,
+            "active_root_task_id": str(row["active_root_task_id"]) if row.get("active_root_task_id") is not None else None,
+            "active_task_id": str(row["active_task_id"]) if row.get("active_task_id") is not None else None,
+            "active_pr_url": row.get("active_pr_url"),
+            "reservation_epoch": int(row.get("reservation_epoch") or 0),
+            "reservation_blocker": row.get("reservation_blocker"),
+        }
+
+    def _agent_branch_states(self, config):
+        from work_agent_branch import branch_scope_for_branch
+        live = {}
+        with self._transaction(read_only=True) as cursor:
+            cursor.execute(
+                "SELECT to_regclass('forge_agent.agent_branch_state') IS NOT NULL "
+                "AND has_table_privilege(current_user, 'forge_agent.agent_branch_state', 'SELECT') AS has_table"
+            )
+            if cursor.fetchone()["has_table"]:
+                cursor.execute("""
+                    SELECT project_alias, agent_profile, branch_name, branch_scope,
+                           head_commit_sha, fetched_main_sha, fetched_main_at,
+                           sync_status, conflict_paths, cache_status, cache_updated_at,
+                           last_task_id, last_correlation_id,
+                           reservation_status, active_scope_kind, active_scope_id,
+                           active_root_task_id, active_task_id, active_pr_url,
+                           reservation_epoch, reservation_blocker
+                    FROM forge_agent.agent_branch_state
+                    WHERE owner_id = %s AND project_alias = ANY(%s)
+                    ORDER BY project_alias ASC, agent_profile ASC
+                """, (self._owner, sorted(config.allowed_projects)))
+                for row in cursor.fetchall():
+                    live[(row["project_alias"], row["agent_profile"])] = self._branch_row_to_dto(row)
+        result = []
+        for project_alias in sorted(config.allowed_projects)[:MAX_PROJECTS]:
+            for alias in sorted(config.profiles)[:MAX_PROFILES]:
+                existing = live.get((project_alias, alias))
+                if existing is not None:
+                    result.append(existing)
+                else:
+                    profile = config.profiles[alias]
+                    result.append({
+                        "project_alias": project_alias,
+                        "agent_profile": alias,
+                        "branch_name": profile.branch,
+                        "branch_scope": branch_scope_for_branch(profile.branch),
+                        "head_commit_sha": None,
+                        "fetched_main_sha": None,
+                        "fetched_main_at": None,
+                        "sync_status": "unknown",
+                        "conflict_paths": [],
+                        "cache_status": "unknown",
+                        "cache_updated_at": None,
+                        "last_task_id": None,
+                        "last_correlation_id": None,
+                        "reservation_status": "idle",
+                        "active_scope_kind": None,
+                        "active_scope_id": None,
+                        "active_root_task_id": None,
+                        "active_task_id": None,
+                        "active_pr_url": None,
+                        "reservation_epoch": 0,
+                        "reservation_blocker": None,
+                    })
+                if len(result) >= 128:
+                    return result
+        return result
 
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
                prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False,
@@ -685,7 +772,359 @@ class WorkStore:
                     detail["external_result"] = artifact
             delivery=self._delivery_projection(cursor,project_alias,task_id)
             if delivery is not None:detail["delivery"]=delivery
+            correlation_cicd = self._correlation_cicd_projection(cursor, row, delivery=delivery)
+            if correlation_cicd is not None:
+                detail["correlation_cicd"] = correlation_cicd
             return detail
+
+    def _correlation_cicd_projection(self, cursor, task, *, delivery=None):
+        from work_agent_branch import branch_scope_for_branch, default_agent_branch
+        from work_pipeline_projection import project_correlation_cicd
+        correlation_id = task.get("correlation_id")
+        if correlation_id is None:
+            return None
+        project_alias = task["project_alias"]
+        corr_str = str(correlation_id)
+
+        def _can_select(relation_name):
+            cursor.execute(
+                "SELECT to_regclass(%s) IS NOT NULL AND has_table_privilege(current_user, %s, 'SELECT') AS ok",
+                (relation_name, relation_name),
+            )
+            return bool(cursor.fetchone()["ok"])
+
+        # 1. Branch state and whether this task is currently waiting on another workflow's reservation.
+        branch_state = None
+        waiting_on_branch_owner = False
+        if _can_select("forge_agent.agent_branch_state"):
+            cursor.execute("""
+                SELECT project_alias, agent_profile, branch_name, branch_scope,
+                       head_commit_sha, fetched_main_sha, fetched_main_at,
+                       sync_status, conflict_paths, cache_status, cache_updated_at,
+                       last_task_id, last_correlation_id,
+                       reservation_status, active_scope_kind, active_scope_id,
+                       active_root_task_id, active_task_id, active_pr_url,
+                       reservation_epoch, reservation_blocker
+                FROM forge_agent.agent_branch_state
+                WHERE owner_id = %s AND project_alias = %s AND agent_profile = %s
+            """, (self._owner, project_alias, task["agent_profile"]))
+            brow = cursor.fetchone()
+            if brow is not None:
+                branch_state = self._branch_row_to_dto(brow)
+                if brow["reservation_status"] == "active" and task.get("status") not in {"completed", "cancelled", "failed"}:
+                    task_scope_id = (
+                        str(task["workflow_id"])
+                        if task.get("workflow_id") is not None
+                        else str(task.get("repair_root_task_id") or task["id"])
+                    )
+                    if (str(brow["active_scope_id"]) != task_scope_id
+                            and str(brow["active_task_id"]) != str(task["id"])
+                            and str(brow.get("active_root_task_id") or "") != task_scope_id):
+                        waiting_on_branch_owner = True
+        if branch_state is None:
+            default_b = default_agent_branch(task["agent_profile"])
+            branch_state = {
+                "project_alias": project_alias,
+                "agent_profile": task["agent_profile"],
+                "branch_name": default_b,
+                "branch_scope": branch_scope_for_branch(default_b),
+                "head_commit_sha": None,
+                "fetched_main_sha": None,
+                "fetched_main_at": None,
+                "sync_status": "unknown",
+                "conflict_paths": [],
+                "cache_status": "unknown",
+                "cache_updated_at": None,
+                "last_task_id": None,
+                "last_correlation_id": None,
+                "reservation_status": "idle",
+                "active_scope_kind": None,
+                "active_scope_id": None,
+                "active_root_task_id": None,
+                "active_task_id": None,
+                "active_pr_url": None,
+                "reservation_epoch": 0,
+                "reservation_blocker": None,
+            }
+
+        # 2. Collect linked task IDs, correlation IDs & candidate commits across this workflow / repair family.
+        root_id = task.get("repair_root_task_id") or task["id"]
+        if task.get("workflow_id") is not None:
+            cursor.execute("""
+                SELECT id, correlation_id FROM forge_agent.coding_tasks
+                WHERE owner_id = %s AND project_alias = %s
+                  AND (correlation_id = %s OR workflow_id = %s OR id = %s OR repair_root_task_id = %s)
+                LIMIT 64
+            """, (self._owner, project_alias, correlation_id, task["workflow_id"], root_id, root_id))
+        else:
+            cursor.execute("""
+                SELECT id, correlation_id FROM forge_agent.coding_tasks
+                WHERE owner_id = %s AND project_alias = %s
+                  AND (correlation_id = %s OR id = %s OR repair_root_task_id = %s)
+                LIMIT 64
+            """, (self._owner, project_alias, correlation_id, root_id, root_id))
+        linked_rows = cursor.fetchall()
+        linked_ids = [r["id"] for r in linked_rows]
+        linked_corrs = list({r["correlation_id"] for r in linked_rows} | {correlation_id})
+        linked_corr_strs = [str(c) for c in linked_corrs]
+
+        candidate_commits = []
+        hosted_observations = []
+        if linked_ids:
+            cursor.execute("""
+                SELECT DISTINCT candidate_commit FROM forge_agent.coding_reviews
+                WHERE owner_id = %s AND project_alias = %s AND task_id = ANY(%s)
+                  AND candidate_commit IS NOT NULL
+            """, (self._owner, project_alias, linked_ids))
+            candidate_commits = [r["candidate_commit"] for r in cursor.fetchall()]
+            cursor.execute("""
+                SELECT h.candidate_commit, h.checks
+                FROM forge_agent.coding_hosted_checks h
+                JOIN forge_agent.coding_publications p ON p.publication_id = h.publication_id
+                WHERE h.owner_id = %s AND h.project_alias = %s AND p.task_id = ANY(%s)
+                ORDER BY h.observed_at ASC, h.observation_id ASC
+                LIMIT 32
+            """, (self._owner, project_alias, linked_ids))
+            hosted_observations = [dict(r) for r in cursor.fetchall()]
+
+        # 3. Query immutable stage_results for this correlation / workflow family.
+        stage_results = []
+        if _can_select("forge_agent.jenkins_stage_results"):
+            cursor.execute("""
+                SELECT action_id, stage_index, correlation_id, task_id, job_name, build_number,
+                       commit_sha, branch_name, branch_scope, pipeline_scope,
+                       logical_stage_id, phase_id, phase_kind, label, status,
+                       returncode, duration_ms, tests_passed, tests_failed, tests_skipped,
+                       test_summary, error_excerpt, log_sha256, log_byte_count, log_chunk_count,
+                       created_at
+                FROM forge_agent.jenkins_stage_results
+                WHERE owner_id = %s AND project_alias = %s AND correlation_id = ANY(%s)
+                ORDER BY created_at ASC, action_id ASC, stage_index ASC
+                LIMIT 512
+            """, (self._owner, project_alias, linked_corrs))
+            for r in cursor.fetchall():
+                item = dict(r)
+                item["action_id"] = str(r["action_id"])
+                item["correlation_id"] = str(r["correlation_id"])
+                item["task_id"] = str(r["task_id"]) if r["task_id"] is not None else None
+                item["created_at"] = _timestamp(r["created_at"]) if r["created_at"] is not None else None
+                stage_results.append(item)
+
+        # 4. Query jenkins_events scoped by correlation_id OR linked candidate commits.
+        jenkins_events = []
+        if _can_select("forge_agent.jenkins_events"):
+            cursor.execute("""
+                SELECT EXISTS(
+                    SELECT 1 FROM pg_catalog.pg_attribute
+                    WHERE attrelid = 'forge_agent.jenkins_events'::regclass
+                      AND attname = 'action_id' AND NOT attisdropped
+                ) AS has_m39_cols
+            """)
+            has_m39_cols = cursor.fetchone()["has_m39_cols"]
+            extra_cols = ", action_id, branch_scope" if has_m39_cols else ""
+            if candidate_commits:
+                cursor.execute(f"""
+                    SELECT event_kind, job_name, build_number, queue_id, commit_sha, branch,
+                           build_result, stage_name, stage_status, occurred_at, sequence,
+                           correlation_id {extra_cols}
+                    FROM forge_agent.jenkins_events
+                    WHERE owner_id = %s AND project_alias = %s
+                      AND (correlation_id = ANY(%s) OR commit_sha = ANY(%s))
+                    ORDER BY sequence ASC
+                    LIMIT 512
+                """, (self._owner, project_alias, linked_corr_strs, candidate_commits))
+            else:
+                cursor.execute(f"""
+                    SELECT event_kind, job_name, build_number, queue_id, commit_sha, branch,
+                           build_result, stage_name, stage_status, occurred_at, sequence,
+                           correlation_id {extra_cols}
+                    FROM forge_agent.jenkins_events
+                    WHERE owner_id = %s AND project_alias = %s AND correlation_id = ANY(%s)
+                    ORDER BY sequence ASC
+                    LIMIT 512
+                """, (self._owner, project_alias, linked_corr_strs))
+            for r in cursor.fetchall():
+                item = dict(r)
+                if item.get("occurred_at") is not None:
+                    item["occurred_at"] = _timestamp(item["occurred_at"])
+                if item.get("action_id") is not None:
+                    item["action_id"] = str(item["action_id"])
+                jenkins_events.append(item)
+
+        # 5. Derive post-merge main verification & release state from the authorized delivery projection.
+        post_merge_runs = []
+        release_status = None
+        if isinstance(delivery, dict):
+            verification = delivery.get("verification")
+            if isinstance(verification, dict) and delivery.get("verification_id"):
+                post_merge_runs.append({
+                    "post_merge_id": str(delivery["verification_id"]),
+                    "merge_commit": delivery.get("commit_sha"),
+                    "status": verification.get("status"),
+                    "receipt": {"build_number": verification.get("build_number")} if verification.get("build_number") is not None else {},
+                    "summary": verification.get("summary") or "",
+                    "created_at": verification.get("updated_at"),
+                    "updated_at": verification.get("updated_at"),
+                })
+            release = delivery.get("release")
+            if isinstance(release, dict) and isinstance(release.get("status"), str):
+                release_status = release["status"]
+
+        return project_correlation_cicd(
+            correlation_id=corr_str,
+            branch_state=branch_state,
+            waiting_on_branch_owner=waiting_on_branch_owner,
+            stage_results=stage_results,
+            jenkins_events=jenkins_events,
+            hosted_observations=hosted_observations,
+            post_merge_runs=post_merge_runs,
+            release_status=release_status,
+        )
+
+    def cicd_stage_log(self, *, project_alias, task_id, correlation_id, action_id,
+                       stage_id, view, cursor_token=None, limit_bytes=32768):
+        self._require_project(project_alias)
+        if (not isinstance(task_id, UUID) or not isinstance(correlation_id, UUID)
+                or not isinstance(action_id, UUID)
+                or not isinstance(stage_id, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", stage_id)
+                or view not in {"errors", "tests", "console"}
+                or type(limit_bytes) is not int or not 1 <= limit_bytes <= 32768):
+            raise Rejected(400, "invalid_request")
+        req_digest = None
+        offset = 0
+        if cursor_token is not None:
+            if not isinstance(cursor_token, str) or not re.fullmatch(r"[0-9a-f]{64}\.(0|[1-9][0-9]{0,7})", cursor_token):
+                raise Rejected(400, "invalid_request")
+            req_digest, raw_off = cursor_token.split(".", 1)
+            offset = int(raw_off)
+
+        with self._transaction(read_only=True) as cursor:
+            cursor.execute("""
+                SELECT id, correlation_id, workflow_id, repair_root_task_id
+                FROM forge_agent.coding_tasks
+                WHERE owner_id = %s AND project_alias = %s AND id = %s
+            """, (self._owner, project_alias, task_id))
+            task_row = cursor.fetchone()
+            if task_row is None:
+                raise Rejected(404, "not_found")
+            if str(task_row["correlation_id"]) != str(correlation_id):
+                raise Rejected(403, "denied")
+            root_id = task_row["repair_root_task_id"] or task_row["id"]
+            if task_row["workflow_id"] is not None:
+                cursor.execute("""
+                    SELECT correlation_id FROM forge_agent.coding_tasks
+                    WHERE owner_id = %s AND project_alias = %s
+                      AND (correlation_id = %s OR workflow_id = %s OR id = %s OR repair_root_task_id = %s)
+                    LIMIT 64
+                """, (self._owner, project_alias, correlation_id, task_row["workflow_id"], root_id, root_id))
+            else:
+                cursor.execute("""
+                    SELECT correlation_id FROM forge_agent.coding_tasks
+                    WHERE owner_id = %s AND project_alias = %s
+                      AND (correlation_id = %s OR id = %s OR repair_root_task_id = %s)
+                    LIMIT 64
+                """, (self._owner, project_alias, correlation_id, root_id, root_id))
+            allowed_corrs = list({r["correlation_id"] for r in cursor.fetchall()} | {correlation_id})
+
+            cursor.execute("SELECT to_regclass('forge_agent.jenkins_stage_results') IS NOT NULL AS has_table")
+            if not cursor.fetchone()["has_table"]:
+                raise Rejected(404, "not_found")
+
+            cursor.execute("""
+                SELECT stage_index, phase_id, logical_stage_id, label, status, returncode,
+                       tests_passed, tests_failed, tests_skipped, test_summary,
+                       error_excerpt, log_sha256, log_byte_count, log_chunk_count
+                FROM forge_agent.jenkins_stage_results
+                WHERE owner_id = %s AND project_alias = %s
+                  AND action_id = %s AND correlation_id = ANY(%s)
+                  AND (logical_stage_id = %s OR phase_id = %s)
+                ORDER BY stage_index ASC
+            """, (self._owner, project_alias, action_id, allowed_corrs, stage_id, stage_id))
+            stage_rows = cursor.fetchall()
+            if not stage_rows:
+                raise Rejected(404, "not_found")
+
+            stage_indices = [int(r["stage_index"]) for r in stage_rows]
+            t_passed_vals = [r["tests_passed"] for r in stage_rows if type(r["tests_passed"]) is int]
+            t_failed_vals = [r["tests_failed"] for r in stage_rows if type(r["tests_failed"]) is int]
+            t_skipped_vals = [r["tests_skipped"] for r in stage_rows if type(r["tests_skipped"]) is int]
+            tests_passed = sum(t_passed_vals) if t_passed_vals else None
+            tests_failed = sum(t_failed_vals) if t_failed_vals else None
+            tests_skipped = sum(t_skipped_vals) if t_skipped_vals else None
+            test_cases = []
+            for r in stage_rows:
+                ts = r.get("test_summary")
+                if isinstance(ts, dict):
+                    for case in ts.get("cases") or ():
+                        if isinstance(case, dict) and isinstance(case.get("name"), str) and len(test_cases) < 64:
+                            test_cases.append({"name": case["name"][:160], "status": str(case.get("status") or "unknown")})
+            excerpts = [r["error_excerpt"] for r in stage_rows if isinstance(r.get("error_excerpt"), str) and r["error_excerpt"]]
+            combined_excerpt = "\n\n".join(excerpts) if excerpts else None
+            if combined_excerpt is not None and len(combined_excerpt.encode("utf-8")) > 4096:
+                combined_excerpt = combined_excerpt.encode("utf-8")[:4096].decode("utf-8", errors="ignore").rstrip()
+
+            if view == "errors":
+                full_bytes = (combined_excerpt or "").encode("utf-8")
+            elif view == "tests":
+                lines = []
+                if tests_passed is not None or tests_failed is not None or tests_skipped is not None:
+                    lines.append(
+                        f"Tests: {tests_passed or 0} passed, {tests_failed or 0} failed, {tests_skipped or 0} skipped"
+                    )
+                for case in test_cases:
+                    lines.append(f"[{case['status']}] {case['name']}")
+                full_bytes = "\n".join(lines).encode("utf-8")
+            else:
+                cursor.execute("""
+                    SELECT stage_index, chunk_index, chunk_bytes
+                    FROM forge_agent.jenkins_stage_log_chunks
+                    WHERE owner_id = %s AND project_alias = %s
+                      AND action_id = %s AND stage_index = ANY(%s)
+                    ORDER BY stage_index ASC, chunk_index ASC
+                """, (self._owner, project_alias, action_id, stage_indices))
+                parts = [bytes(r["chunk_bytes"]) for r in cursor.fetchall()]
+                full_bytes = b"".join(parts)
+
+        digest = hashlib.sha256(full_bytes).hexdigest()
+        total_bytes = len(full_bytes)
+        if req_digest is not None and req_digest != digest:
+            raise Rejected(409, "result_mismatch")
+        if offset > total_bytes:
+            raise Rejected(400, "invalid_request")
+        raw_end = min(total_bytes, offset + limit_bytes)
+        if raw_end < total_bytes:
+            while raw_end > offset and (full_bytes[raw_end] & 0xC0) == 0x80:
+                raw_end -= 1
+        page_bytes = full_bytes[offset:raw_end]
+        end_offset = offset + len(page_bytes)
+        content = page_bytes.decode("utf-8", errors="replace")
+        next_cursor = f"{digest}.{end_offset}" if end_offset < total_bytes else None
+        if offset > 0:
+            prev_offset = max(0, offset - limit_bytes)
+            while prev_offset > 0 and prev_offset < total_bytes and (full_bytes[prev_offset] & 0xC0) == 0x80:
+                prev_offset -= 1
+            prev_cursor = f"{digest}.{prev_offset}"
+        else:
+            prev_cursor = None
+        return {
+            "project_alias": project_alias,
+            "task_id": str(task_id),
+            "correlation_id": str(correlation_id),
+            "action_id": str(action_id),
+            "stage_id": stage_id,
+            "view": view,
+            "content": content,
+            "truncated": end_offset < total_bytes,
+            "total_bytes": total_bytes,
+            "byte_offset": offset,
+            "next_cursor": next_cursor,
+            "prev_cursor": prev_cursor,
+            "tests_passed": tests_passed,
+            "tests_failed": tests_failed,
+            "tests_skipped": tests_skipped,
+            "test_cases": test_cases,
+            "error_excerpt": combined_excerpt,
+        }
 
     def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None, delivery_visible=True):
         self._require_project(project_alias)

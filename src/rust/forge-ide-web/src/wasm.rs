@@ -6,6 +6,9 @@
 //! Host order: reserve_input(len), copy exactly len bytes through memory.buffer,
 //! dispatch_input(), copy output_ptr/output_len bytes, release_output(). Refresh
 //! JavaScript memory views after every call; reentry returns 0, never panics.
+//! ABI 16 adds correlation-scoped Jenkins CI/CD stages, per-agent persistent
+//! branch state, interactive `FlowStageNode` stage dot controls, and bounded
+//! Errors/Tests/Console stage inspection in `ViewModel`.
 //! ABI 15 adds negotiated per-event retry progress, lifetime repair telemetry,
 //! and reusable `FlowDiagramBinding` event-stream stage diagrams and pipeline
 //! stage diagrams in `ViewModel`.
@@ -47,7 +50,7 @@ impl Write for BoundedBytes {
 #[allow(unsafe_code)]
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    15
+    16
 }
 
 /// Returns zero on invalid size/reentry. Reserving invalidates previous input.

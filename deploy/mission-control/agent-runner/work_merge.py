@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 
+from work_agent_branch import BranchOwnershipConflictError
 from work_publication_clients import DIGEST, SHA, PublicationError, uuid
 
 LOG = logging.getLogger("forge-workflow-merge")
@@ -183,11 +184,13 @@ class GitHubExactTreeMergeProvider:
 
 
 class MergeWorker:
-    def __init__(self, config, store, provider, *, source_sync, stop=None, native_ci=None, repair_sources=None):
+    def __init__(self, config, store, provider, *, source_sync, stop=None, native_ci=None, repair_sources=None,
+                 branch_provider=None):
         self.config, self.store, self.provider = config, store, provider
         self.stop = stop if stop is not None else threading.Event()
         self.source_sync = source_sync
         self.native_ci, self.repair_sources = native_ci, repair_sources
+        self.branch_provider = branch_provider
 
     def process(self, job):
         if self.native_ci is not None:
@@ -203,6 +206,7 @@ class MergeWorker:
             raise PublicationError("merge_not_authorized")
         done, lost = threading.Event(), threading.Event()
         intent, mutable = job.get("intent"), False
+        reservation = None
 
         def require_lease():
             if self.stop.is_set() or lost.is_set() or not self.store.merge_renew(job):
@@ -226,6 +230,10 @@ class MergeWorker:
                                  os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             require_lease()
+            if self.branch_provider is not None and self.branch_provider.persistent_enabled:
+                reservation = self.branch_provider.verify_merge_owner(job)
+                if reservation is not None:
+                    job = {**job, "agent_profile": reservation.agent_profile, "branch_name": reservation.branch_name}
             if intent is None:
                 proposed = self.provider.prepare(job)
                 require_lease()
@@ -235,6 +243,8 @@ class MergeWorker:
             self.provider.validate_intent(job, intent)
             require_lease()
             if not self.provider.reconcile(job, intent):
+                if reservation is not None:
+                    self.branch_provider.verify_merge_owner(job)
                 mutable = True
                 self.provider.apply(job, intent, require_lease)
             require_lease()
@@ -243,6 +253,16 @@ class MergeWorker:
             self.store.merge_finish(job, "merged", {"candidate_commit": job["candidate_commit"],
                 "merge_commit": intent["merge_commit"], "pr_url": job["pr_url"],
                 "summary": "The independently approved candidate tree was merged without incorporating unreviewed bytes."})
+            if reservation is not None:
+                try:
+                    self.branch_provider.release(
+                        reservation,
+                        release_reason="merged",
+                        remote_open_pr_confirmed_none=True,
+                        merge_commit=intent["merge_commit"],
+                    )
+                except Exception:
+                    LOG.warning("Branch reservation release deferred to restart reconciliation after merge")
         except Exception as error:
             if not lost.is_set():
                 try:
@@ -259,7 +279,7 @@ class MergeWorker:
                             merged = True
                         except Exception:
                             mutable = True
-                    code = error.code if isinstance(error, PublicationError) else "merge_unavailable"
+                    code = error.code if isinstance(error, (PublicationError, BranchOwnershipConflictError)) else "merge_unavailable"
                     current_main = (self.provider._main(job) if no_merge_confirmed
                         and self.repair_sources is not None else None)
                     main_raced = intent is not None and current_main is not None and current_main != intent['expected_main']

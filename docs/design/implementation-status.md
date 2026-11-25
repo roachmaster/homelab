@@ -1,11 +1,15 @@
 # Current Forge implementation
 
-Updated 23 November 2026.
+Updated 25 November 2026.
 Active navigation is **Agents, Workbench, Home and Design**,
 with Agents as the default admitted view. Chat is temporarily inactive;
 Mail remains retired. Their PostgreSQL history and supported inert local
-snapshots remain preserved. The current source browser contract is **ABI15**; the
-native HTTP protocol remains version1.
+snapshots remain preserved. The current source browser contract is **ABI16**
+(adding correlation-scoped Jenkins CI/CD stages, persistent per-agent cached
+branch state, interactive stage dots, and bounded Errors/Tests/Console stage
+inspection via `ide.work.cicd.stage_log` backed by migration 39); the
+native HTTP protocol remains version 1. Live deployment and migration 39
+activation remain separate authorized rollout steps.
 
 The retry implementation uses **20 attempts for each unresolved failure event**
 across native and external agents. Compilation, test phases, reviews and feedback

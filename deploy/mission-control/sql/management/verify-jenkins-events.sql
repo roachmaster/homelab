@@ -5,7 +5,7 @@ BEGIN
  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=27 AND name='jenkins_events') THEN
   RAISE EXCEPTION 'Missing Jenkins events migration27';END IF;
  FOR expected IN SELECT * FROM(VALUES
-  ('jenkins_events','d0838fc8f42db1a372e6f4b78d89ab2e8f7a5f5010a57c083afde39be10cc26d'),('jenkins_event_deliveries','29d75bf9cc955afc14dd7f7f74fe5bbf8a4fa680eb415b3e0ab1fe71b3bdc17d'),('jenkins_observations','0e9f4900e964abbe1661720dba214fae0a1af4969df36d72dd795b11aa1e217f')
+  ('jenkins_events','bf95c65c7d04a26b66d39d638dbd50f3c169ff01ec00a195e915caa996b30f0d'),('jenkins_event_deliveries','29d75bf9cc955afc14dd7f7f74fe5bbf8a4fa680eb415b3e0ab1fe71b3bdc17d'),('jenkins_observations','0e9f4900e964abbe1661720dba214fae0a1af4969df36d72dd795b11aa1e217f')
  )x(name,sha256) LOOP
   relation:=to_regclass('forge_agent.'||expected.name);
   IF relation IS NULL THEN RAISE EXCEPTION 'Missing Jenkins relation %',expected.name;END IF;

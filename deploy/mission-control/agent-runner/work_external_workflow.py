@@ -497,7 +497,11 @@ class ExternalWorkflowStore:
                 return self._revise(cursor,w,'code',{'summary':'Return the exact candidate JSON manifest with version,candidate_commit,candidate_tree,base_revision,summary (and optional source_branch). Preserve your existing branch and completed work.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
             if manifest['base_revision']!=w['state']['base_revision']:
                 return self._revise(cursor,w,'code',{'summary':'Rebase the existing implementation onto the configured base '+w['state']['base_revision']+' and return its exact candidate manifest.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
-            request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':w['state']['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
+            profile_cfg = getattr(self.config, 'profiles', {}).get(w['author_profile']) if hasattr(self.config, 'profiles') else None
+            expected_branch = getattr(profile_cfg, 'branch', None)
+            request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':w['state']['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree'],'agent_profile':w['author_profile'],'root_task_id':str(w['root_task_id'])}
+            if expected_branch is not None:
+                request['expected_agent_branch']=expected_branch
             if manifest.get('source_branch') is not None:
                 request['source_branch']=manifest['source_branch']
             a=self._action(cursor,w,'prepare',artifact['sha256'],request)

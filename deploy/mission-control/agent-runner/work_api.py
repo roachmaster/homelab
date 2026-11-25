@@ -63,6 +63,7 @@ class Destination(Enum):
     REVIEW_DECIDE = "ide.work.review.decide"
     REPAIR = "ide.work.repair"
     PUBLICATION_RETRY = "ide.work.publication.retry"
+    CICD_STAGE_LOG = "ide.work.cicd.stage_log"
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,18 @@ class WorkPublicationRetry:
     idempotency_key: str
 
 
+@dataclass(frozen=True)
+class WorkCicdStageLog:
+    project_alias: str
+    task_id: UUID
+    correlation_id: UUID
+    action_id: UUID
+    stage_id: str
+    view: str
+    cursor: str | None = None
+    limit_bytes: int = 32768
+
+
 class WorkService:
     """Authorized application service coordinating configured grants, catalog, and store."""
 
@@ -288,6 +301,19 @@ class WorkService:
     def get(self, command):
         self._require_project(command.project_alias)
         return self._store.get(project_alias=command.project_alias, task_id=command.task_id)
+
+    def cicd_stage_log(self, command):
+        self._require_project(command.project_alias)
+        return self._store.cicd_stage_log(
+            project_alias=command.project_alias,
+            task_id=command.task_id,
+            correlation_id=command.correlation_id,
+            action_id=command.action_id,
+            stage_id=command.stage_id,
+            view=command.view,
+            cursor_token=command.cursor,
+            limit_bytes=command.limit_bytes,
+        )
 
     def list_tasks(self, command):
         self._require_project(command.project_alias)
@@ -830,6 +856,23 @@ def decode(route, correlation, body):
         except (ValueError,TypeError,UnicodeError):
             raise Rejected(400,"invalid_request") from None
 
+    if route is Destination.CICD_STAGE_LOG and kind == "work_cicd_stage_log":
+        required = base | {"task_id", "correlation_id", "action_id", "stage_id", "view"}
+        if required <= body.keys() <= required | {"cursor", "limit_bytes"}:
+            view = body["view"]
+            if not isinstance(view, str) or view not in {"errors", "tests", "console"}:
+                raise Rejected(400, "invalid_request")
+            return WorkCicdStageLog(
+                project_alias=project_alias,
+                task_id=_uuid(body["task_id"]),
+                correlation_id=_uuid(body["correlation_id"]),
+                action_id=_uuid(body["action_id"]),
+                stage_id=_identifier(body["stage_id"]),
+                view=view,
+                cursor=_result_cursor(body.get("cursor", None)),
+                limit_bytes=_int_range(body.get("limit_bytes", 32768), 1, 32768),
+            )
+
     raise Rejected(400, "invalid_request")
 
 
@@ -892,5 +935,8 @@ def dispatch(route, correlation, command, service, *, delivery_version=1):
         return HTTPStatus.ACCEPTED,common.envelope("work_repair_submitted",correlation,**service.repair(command))
     if route is Destination.PUBLICATION_RETRY and isinstance(command,WorkPublicationRetry):
         return HTTPStatus.ACCEPTED,common.envelope("work_publication_retry_queued",correlation,**service.publication_retry(command))
+    if route is Destination.CICD_STAGE_LOG and isinstance(command, WorkCicdStageLog):
+        page = service.cicd_stage_log(command)
+        return HTTPStatus.OK, common.envelope("work_cicd_stage_log_page", correlation, **page)
 
     raise Rejected(400, "invalid_request")

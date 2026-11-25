@@ -21,6 +21,7 @@ import threading
 import time
 
 import psycopg2
+from work_agent_branch import branch_scope_for_branch, default_agent_branch
 from work_publication_clients import artifact_guard, command, PublicationError
 from work_review import protected_gate_path
 from work_external_delivery_store import ExternalDeliveryStoreFactory
@@ -904,6 +905,39 @@ class ExternalDeliveryWorker:
         request = {**action.request, 'action_id': action.action_id,
                    'workflow_id': action.workflow_id, 'project_alias': action.project_alias}
         require_lease()
+        agent_profile = request.get('agent_profile')
+        branch_reservation = None
+        branch_name_selected = None
+        if (agent_profile and action.kind in {'prepare', 'verify', 'merge', 'cancel'}
+                and hasattr(self.dao, 'agent_branch_acquire')):
+            branch_name_selected = (
+                request.get('source_branch')
+                or request.get('expected_agent_branch')
+                or default_agent_branch(agent_profile)
+            )
+            if branch_name_selected != 'main':
+                branch_scope_selected = branch_scope_for_branch(branch_name_selected)
+                root_task_id = request.get('root_task_id') or request.get('source_task_id') or action.workflow_id
+                task_id = request.get('source_task_id') or root_task_id
+                acquired = self.dao.agent_branch_acquire(
+                    project_alias=action.project_alias,
+                    agent_profile=agent_profile,
+                    branch_name=branch_name_selected,
+                    branch_scope=branch_scope_selected,
+                    workflow_id=action.workflow_id,
+                    root_task_id=root_task_id,
+                    task_id=task_id,
+                )
+                if not isinstance(acquired, dict) or acquired.get('acquired') is not True:
+                    result = {
+                        'status': 'pending',
+                        'receipt': request.get('previous_receipt', {}),
+                        'summary': 'Persistent agent branch is currently owned by another active workflow; waiting.',
+                    }
+                    require_lease()
+                    self.dao.checkpoint(action, result)
+                    return True
+                branch_reservation = acquired
         try:
             if action.kind == 'source':
                 result = {'status': 'passed', 'receipt': {'base_revision': self.delivery.source_head(action.project_alias)},
@@ -912,12 +946,77 @@ class ExternalDeliveryWorker:
                 candidate = self.delivery.prepare_candidate(request, require_lease)
                 result = {'status': candidate.get('status', 'passed'), 'receipt': candidate,
                           'summary': 'Exact external candidate prepared for independent review.'}
+                if branch_reservation is not None and candidate.get('status', 'passed') == 'passed' and hasattr(self.dao, 'agent_branch_upsert'):
+                    from datetime import datetime, timezone
+                    resolved_branch = candidate.get('source_branch') or branch_name_selected
+                    if resolved_branch and resolved_branch != 'main':
+                        self.dao.agent_branch_upsert(
+                            project_alias=action.project_alias,
+                            agent_profile=agent_profile,
+                            branch_name=resolved_branch,
+                            branch_scope=branch_scope_for_branch(resolved_branch),
+                            head_commit_sha=candidate.get('candidate_commit'),
+                            fetched_main_sha=candidate.get('integration_base'),
+                            fetched_main_at=datetime.now(timezone.utc),
+                            sync_status='synced_with_main',
+                            conflict_paths=[],
+                            last_task_id=request.get('source_task_id'),
+                            last_correlation_id=request.get('correlation_id'),
+                        )
             elif action.kind == 'verify':
                 result = self.delivery.verify(request, require_lease)
+                if branch_reservation is not None and hasattr(self.dao, 'agent_branch_upsert'):
+                    cache_raw = (result.get('receipt') or {}).get('cache')
+                    cache_status = None
+                    if isinstance(cache_raw, dict):
+                        raw_st = cache_raw.get('restore_status') or cache_raw.get('status')
+                        st = 'hit_main' if raw_st == 'hit_main_seed' else raw_st
+                        if st in {'hit_branch', 'hit_main', 'miss', 'disabled'}:
+                            cache_status = st
+                    if cache_status is not None and branch_name_selected:
+                        self.dao.agent_branch_upsert(
+                            project_alias=action.project_alias,
+                            agent_profile=agent_profile,
+                            branch_name=branch_name_selected,
+                            branch_scope=branch_scope_for_branch(branch_name_selected),
+                            cache_status=cache_status,
+                            last_task_id=request.get('source_task_id'),
+                            last_correlation_id=request.get('correlation_id'),
+                        )
             elif action.kind == 'merge':
+                if branch_reservation is not None and hasattr(self.dao, 'agent_branch_verify_owner'):
+                    check = self.dao.agent_branch_verify_owner(
+                        project_alias=action.project_alias,
+                        agent_profile=agent_profile,
+                        workflow_id=action.workflow_id,
+                        expected_epoch=int(branch_reservation['reservation_epoch']),
+                    )
+                    if not isinstance(check, dict) or check.get('valid') is not True:
+                        raise ValueError('Persistent branch ownership lost before external merge')
                 result = self.delivery.merge(request, require_lease)
+                if (branch_reservation is not None and result.get('status') == 'merged'
+                        and hasattr(self.dao, 'agent_branch_release')):
+                    self.dao.agent_branch_release(
+                        project_alias=action.project_alias,
+                        agent_profile=agent_profile,
+                        workflow_id=action.workflow_id,
+                        expected_epoch=int(branch_reservation['reservation_epoch']),
+                        release_reason='merged',
+                        remote_open_pr_confirmed_none=True,
+                        merge_commit=(result.get('receipt') or {}).get('merge_commit'),
+                    )
             elif action.kind == 'cancel':
                 result = self.delivery.cancel(request, require_lease)
+                if (branch_reservation is not None and result.get('status') == 'cancelled'
+                        and hasattr(self.dao, 'agent_branch_release')):
+                    self.dao.agent_branch_release(
+                        project_alias=action.project_alias,
+                        agent_profile=agent_profile,
+                        workflow_id=action.workflow_id,
+                        expected_epoch=int(branch_reservation['reservation_epoch']),
+                        release_reason='cancelled',
+                        remote_open_pr_confirmed_none=True,
+                    )
             else:
                 raise ValueError('Unknown delivery action')
         except (ObservationUnavailable, PublicationError):

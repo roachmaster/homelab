@@ -217,3 +217,15 @@ Muse delivery already uses that job. A real full-suite smoke build passed on
 Native-provider tests use owned fixtures and do not impersonate production
 model approvals or Jenkins results. Deployment and live-task evidence are
 recorded in `AGENT_WORK.md`.
+
+## Persistent agent branches & portal stage inspection (source M39)
+
+Under default `branch_policy = "persistent-agent-v1"`, native verification and
+publication reuse one persistent branch per profile (`forge/agent/<profile-slug>`
+or explicit startup-validated override) guarded by exclusive active-workflow
+ownership in `forge_agent.agent_branch_state` (`reservation_epoch`, compare-and-swap
+`--force-with-lease` pushes, and open-PR safety blocking). Native and post-merge
+Jenkins runs propagate `correlation_id`, `action_id`, `branch`, and `branch_scope`
+so the portal displays correlation-scoped CI/CD stage dots and bounded read-only
+Errors/Tests/Console diagnostics (`ide.work.cicd.stage_log`) without turning
+untrusted console text or webhook observations into approval or merge authority.

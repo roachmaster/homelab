@@ -24,12 +24,14 @@ fn ready() -> Agents {
                 alias: "agy-primary".into(),
                 label: "Gemini".into(),
                 backend: WorkBackend::Antigravity,
+                branch: None,
                 transport: None,
                 model: "Fixture model".into(),
                 modes: vec![WorkMode::Plan, WorkMode::Review],
             }],
             worker_status: WorkWorkerStatus::Ready,
             observed_at: Some(TIME.into()),
+            agent_branches: vec![],
         }),
         ..Agents::default()
     }
@@ -85,6 +87,7 @@ fn detail(status: WorkStatus) -> WorkTaskDetail {
         workflow: None,
         review: None,
         external_result: None,
+        correlation_cicd: None,
     }
 }
 fn draft(agents: &mut Agents) {

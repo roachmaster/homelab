@@ -7,6 +7,7 @@ import re
 from types import MappingProxyType
 
 from work_policy import POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIES, native_policy_digest
+from work_agent_branch import default_agent_branch, validate_persistent_branch
 
 CONFIG_ENV = "FORGE_CODING_WORKER_CONFIG"
 MAX_CONFIG_BYTES = 64 * 1024
@@ -74,12 +75,19 @@ class WorkerProfile:
     model: str
     modes: tuple[str, ...]
     execution_enabled: bool | None = None
+    branch: str | None = None
 
     def __post_init__(self):
         enabled = self.backend not in {"grok", "muse"} if self.execution_enabled is None else self.execution_enabled
         if type(enabled) is not bool:
             raise ValueError("Invalid coding execution capability")
         object.__setattr__(self, "execution_enabled", enabled)
+        resolved_branch = (
+            default_agent_branch(self.alias)
+            if self.branch is None
+            else validate_persistent_branch(self.branch, allow_non_forge=False)
+        )
+        object.__setattr__(self, "branch", resolved_branch)
 
 
 @dataclass(frozen=True)
@@ -188,7 +196,7 @@ def parse_config(raw, *, source_path=None):
         raise ValueError("Invalid coding worker execution policy")
     for alias, value in profiles.items():
         alias = identifier(alias)
-        value = _object(value, {"backend", "model", "modes"}, {"execution_enabled"})
+        value = _object(value, {"backend", "model", "modes"}, {"execution_enabled", "branch"})
         if not isinstance(value["backend"], str) or value["backend"] not in BACKENDS:
             raise ValueError("Invalid coding worker backend")
         native_policy_digest(resource_profile, value["backend"])
@@ -203,7 +211,12 @@ def parse_config(raw, *, source_path=None):
         enabled = value.get("execution_enabled", value["backend"] not in {"grok", "muse"})
         if type(enabled) is not bool:
             raise ValueError("Invalid coding execution capability")
-        frozen_profiles[alias] = WorkerProfile(alias, value["backend"], model, tuple(modes), enabled)
+        branch = value.get("branch")
+        if branch is not None and not isinstance(branch, str):
+            raise ValueError("Invalid coding worker profile branch")
+        frozen_profiles[alias] = WorkerProfile(alias, value["backend"], model, tuple(modes), enabled, branch=branch)
+    if len({profile.branch for profile in frozen_profiles.values()}) != len(frozen_profiles):
+        raise ValueError("Duplicate persistent agent branch across coding worker profiles")
     if resource_profile == AGY_POLICY_ID and (external_reviews or raw.get("usage_only_profiles")):
         raise ValueError("Unattended Antigravity worker cannot own other agent capabilities")
     binaries = raw["binaries"]
@@ -298,7 +311,7 @@ def validated_copy(config):
                     "gid": config.account.gid, "home": str(config.account.home)},
         "workspace_root": str(config.workspace_root), "state_root": str(config.state_root),
         "projects": {key: str(value) for key, value in config.projects.items()},
-        "profiles": {key: {"backend": value.backend, "model": value.model, "modes": list(value.modes), "execution_enabled": value.execution_enabled}
+        "profiles": {key: {"backend": value.backend, "model": value.model, "modes": list(value.modes), "execution_enabled": value.execution_enabled, "branch": value.branch}
                      for key, value in config.profiles.items()},
         "binaries": {key: str(value) for key, value in config.binaries.items()},
         "allow_implement": config.allow_implement,

@@ -1,6 +1,12 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::{ChatRole, RequestToken, SourceSpan, WorkPlanDecision, WorkReviewDecision};
+use crate::protocol::{
+    ChatRole, RequestToken, SourceSpan, WorkCicdStageView, WorkPlanDecision, WorkReviewDecision,
+};
 use serde::Serialize;
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ViewModel {
@@ -53,6 +59,12 @@ pub struct FlowStageNode {
     pub label: String,
     pub state: FlowStageState,
     pub current: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub selected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<RowAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count_label: Option<String>,
     pub detail: String,
@@ -457,6 +469,32 @@ pub enum RowAction {
     },
     SelectAgentUsage {
         agent_profile: String,
+    },
+    SelectCicdRun {
+        task_id: String,
+        correlation_id: String,
+        run_id: String,
+    },
+    SelectCicdStage {
+        task_id: String,
+        correlation_id: String,
+        run_id: String,
+        stage_id: String,
+    },
+    SelectCicdStageView {
+        task_id: String,
+        correlation_id: String,
+        run_id: String,
+        stage_id: String,
+        view: WorkCicdStageView,
+    },
+    CicdStageLogPage {
+        task_id: String,
+        correlation_id: String,
+        run_id: String,
+        stage_id: String,
+        view: WorkCicdStageView,
+        cursor: Option<String>,
     },
     ToggleExplorerFilter {
         report: RequestToken,

@@ -2,6 +2,7 @@
 //! No application HTML, CSS, JS, raw-code field or string template lives here.
 use super::{Document, HeaderBinding, RequestBinding, RequestPolicy, TimerBinding, Transport};
 use crate::component;
+mod cicd;
 mod delivery;
 mod external_agents;
 
@@ -57,6 +58,7 @@ pub fn ide_document() -> Document {
                             component!(heading "agents-tasks-heading", "Tasks"),
                             component!(stacked_tree "agents-tasks", "Coding assignments"),
                         ]),
+                        cicd::branches_overview(),
                         external_agents::directory(),
                     ]),
                     component!(region "agents-list-pagination"; [
@@ -102,6 +104,7 @@ pub fn ide_document() -> Document {
                             component!(heading "agents-stage-heading", "Event stream path"),
                             component!(flow_diagram "agents-stage-diagram", "Task event-stream stage diagram"),
                         ]),
+                        cicd::reader_panel(),
                         component!(region "agents-workflow"; [
                             component!(row [
                                 component!(heading "agents-workflow-heading", "Autonomous workflow"),
@@ -524,6 +527,13 @@ pub fn ide_transport() -> Transport {
             "work_publication_retry_queued",
             "work_failed",
             true,
+        ),
+        (
+            "work_cicd_stage_log",
+            "ide.work.cicd.stage_log",
+            "work_cicd_stage_log_page",
+            "work_failed",
+            false,
         ),
         (
             "usage_overview",

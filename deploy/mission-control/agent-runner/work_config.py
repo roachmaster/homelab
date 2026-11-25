@@ -12,6 +12,7 @@ from work_policy import (POLICY_DIGEST, POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIE
                          native_policy_digest, native_policy_matches)
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, POLICY_DIGEST as EXTERNAL_POLICY_DIGEST, MODES as EXTERNAL_MODES, MODEL as EXTERNAL_MODEL, POLICIES as EXTERNAL_POLICIES
 from work_external_flow_config import freeze_external_workflows
+from work_agent_branch import default_agent_branch, validate_persistent_branch
 
 CONFIG_ENV_VAR = "FORGE_RUNNER_WORK_CONFIG"
 USAGE_CONFIG_ENV_VAR = "FORGE_RUNNER_USAGE_CONFIG"
@@ -34,7 +35,7 @@ DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
 CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
-PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled"}
+PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled", "branch"}
 
 
 def canonical_json_bytes(value):
@@ -124,6 +125,7 @@ class WorkProfile:
     resource_profile: str
     label: str | None = None
     execution_enabled: bool | None = None
+    branch: str | None = None
 
     def __post_init__(self):
         validate_identifier(self.alias, "profile alias")
@@ -141,6 +143,12 @@ class WorkProfile:
         if type(enabled) is not bool:
             raise ValueError("Invalid work execution capability")
         object.__setattr__(self, "execution_enabled", enabled)
+        resolved_branch = (
+            default_agent_branch(self.alias)
+            if self.branch is None
+            else validate_persistent_branch(self.branch, allow_non_forge=self.is_external)
+        )
+        object.__setattr__(self, "branch", resolved_branch)
 
     @property
     def display_label(self):
@@ -401,6 +409,8 @@ class WorkConfig:
             copied_profiles[alias] = profile
         if not copied_profiles or len(copied_profiles) > MAX_PROFILES:
             raise ValueError("Work profiles must contain between 1 and 64 entries")
+        if len({profile.branch for profile in copied_profiles.values()}) != len(copied_profiles):
+            raise ValueError("Duplicate persistent agent branch across work profiles")
         if not isinstance(self.project_labels, (dict, MappingProxyType)):
             raise ValueError("Invalid work project_labels")
         copied_labels = {}
@@ -491,6 +501,7 @@ def parse_work_config(raw):
             resource_profile=spec["resource_profile"],
             label=spec.get("label"),
             execution_enabled=spec.get("execution_enabled"),
+            branch=spec.get("branch"),
         )
     raw_project_labels = raw.get("project_labels", {})
     if not isinstance(raw_project_labels, dict):

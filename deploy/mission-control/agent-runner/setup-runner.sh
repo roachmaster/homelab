@@ -124,6 +124,8 @@ publish "$directory/jenkins_emitter.py" "$target/jenkins_emitter.py"
 publish "$directory/jenkins_emit_tool.py" "$target/jenkins_emit_tool.py"
 publish "$directory/work_jenkins_lifecycle.py" "$target/work_jenkins_lifecycle.py"
 publish "$directory/work_pipeline_projection.py" "$target/work_pipeline_projection.py"
+publish "$directory/work_agent_branch.py" "$target/work_agent_branch.py"
+publish "$directory/work_cicd_artifacts.py" "$target/work_cicd_artifacts.py"
 publish "$directory/runner.py" "$target/runner.py"
 publish "$directory/forge-agent-runner.service" "$unit"
 systemctl daemon-reload

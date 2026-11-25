@@ -332,4 +332,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=38)
 \ir migrations/0038_external_plan_approve_override.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(38,'external_plan_approve_override');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=39) AS apply_0039
+\gset
+\if :apply_0039
+\ir migrations/0039_agent_branch_and_cicd_stages.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(39,'agent_branch_and_cicd_stages');
+\endif
 COMMIT;

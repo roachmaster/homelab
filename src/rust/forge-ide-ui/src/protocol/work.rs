@@ -2,9 +2,11 @@
 use super::{valid_chat_id, valid_chat_text};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+mod cicd;
 mod delivery;
 mod retry;
 mod workflow;
+pub use cicd::*;
 pub use delivery::*;
 pub use retry::*;
 pub use workflow::*;
@@ -695,6 +697,8 @@ pub struct WorkProfile {
     pub model: String,
     pub modes: Vec<WorkMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<WorkTransport>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -707,6 +711,10 @@ impl WorkProfile {
         valid_work_name(&self.alias, 64)
             && valid_work_label(&self.label, 128)
             && valid_work_label(&self.model, 128)
+            && self
+                .branch
+                .as_deref()
+                .is_none_or(|b| valid_work_branch(b) && b != "main")
             && !self.modes.is_empty()
             && self.modes.len() <= 3
             && self
@@ -726,11 +734,14 @@ pub struct WorkCatalog {
     pub worker_status: WorkWorkerStatus,
     #[serde(deserialize_with = "required_nullable")]
     pub observed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_branches: Vec<AgentBranchState>,
 }
 impl WorkCatalog {
     pub fn is_valid(&self) -> bool {
         self.projects.len() <= 64
             && self.profiles.len() <= 64
+            && self.agent_branches.len() <= MAX_AGENT_BRANCHES
             && self.projects.iter().all(|p| {
                 p.delivery.as_ref().is_none_or(WorkDelivery::is_valid)
                     && p.workflow.as_ref().is_none_or(WorkWorkflowPolicy::is_valid)
@@ -744,6 +755,7 @@ impl WorkCatalog {
                         .is_none_or(|s| valid_work_hex(s, 40))
             })
             && self.profiles.iter().all(WorkProfile::is_valid)
+            && self.agent_branches.iter().all(AgentBranchState::is_valid)
             && self
                 .projects
                 .iter()
@@ -891,6 +903,9 @@ pub struct WorkTaskDetail {
     /// Authenticated external artifact; carries no native process or workspace proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_result: Option<WorkExternalResult>,
+    /// Correlation-scoped Jenkins CI/CD runs, stages, and persistent agent branch state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_cicd: Option<WorkCorrelationCicd>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -975,6 +990,10 @@ impl WorkTaskDetail {
                 .as_ref()
                 .zip(self.result.as_ref())
                 .is_none_or(|(a, r)| a.attempt_id == r.attempt_id)
+            && self
+                .correlation_cicd
+                .as_ref()
+                .is_none_or(|c| c.is_valid() && c.correlation_id == self.correlation_id)
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1202,6 +1221,19 @@ pub enum WorkRequest {
         note: String,
         idempotency_key: String,
     },
+    WorkCicdStageLog {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        correlation_id: String,
+        action_id: String,
+        stage_id: String,
+        view: WorkCicdStageView,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
+        #[serde(default = "cicd_stage_log_limit")]
+        limit_bytes: usize,
+    },
 }
 const fn list_limit() -> usize {
     20
@@ -1211,6 +1243,9 @@ const fn event_limit() -> usize {
 }
 const fn result_limit() -> usize {
     MAX_WORK_RESULT_PAGE_BYTES
+}
+const fn cicd_stage_log_limit() -> usize {
+    MAX_CICD_STAGE_LOG_PAGE_BYTES
 }
 impl WorkRequest {
     pub fn request_id(&self) -> &str {
@@ -1227,7 +1262,8 @@ impl WorkRequest {
             | Self::WorkPlanDecide { request_id, .. }
             | Self::WorkReviewDecide { request_id, .. }
             | Self::WorkRepair { request_id, .. }
-            | Self::WorkPublicationRetry { request_id, .. } => request_id,
+            | Self::WorkPublicationRetry { request_id, .. }
+            | Self::WorkCicdStageLog { request_id, .. } => request_id,
         }
     }
     pub fn project_alias(&self) -> Option<&str> {
@@ -1244,7 +1280,8 @@ impl WorkRequest {
             | Self::WorkPlanDecide { project_alias, .. }
             | Self::WorkReviewDecide { project_alias, .. }
             | Self::WorkRepair { project_alias, .. }
-            | Self::WorkPublicationRetry { project_alias, .. } => Some(project_alias),
+            | Self::WorkPublicationRetry { project_alias, .. }
+            | Self::WorkCicdStageLog { project_alias, .. } => Some(project_alias),
         }
     }
     pub fn task_id(&self) -> Option<&str> {
@@ -1258,7 +1295,8 @@ impl WorkRequest {
             | Self::WorkPlanDecide { task_id, .. }
             | Self::WorkReviewDecide { task_id, .. }
             | Self::WorkRepair { task_id, .. }
-            | Self::WorkPublicationRetry { task_id, .. } => Some(task_id),
+            | Self::WorkPublicationRetry { task_id, .. }
+            | Self::WorkCicdStageLog { task_id, .. } => Some(task_id),
             _ => None,
         }
     }
@@ -1277,6 +1315,7 @@ impl WorkRequest {
             Self::WorkReviewDecide { .. } => "ide.work.review.decide",
             Self::WorkRepair { .. } => "ide.work.repair",
             Self::WorkPublicationRetry { .. } => "ide.work.publication.retry",
+            Self::WorkCicdStageLog { .. } => "ide.work.cicd.stage_log",
         }
     }
     pub fn is_destination(value: &str) -> bool {
@@ -1295,6 +1334,7 @@ impl WorkRequest {
                 | "ide.work.review.decide"
                 | "ide.work.repair"
                 | "ide.work.publication.retry"
+                | "ide.work.cicd.stage_log"
         )
     }
     pub fn is_mutation(&self) -> bool {
@@ -1483,6 +1523,22 @@ impl WorkRequest {
                         && optional_text(note, 2048)
                         && valid_work_name(idempotency_key, 128)
                 }
+                Self::WorkCicdStageLog {
+                    correlation_id,
+                    action_id,
+                    stage_id,
+                    cursor,
+                    limit_bytes,
+                    ..
+                } => {
+                    valid_chat_id(correlation_id)
+                        && valid_chat_id(action_id)
+                        && valid_work_name(stage_id, 64)
+                        && (1..=MAX_CICD_STAGE_LOG_PAGE_BYTES).contains(limit_bytes)
+                        && cursor
+                            .as_deref()
+                            .is_none_or(|c| work_result_cursor(c).is_some())
+                }
             }
     }
 }
@@ -1539,6 +1595,8 @@ pub enum WorkResponse {
         worker_status: WorkWorkerStatus,
         #[serde(deserialize_with = "required_nullable")]
         observed_at: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agent_branches: Vec<AgentBranchState>,
     },
     WorkSubmitted {
         request_id: String,
@@ -1649,6 +1707,33 @@ pub enum WorkResponse {
         status: WorkStatus,
         publication_id: String,
     },
+    WorkCicdStageLogPage {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        correlation_id: String,
+        action_id: String,
+        stage_id: String,
+        view: WorkCicdStageView,
+        content: String,
+        truncated: bool,
+        total_bytes: u64,
+        byte_offset: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prev_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tests_passed: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tests_failed: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tests_skipped: Option<u64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        test_cases: Vec<WorkCicdTestCase>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_excerpt: Option<String>,
+    },
     WorkFailed {
         request_id: String,
         code: WorkFailure,
@@ -1671,6 +1756,7 @@ impl WorkResponse {
             | Self::WorkReviewDecided { request_id, .. }
             | Self::WorkRepairSubmitted { request_id, .. }
             | Self::WorkPublicationRetryQueued { request_id, .. }
+            | Self::WorkCicdStageLogPage { request_id, .. }
             | Self::WorkFailed { request_id, .. } => request_id,
         }
     }
@@ -1693,6 +1779,7 @@ impl WorkResponse {
                     profiles,
                     worker_status,
                     observed_at,
+                    agent_branches,
                     ..
                 },
                 WorkRequest::WorkCatalog { .. },
@@ -1703,6 +1790,7 @@ impl WorkResponse {
                         profiles: profiles.clone(),
                         worker_status: *worker_status,
                         observed_at: observed_at.clone(),
+                        agent_branches: agent_branches.clone(),
                     }
                     .is_valid()
             }
@@ -2063,6 +2151,68 @@ impl WorkResponse {
                                     d == result_digest && Some(n) == end && n < *total_bytes
                                 })
                     }
+            }
+            (
+                Self::WorkCicdStageLogPage {
+                    project_alias,
+                    task_id,
+                    correlation_id,
+                    action_id,
+                    stage_id,
+                    view,
+                    content,
+                    truncated,
+                    total_bytes,
+                    byte_offset,
+                    next_cursor,
+                    prev_cursor,
+                    tests_passed,
+                    tests_failed,
+                    tests_skipped,
+                    test_cases,
+                    error_excerpt,
+                    ..
+                },
+                WorkRequest::WorkCicdStageLog {
+                    correlation_id: req_correlation,
+                    action_id: req_action,
+                    stage_id: req_stage,
+                    view: req_view,
+                    cursor,
+                    limit_bytes,
+                    ..
+                },
+            ) => {
+                let wanted = cursor.as_deref().and_then(work_result_cursor);
+                let end = byte_offset.checked_add(content.len() as u64);
+                http_status == 200
+                    && project(project_alias)
+                    && task(task_id)
+                    && correlation_id == req_correlation
+                    && action_id == req_action
+                    && stage_id == req_stage
+                    && view == req_view
+                    && content.len() <= *limit_bytes
+                    && content.len() <= MAX_CICD_STAGE_LOG_PAGE_BYTES
+                    && *total_bytes <= MAX_CICD_STAGE_LOG_BYTES
+                    && *byte_offset == wanted.map_or(0, |(_, n)| n)
+                    && end.is_some_and(|n| n <= *total_bytes)
+                    && (*truncated == end.is_some_and(|n| n < *total_bytes))
+                    && next_cursor
+                        .as_deref()
+                        .is_none_or(|c| work_result_cursor(c).is_some())
+                    && prev_cursor
+                        .as_deref()
+                        .is_none_or(|c| work_result_cursor(c).is_some())
+                    && (*truncated == next_cursor.is_some())
+                    && tests_passed.is_none_or(|n| n <= MAX_WORK_INTEGER)
+                    && tests_failed.is_none_or(|n| n <= MAX_WORK_INTEGER)
+                    && tests_skipped.is_none_or(|n| n <= MAX_WORK_INTEGER)
+                    && test_cases.len() <= MAX_CICD_TEST_CASES
+                    && test_cases.iter().all(WorkCicdTestCase::is_valid)
+                    && error_excerpt
+                        .as_deref()
+                        .is_none_or(|e| optional_text(e, MAX_CICD_ERROR_EXCERPT_BYTES))
             }
             _ => false,
         }

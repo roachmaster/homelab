@@ -481,6 +481,33 @@ pub enum UiEvent {
     SelectAgentUsage {
         agent_profile: String,
     },
+    SelectCicdRun {
+        task_id: String,
+        correlation_id: String,
+        run_id: String,
+    },
+    SelectCicdStage {
+        task_id: String,
+        correlation_id: String,
+        run_id: String,
+        stage_id: String,
+    },
+    SelectCicdStageView {
+        task_id: String,
+        correlation_id: String,
+        run_id: String,
+        stage_id: String,
+        view: WorkCicdStageView,
+    },
+    CicdStageLogPage {
+        task_id: String,
+        correlation_id: String,
+        run_id: String,
+        stage_id: String,
+        view: WorkCicdStageView,
+        #[serde(default)]
+        cursor: Option<String>,
+    },
     TickAgentTime {
         watch: String,
     },

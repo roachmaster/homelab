@@ -915,3 +915,26 @@ Combined policy10 and additive migration0019 preserve Grok policy9/migration0018
 and every earlier immutable recipe, receipt and migration. See the [Muse provider
 design](../../../docs/architecture/muse-code-provider.md) for the fixed command,
 accounting convention, lifecycle and activation boundary.
+
+### Persistent per-agent branches & correlation CI/CD stages (migration 0039)
+
+In source, `branch_policy` defaults to `"persistent-agent-v1"` across `WorkConfig`,
+`WorkerConfig`, `PublicationConfig`, and external delivery (with explicit
+`"ephemeral-task-v1"` opt-in preserved for legacy regression tests and historical
+`forge/task-<uuid>` receipts). Every admitted profile (`agy-primary`,
+`codex-primary`, `grok-primary`, `muse-primary`, `muse-db-primary`, or any
+configured alias) resolves deterministically to `forge/agent/<profile-slug>`
+unless an explicit validated per-profile or per-project override is frozen at
+startup.
+
+Exclusive active-workflow ownership is persisted in `forge_agent.agent_branch_state`
+with monotonic `reservation_epoch`, branch-aware claim wrappers
+(`review_claim_for_branch_policy`, `publication_claim_for_branch_policy`), pre-push
+remote open-PR checks, compare-and-swap pushes (`--force-with-lease`), and startup
+`reconcile_branch_reservations()` recovery. Unrelated tasks wait cleanly in
+`pending` until the owning workflow reaches a verified terminal state with zero
+open PRs confirmed on GitHub (otherwise `reservation_blocker = 'open_pr_awaiting_closure'`).
+Read-only correlation CI/CD stage projections and bounded Errors/Tests/Console logs
+are exposed through `ide.work.catalog`, `ide.work.get`, and `ide.work.cicd.stage_log`
+backed by `forge_agent.jenkins_stage_results` and `jenkins_stage_log_chunks`.
+Live migration 0039 activation and portal deployment remain separate authorized steps.

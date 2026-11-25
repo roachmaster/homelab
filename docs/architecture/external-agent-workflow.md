@@ -192,3 +192,16 @@ transition checkpoint on `root_task_id`, queues the `implement` assignment via
 a `P0009` `BEFORE UPDATE OR DELETE` trigger). Prior plan reviews, artifacts,
 and exhausted retry events remain untouched, and full independent Codex code
 review, Jenkins checks, and guarded merge execute unchanged.
+
+## Persistent per-agent branch tracking (source M39)
+
+External author profiles (such as `muse-db-primary`) resolve to a single
+persistent non-`main` branch (`forge/agent/muse-db-primary` by default, or an
+explicit startup-validated override such as `feature/muse`). External delivery
+enforces the same exclusive active-workflow ownership contract through
+`forge_external_delivery_api.agent_branch_acquire`, `agent_branch_verify_owner`,
+`agent_branch_upsert`, and `agent_branch_release`, verifying manifest
+`source_branch`, tracking trunk `main` fetch SHA/timestamps and Jenkins cache
+status in `forge_agent.agent_branch_state`, and projecting both branch and
+post-merge Jenkins stages under the workflow's `correlation_id`. Live rollout
+of migration 0039 and delivery services remains a separate authorized step.
