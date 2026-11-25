@@ -1,4 +1,28 @@
-# Current: Reconcile feature/muse review-schema compatibility — 2026-11-24
+# Current: Recover cancelled/parked Muse and Gemini work — 2026-11-25
+
+User asks to fix the cancelled Muse task and the attention-state Gemini portal
+CI/CD task, determine why they stopped, and let their original owners continue.
+Muse root 6fdff749 / external workflow b3a05d8a exhausted twenty code reviewers
+before any model started: identical patches had different Git index-line
+abbreviations across producer/reviewer clones, so the diff digest mismatched.
+External escalation stopped linked tasks as cancelled; the list badge then hid
+the authoritative escalated workflow behind that raw cleanup status.
+Gemini root 49227db2 / native workflow c87bf342 stopped at its thirty-minute
+execution deadline twice. Its workspace and approved Plan remain preserved,
+but the native-timeout scanner allows only one automatic retry per workflow.
+
+Root owns integration, source qualification, tested immutable runtime rollout,
+private audited operator recovery and live event verification. External owner
+fixes canonical full-index diff production/validation and a scoped code-context
+post-fix recovery that retains the exhausted twenty-attempt evidence. Native
+owner uses the injected retry-event provider for bounded deadline episodes,
+including validated existing retry history, without a migration or budget reset.
+UI owner fixes the Rust authoritative-workflow badge and verifies generated
+assets; genuine user cancellation remains cancellation. Preserve each source
+artifact, reconciliation, Plan, owner, receipt, and protected CI requirement.
+No direct SQL status resets, stale-context approvals or fake completion.
+
+# Previous: Reconcile feature/muse review-schema compatibility — 2026-11-24
 
 Fix the remaining py-agent-runner failures on feature/muse at e41db88, based on
 main dc1af267. Preserve main's tested superseding-review provider byte for byte:

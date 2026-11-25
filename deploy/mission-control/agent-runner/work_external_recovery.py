@@ -85,10 +85,11 @@ class NativeReviewerGrantScope:
                             if cursor.fetchone() is None:raise Rejected(409,'not_reviewable')
                             cursor.execute('SELECT receipt_id FROM forge_agent.coding_reconciliation_receipts WHERE attempt_id=%s FOR SHARE',(attempt_id,))
                             if cursor.fetchone() is None:raise Rejected(409,'reconcile_required')
-                        def exhausted_reviewer_event(self,review_id,task_id,attempt_id,target_sha256):
+                        def exhausted_reviewer_event(self,review_id,task_id,attempt_id,target_sha256,*,failure_status='failed'):
                             from work_external_review_context import canonical
+                            if failure_status not in {'failed','needs_reconcile'}:raise ValueError('Unexpected reviewer failure evidence')
                             digest=hashlib.sha256(canonical({'target':target_sha256,'task_id':str(task_id),
-                                'attempt_id':str(attempt_id),'summary':'Native reviewer could not finish: failed'})).hexdigest()
+                                'attempt_id':str(attempt_id),'summary':'Native reviewer could not finish: '+failure_status})).hexdigest()
                             cursor.execute('''SELECT jsonb_build_object('event_id',e.event_id,'kind',e.kind,
                                 'used',e.used,'limit',e.attempt_limit,'status',e.status) FROM forge_agent.coding_retry_events e
                                 JOIN forge_agent.coding_retry_event_observations o ON o.event_id=e.event_id

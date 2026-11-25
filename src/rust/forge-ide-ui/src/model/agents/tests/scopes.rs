@@ -107,3 +107,84 @@ fn new_assignment_returns_to_active_scope_without_mutating_or_cancelling_history
     assert!(agents.list_next.is_none());
     assert_eq!(agents.pane, Pane::Compose);
 }
+
+#[test]
+fn authoritative_workflow_phase_overrides_cancelled_author_in_task_rows() {
+    for profile in ["muse-db-primary", "agy-primary"] {
+        for status in [
+            WorkStatus::Cancelled,
+            WorkStatus::CancelRequested,
+            WorkStatus::Failed,
+            WorkStatus::NeedsReconcile,
+        ] {
+            let mut agents = ready();
+            agents.task_scope = WorkListScope::Attention;
+            let mut root = detail(status).summary();
+            root.agent_profile = profile.into();
+            root.workflow_required = Some(true);
+            root.workflow_phase = Some(WorkWorkflowPhase::Escalated);
+            root.workflow_enabled = Some(false);
+            agents.tasks = vec![root];
+            let mut view = ViewModel::default();
+            agents.project(&mut view, true, true, true);
+            let row = &view
+                .lists
+                .iter()
+                .find(|binding| binding.id == "agents-tasks")
+                .unwrap()
+                .rows[0];
+            assert_eq!(
+                row.summary.as_ref().unwrap().badge,
+                badge("Needs attention", BadgeTone::Warning),
+                "{profile}: {status:?} is a stopped author, not a cancelled workflow"
+            );
+            assert_eq!(row.summary.as_ref().unwrap().tag, profile);
+            assert_eq!(agents.tasks[0].status, status);
+        }
+    }
+}
+
+#[test]
+fn authoritative_workflow_badges_preserve_cancellation_completion_and_retry_evidence() {
+    let agents = ready();
+    let mut root = detail(WorkStatus::Cancelled).summary();
+    root.workflow_required = Some(true);
+    root.workflow_enabled = Some(false);
+    root.workflow_phase = Some(WorkWorkflowPhase::Completed);
+    assert_eq!(
+        agents.task_summary_badge(&root),
+        badge("Merged", BadgeTone::Success)
+    );
+    root.workflow_phase = Some(WorkWorkflowPhase::Escalated);
+    root.retry_event = Some(WorkRetryEvent {
+        event_id: KEY.into(),
+        kind: WorkRetryKind::Planning,
+        used: MAX_AGENT_RETRIES,
+        limit: MAX_AGENT_RETRIES,
+        status: WorkRetryStatus::Exhausted,
+    });
+    assert_eq!(
+        agents.task_summary_badge(&root),
+        badge(
+            "Plan review needs attention · Retry 20/20",
+            BadgeTone::Warning
+        )
+    );
+    root.workflow_phase = Some(WorkWorkflowPhase::Cancelled);
+    assert_eq!(
+        agents.task_summary_badge(&root),
+        badge("Cancelled", BadgeTone::Neutral)
+    );
+    root.status = WorkStatus::AwaitingReview;
+    assert_eq!(
+        agents.task_summary_badge(&root),
+        badge("Cancelled", BadgeTone::Neutral)
+    );
+    root.status = WorkStatus::Cancelled;
+    root.workflow_phase = None;
+    root.workflow_required = Some(false);
+    assert_eq!(
+        agents.task_summary_badge(&root),
+        badge("Cancelled", BadgeTone::Neutral)
+    );
+}
