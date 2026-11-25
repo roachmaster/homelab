@@ -85,6 +85,48 @@ have separate receipts. A sealed deployment receipt, not this source checkpoint,
 establishes actual activation. Source-observation owns subsequent genuine Jenkins
 main verification and portal artifact release; no successful gate is synthesized.
 
+Live checkpoint at21:57UTC: qualified source2ee824e is sealed and selected for
+all five API/coding/publication/external-delivery services, with the matched
+3a2b2c238f3186d0 privileged verifier. API health200, stable service identities and
+fresh selected worker readiness passed. Main publication is remotely verified;
+canonical main was fast-forwarded without removing its untracked caches.
+The exact four-suite local backend gate passed1568tests with zero skips/failures;
+its1557 agent-runner IDs exactly matched discovery and execution. Elapsed10m21s
+is a local observation, not a new Jenkins timing claim.
+
+Typed recovery resumed nine genuinely quota-stopped sources on the configured
+Opus backup and two separately attested binary-pin failures on their unchanged
+Gemini recipe. Original Plans, model history and existing counters remain intact.
+The first real Opus Plan completed in6m40s, Codex reviewed it in about32seconds,
+and a requested revision was queued automatically at the retained3/20 planning
+event. Its live attempt settings are readonly0400 withuseG1Credits=false.
+Muse's permanent artifact rejection now produced verification repair1/20; Muse
+claimed that same-owner assignment. A lease proves ownership, not completion.
+
+The SourceObserver automatically queued exact-main Jenkins87, without a manual
+submission. Its first45checks passed, including browser journeys; the final
+backend check exposed a process-group cleanup-observation race in the new runner.
+SIGKILL delivery alone did not prove a surviving descendant had stopped before
+the already-exited leader was reaped. Release correctly remained blocked. The
+follow-up must confirm bounded group quiescence while retaining leader ownership,
+keep the existing assertion strict, and pass the actual Jenkins user/environment.
+Live application workers remain healthy; this is a CI runner correction. Full
+new-main verification and portal activation still require genuine fresh receipts.
+Sanitized live state is recorded in the evidence directory'sdelivery-summary.json;
+root-sealed activation/recovery receipts are under
+/opt/homelab-forge/operations/event-stream-stability-2ee824e9a722.
+
+The process-group follow-up now observes bounded /proc group state before
+reaping the retained leader. Unknown, malformed, oversized or timed-out
+observations fail closed. A deterministic delayed-KILL regression reproduces the
+old failure; the existing immediate no-live-descendant assertion is unchanged.
+Thirty focused checks passed as Jenkins userforge_ci UID990 inside the actual
+agent mount/PrivateTmp and isolated network environment. Independent lifecycle
+and permission/deadline audits passed. This follow-up changes only the CI runner,
+its tests and qualification/report records; installed application modules remain
+byte-identical to the live2ee824e release. A fresh source-observed main CI run
+must establish the complete new-source gate; no failed87 receipt is rewritten.
+
 # Previous: Git-independent artifact and verification identities — 2026-11-25
 
 User requests implementing the content-identity design described after task

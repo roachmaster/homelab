@@ -116,3 +116,39 @@ Muse still owns its external runner. A lease renewal establishes ownership,
 not coding progress. That runner should emit the existing lease-fenced
 `forge_external_agent_api.progress` checkpoints; Mission Control cannot infer
 its internal execution speed from a heartbeat.
+
+## Observed rollout checkpoint
+
+Source `2ee824e` was pushed to main and its Python services activated at21:57UTC
+with matched verifier `3a2b2c238f3186d0`. All five services established fresh
+readiness and the authenticated API health check returned200. The exact local
+main backend gate passed1568tests across four suites, zero skips/failures, in
+10m21s. Its1557 agent-runner IDs match the frozen execution inventory.
+
+Nine quota-stopped tasks resumed through source-bound Opus recovery. Two
+pre-execution binary refusals resumed separately with their original recipe.
+A real Opus Plan completed, Codex independently requested a revision, and the
+coordinator queued it automatically without resetting the existing3/20 event.
+The running attempt's settings physically report `useG1Credits: false` and mode
+0400. The model's reported token counters remain separate from account allowance.
+
+Muse claimed the original-owner artifact repair at verification event1/20. Its
+previous preparation had recorded319 observations of a permanent artifact
+rejection. That rejection now becomes actionable feedback rather than another
+observation. Claim/renewal alone does not establish completed implementation.
+
+Jenkins87 started through the normal sixty-second source observer. It passed
+45checks, including the browser journeys, then its final backend check caught
+a cleanup race in the parallel runner: a group descendant could remain briefly
+runnable after SIGKILL while the exited leader was reaped. This is genuine failed
+CI; release stayed blocked. The follow-up must confirm bounded group quiescence
+before reaping the retained leader. No test skip or synthetic success can satisfy
+that gate. Final main verification and portal release have separate live receipts.
+
+The follow-up confirms bounded process-group quiescence before reaping its retained
+leader. Unreadable, malformed or timed-out observations fail closed. The original
+immediate descendant-stop assertion remains strict; a deterministic delayed-kill
+regression reproduces the old defect. Thirty focused checks passed under Jenkins
+UID990 in its actual mount/PrivateTmp and isolated network environment, with an
+independent lifecycle audit. Application service modules remain unchanged; a fresh
+automatic main CI result is required for this CI-only follow-up.
