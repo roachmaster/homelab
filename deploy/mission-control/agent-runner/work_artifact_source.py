@@ -236,6 +236,14 @@ class MemoryArtifactSource:
                                       for path, mode, content in self.config.files))
 
 
+class CallableGitExecutor:
+    """Adapt an already selected Git call port, without choosing an executor."""
+    def __init__(self,execute):
+        if not callable(execute):raise TypeError('Expected a ready Git call port')
+        self.execute=execute
+    def _git(self,*args,**kwargs):return self.execute(*args,**kwargs)
+
+
 class ArtifactSourceFactory:
     """Effect-free typed selection. Only the acquired ready port reads a source."""
     def __init__(self, config, *, git=None):
@@ -264,6 +272,8 @@ class GitArtifactProvider:
 
 class GitArtifactProviderFactory:
     def __init__(self, git, *, limits=SourceLimits()):
+        if callable(git) and not callable(getattr(git,'_git',None)):
+            git=CallableGitExecutor(git)
         if not callable(getattr(git, '_git', None)) or not isinstance(limits, SourceLimits):
             raise TypeError('Expected ready Git executor and typed limits')
         self.git, self.limits = git, limits

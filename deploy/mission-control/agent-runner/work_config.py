@@ -32,7 +32,7 @@ PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects", "identity_protocol"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
 PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled"}
 
@@ -376,8 +376,11 @@ class WorkConfig:
     external_workflows: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
     delivery_enabled: bool = False
     delivery_repair_projects: frozenset[str] = field(default_factory=frozenset)
+    identity_protocol: str = 'legacy-v1'
 
     def __post_init__(self):
+        if self.identity_protocol not in ('legacy-v1','content-v2'):
+            raise ValueError('Invalid artifact identity protocol')
         repair_policy=freeze_repair_policy(self.repair_policy)
         owner = validate_owner(self.owner)
         if not isinstance(self.allowed_projects, (frozenset, set, tuple, list)):
@@ -513,6 +516,7 @@ def parse_work_config(raw):
         external_workflows=raw.get("external_workflows",{}),
         delivery_enabled=raw.get('delivery_enabled',False),
         delivery_repair_projects=raw.get('delivery_repair_projects',()),
+        identity_protocol=raw.get('identity_protocol','legacy-v1'),
     )
 
 

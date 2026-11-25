@@ -345,8 +345,9 @@ class ForgeJenkinsPort:
 
 
 class TrustedDeliveryPort:
-    def __init__(self, config, jenkins, *, execute=command):
+    def __init__(self, config, jenkins, *, execute=command, identities=None):
         self.config, self.jenkins, self.execute = config, jenkins, execute
+        self.identities=identities
         self.env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
             'HOME': pwd.getpwuid(os.geteuid()).pw_dir, 'GH_CONFIG_DIR': str(config.github_config_dir),
             'GH_HOST': 'github.com', 'GH_PROMPT_DISABLED': '1', 'GIT_TERMINAL_PROMPT': '0',
@@ -354,9 +355,9 @@ class TrustedDeliveryPort:
             'GIT_AUTHOR_NAME': 'Forge publisher', 'GIT_COMMITTER_NAME': 'Forge publisher',
             'GIT_AUTHOR_EMAIL': 'forge@thedevex.com', 'GIT_COMMITTER_EMAIL': 'forge@thedevex.com'}
 
-    def git(self, repository, *arguments, data=None, env=None):
+    def git(self, repository, *arguments, data=None, env=None, timeout=45):
         argv = ['/usr/bin/git'] + (['-C', str(repository)] if repository else []) + list(arguments)
-        return self.execute(argv, env=self.env if env is None else env, data=data, timeout=45)
+        return self.execute(argv, env=self.env if env is None else env, data=data, timeout=min(45,timeout))
 
     def api(self, project, method, suffix, payload=None):
         repository = self.config.projects[project]['repository']
@@ -476,17 +477,27 @@ class TrustedDeliveryPort:
     def prepare_candidate(self, request, require_lease):
         directory = self.directory(request)
         result_path = directory / 'prepared.json'
+        protocol=request.get('identity_protocol','legacy-v1')
+        if protocol not in ('legacy-v1','content-v2'):raise ValueError('Unknown source identity protocol')
+        if protocol=='content-v2' and self.identities is None:raise ValueError('Content identity provider is not selected')
         requested_branch = request.get('source_branch')
         if requested_branch is not None:
             requested_branch = validate_branch_name(requested_branch)
         intended = {k: request.get(k) for k in ('workflow_id', 'project_alias', 'source_task_id',
             'source_assignment_id', 'source_sha256', 'base_revision', 'candidate_commit', 'candidate_tree')}
         intended['source_branch'] = requested_branch
+        if protocol=='content-v2':intended['identity_protocol']=protocol
         identity = hashlib.sha256(canonical(intended)).hexdigest()
         if result_path.exists():
             previous = json.loads(read_private(result_path, owner=os.geteuid()))
             if previous['intent_sha256'] != identity:
                 raise ValueError('Prepared candidate replay conflict')
+            if protocol=='content-v2':
+                from work_external_review_context import strict_json
+                record=strict_json(read_private(directory/'identity-manifest.json',owner=os.geteuid(),maximum=16*1024*1024))
+                self.identities.validate_snapshot(record['snapshot'],previous['candidate']['content_identity'])
+                if record['intent_sha256']!=identity or record['reference']!=previous['candidate']['content_identity']:
+                    raise ValueError('Saved content preparation binding changed')
             return previous['candidate']
         require_lease()
         project = request['project_alias']
@@ -550,8 +561,53 @@ class TrustedDeliveryPort:
             require_lease=require_lease,
         )
         contract = contract_for_config(self.config)
-        source_digest, _helper_digest, gate = (jenkins_gate_manifest(self.config, files, branch_scope)
-            if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} else jenkins_gate_manifest(self.config, files))
+        content_reference=None
+        identity_path=directory/'identity-manifest.json'
+        if protocol=='content-v2' and identity_path.exists():
+            from work_external_review_context import strict_json
+            record=strict_json(read_private(identity_path,owner=os.geteuid(),maximum=16*1024*1024))
+            content_reference=record['reference']
+            self.identities.validate_snapshot(record['snapshot'],content_reference)
+            if (record['intent_sha256']!=identity or record['candidate_commit']!=clean
+                    or record['candidate_tree']!=claimed_tree or record['integration_base']!=expected
+                    or record['branch_scope']!=branch_scope or record['profile']!=contract.profile):
+                raise ValueError('Persisted content preparation cannot be retargeted')
+            current=self.identities.artifacts.acquire(repository,clean)
+            current_base=self.identities.artifacts.acquire(repository,expected)
+            if current.artifact_id!=content_reference['artifact_id'] or current_base.artifact_id!=content_reference['base_artifact_id']:
+                raise ValueError('Persisted source content changed')
+            source_digest,_helper_digest,gate=record['legacy_transport']
+            if hashlib.sha256(read_private(self.config.verifier,owner=0,maximum=1024*1024)).hexdigest()!=_helper_digest:
+                raise ValueError('Frozen verification executor changed; create a new generation')
+            from work_artifact_identity import VerificationPolicySnapshot
+            policy=VerificationPolicySnapshot.parse_dict(content_reference['policy']).to_dict()['policy']
+            plan=contract.plan(branch_scope)
+            from work_external_identity import ci_policy_body
+            if policy!={**ci_policy_body(plan,_helper_digest),'protected_artifact_id':policy.get('protected_artifact_id')}:
+                raise ValueError('Frozen CI policy requires a new generation')
+            gate_changes=record['protected_gate_changes']
+        else:
+            source_digest, _helper_digest, gate = (jenkins_gate_manifest(self.config, files, branch_scope)
+                if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} else jenkins_gate_manifest(self.config, files))
+            if protocol=='content-v2':
+                from work_identity_contract import content_policy_path
+                from work_external_identity import ci_policy_body
+                plan=contract.plan(branch_scope)
+                policy=ci_policy_body(plan,_helper_digest)
+                snapshot,content_reference=self.identities.prepare(repository,clean,expected,policy,request['action_id'],
+                    lambda path:content_policy_path(path,lambda name:protected_delivery_gate(name,contract.profile)))
+                before={entry['path']:entry for entry in snapshot['base_artifact']['files']}
+                after={entry['path']:entry for entry in snapshot['artifact']['files']}
+                gate_changes=[{'path':path,'finding_id':'gate-'+hashlib.sha256(path.encode()).hexdigest()[:16]}
+                    for path in sorted(before.keys()|after.keys()) if before.get(path)!=after.get(path)
+                    and content_policy_path(path,lambda name:protected_delivery_gate(name,contract.profile))]
+                from work_external_identity import persist_identity_snapshot
+                require_lease()
+                persist_identity_snapshot(identity_path,{'intent_sha256':identity,'candidate_commit':clean,
+                    'candidate_tree':claimed_tree,'integration_base':expected,'branch_scope':branch_scope,
+                    'scope':{key:request[key] for key in ('workflow_id','project_alias','source_task_id','source_assignment_id','source_sha256')},
+                    'profile':contract.profile,'snapshot':snapshot,'reference':content_reference,
+                    'legacy_transport':[source_digest,_helper_digest,gate],'protected_gate_changes':gate_changes})
         require_lease()
         reference = 'refs/forge/external-candidates/' + request['action_id']
         self.git(repository, 'update-ref', reference, clean)
@@ -564,11 +620,12 @@ class TrustedDeliveryPort:
         patch = self.git(repository, 'diff', *DIFF_FLAGS, expected, clean)
         changed = self.git(repository, 'diff', '--no-ext-diff', '--no-textconv', '--no-renames',
                            '--name-only', '-z', expected, clean).split(b'\0')
-        gate_changes = []
-        for path in changed:
-            if path and protected_delivery_gate(path.decode(), contract.profile):
-                name = path.decode()
-                gate_changes.append({'path': name, 'finding_id': 'gate-' + hashlib.sha256(path).hexdigest()[:16]})
+        if protocol=='legacy-v1':
+            gate_changes = []
+            for path in changed:
+                if path and protected_delivery_gate(path.decode(), contract.profile):
+                    name = path.decode()
+                    gate_changes.append({'path': name, 'finding_id': 'gate-' + hashlib.sha256(path).hexdigest()[:16]})
         result = {'candidate_commit': sha(clean), 'candidate_tree': claimed_tree,
             'integration_base': expected, 'author_candidate_commit': raw,
             'source_branch': resolved_source_branch, 'branch_scope': branch_scope,
@@ -576,6 +633,8 @@ class TrustedDeliveryPort:
             'gate_source_sha256': source_digest, 'gate_manifest_sha256': gate,
             'protected_gate_changes': gate_changes, 'no_change': clean == expected,
             'prepare_action_id': request['action_id']}
+        if content_reference is not None:
+            result.update(content_identity=content_reference,identity_protocol='content-v2')
         durable_json(result_path, {'intent_sha256': identity, 'candidate': result})
         return result
 
@@ -583,6 +642,32 @@ class TrustedDeliveryPort:
         return dict(zip(PARAMETERS, [uid(request['action_id']), uid(request['workflow_id']),
             sha(request['candidate_commit']), sha(request['candidate_tree']), sha(request['integration_base']),
             digest(request['gate_manifest_sha256']), uid(request['correlation_id'])]))
+
+    def _assert_content_policy(self,request,plan):
+        identity_path=self.config.state_root/'actions'/uid(request['prepare_action_id'])/'identity-manifest.json'
+        reference=request.get('content_identity')
+        protocol=request.get('identity_protocol','legacy-v1')
+        if protocol not in ('legacy-v1','content-v2'):raise ValueError('Unknown CI identity protocol')
+        if protocol=='legacy-v1' and reference is None and not identity_path.exists():return None
+        from work_external_identity import ExternalCandidateIdentityProvider,ci_policy_body
+        from work_external_review_context import strict_json
+        from work_artifact_identity import VerificationPolicySnapshot
+        if reference is None or protocol!='content-v2':raise ValueError('Saved content generation cannot downgrade to legacy')
+        record=strict_json(read_private(identity_path,owner=os.geteuid(),maximum=16*1024*1024))
+        ExternalCandidateIdentityProvider.validate_snapshot(record['snapshot'],reference)
+        expected_scope={'workflow_id','project_alias','source_task_id','source_assignment_id','source_sha256'}
+        if (reference!=record['reference'] or reference['verification']['generation']!=request['prepare_action_id']
+                or not isinstance(record['scope'],dict) or set(record['scope'])!=expected_scope
+                or record['candidate_commit']!=request['candidate_commit'] or record['candidate_tree']!=request['candidate_tree']
+                or record['integration_base']!=request['integration_base'] or record['branch_scope']!=request['branch_scope']
+                or record['profile']!=plan.profile or any(request.get(key)!=value for key,value in record['scope'].items())
+                or request['gate_manifest_sha256']!=record['legacy_transport'][2]):
+            raise ValueError('CI content generation or source scope changed')
+        verifier=hashlib.sha256(read_private(self.config.verifier,owner=0,maximum=1024*1024)).hexdigest()
+        policy=VerificationPolicySnapshot.parse_dict(reference['policy']).to_dict()['policy']
+        if policy!={**ci_policy_body(plan,verifier),'protected_artifact_id':policy.get('protected_artifact_id')}:
+            raise ValueError('Frozen CI policy or executor changed; create a new generation')
+        return record
 
     def _submission(self, request):
         import grp
@@ -617,6 +702,7 @@ class TrustedDeliveryPort:
         if request.get('verification_profile', PROFILE) != contract.profile:
             raise ValueError('CI verification profile changed')
         plan = contract.plan(branch_scope)
+        self._assert_content_policy(request,plan)
         prepared = self.config.state_root / 'actions' / uid(request['prepare_action_id']) / 'candidate.bundle'
         bundle = read_private(prepared, owner=os.geteuid(), maximum=128 * 1024 * 1024)
         path = self.config.spool_root / uid(request['action_id'])
@@ -878,12 +964,14 @@ class TrustedDeliveryPort:
 
 
 class DeliveryProviderFactory:
-    def __init__(self, config, *, jenkins_factory=ForgeJenkinsPort, execute=command, observer=None):
+    def __init__(self, config, *, jenkins_factory=ForgeJenkinsPort, execute=command, observer=None, artifact_factory=None):
         if not isinstance(config, DeliveryConfig) or not callable(jenkins_factory) or not callable(execute):
             raise TypeError('Expected typed delivery factories')
         if observer is not None and not all(callable(getattr(observer, name, None)) for name in ('find', 'assert_scope')):
             raise TypeError('Expected a ready read-only Jenkins observer')
         self.config, self.jenkins_factory, self.execute, self.observer = config, jenkins_factory, execute, observer
+        if artifact_factory is not None and not callable(artifact_factory):raise TypeError('Expected artifact provider factory')
+        self.artifact_factory=artifact_factory
 
     def create(self):
         selected = json.loads(read_private(self.config.jenkins_config, owner=os.geteuid()))
@@ -898,7 +986,12 @@ class DeliveryProviderFactory:
             self.observer.assert_scope(self.config.jenkins_job, selected['endpoint'], PARAMETERS)
             options['observer'] = self.observer
         self.config.state_root.mkdir(parents=True, mode=0o700, exist_ok=True)
-        return TrustedDeliveryPort(self.config, self.jenkins_factory(self.config, self.execute, **options), execute=self.execute)
+        from work_artifact_source import GitArtifactProviderFactory
+        from work_external_identity import ExternalCandidateIdentityProvider
+        delivery=TrustedDeliveryPort(self.config, self.jenkins_factory(self.config, self.execute, **options), execute=self.execute)
+        selected_factory=self.artifact_factory or GitArtifactProviderFactory
+        delivery.identities=ExternalCandidateIdentityProvider(selected_factory(delivery.git).create())
+        return delivery
 
 
 class ExternalDeliveryWorker:

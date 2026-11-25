@@ -50,7 +50,7 @@ def validate_target(raw,digest):
         raise ValueError('External review context digest mismatch')
     value=strict_json(raw)
     keys={'version','kind','workflow_id','review_id','reviewer_task_id','reviewer_profile','target_kind','source_task_id','source_assignment_id','source_sha256','source_revision','source_base_revision','review_base_revision','request_prompt','acceptance_criteria','source_content','approved_plan','candidate','required_attestations'}
-    if not isinstance(value,dict) or set(value)!=keys or type(value['version']) is not int or value['version']!=1 or value['kind']!='external_database_review' or value['target_kind'] not in {'plan','code'}:
+    if not isinstance(value,dict) or set(value)!=keys or type(value['version']) is not int or value['version'] not in (1,2) or value['kind']!='external_database_review' or value['target_kind'] not in {'plan','code'}:
         raise ValueError('Invalid external review target')
     for key in ('workflow_id','review_id','reviewer_task_id','source_task_id','source_assignment_id'):uuid(value[key])
     for key in ('source_base_revision','review_base_revision'):
@@ -66,8 +66,16 @@ def validate_target(raw,digest):
         uuid(plan['assignment_id'])
         if not isinstance(candidate,dict) or any(not HEX40.fullmatch(candidate.get(k,'')) for k in ('candidate_commit','candidate_tree','integration_base')) or candidate['candidate_commit']!=value['review_base_revision']:
             raise ValueError('External review candidate unavailable')
+        if value['version']==2:
+            from work_external_identity import validate_content_identity
+            if candidate.get('identity_protocol')!='content-v2':raise ValueError('Missing frozen content protocol')
+            identity=validate_content_identity(candidate.get('content_identity'))
+            if identity['verification']['generation']!=candidate.get('prepare_action_id'):
+                raise ValueError('Content identity belongs to a different preparation generation')
+        elif 'content_identity' in candidate or candidate.get('identity_protocol','legacy-v1')!='legacy-v1':raise ValueError('Legacy target cannot reinterpret content identity')
     elif value['approved_plan'] is not None or value['candidate'] is not None or value['required_attestations']:
         raise ValueError('Plan target carries code authority')
+    elif value['version']!=1:raise ValueError('Content identity protocol applies only to code targets')
     attest=value['required_attestations']
     if not isinstance(attest,list) or len(attest)>256 or any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',x) for x in attest) or len(set(attest))!=len(attest):
         raise ValueError('Invalid protected gate attestations')
@@ -95,7 +103,9 @@ def parse_verdict(text,target,digest):
 
 class ExternalReviewContextProvider:
     """Owned worker dependency; database access stays outside the model process."""
-    def __init__(self,store,git):self.store,self.git=store,git
+    def __init__(self,store,git,*,artifacts=None):
+        if artifacts is not None and not callable(getattr(artifacts,'acquire',None)):raise TypeError('Expected ready artifact source provider')
+        self.store,self.git,self.artifacts=store,git,artifacts
     def acquire(self,lease,workspace):
         envelope=self.store.read_external_review_context(lease)
         if envelope is None:return None
@@ -106,7 +116,17 @@ class ExternalReviewContextProvider:
         if target['target_kind']=='code':
             candidate=target['candidate']
             tree=self.git(workspace.path,'rev-parse','--verify','HEAD^{tree}').decode().strip()
-            diff=self.git(workspace.path,'diff',*EXTERNAL_DIFF_FLAGS,candidate['integration_base'],candidate['candidate_commit'],'--')
-            if tree!=candidate['candidate_tree'] or hashlib.sha256(diff).hexdigest()!=candidate['diff_sha256']:
+            if tree!=candidate['candidate_tree']:
                 raise ValueError('External candidate differs from independent review target')
+            if target['version']==2:
+                if self.artifacts is None:raise ValueError('Content identity verifier is not selected')
+                identity=candidate['content_identity']
+                actual=self.artifacts.acquire(workspace.path,candidate['candidate_commit'])
+                base=self.artifacts.acquire(workspace.path,candidate['integration_base'])
+                if actual.artifact_id!=identity['artifact_id'] or base.artifact_id!=identity['base_artifact_id']:
+                    raise ValueError('External source content differs from immutable review target')
+            else:
+                diff=self.git(workspace.path,'diff',*EXTERNAL_DIFF_FLAGS,candidate['integration_base'],candidate['candidate_commit'],'--')
+                if hashlib.sha256(diff).hexdigest()!=candidate['diff_sha256']:
+                    raise ValueError('External candidate differs from independent review target')
         return ExternalReviewContext(envelope['target_json'].encode(),envelope['target_sha256'],target['reviewer_task_id'],target['review_id'],target['workflow_id'],target['target_kind'])
