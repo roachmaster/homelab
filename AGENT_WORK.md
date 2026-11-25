@@ -32,6 +32,17 @@ Four UML views and a Rust-generated Design reader document the implemented path.
 Full qualification and actual source/deployment identities are recorded separately
 from component tests; this checkpoint activates no live protocol or worker.
 
+Source e49b02ae passed the complete 1,477-test runner inventory without omissions
+or skips, all 67 host-consumer tests, and the three supporting backend suites.
+Its content-v2 protocol remains opt-in. The prior live CI failures were deployment
+drift: the installed verifier omitted two M38 protected paths already present in
+the runtime and repository. A new immutable matched helper (2dd31c5e) and paired
+selectors are now active; old helpers, failed receipts and spent counters remain.
+This deployment record also admits a private once-only verification recovery for
+the exact exhausted native source after that proven correction. It keeps twenty
+automatic admissions and appends an honest manual verification21, without a
+code/Plan approval or an author turn. Fresh protected CI must establish success.
+
 # Previous: Recover cancelled/parked Muse and Gemini work — 2026-11-25
 
 User asks to fix the cancelled Muse task and the attention-state Gemini portal
