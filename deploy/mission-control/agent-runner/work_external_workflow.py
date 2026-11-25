@@ -342,6 +342,8 @@ class ExternalWorkflowStore:
                 if w['enabled'] or w['phase']!='escalated' or not w['state'].get('active_review_id'):raise Rejected(409,'not_reviewable')
                 cursor.execute('SELECT * FROM forge_external_workflow.reviews WHERE workflow_id=%s AND review_id=%s FOR UPDATE',(w['workflow_id'],w['state']['active_review_id']))
                 review=cursor.fetchone()
+                if review and review['target_kind']=='code':
+                    return self._recover_code_context_infrastructure(cursor,w,root,review,command,intent_digest,evidence_lock)
                 transport_exception=w['state'].get('review_retries')==AGENT_RETRY_LIMIT
                 if not review or review['target_kind']!='plan' or review['status'] not in {'reviewing','escalated'} or w['state'].get('review_retries') not in {1,AGENT_RETRY_LIMIT}:
                     raise Rejected(409,'not_reviewable')
@@ -433,6 +435,117 @@ class ExternalWorkflowStore:
                 self._save(cursor,w,summary+'Selecting fresh trusted source; previous attempts and budgets remain preserved.',phase='plan',related_task_id=source['id'])
                 return receipt
 
+    def _recover_code_context_infrastructure(self,cursor,w,root,review,command,intent_digest,evidence_lock):
+        """One private post-fix code-context review; no approval or retry reset.
+
+        Called only under the operator grant, scoped workflow/root locks and
+        current-policy/revision checks of recover_review_infrastructure.
+        """
+        if (self._retry_events is None or review['status'] not in {'reviewing','escalated'}
+                or w['state'].get('review_retries')!=AGENT_RETRY_LIMIT
+                or w['state'].get('escalation_reason')!='Reviewer correction event exhausted its twenty retry attempts. All source and review evidence are retained.'):
+            raise Rejected(409,'not_reviewable')
+        target=validate_target(review['target_json'],review['target_sha256'])
+        critic=self._task(cursor,w,review['reviewer_task_id']);source=self._task(cursor,w,review['source_task_id'])
+        bindings={'workflow_id':str(w['workflow_id']),'review_id':str(review['review_id']),
+            'reviewer_task_id':str(critic['id']),'reviewer_profile':w['reviewer_profile'],
+            'source_task_id':str(source['id']),'source_assignment_id':str(review['source_assignment_id']),
+            'source_sha256':review['source_sha256'],'source_base_revision':source['base_revision'],
+            'review_base_revision':critic['base_revision'],'request_prompt':root['prompt'],
+            'acceptance_criteria':root['acceptance_criteria'],'target_kind':'code'}
+        if (any(target.get(k)!=v for k,v in bindings.items()) or w['active_task_id']!=source['id']
+                or target['candidate']!=w['state'].get('candidate')
+                or target['approved_plan']!=w['state'].get('approved_plan')
+                or w['state'].get('candidate_source')!={'source_assignment_id':str(review['source_assignment_id']),'source_sha256':review['source_sha256']}):
+            raise Rejected(409,'result_mismatch')
+        for task in (root,source,critic):
+            if not self.related_task(cursor,w['project_alias'],w['workflow_id'],task['id']):raise Rejected(409,'result_mismatch')
+        if (critic['status']!='cancelled' or critic['latest_attempt_id'] is None
+                or critic['agent_profile']!=w['reviewer_profile']
+                or critic['recipe_digest']!=w['snapshot']['recipes']['reviewer_review']['digest']
+                or source['mode']!='implement' or source['latest_attempt_id'] is not None
+                or source['agent_profile']!=w['author_profile'] or source['status']!='cancelled'
+                or source['recipe_digest']!=w['snapshot']['recipes']['author_implement']['digest']
+                or source['revision']!=target['source_revision']+1
+                or root['status']!='cancelled' or root['latest_attempt_id'] is not None):
+            raise Rejected(409,'not_reviewable')
+        cursor.execute("SELECT EXISTS(SELECT FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=ANY(%s::uuid[]) AND action='cancel') AS cancelled",
+            (self.owner,w['project_alias'],[str(t['id']) for t in (root,source,critic)]))
+        if cursor.fetchone()['cancelled']:raise Rejected(409,'not_reviewable')
+        cursor.execute("""SELECT a.attempt_id,a.unit_name,r.receipt_id,r.stop_proof
+          FROM forge_agent.coding_attempts a JOIN forge_agent.coding_reconciliation_receipts r
+          ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(a.owner_id,a.project_alias,a.task_id,a.attempt_id,%s)
+          WHERE(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(%s,%s,%s,%s)
+          AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL
+          AND a.outcome='needs_reconcile' AND a.published_at IS NOT NULL
+          AND a.summary='The complete external review context is unavailable.'
+          AND a.result_sha256 IS NULL AND a.result_byte_count IS NULL AND a.result_chunk_count IS NULL
+          AND NOT EXISTS(SELECT FROM forge_agent.coding_result_chunks c WHERE c.attempt_id=a.attempt_id)
+          ORDER BY r.created_at DESC LIMIT 1""",
+          (critic['revision'],self.owner,w['project_alias'],critic['id'],critic['latest_attempt_id']))
+        failed=cursor.fetchone()
+        if (not failed or failed['stop_proof'].get('scope_stopped') is not True
+                or failed['stop_proof'].get('source')!='systemd'
+                or failed['stop_proof'].get('unit_name')!=failed['unit_name']):raise Rejected(409,'reconcile_required')
+        evidence_lock.lock_review_evidence(review['review_id'],failed['attempt_id'])
+        retained=evidence_lock.exhausted_reviewer_event(review['review_id'],critic['id'],failed['attempt_id'],
+            review['target_sha256'],failure_status='needs_reconcile')
+        if not retained or (retained.get('kind'),retained.get('status'),retained.get('used'),retained.get('limit'))!=('reviewer_correction','exhausted',AGENT_RETRY_LIMIT,AGENT_RETRY_LIMIT):
+            raise Rejected(409,'not_reviewable')
+        cursor.execute("""SELECT EXISTS(SELECT FROM forge_agent.coding_attempts a JOIN forge_external_workflow.tasks t
+          ON(t.owner_id,t.project_alias,t.task_id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s
+          AND(a.phase<>'stopped' OR a.reservation_active OR a.lease_expires_at IS NOT NULL))
+          OR EXISTS(SELECT FROM forge_external_workflow.actions WHERE workflow_id=%s AND status IN('queued','leased'))
+          OR EXISTS(SELECT FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x
+          ON(x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id)
+          WHERE x.workflow_id=%s AND t.status IN('queued','running','cancel_requested')) AS active""",(w['workflow_id'],)*3)
+        if cursor.fetchone()['active']:raise Rejected(409,'reconcile_required')
+        cursor.execute('SELECT forge_external_agent_api.artifact_by_task(%s,%s,%s) AS value',(self.owner,w['project_alias'],source['id']))
+        artifact=cursor.fetchone()['value']
+        if (not artifact or artifact['assignment_id']!=str(review['source_assignment_id'])
+                or artifact['sha256']!=review['source_sha256'] or artifact['content']!=target['source_content']
+                or hashlib.sha256(artifact['content'].encode()).hexdigest()!=artifact['sha256']):raise Rejected(409,'result_mismatch')
+        plan=w['state'].get('plan_review',{})
+        cursor.execute("SELECT * FROM forge_external_workflow.reviews WHERE workflow_id=%s AND review_id=%s FOR SHARE",(w['workflow_id'],plan.get('review_id')))
+        approved=cursor.fetchone()
+        if (not approved or approved['target_kind']!='plan' or approved['status']!='approved'
+                or approved['receipt']!=plan or plan.get('decision')!='approve'
+                or str(approved['source_assignment_id'])!=target['approved_plan']['assignment_id']
+                or approved['source_sha256']!=target['approved_plan']['sha256']):raise Rejected(409,'result_mismatch')
+        plan_target=validate_target(approved['target_json'],approved['target_sha256'])
+        if (plan_target['source_content']!=target['approved_plan']['content']
+                or parse_verdict(canonical(approved['verdict']).decode(),plan_target,approved['target_sha256'])['decision']!='approve'):
+            raise Rejected(409,'result_mismatch')
+        candidate=target['candidate']
+        cursor.execute("SELECT intent,result,status,kind FROM forge_external_workflow.actions WHERE workflow_id=%s AND action_id=%s FOR SHARE",(w['workflow_id'],candidate.get('prepare_action_id')))
+        prepared=cursor.fetchone()
+        if (not prepared or prepared['kind']!='prepare' or prepared['status']!='completed'
+                or prepared['result'].get('receipt')!=candidate
+                or prepared['intent'].get('source_task_id')!=str(source['id'])
+                or prepared['intent'].get('source_assignment_id')!=artifact['assignment_id']
+                or prepared['intent'].get('source_sha256')!=artifact['sha256']):raise Rejected(409,'result_mismatch')
+        rescue_id=uuid4()
+        for task in {root['id']:root,source['id']:source}.values():
+            cursor.execute("UPDATE forge_agent.coding_tasks SET status='awaiting_review',cancelled_at=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE(owner_id,project_alias,id)=(%s,%s,%s)",(self.owner,w['project_alias'],task['id']))
+        cursor.execute("UPDATE forge_external_workflow.reviews SET status='escalated',updated_at=clock_timestamp() WHERE review_id=%s",(review['review_id'],))
+        exception={'kind':'post_fix_code_context_review','retained_retry_event':retained,'automatic_retry_admissions':0}
+        receipt={'project_alias':w['project_alias'],'workflow_id':str(w['workflow_id']),'root_task_id':str(w['root_task_id']),
+            'operator_rescue_id':str(rescue_id),'workflow_revision':w['revision']+1,'root_revision':root['revision']+1,
+            'phase':'implement','trusted_source_pending':True,'deployed_fix_revision':command.deployed_fix_revision,'operator_exception':exception}
+        record={'idempotency_key':str(command.idempotency_key),'intent_digest':intent_digest,'reason':command.reason,
+            'deployed_fix_revision':command.deployed_fix_revision,'prior_workflow_revision':w['revision'],'prior_root_revision':root['revision'],
+            'prior_review_id':str(review['review_id']),'prior_reviewer_task_id':str(critic['id']),'prior_attempt_id':str(failed['attempt_id']),
+            'prior_reconciliation_receipt_id':str(failed['receipt_id']),'prior_escalation_reason':w['state']['escalation_reason'],
+            'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],
+            'approved_plan_sha256':target['approved_plan']['sha256'],'prior_candidate':candidate,
+            'operator_exception':exception,'receipt':receipt}
+        w['state']['operator_infrastructure_rescues']=[record]
+        w['state']['operator_source_epoch']=str(rescue_id);w['state']['operator_rescue_pending']=True
+        w['state'].pop('base_revision',None)
+        w['active_task_id']=source['id'];w['enabled']=True
+        self._save(cursor,w,'Operator authorized one post-fix code-context review. Selecting fresh trusted source and a new prepared diff; twenty automatic admissions and the approved Plan remain preserved.',phase='implement',related_task_id=source['id'])
+        return receipt
+
     def continue_after_retry_policy_update(self,command):
         from work_retry_continuation import continue_external_plan
         return continue_external_plan(self,command)
@@ -500,7 +613,10 @@ class ExternalWorkflowStore:
             request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':w['state']['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
             if manifest.get('source_branch') is not None:
                 request['source_branch']=manifest['source_branch']
-            a=self._action(cursor,w,'prepare',artifact['sha256'],request)
+            prepare_key=artifact['sha256']
+            if w['state'].get('operator_rescue_pending'):
+                prepare_key+=':'+w['state']['operator_source_epoch']
+            a=self._action(cursor,w,'prepare',prepare_key,request)
             if a['status']=='failed':
                 if a['result']['status']=='main_changed':return self._request_rebase(cursor,w,a['result']['summary'],action=a)
                 return self._revise(cursor,w,'code',{'summary':a['result']['summary'],'findings':[]},artifact,retry_kind='verification',source_id='delivery:'+str(a['action_id']),evidence_digest=hashlib.sha256(canonical(a['result'])).hexdigest())
@@ -516,7 +632,9 @@ class ExternalWorkflowStore:
             self._resolve_retry(cursor,w,'feedback_delivery','artifact:'+artifact['assignment_id'],artifact['sha256'])
             w['state']['candidate']=candidate
             w['state']['candidate_source']={'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256']}
-            self._queue_review(cursor,w,task,artifact,'code');return True
+            retry=w['state'].get('review_retries',0) if w['state'].get('operator_rescue_pending') else 0
+            w['state'].pop('operator_rescue_pending',None)
+            self._queue_review(cursor,w,task,artifact,'code',retry=retry);return True
         if w['phase'] in {'plan_review','code_review'}:return self._consume_review(cursor,w)
         if w['phase']=='checks':return self._consume_verification(cursor,w)
         if w['phase']=='merging':return self._consume_merge(cursor,w)
