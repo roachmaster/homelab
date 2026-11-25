@@ -512,7 +512,7 @@ EXPECTED_SQL_EVENT_INSERTS = {
     ("0036_event_stream_actor_cause.sql", "forge_agent.coding_schedule_repair"): 2,
     ("0036_event_stream_actor_cause.sql", "forge_agent.amend_agent_retry_policy"): 1,
     ("0040_pg_proxy_preparation.sql", "forge_pg_proxy_api.coding_event_insert"): 1,
-    ("0040_pg_proxy_preparation.sql", "forge_pg_proxy_api.coding_workflow_cancel"): 2,
+    ("0040_pg_proxy_preparation.sql", "forge_pg_proxy_api.coding_workflow_cancel"): 4,
     ("0040_pg_proxy_preparation.sql", "forge_pg_proxy_api.ext_workflow_cancel"): 3,
 }
 
@@ -551,7 +551,7 @@ class EventAttributionCoverageTest(unittest.TestCase):
                 if count:
                     actual[(path.name, match.group(1))] = count
         self.assertEqual(actual, EXPECTED_SQL_EVENT_INSERTS)
-        self.assertEqual(sum(actual.values()), 42)
+        self.assertEqual(sum(actual.values()), 44)
 
 
 if __name__ == "__main__":

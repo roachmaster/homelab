@@ -453,7 +453,7 @@ EVENT_RETRY_CONTEXT_SHA256 = {
     "deploy/mission-control/agent-runner/work_events.py": "260935af16682f9eefdec86e0e206095ba17cd5857187b04560b41e7366cde2b",
     "deploy/mission-control/agent-runner/work_jenkins_lifecycle.py": "5bd39e75de72dff2e66a64d553b4191ff8461cad6291ed94382a1fd9a8cd0494",
     "deploy/mission-control/agent-runner/test_work_jenkins_lifecycle.py": "6b3d602b17c1de6497d9a2030d520aa96e8874f27e37885fcdc83315a59c707a",
-    "deploy/mission-control/agent-runner/test_work_event_attribution.py": "55ba70010209cad7dabe27b15f7a0ddb34ce64a82daead6c54838e67dc24653a",
+    "deploy/mission-control/agent-runner/test_work_event_attribution.py": "126aa3ebd0e84fff571bff76085ef6918e1809277bb6c27f7fe3ccad04136b06",
     "deploy/mission-control/agent-runner/test_work_delivery_contract.py": "73d59d60da1688fc8580b2f33175beef4366463b07c154d425d8bf96e0245775",
     "deploy/mission-control/agent-runner/fixtures/peer-target-351b8c41.json": "11d3542aafe789669496eb6bb667955f51e19f747dbd1c928f19f9361b87dfda",
     "deploy/mission-control/agent-runner/fixtures/peer-verdict-719aa2b2.json": "6091f0640084b193335e67accc030e477e03be53aa90baa94982705ba1e2bfef",
