@@ -74,6 +74,7 @@ class WorkerProfile:
     model: str
     modes: tuple[str, ...]
     execution_enabled: bool | None = None
+    backup_models: tuple[str, ...] = ()
 
     def __post_init__(self):
         enabled = self.backend not in {"grok", "muse"} if self.execution_enabled is None else self.execution_enabled
@@ -128,9 +129,10 @@ class WorkerConfig:
 
     def advertised_profiles(self):
         return [
-            {"alias": profile.alias, "backend": profile.backend, "model": profile.model,
+            {"alias": profile.alias, "backend": profile.backend, "model": model,
              "modes": [mode for mode in profile.modes if mode != "implement" or self.allow_implement]}
             for profile in self.profiles.values()
+            for model in (profile.model, *profile.backup_models)
             if profile.execution_enabled and any(mode != "implement" or self.allow_implement for mode in profile.modes)
         ]
 
@@ -188,7 +190,7 @@ def parse_config(raw, *, source_path=None):
         raise ValueError("Invalid coding worker execution policy")
     for alias, value in profiles.items():
         alias = identifier(alias)
-        value = _object(value, {"backend", "model", "modes"}, {"execution_enabled"})
+        value = _object(value, {"backend", "model", "modes"}, {"execution_enabled", "backup_models"})
         if not isinstance(value["backend"], str) or value["backend"] not in BACKENDS:
             raise ValueError("Invalid coding worker backend")
         native_policy_digest(resource_profile, value["backend"])
@@ -203,7 +205,14 @@ def parse_config(raw, *, source_path=None):
         enabled = value.get("execution_enabled", value["backend"] not in {"grok", "muse"})
         if type(enabled) is not bool:
             raise ValueError("Invalid coding execution capability")
-        frozen_profiles[alias] = WorkerProfile(alias, value["backend"], model, tuple(modes), enabled)
+        backups=value.get('backup_models',[])
+        if (not isinstance(backups,list) or len(backups)>4 or any(not isinstance(x,str) or not x.strip()
+            or len(x.encode())>128 or any(not 32<=ord(c)<127 for c in x) for x in backups)
+            or len(set(backups))!=len(backups) or model in backups or backups and value['backend']!='antigravity'):
+            raise ValueError('Invalid provider backup models')
+        frozen_profiles[alias] = WorkerProfile(alias, value["backend"], model, tuple(modes), enabled, tuple(backups))
+    if sum(1+len(p.backup_models) for p in frozen_profiles.values()if p.execution_enabled)>64:
+        raise ValueError('Expanded advertised provider model catalog exceeds bound')
     if resource_profile == AGY_POLICY_ID and (external_reviews or raw.get("usage_only_profiles")):
         raise ValueError("Unattended Antigravity worker cannot own other agent capabilities")
     binaries = raw["binaries"]
@@ -276,8 +285,8 @@ def verify_recipe(config, lease):
             or lease["mode"] not in profile.modes
             or lease["mode"] == "implement" and not config.allow_implement):
         return False
-    return recipe == {
-        "version": 2, "backend": profile.backend, "model": profile.model,
+    return recipe.get('model') in (profile.model,*profile.backup_models) and recipe == {
+        "version": 2, "backend": profile.backend, "model": recipe.get('model'),
         "resource_profile": config.resource_profile, "mode": lease["mode"],
         "generation_token_limit": None, "policy_digest": config.policy_digest,
     }
@@ -298,7 +307,7 @@ def validated_copy(config):
                     "gid": config.account.gid, "home": str(config.account.home)},
         "workspace_root": str(config.workspace_root), "state_root": str(config.state_root),
         "projects": {key: str(value) for key, value in config.projects.items()},
-        "profiles": {key: {"backend": value.backend, "model": value.model, "modes": list(value.modes), "execution_enabled": value.execution_enabled}
+        "profiles": {key: {"backend": value.backend, "model": value.model, "modes": list(value.modes), "execution_enabled": value.execution_enabled, "backup_models": list(value.backup_models)}
                      for key, value in config.profiles.items()},
         "binaries": {key: str(value) for key, value in config.binaries.items()},
         "allow_implement": config.allow_implement,

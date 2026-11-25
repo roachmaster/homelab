@@ -116,7 +116,7 @@ class CodingWorker:
 
     def __init__(self, config, store, runner_provider, workspace_provider, supervisor,
                  *, collector=None, clock=time.monotonic, stop=None, usage_normalizer=None,
-                 review_context_provider=None, peer_context_provider=None, external_context_provider=None):
+                 review_context_provider=None, peer_context_provider=None, external_context_provider=None, cooldown_provider=None):
         self.config, self.store = config, store
         self.runner, self.workspaces, self.supervisor = runner_provider, workspace_provider, supervisor
         self.collector, self.clock = collector, clock
@@ -125,13 +125,15 @@ class CodingWorker:
         self.review_contexts = review_context_provider
         self.peer_contexts = peer_context_provider
         self.external_contexts = external_context_provider
+        self.cooldowns = cooldown_provider
         self.incarnation = str(uuid4())
         self._last_advertisement = float("-inf")
 
     def advertise(self):
         if self.clock() - self._last_advertisement >= ADVERTISE_SECONDS:
+            profiles=self.config.advertised_profiles() if self.cooldowns is None else self.cooldowns.selection()[1]
             self.store.advertise(self.config.worker_id, self.incarnation, self.workspaces.projects(),
-                                 self.config.advertised_profiles(), self.config.policy_digest)
+                                 profiles, self.config.policy_digest)
             self._last_advertisement = self.clock()
 
     def reconcile_pending(self):
@@ -210,6 +212,12 @@ class CodingWorker:
         return outcome
 
     def _publish(self, lease, outcome, *, usage):
+        if outcome.status=='quota_blocked' and outcome.quota_diagnostic is not None:
+            from work_quota_diagnostics import quota_summary
+            outcome=replace(outcome,summary=quota_summary(outcome.quota_diagnostic))
+            if self.cooldowns is not None:
+                self.cooldowns.record(lease,outcome.quota_diagnostic)
+                self._last_advertisement=float('-inf')
         manifest = None
         if outcome.status == "awaiting_review":
             chunks = list(utf8_chunks(outcome.text))
@@ -429,10 +437,11 @@ class CodingWorker:
     def run_once(self):
         self.reconcile_pending()
         self.advertise()
-        if not self.config.allowed_profiles:
+        profiles=self.config.allowed_profiles if self.cooldowns is None else self.cooldowns.selection()[0]
+        if not profiles:
             self.collect_usage()
             return False
-        lease = self.store.claim(self.config.worker_id, self.incarnation, list(self.config.allowed_profiles))
+        lease = self.store.claim(self.config.worker_id, self.incarnation, list(profiles))
         if lease is not None:
             self.process(lease)
             self.collect_usage()
@@ -472,7 +481,7 @@ class CodingWorkerFactory:
                  supervisor_factory=None, session_factory=None, codex_session_factory=None,
                  collector_factory=None, clock=time.monotonic, stop=None,
                  usage_normalizer=None, review_context_factory=None, peer_context_factory=None,
-                 source_revision_factory=SelectedSourceRevisionProvider, external_context_factory=None):
+                 source_revision_factory=SelectedSourceRevisionProvider, external_context_factory=None,cooldown_factory=None):
         if not isinstance(config, WorkerConfig) or not callable(store_factory):
             raise TypeError("Coding worker requires frozen configuration and a store factory")
         self.config, self.store_factory = validated_copy(config), store_factory
@@ -490,6 +499,7 @@ class CodingWorkerFactory:
         self.workspace_factory = workspace_factory
         self.source_revision_factory = source_revision_factory
         self.external_context_factory = external_context_factory or default_external_context_factory
+        self.cooldown_factory=cooldown_factory
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None
                                    else lambda config: SystemdSupervisor(
                                        config, consumer_cache_provider=configured_consumer_caches(config)))
@@ -503,6 +513,7 @@ class CodingWorkerFactory:
             lambda store: PeerReviewContextProvider(store, PeerReviewCandidateSourceProvider(self.config, _workspace_git)))
 
     def create(self):
+        from work_provider_cooldown import ProviderCooldownFactory
         store = self.store_factory(self.config)
         supervisor = self.supervisor_factory(self.config)
         workspaces = (self.workspace_factory(self.config) if self.workspace_factory is not None else
@@ -514,10 +525,14 @@ class CodingWorkerFactory:
         collector = self.collector_factory(self.config, store) if self.collector_factory else None
         review_contexts = self.review_context_factory(store)
         peer_contexts = self.peer_context_factory(store)
+        cooldowns=(self.cooldown_factory or ProviderCooldownFactory)(self.config).create()
+        if not all(callable(getattr(cooldowns,name,None))for name in('record','selection')):
+            raise TypeError('Quota admission requires a ready cooldown port')
         return CodingWorker(self.config, store, runner, workspaces, supervisor, collector=collector,
                             clock=self.clock, stop=self.stop, usage_normalizer=self.usage_normalizer,
                             review_context_provider=review_contexts, peer_context_provider=peer_contexts,
-                            external_context_provider=self.external_context_factory(store) if self.config.external_reviews else None)
+                            external_context_provider=self.external_context_factory(store) if self.config.external_reviews else None,
+                            cooldown_provider=cooldowns)
 
 
 def default_external_context_factory(store):
