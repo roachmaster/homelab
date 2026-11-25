@@ -12,6 +12,8 @@ from the number of notifications or a runner's heartbeat.
 | External Muse execution | One repair ran440.3minutes without a work checkpoint. After submission, main-drift handling took about one second. | A routine base update requested another external author turn, repeating the slow boundary. |
 | Main CI | Jenkins86 took38m45.7s; backend-main consumed27m14.6s, browser journeys2m21.8s. Cache restore and publication together took2m20.7s, with a6.1GB cache hit. | Sequential backend tests accounted for70.3% of the build. Cold compilation was not the principal delay. |
 | Portal activation | Latest activation completed4.49seconds after successful main verification. | Deployment was not the long wait. |
+| Executable identity | Two new Plan invocations stopped in about1.4seconds after AGY updated its user-local binary. | Workers correctly refused the changed program; select the verified immutable1.5.17 installation and recover those exact stopped sources separately. |
+| Muse candidate preparation | The submitted candidate tracks two generated Python bytecode files. | The artifact guard rejects them permanently, but the old worker classified that rejection as temporary and retried without author feedback. |
 | Historical reconciliation | Two retired actions had exact cancelled/never-started receipts but were repeatedly rejected by the historical cleanup reader. | Repeated uncorrelated warnings obscured current failures. No Jenkins build was running for those actions. |
 
 The durable database scans dispatched source refreshes and reviewer work within
@@ -45,6 +47,11 @@ repair budgets remain separate. A successful response on that same model ends
 the availability episode. Authentication, cancellation and unrelated failures
 retain their separate handling.
 
+The AGY executable is pinned to a verified root-owned versioned installation.
+A source-bound private binary-identity recovery must preserve the exact recipe,
+Plan stage, workspace and failed attempt; it cannot claim quota exhaustion or a
+model timeout. New work still uses the configured primary.
+
 An explicit interactive `/usage` read at21:00UTC reported Gemini weekly9.57% /
 five-hour100%, and shared Claude/GPT weekly98.30% / five-hour97.60%. These are
 manual observations, not a headless allowance API. `/credits` reported credit
@@ -59,6 +66,11 @@ checks the immutable author commit/tree/base, proves ancestry, freezes the
 selected integration, and obtains fresh independent review and exact-source CI.
 It never edits the author's workspace or treats an earlier approval as approval
 of the new integration.
+
+Generated/private artifacts remain forbidden. Permanent artifact rejection
+returns a bounded source-specific verification repair to the original author,
+with safe relative-path diagnostics. Temporary delivery observation failures
+retain their separate retry handling.
 
 A genuine conflict returns to the original author. Main advancing after CI
 instead creates another bounded preparation generation from the same source
@@ -77,6 +89,11 @@ Main backend execution groups whole test modules into at most four owned
 processes, constrained by CPU and memory availability. Each process retains
 class/module cleanup. The supervisor keeps the process leader unreaped through
 TERM/KILL cleanup and attempts cleanup of every worker even after one failure.
+Workers sharing a state root retain each other's cooldown records and apply only
+their configured scope. Acquisition creates the private state root before child
+providers prepare their directories; no constructor performs I/O. Lock waits and
+cache size are bounded.
+
 Discovery and execution must contain exactly the same unique test IDs, without
 missing tests, duplicate execution or skips. Branch and preflight coverage and
 the four required backend suites remain intact. Fifteen redundant discoveries
