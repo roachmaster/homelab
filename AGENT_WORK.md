@@ -1,4 +1,28 @@
-# Current: Recover cancelled/parked Muse and Gemini work — 2026-11-25
+# Current: Git-independent artifact and verification identities — 2026-11-25
+
+User requests implementing the content-identity design described after task
+recovery. Separate stable task UUIDs, canonical source-content SHA-256 manifests,
+and explicit frozen verification-policy/generation identities. Git object IDs,
+branches, diff presentation and checkout roots are provenance, never artifact
+identity. Persist a job's selected identity and policy snapshot before effects;
+resume against that snapshot. A deliberate policy change requires a fresh
+verification generation rather than rewriting an old receipt or CI index.
+
+Root owns integration, external-review wiring, source qualification, acceptance
+and final publication. The manifest component owns pure contracts, selected
+source adapters/factory and meaningful cross-source tests. The verification
+component owns normal native review/publication wiring and backward-compatible
+snapshot persistence. Each writer uses an isolated worktree. Document the actual
+types, lifecycle and failure behavior with UML component/data/sequence diagrams.
+
+Preserve existing v1 jobs, approvals, source bindings, migrations, mutation
+transport pins and per-event retry budgets. A content match does not authorize
+reusing an approval for another workflow or skipping exact-candidate CI. Do not
+rewrite historical identities, reset live tasks, restart active workers, or
+claim that source publication is a portal rollout. No paid agent calls are
+needed for this implementation.
+
+# Previous: Recover cancelled/parked Muse and Gemini work — 2026-11-25
 
 User asks to fix the cancelled Muse task and the attention-state Gemini portal
 CI/CD task, determine why they stopped, and let their original owners continue.
