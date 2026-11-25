@@ -107,6 +107,19 @@ class MainParallelTests(unittest.TestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(int((root / 'pid').read_text()), 0)
 
+    def test_crashed_leader_still_stops_its_owned_descendant(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write(root, 'test_owned.py', 'import unittest,os,subprocess,sys\nfrom pathlib import Path\n'
+                'class T(unittest.TestCase):\n def test_crash(self):\n'
+                '  child=subprocess.Popen([sys.executable,"-c","import time;time.sleep(30)"])\n'
+                '  Path("pid").write_text(str(child.pid));os._exit(0)\n')
+            with self.assertRaises(RuntimeError):
+                self.run_owned(root, self.provider(stop_grace_seconds=.2))
+            status = Path('/proc') / (root / 'pid').read_text() / 'stat'
+            # A grandchild can briefly await init's reap, but must not run.
+            self.assertTrue(not status.exists() or status.read_text().split()[2] == 'Z')
+
     def test_children_enforce_selected_address_space_and_output_limits(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -117,6 +130,61 @@ class MainParallelTests(unittest.TestCase):
                 ' def test_output(self):print("x"*40000)\n')
             with self.assertRaisesRegex(RuntimeError, 'time/output bound'):
                 self.run_owned(root, self.provider(max_output_bytes=1024))
+
+    def test_import_output_is_bounded_before_discovery_finishes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write(root, 'test_owned.py', 'import time\nprint("x"*40000,flush=True)\ntime.sleep(30)\n')
+            with self.assertRaisesRegex(RuntimeError, 'test discovery exceeded its time/output bound'):
+                self.run_owned(root, self.provider(max_output_bytes=1024, stop_grace_seconds=.2))
+
+    def test_leader_stays_owned_until_signals_complete_and_is_never_signalled_after_reap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write(root, 'test_owned.py', 'import unittest\nclass T(unittest.TestCase):\n def test_one(self):pass\n')
+            provider = self.provider()
+            children, signals = [], []
+            start, killpg = provider._start, os.killpg
+            def remember(*args):
+                child = start(*args)
+                children.append(child)
+                return child
+            def signal_owned(pid, value):
+                child = next(child for child in children if child[0].pid == pid)
+                self.assertIsNone(child[0].returncode)
+                self.assertIsNotNone(os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT))
+                self.assertEqual((Path('/proc') / str(pid) / 'stat').read_text().split()[2], 'Z')
+                signals.append((pid, value))
+                return killpg(pid, value)
+            with patch.object(provider, '_start', side_effect=remember), \
+                    patch.object(backend.os, 'killpg', side_effect=signal_owned), \
+                    patch.object(backend.subprocess.Popen, 'poll', side_effect=AssertionError('Must not reap in observation')):
+                self.assertEqual(self.run_owned(root, provider)[0], 0)
+                count = len(signals)
+                for child in children:
+                    provider._stop(child)
+                self.assertEqual(len(signals), count)
+
+    def test_one_cleanup_error_does_not_leave_other_children_or_streams_open(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write(root, 'test_owned.py', 'import unittest,time\nclass T(unittest.TestCase):\n def test_wait(self):time.sleep(30)\n')
+            provider = self.provider(stop_grace_seconds=.2)
+            children = [provider._start(root, str(index), {'kind': 'group', 'ids': ['test_owned.T.test_wait']},
+                root, dict(os.environ)) for index in range(2)]
+            stop = provider._stop
+            def denied_once(child):
+                if child is children[0]:raise PermissionError('owned stop denial')
+                return stop(child)
+            try:
+                with patch.object(provider, '_stop', side_effect=denied_once), \
+                        self.assertRaisesRegex(RuntimeError, 'cleanup could not be confirmed'):
+                    provider._quiesce(children)
+                self.assertTrue(all(child[3].closed for child in children))
+                self.assertIsNotNone(children[1][0].returncode)
+            finally:
+                for child in children:
+                    stop(child)
 
     def test_completed_result_cannot_omit_add_repeat_or_miscount_test_ids(self):
         for change in ('missing', 'extra', 'repeat', 'count'):
