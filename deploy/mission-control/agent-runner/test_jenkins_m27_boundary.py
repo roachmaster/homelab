@@ -279,7 +279,7 @@ UI_DELIVERY_CONTEXT_SHA256 = {
 # Current additive delivery source; historical maps above remain provenance.
 DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/runner.py': '4e112cd0624e46c8964e37e66c86eb274ce7392cb02a1dd24b548fc8a075537c',
-    'deploy/mission-control/agent-runner/setup-runner.sh': 'a346e8e4fd5e64b47b4a40419f2e9195e7097e752340e486399054e63faf36b4',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': 'de459b8d5a49922d5272c186f887bad40afb87421661d31fc0bfa85ac85e0664',
     'deploy/mission-control/agent-runner/test_ci_supervision.py': '8769a4232b38c14932917099c6f30ed7a6b22d725d29f412d48efcecf991cf3a',
     'deploy/mission-control/agent-runner/test_delivery_ops.py': 'd0d9428dfe0e264a7dce8f2edf9e2562eadbf29bb425adceae18040c39cf4a7a',
@@ -339,7 +339,7 @@ DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
 # These fingerprints qualify source; they confer no CI or deployment authority.
 AGENT_WIDE_RETRY_CONTEXT_SHA256 = {
     "src/rust/forge-ide-ui/tests/work_review.rs": "0b3bfed9322842760840823fed6589cbf1875b4f3b42cd2c01c9135d8a0d01c1",
-    "deploy/mission-control/agent-runner/setup-runner.sh": "c25bc0c27040d513095c1cdeb31b80748548ba3c3384eef06070d52f40757a30",
+    "deploy/mission-control/agent-runner/setup-runner.sh": "aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b",
     "deploy/mission-control/agent-runner/test_external_flow.py": "b6fc29b6ef427b06656104b5426bce8f71b1a01fc64f345c8e1c7e30148febdb",
     "deploy/mission-control/agent-runner/test_work_owner_followup.py": "369b9d91e2098e7c42f340f905aa449c2e14f559782f8579eab80f3d55335be2",
     "deploy/mission-control/agent-runner/test_work_peer_review.py": "9cdddc629df8806cf647ec9f70a71643e31bc461c8c25e7819fd267747f3ebaa",
@@ -384,7 +384,7 @@ EVENT_RETRY_CONTEXT_SHA256 = {
     "deploy/mission-control/jenkins/setup-ci.py": "99dbe52ff966ec62202c4f3fa16dfab0623b5a6463c0a990f3141026e7925e4a",
     "deploy/mission-control/agent-runner/test_ci_installer_v3.py": "c887bdbfbdea591a0f80c4cd340a45a9d3b2813878e15cf79771ca30e20bd864",
     "deploy/mission-control/agent-runner/runner.py": "fa8e8499b8f4e7cdebc2e247883d361e1c034ce71aef24c809e4c9d642c99269",
-    "deploy/mission-control/agent-runner/setup-runner.sh": "03cfb4d33d579d688988c36800f12d8e55b7993ead6918e2bb771b1e15f4aa20",
+    "deploy/mission-control/agent-runner/setup-runner.sh": "aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b",
     "deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py": "e1000fc0989f05d961b0323c70e604981a364dc297de497c04368802b740c7ec",
     "deploy/mission-control/agent-runner/test_ci_supervision.py": "dd085b67e9b79c040f9946c1401600e4d4266b4618aa9d4288cf510fb3c56584",
     "deploy/mission-control/agent-runner/test_external_flow.py": "32f339f42cdb23f33e3b3d5b5def9a0ecf2546e0a54fbc689ce6ec46d289d8b6",
@@ -495,7 +495,7 @@ LINEAGE_RETRY_CONTEXT_SHA256 = {
 
 # Exact additive M33 source; every predecessor pin remains historical authority.
 SUPERSEDING_REVIEW_CONTEXT_SHA256 = {'AGENT_WORK.md': '7bc6d4ee90235797dcbb0ab75a0759943cc3e230a9b9f7febd6490d809d7fdb1',
- 'deploy/mission-control/agent-runner/setup-runner.sh': '4982edf6698c318f72d3cc06285448326ea090ba84dfffd1a74ef257691265ef',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
  'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '2a17322ef5c3776e374dbb5e631fc89d1c7d83b484ea195a7286d37b3675b1b1',
  'deploy/mission-control/agent-runner/test_ci_event_phases.py': 'd39fd595d4ba86d13aaa5b99621e8b9e87bbd5aa9504bf290f47436f5c4645e0',
  'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '9e3d529f0275bbd8245ec20974f648b376931809bbd58fc9775f9b3411cac772',
@@ -520,7 +520,7 @@ SUPERSEDING_REVIEW_CONTEXT_SHA256 = {'AGENT_WORK.md': '7bc6d4ee90235797dcbb0ab75
 
 # Exact peer-feedback correction; all applied SQL and predecessor pins remain immutable.
 PEER_FEEDBACK_CONTEXT_SHA256 = {'AGENT_WORK.md': '5b2736ec7bbb7502c3a8ecaa9a8b99637dd8dfc0f8151758e90186a5404dc877',
- 'deploy/mission-control/agent-runner/setup-runner.sh': 'f7035d6ed8070811cbdc430af94bf08f16adb74019de4eca44db16f8c2f6e73d',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
  'deploy/mission-control/agent-runner/test_ci_event_phases.py': 'fb8d24dd8427d660281a597f535de374519e595d6328198f5458613c2fac7b72',
  'deploy/mission-control/agent-runner/test_work_linked_child_feedback.py': '54bf5a07a1864ef1d17c2eb4e791a677f1241d34a388ca02f6cf8996f6e591ec',
  'deploy/mission-control/agent-runner/test_work_peer_context.py': '0d01c0eb9b5a7f40761add138db5098b587713b2330b1a53552e62b931be021e',
@@ -536,7 +536,7 @@ PEER_FEEDBACK_CONTEXT_SHA256 = {'AGENT_WORK.md': '5b2736ec7bbb7502c3a8ecaa9a8b99
 # Exact reviewer protocol and transport fix; predecessor authority and applied SQL stay immutable.
 REVIEW_PROTOCOL_CONTEXT_SHA256 = {'AGENT_WORK.md': '74187a9baa76afbd6aae600a2b89ccadd2f95b55d6c3f8e8f71b63d512c4b0c0',
  'deploy/mission-control/agent-runner/README.md': '28969daa3708e10984efb830fc442a6d6784a0c18e5969a4ffff6fed2bb89845',
- 'deploy/mission-control/agent-runner/setup-runner.sh': '97c695cc59ad59df8a5fb37e51eb14a06e3e57aa53f0118c2ce1321f3e78a588',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
  'deploy/mission-control/agent-runner/test_ci_event_phases.py': '105deceff4ad241e0dcf2527c0db2dc7a74363e6d3af6e3271b342a254413c6e',
  'deploy/mission-control/agent-runner/test_external_transport_recovery.py': 'b0c4a451b07731dfb47c78ea0b871f78e6a652ffa3505bb2f42e5a45c2619aba',
  'deploy/mission-control/agent-runner/test_work_cli_transport.py': 'f0e44d7c7121ca08bf8935ed65205c9f9cf8b42c76f1359a23ed74ed458fde40',
@@ -594,7 +594,7 @@ PIPELINE_DIAGRAM_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/jenkins_api.py': '0ceaa309ea41de4e79583fc6a2e6db9c441a683489f8179c670a666320846ad4',
     'deploy/mission-control/agent-runner/jenkins_events.py': '295d052ca4b693db60c1e55afa94939b62e48b458b1c47d78a9768889f828012',
     'deploy/mission-control/agent-runner/runner.py': '20a84ac0699d6be2643b12ce1b7d0eb9d057fd682e7f9522e4881420fe95cd65',
-    'deploy/mission-control/agent-runner/setup-runner.sh': '97c695cc59ad59df8a5fb37e51eb14a06e3e57aa53f0118c2ce1321f3e78a588',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': 'eed7dd4b74a6463061c178139623b24f611230c58cf935b1cffe68079afe0bfa',
     'deploy/mission-control/agent-runner/test_ci_supervision.py': 'f1ca0bffcc886768a9c91f209f77c82e0af31ed440172d0d5af87b58d89966ee',
     'deploy/mission-control/agent-runner/test_jenkins_api.py': 'c66ef69224bc5792321f8343bd27b98c9439d1347793eeb8dd8021c21faac494',
@@ -665,7 +665,7 @@ MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256 = {
 # migrations (0001..0037) and predecessor maps remain immutable provenance.
 # Source identities never substitute for real CI or deployment receipts.
 PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256 = {
-    'deploy/mission-control/agent-runner/setup-runner.sh': '7fb6547cb849aa63cb958d69af065659ee60dabcec913b767d0f9ccba6596b9c',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': 'cceb3be8f50a7d5ac3d4808f80e97e3a9c5cf71491e67e373f6a9de302d0a8ed',
     'deploy/mission-control/agent-runner/test_ci_event_phases.py': '57b329da7b011c3a9d86e1a64a824c5c2c0b84bbb3ee604683db84708ca7125b',
     'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '8aee9e0bcd0302d34dd7b38ec2c76ac9fbcaa54bb5e33d1fca43147af0ee8a2a',
@@ -731,7 +731,7 @@ M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256 = {
 # unchanged. These are exact reviewed source bytes, never CI proof substitutes.
 JENKINS_PAGED_OBSERVER_CONTEXT_SHA256 = {
     'AGENT_WORK.md': 'bffae2aaf43a78dac989f095e183b255662c92c155f115e0ba51e9a6846182e2',
-    'deploy/mission-control/agent-runner/setup-runner.sh': '447042e4343851149c5f16a54a5f3ecb050205288fbb1f1105cd45f35b1f0631',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
     'deploy/mission-control/agent-runner/test_jenkins_read_observer.py': '56e2699b08cf1d2a4b7bd9030d18eee6e161b288ad5acaf0cc5344e314840b42',
     'deploy/mission-control/agent-runner/work_external_delivery.py': '4f6d761911d3f0f3f3cac73b70cb69698017ac42b66757443aaba036a8706397',
     'deploy/mission-control/agent-runner/work_jenkins_observer.py': 'eab42d259be5934174208ba2b3842bc3198f86c34be061b532715991410a77de',
@@ -757,7 +757,7 @@ JENKINS_PAGED_OBSERVER_CONTEXT_SHA256 = {
 # existing mutation transport, or historical source pin is changed.
 NATIVE_CI_CONTEXT_RECOVERY_SHA256 = {
     'AGENT_WORK.md': 'c826ecfe8352eb1143993002c9acb74db3ff73a29ee8134646908e4659f4753c',
-    'deploy/mission-control/agent-runner/setup-runner.sh': 'bc71e92930bc08907ad5be6598c17a312409232a653a0febcc1b0b267df076e9',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'aa0b20343c4490c59e735811cb130007c5c9d80baa4e282db53ed47e75c76e6b',
     'deploy/mission-control/agent-runner/test_native_ci_reprepare.py': 'ad1e395a60ccb09a495a15e48573b58df99d1eedc81eb47b458a2ae41e7674f0',
     'deploy/mission-control/agent-runner/work_native_ci_reprepare.py': '7a506685c0974e9cc29fe93416416538b79e71dfffe553bb2e8058cd08ca5db4',
 }
