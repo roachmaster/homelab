@@ -1,0 +1,24 @@
+flowchart TD
+    Boot["Bootstrap validates selection"]
+    Factory["GitArtifactProviderFactory / ArtifactSourceFactory"]
+    Source["Ready source provider"]
+    Inputs["Memory / directory / Git blobs"]
+    Manifest["ArtifactManifest / ArtifactEntry"]
+    Policy["VerificationPolicySnapshot"]
+    Identity["VerificationIdentity"]
+    Workers["Workers own injected ready ports"]
+    State["Private durable snapshot before effects"]
+    Gates["Scoped verdict and exact-candidate CI"]
+    Publish["Git publication / merge / release"]
+    Boot --> Factory
+    Factory -->|create| Source
+    Source -->|read| Inputs
+    Source -->|returns| Manifest
+    Source -->|inject| Workers
+    Manifest --> Identity
+    Policy --> Identity
+    Identity --> State
+    Workers -->|persist| State
+    Workers --> Gates
+    State -->|frozen identity| Gates
+    Gates -->|receipts| Publish

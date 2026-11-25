@@ -43,6 +43,7 @@ pub(super) const BODY: &[Node] = &[
                 doc_row!("/design/forge-workers/studio", "Studio build worker flow", "Build attempts and preview publication."),
                 doc_row!("/design/coding-agents", "Coding-agent dispatch", "Muse database workflow, independent native review, Jenkins and task event history."),
                 doc_row!("/design/autonomous-agents", "Autonomous agent workflow", "Configured authors, independent peer reviews, required checks and trusted merge."),
+                doc_row!("/design/content-identity", "Source content and verification identity", "Canonical artifacts, frozen policy generations and Git provenance."),
                 doc_row!("/design/agent-feedback-loop", "Agent feedback and repair", "Verified findings, bounded repair rounds, and explicit coordinator handoff."),
                 doc_row!("/design/agent-usage", "Agent usage and token limits", "Provider-managed limits, truthful allowance visibility and scoped accounting."),
             ),

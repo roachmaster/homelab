@@ -1,5 +1,27 @@
 # Mermaid UML-like views
 
+## Source content and verification identity
+
+These source implementation views document explicitly selected `content-v2`
+and preserved `legacy-v1` work. They do not claim live activation or a non-Git
+CI/publication adapter. See the [identity reference](../../content-identity.md)
+and [portal reader](https://portal.thedevex.com/design/content-identity).
+
+| View | Editable source | Rendered diagram |
+| --- | --- | --- |
+| Immutable identity data | [Mermaid](content-identity-data.mmd) | [SVG](images/content-identity-data.svg) |
+| Components and provider ownership | [Mermaid](content-identity-components.mmd) | [SVG](images/content-identity-components.svg) |
+| Native review, freeze and resume | [Mermaid](content-identity-native.mmd) | [SVG](images/content-identity-native.svg) |
+| External author and independent review | [Mermaid](content-identity-external.mmd) | [SVG](images/content-identity-external.svg) |
+
+The data diagram uses actual immutable Python value types; composition arrows
+describe owned entries and dashed dependencies bind content digests. Git
+provenance remains outside these values. Components describe injected dependencies and
+effect boundaries. Sequences distinguish a fresh snapshot from resume and retain
+exact-candidate CI/merge authority after content equality is established.
+
+## Framework and UI views
+
 Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle. M09/M10 describe the implemented optional template library and its development examples.** M11 shows implemented Forge IDE inspection. M12 shows the implemented HTTPS gateway; M13–M17 show the proposed two-machine IDE milestone. These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-system component planning view.
 
 | View | Status and purpose | Source | Image |

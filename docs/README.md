@@ -20,6 +20,12 @@ their own verification and rollout; historical Chat/Mail notes are not active UI
 
 ## Coding agents and usage
 
+[Source content and verification identity](architecture/content-identity.md)
+documents canonical source artifacts, immutable policy generations, provider
+ownership and preserved legacy work. The
+[portal design reader](https://portal.thedevex.com/design/content-identity)
+contains the data/component and native/external sequence diagrams.
+
 [Task correlation and event envelopes](architecture/proposals/forge-task-event-envelope.md)
 documents implemented M21 trace identities and the ABI12 bounded task reader.
 The full correlation and every typed event are available through explicit paging;

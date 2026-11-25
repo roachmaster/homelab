@@ -20,7 +20,9 @@ for (const name of ["m01-contracts", "m02-bootstrap", "m03-disk-request", "m04-s
   "game-asset-pipeline-cook", "game-asset-pipeline-load", "game-asset-pipeline-contract",
   "forge-worker-ownership", "forge-game-worker-handoff", "forge-studio-worker-lease",
   "coding-agent-ownership", "coding-agent-lifecycle", "coding-agent-completion", "coding-agent-takeover",
-  "agent-usage-providers", "agent-usage-collection"]) {
+  "agent-usage-providers", "agent-usage-collection",
+  "content-identity-data", "content-identity-components",
+  "content-identity-native", "content-identity-external"]) {
   const source = fs.readFileSync(path.join(root, `${name}.mmd`), "utf8");
   const result = await mermaid.parse(source);
   console.log(`PASS official Mermaid syntax: ${name} (${result.diagramType})`);
