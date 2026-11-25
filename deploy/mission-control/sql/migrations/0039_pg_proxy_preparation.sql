@@ -212,7 +212,7 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_worker_grant_insert(text, text, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_worker_grant_insert TO forge_agent;
 
-CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert(p_owner_id text, p_profile_alias text, p_project_alias text, p_status text)
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert(p_owner_id text, p_profile_alias text, p_project_alias text, p_status text, p_refresh_id uuid)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_usage_refresh_requests%ROWTYPE;
@@ -221,13 +221,13 @@ BEGIN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_usage_refresh_requests (owner_id, profile_alias, project_alias, status, refresh_id)
-    VALUES (p_owner_id, p_profile_alias, p_project_alias, p_status, gen_random_uuid())
+    VALUES (p_owner_id, p_profile_alias, p_project_alias, p_status, COALESCE(p_refresh_id, gen_random_uuid()))
     RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
 END;
 $fn$;
-REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert(text, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert(text, text, text, text, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert TO forge_agent;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_insert TO forge_coding_worker;
 
@@ -597,7 +597,7 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert(text, text, uuid, uuid, text, text, text, text, uuid, uuid, text, bigint, bigint, text, integer, uuid, text, uuid, text, text, uuid, uuid, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert TO forge_agent;
 
-CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_task_update(p_owner_id text, p_project_alias text, p_id uuid, p_status text, p_mode text, p_revision bigint, p_agent_profile text, p_pinned_recipe jsonb, p_recipe_digest text, p_cancelled_at text, p_set_cancelled_at_now boolean, p_clear_cancelled_at boolean, p_accepted_at text, p_set_accepted_at_now boolean, p_touch_accepted_at boolean, p_clear_accepted_at boolean, p_latest_attempt_id uuid, p_resume_workspace_digest text, p_plan_decision_id uuid, p_feedback_id uuid, p_feedback_sha256 text, p_legacy_resume_note text, p_auto_repair boolean, p_review_required boolean, p_workflow_required boolean, p_workflow_id uuid, p_workflow_review_id uuid, p_workflow_feedback_review_id uuid, p_clear_workflow_feedback_review_id boolean, p_workflow_feedback_sha256 text, p_clear_workflow_feedback_sha256 boolean, p_title text, p_review_note text, p_bump_revision boolean, p_cancel_transition boolean, p_cancel_or_request_transition boolean)
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_task_update(p_owner_id text, p_project_alias text, p_id uuid, p_status text, p_mode text, p_revision bigint, p_agent_profile text, p_pinned_recipe jsonb, p_recipe_digest text, p_cancelled_at text, p_set_cancelled_at_now boolean, p_clear_cancelled_at boolean, p_accepted_at text, p_set_accepted_at_now boolean, p_touch_accepted_at boolean, p_clear_accepted_at boolean, p_latest_attempt_id uuid, p_resume_workspace_digest text, p_plan_decision_id uuid, p_feedback_id uuid, p_feedback_sha256 text, p_legacy_resume_note text, p_auto_repair boolean, p_review_required boolean, p_workflow_required boolean, p_workflow_id uuid, p_workflow_review_id uuid, p_workflow_feedback_review_id uuid, p_clear_workflow_feedback_review_id boolean, p_workflow_feedback_sha256 text, p_clear_workflow_feedback_sha256 boolean, p_title text, p_review_note text, p_bump_revision boolean, p_cancel_transition boolean, p_cancel_or_request_transition boolean, p_require_revision bigint)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_tasks%ROWTYPE;
@@ -630,16 +630,16 @@ BEGIN
     title = COALESCE(p_title, title),
     review_note = COALESCE(p_review_note, review_note),
     updated_at = clock_timestamp()
-  WHERE (t.owner_id, t.project_alias, t.id) = (p_owner_id, p_project_alias, p_id)
+  WHERE (t.owner_id, t.project_alias, t.id) = (p_owner_id, p_project_alias, p_id) AND (p_require_revision IS NULL OR revision = p_require_revision)
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
 END;
 $fn$;
-REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_task_update(text, text, uuid, text, text, bigint, text, jsonb, text, text, boolean, boolean, text, boolean, boolean, boolean, uuid, text, uuid, uuid, text, text, boolean, boolean, boolean, uuid, uuid, uuid, boolean, text, boolean, text, text, boolean, boolean, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_task_update(text, text, uuid, text, text, bigint, text, jsonb, text, text, boolean, boolean, text, boolean, boolean, boolean, uuid, text, uuid, uuid, text, text, boolean, boolean, boolean, uuid, uuid, uuid, boolean, text, boolean, text, text, boolean, boolean, boolean, bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_task_update TO forge_agent;
 
-CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_update(p_workflow_id uuid, p_phase text, p_enabled boolean, p_escalation_reason text, p_plan_revisions_delta integer, p_snapshot jsonb)
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_update(p_workflow_id uuid, p_phase text, p_enabled boolean, p_escalation_reason text, p_plan_revisions_delta integer, p_snapshot jsonb, p_require_enabled boolean, p_require_phase_not_in text[], p_require_phase_distinct_from text)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_workflows%ROWTYPE;
@@ -651,13 +651,13 @@ BEGIN
     plan_revisions = plan_revisions + COALESCE(p_plan_revisions_delta, 0),
     snapshot = COALESCE(p_snapshot, snapshot),
     updated_at = clock_timestamp()
-  WHERE t.workflow_id = p_workflow_id AND t.owner_id = current_setting('forge.coding_owner', true)
+  WHERE t.workflow_id = p_workflow_id AND ((p_require_enabled IS NULL OR enabled = p_require_enabled) AND (p_require_phase_not_in IS NULL OR NOT (phase = ANY(p_require_phase_not_in))) AND (p_require_phase_distinct_from IS NULL OR phase IS DISTINCT FROM p_require_phase_distinct_from)) AND t.owner_id = current_setting('forge.coding_owner', true)
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
 END;
 $fn$;
-REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_update(uuid, text, boolean, text, integer, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_update(uuid, text, boolean, text, integer, jsonb, boolean, text[], text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_update TO forge_agent;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_review_update(p_workflow_review_id uuid, p_status text, p_diagnostics jsonb, p_target_json text, p_target_sha256 text, p_reviewer_task_id uuid, p_reviewer_attempt_id uuid, p_reviewer_result_sha256 text, p_verdict_json text, p_verdict_sha256 text)
@@ -708,7 +708,7 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_action_update(uuid, text, text, boolean, uuid, boolean, text, boolean, boolean, jsonb, jsonb, uuid, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_action_update TO forge_agent;
 
-CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_update(p_review_id uuid, p_status text, p_owner_decision jsonb, p_clear_owner_decision boolean, p_findings jsonb, p_summary text, p_reason text, p_feedback_id uuid, p_candidate_commit text, p_clear_candidate_commit boolean, p_gate_manifest_sha256 text, p_clear_gate_manifest_sha256 boolean, p_verification jsonb)
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_update(p_review_id uuid, p_status text, p_owner_decision jsonb, p_clear_owner_decision boolean, p_findings jsonb, p_summary text, p_reason text, p_feedback_id uuid, p_candidate_commit text, p_clear_candidate_commit boolean, p_gate_manifest_sha256 text, p_clear_gate_manifest_sha256 boolean, p_verification jsonb, p_require_status text, p_require_previous_review_id uuid)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_reviews%ROWTYPE;
@@ -724,13 +724,13 @@ BEGIN
     gate_manifest_sha256 = CASE WHEN p_clear_gate_manifest_sha256 THEN NULL ELSE COALESCE(p_gate_manifest_sha256, gate_manifest_sha256) END,
     verification = COALESCE(p_verification, verification),
     updated_at = clock_timestamp()
-  WHERE t.review_id = p_review_id AND t.owner_id = current_setting('forge.coding_owner', true)
+  WHERE t.review_id = p_review_id AND ((p_require_status IS NULL OR status = p_require_status) AND (p_require_previous_review_id IS NULL OR previous_review_id = p_require_previous_review_id)) AND t.owner_id = current_setting('forge.coding_owner', true)
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
 END;
 $fn$;
-REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_review_update(uuid, text, jsonb, boolean, jsonb, text, text, uuid, text, boolean, text, boolean, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_review_update(uuid, text, jsonb, boolean, jsonb, text, text, uuid, text, boolean, text, boolean, jsonb, text, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_review_update TO forge_agent;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_update(p_id uuid, p_status text, p_ide_chat_revision bigint, p_lease_owner text, p_clear_lease_owner boolean, p_lease_until text, p_clear_lease_until boolean, p_attempt_token uuid, p_clear_attempt_token boolean, p_attempt_no integer, p_next_attempt_at text, p_accepted_result_hash text, p_clear_accepted_result_hash boolean, p_requeue boolean)
@@ -777,6 +777,28 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_call_update(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_update TO forge_agent;
 
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_call_update_by_run(p_run_id uuid, p_status text, p_require_status text)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE updated_count int;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM forge_agent.runs rr
+    JOIN forge_agent.conversations c ON c.id = rr.conversation_id
+    WHERE rr.id = p_run_id
+      AND c.owner_id = current_setting('forge.coding_owner', true)) THEN
+    RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
+  END IF;
+  UPDATE forge_agent.tool_calls
+    SET status = p_status
+    WHERE run_id = p_run_id
+      AND (p_require_status IS NULL OR status = p_require_status);
+  GET DIAGNOSTICS updated_count = ROW_COUNT;
+  RETURN jsonb_build_object('updated', updated_count);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_call_update_by_run(uuid, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_call_update_by_run TO forge_agent;
+
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_tab_update(p_owner_id text, p_tab_id text, p_revision bigint, p_base_history_revision bigint, p_base_history_fingerprint text, p_snapshot jsonb, p_clear_snapshot boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
@@ -821,7 +843,7 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_workspace_history_update(text, bigint, boolean, jsonb, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_workspace_history_update TO forge_agent;
 
-CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_chat_update(p_owner_id text, p_id uuid, p_title text, p_clear_title boolean, p_messages jsonb, p_expires_on text, p_clear_expires_on boolean, p_time_zone text, p_clear_time_zone boolean, p_expires_at text, p_clear_expires_at boolean, p_bump_revision boolean, p_set_removed_at boolean, p_removal_reason text, p_set_retention_if_fresh boolean, p_require_unexpired boolean)
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_chat_update(p_owner_id text, p_id uuid, p_title text, p_clear_title boolean, p_messages jsonb, p_expires_on text, p_clear_expires_on boolean, p_time_zone text, p_clear_time_zone boolean, p_expires_at text, p_clear_expires_at boolean, p_bump_revision boolean, p_set_removed_at boolean, p_removal_reason text, p_set_retention_if_fresh boolean, p_require_unexpired boolean, p_require_removed_at_null boolean)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.ide_chats%ROWTYPE;
@@ -839,13 +861,13 @@ BEGIN
     removed_at = CASE WHEN COALESCE(p_set_removed_at, false) THEN clock_timestamp() ELSE removed_at END,
     removal_reason = COALESCE(p_removal_reason, removal_reason),
     updated_at = clock_timestamp()
-  WHERE t.owner_id = p_owner_id AND t.id = p_id AND (NOT COALESCE(p_require_unexpired, false) OR expires_at IS NULL OR expires_at > clock_timestamp())
+  WHERE t.owner_id = p_owner_id AND t.id = p_id AND ((NOT COALESCE(p_require_unexpired, false) OR expires_at IS NULL OR expires_at > clock_timestamp()) AND (NOT COALESCE(p_require_removed_at_null, false) OR removed_at IS NULL))
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
 END;
 $fn$;
-REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_chat_update(text, uuid, text, boolean, jsonb, text, boolean, text, boolean, text, boolean, boolean, boolean, text, boolean, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_chat_update(text, uuid, text, boolean, jsonb, text, boolean, text, boolean, text, boolean, boolean, boolean, text, boolean, boolean, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_chat_update TO forge_agent;
 
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.mail_thread_update(p_owner_id text, p_id uuid, p_latest_run_id uuid, p_context_remaining_tokens integer, p_archive boolean, p_archive_base_revision bigint, p_manual_archive boolean, p_require_not_manually_archived boolean)
@@ -1069,7 +1091,7 @@ BEGIN
       SELECT workflow_id, owner_id, project_alias, workflow_review_id, 'decide', p_source_key
       FROM forge_agent.coding_workflow_reviews
       WHERE workflow_review_id = p_workflow_review_id AND status = 'reviewing'
-        AND workflow_id = p_workflow_id
+        AND (p_workflow_id IS NULL OR workflow_id = p_workflow_id)
         AND owner_id = current_setting('forge.coding_owner', true)
       ON CONFLICT DO NOTHING RETURNING * INTO r;
   ELSIF COALESCE(p_on_conflict_do_nothing, false) THEN
@@ -1566,6 +1588,384 @@ END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.coding_workflow_cancel(text, uuid, bigint, text, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.coding_workflow_cancel TO forge_agent;
+
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_admit(p_conversation_id uuid, p_request_id text, p_model_id text, p_fingerprint text, p_messages jsonb, p_settings jsonb, p_model_allowed boolean, p_chat_id uuid, p_expected_revision bigint, p_mail_thread_id uuid, p_mail_source_run_id uuid, p_distributed boolean, p_explicit_conversation boolean)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+  conv_owner text;
+  prev RECORD;
+  chat_rec forge_agent.ide_chats%ROWTYPE;
+  pending RECORD;
+  hist RECORD;
+  submitted_bytes bigint;
+  new_run_id uuid;
+  accepted jsonb;
+BEGIN
+  INSERT INTO forge_agent.conversations (id, owner_id)
+    VALUES (p_conversation_id, current_setting('forge.coding_owner', true))
+    ON CONFLICT (id) DO NOTHING;
+  SELECT owner_id INTO conv_owner FROM forge_agent.conversations
+    WHERE id = p_conversation_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF conv_owner IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+    RETURN jsonb_build_object('error', 'conversation_not_found');
+  END IF;
+  IF p_chat_id IS NULL AND p_mail_thread_id IS NULL
+     AND COALESCE(p_explicit_conversation, false) THEN
+    IF EXISTS (SELECT 1 FROM forge_agent.runs
+               WHERE conversation_id = p_conversation_id
+                 AND (ide_chat_id IS NOT NULL OR mail_thread_id IS NOT NULL)) THEN
+      RETURN jsonb_build_object('error', 'conversation_not_found');
+    END IF;
+  END IF;
+  SELECT r.id, r.status, e.data->>'fingerprint' AS fingerprint INTO prev
+    FROM forge_agent.runs r
+    JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1
+    WHERE r.conversation_id = p_conversation_id AND r.request_id = p_request_id;
+  IF FOUND THEN
+    IF prev.fingerprint IS DISTINCT FROM p_fingerprint THEN
+      RETURN jsonb_build_object('error', 'request_id_conflict');
+    END IF;
+    accepted := jsonb_build_object('run_id', prev.id,
+      'conversation_id', p_conversation_id, 'status', prev.status);
+    IF COALESCE(p_distributed, false) AND p_chat_id IS NOT NULL THEN
+      accepted := accepted || jsonb_build_object('chat_id', p_chat_id);
+    END IF;
+    RETURN accepted;
+  END IF;
+  IF NOT COALESCE(p_model_allowed, true) THEN
+    RETURN jsonb_build_object('error', 'invalid_request');
+  END IF;
+  IF p_chat_id IS NOT NULL THEN
+    INSERT INTO forge_agent.ide_chats (owner_id, id)
+      VALUES (current_setting('forge.coding_owner', true), p_chat_id)
+      ON CONFLICT (owner_id, id) DO NOTHING;
+    SELECT * INTO chat_rec FROM forge_agent.ide_chats
+      WHERE owner_id = current_setting('forge.coding_owner', true)
+        AND id = p_chat_id FOR UPDATE;
+    IF NOT FOUND OR chat_rec.removed_at IS NOT NULL
+       OR (chat_rec.expires_at IS NOT NULL
+           AND chat_rec.expires_at <= clock_timestamp()) THEN
+      RETURN jsonb_build_object('error', 'chat_not_found');
+    END IF;
+    IF p_expected_revision IS DISTINCT FROM NULLIF(chat_rec.revision, 0)
+       OR (chat_rec.revision > 0
+           AND (p_messages - -1) IS DISTINCT FROM chat_rec.messages) THEN
+      RETURN jsonb_build_object('error', 'revision_conflict');
+    END IF;
+    IF EXISTS (SELECT 1 FROM forge_agent.runs
+               WHERE ide_chat_owner_id = current_setting('forge.coding_owner', true)
+                 AND ide_chat_id = p_chat_id
+                 AND status IN ('queued', 'running', 'waiting_for_tool', 'result_ready')) THEN
+      RETURN jsonb_build_object('error', 'chat_busy');
+    END IF;
+  END IF;
+  SELECT count(*) AS total,
+         COALESCE(bool_or(r.conversation_id = p_conversation_id), false) AS same_conversation
+    INTO pending
+    FROM forge_agent.runs r
+    JOIN forge_agent.conversations c ON c.id = r.conversation_id
+    WHERE c.owner_id = current_setting('forge.coding_owner', true)
+      AND r.status IN ('queued', 'running', 'waiting_for_tool', 'result_ready');
+  IF pending.same_conversation THEN
+    RETURN jsonb_build_object('error', 'conversation_busy');
+  END IF;
+  IF pending.total >= 64 THEN
+    RETURN jsonb_build_object('error', 'queue_full');
+  END IF;
+  SELECT count(*) AS count, COALESCE(SUM(octet_length(content)), 0) AS bytes,
+         COALESCE(MAX(position), 0) AS last_position INTO hist
+    FROM forge_agent.messages WHERE conversation_id = p_conversation_id;
+  SELECT COALESCE(SUM(octet_length(elem->>'content')), 0) INTO submitted_bytes
+    FROM jsonb_array_elements(p_messages) elem;
+  IF hist.count + jsonb_array_length(p_messages) > 64
+     OR hist.bytes + submitted_bytes > 65536 THEN
+    RETURN jsonb_build_object('error', 'conversation_limit');
+  END IF;
+  new_run_id := gen_random_uuid();
+  INSERT INTO forge_agent.runs
+      (id, conversation_id, request_id, model_id, ide_chat_owner_id, ide_chat_id,
+       distributed, run_deadline, next_attempt_at, mail_owner_id, mail_thread_id,
+       mail_source_run_id)
+    VALUES (new_run_id, p_conversation_id, p_request_id, p_model_id,
+            CASE WHEN p_chat_id IS NOT NULL
+                 THEN current_setting('forge.coding_owner', true) END,
+            p_chat_id, COALESCE(p_distributed, false),
+            CASE WHEN COALESCE(p_distributed, false)
+                 THEN clock_timestamp()
+                      + (CASE WHEN p_mail_thread_id IS NOT NULL
+                              THEN interval '4 hours' ELSE interval '10 minutes' END)
+            END,
+            CASE WHEN COALESCE(p_distributed, false) THEN clock_timestamp() END,
+            CASE WHEN p_mail_thread_id IS NOT NULL
+                 THEN current_setting('forge.coding_owner', true) END,
+            p_mail_thread_id, p_mail_source_run_id);
+  IF p_mail_thread_id IS NOT NULL THEN
+    UPDATE forge_agent.mail_threads
+      SET latest_run_id = new_run_id, revision = revision + 1,
+          updated_at = clock_timestamp()
+      WHERE owner_id = current_setting('forge.coding_owner', true)
+        AND id = p_mail_thread_id;
+  END IF;
+  INSERT INTO forge_agent.messages (conversation_id, position, run_id, role, content)
+    SELECT p_conversation_id, hist.last_position + ord, new_run_id,
+           elem->>'role', elem->>'content'
+      FROM jsonb_array_elements(p_messages) WITH ORDINALITY AS t(elem, ord);
+  INSERT INTO forge_agent.run_events (run_id, event_type, data, sequence)
+    VALUES (new_run_id, 'queued', p_settings,
+            (SELECT COALESCE(MAX(sequence), 0) + 1 FROM forge_agent.run_events
+             WHERE run_id = new_run_id));
+  PERFORM pg_notify('forge_agent_events', '');
+  PERFORM pg_notify('forge_agent_jobs', '');
+  accepted := jsonb_build_object('run_id', new_run_id,
+    'conversation_id', p_conversation_id, 'status', 'queued');
+  IF COALESCE(p_distributed, false) AND p_chat_id IS NOT NULL THEN
+    accepted := accepted || jsonb_build_object('chat_id', p_chat_id);
+  END IF;
+  RETURN accepted;
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_run_admit(uuid, text, text, text, jsonb, jsonb, boolean, uuid, bigint, uuid, uuid, boolean, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_admit TO forge_agent;
+
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_claim_next(p_tools_only boolean)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+  job RECORD;
+  msgs jsonb;
+BEGIN
+  SELECT r.id, r.conversation_id, r.model_id, e.data INTO job
+    FROM forge_agent.runs r
+    JOIN forge_agent.conversations c ON c.id = r.conversation_id
+    JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1
+    LEFT JOIN forge_agent.ide_chats h
+      ON (h.owner_id, h.id) = (r.ide_chat_owner_id, r.ide_chat_id)
+    WHERE c.owner_id = current_setting('forge.coding_owner', true)
+      AND NOT r.distributed AND r.status = 'queued' AND e.event_type = 'queued'
+      AND (NOT COALESCE(p_tools_only, false) OR e.data ? 'tool_repository')
+      AND (r.ide_chat_id IS NULL OR (h.removed_at IS NULL AND
+          (h.expires_at IS NULL OR h.expires_at > clock_timestamp())))
+    ORDER BY r.created_at, r.id LIMIT 1 FOR UPDATE OF r SKIP LOCKED;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  UPDATE forge_agent.runs SET status = 'running' WHERE id = job.id;
+  INSERT INTO forge_agent.run_events (run_id, event_type, data, sequence)
+    VALUES (job.id, 'model_started', jsonb_build_object('model', job.model_id),
+            (SELECT COALESCE(MAX(sequence), 0) + 1 FROM forge_agent.run_events
+             WHERE run_id = job.id));
+  PERFORM pg_notify('forge_agent_events', '');
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('role', m.role, 'content', m.content)
+                            ORDER BY m.position), '[]'::jsonb) INTO msgs
+    FROM forge_agent.messages m
+    WHERE m.conversation_id = job.conversation_id
+      AND m.role IN ('system', 'user', 'assistant');
+  RETURN jsonb_build_object('run_id', job.id,
+    'conversation_id', job.conversation_id, 'model_id', job.model_id,
+    'settings', job.data, 'messages', msgs);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_run_claim_next(boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_claim_next TO forge_agent;
+
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_started(p_run_id uuid, p_call_id text, p_tool_name text, p_arguments jsonb)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+  lock_chat_id uuid;
+  lock_mail_owner text;
+  lock_mail_thread uuid;
+  lock_chat_rec forge_agent.ide_chats%ROWTYPE;
+  lock_run_rec forge_agent.runs%ROWTYPE;
+  inserted int;
+  ev forge_agent.run_events%ROWTYPE;
+BEGIN
+
+  SELECT r.ide_chat_id, r.mail_owner_id, r.mail_thread_id
+    INTO lock_chat_id, lock_mail_owner, lock_mail_thread
+    FROM forge_agent.runs r
+    JOIN forge_agent.conversations c ON c.id = r.conversation_id
+    WHERE r.id = p_run_id
+      AND c.owner_id = current_setting('forge.coding_owner', true);
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF lock_chat_id IS NOT NULL THEN
+    SELECT * INTO lock_chat_rec FROM forge_agent.ide_chats
+      WHERE owner_id = current_setting('forge.coding_owner', true)
+        AND id = lock_chat_id FOR UPDATE;
+    IF NOT FOUND OR lock_chat_rec.removed_at IS NOT NULL THEN
+      RETURN NULL;
+    END IF;
+  END IF;
+  IF lock_mail_thread IS NOT NULL THEN
+    PERFORM 1 FROM forge_agent.mail_threads
+      WHERE owner_id = lock_mail_owner AND id = lock_mail_thread FOR UPDATE;
+  END IF;
+  SELECT * INTO lock_run_rec FROM forge_agent.runs WHERE id = p_run_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF lock_run_rec.distributed OR lock_run_rec.status <> 'running' THEN
+    RETURN jsonb_build_object('error', 'tool_run_inactive');
+  END IF;
+
+  INSERT INTO forge_agent.tool_calls (run_id, call_id, tool_name, arguments, status)
+    VALUES (p_run_id, p_call_id, p_tool_name, p_arguments, 'running')
+    ON CONFLICT (run_id, call_id) DO NOTHING;
+  GET DIAGNOSTICS inserted = ROW_COUNT;
+  IF inserted <> 1 THEN
+    RETURN jsonb_build_object('error', 'tool_call_conflict');
+  END IF;
+  INSERT INTO forge_agent.run_events (run_id, event_type, data, sequence)
+    VALUES (p_run_id, 'tool_started',
+            jsonb_build_object('call_id', p_call_id, 'name', p_tool_name),
+            (SELECT COALESCE(MAX(sequence), 0) + 1 FROM forge_agent.run_events
+             WHERE run_id = p_run_id))
+    RETURNING * INTO ev;
+  PERFORM pg_notify('forge_agent_events', '');
+  RETURN to_jsonb(ev);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_started(uuid, text, text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_started TO forge_agent;
+
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_finished(p_run_id uuid, p_call_id text, p_tool_name text, p_result jsonb)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+  lock_chat_id uuid;
+  lock_mail_owner text;
+  lock_mail_thread uuid;
+  lock_chat_rec forge_agent.ide_chats%ROWTYPE;
+  lock_run_rec forge_agent.runs%ROWTYPE;
+  inserted int;
+  ev forge_agent.run_events%ROWTYPE;
+BEGIN
+
+  SELECT r.ide_chat_id, r.mail_owner_id, r.mail_thread_id
+    INTO lock_chat_id, lock_mail_owner, lock_mail_thread
+    FROM forge_agent.runs r
+    JOIN forge_agent.conversations c ON c.id = r.conversation_id
+    WHERE r.id = p_run_id
+      AND c.owner_id = current_setting('forge.coding_owner', true);
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF lock_chat_id IS NOT NULL THEN
+    SELECT * INTO lock_chat_rec FROM forge_agent.ide_chats
+      WHERE owner_id = current_setting('forge.coding_owner', true)
+        AND id = lock_chat_id FOR UPDATE;
+    IF NOT FOUND OR lock_chat_rec.removed_at IS NOT NULL THEN
+      RETURN NULL;
+    END IF;
+  END IF;
+  IF lock_mail_thread IS NOT NULL THEN
+    PERFORM 1 FROM forge_agent.mail_threads
+      WHERE owner_id = lock_mail_owner AND id = lock_mail_thread FOR UPDATE;
+  END IF;
+  SELECT * INTO lock_run_rec FROM forge_agent.runs WHERE id = p_run_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF lock_run_rec.distributed OR lock_run_rec.status <> 'running' THEN
+    RETURN jsonb_build_object('error', 'tool_run_inactive');
+  END IF;
+
+  UPDATE forge_agent.tool_calls SET status = 'finished'
+    WHERE run_id = p_run_id AND call_id = p_call_id AND status = 'running';
+  GET DIAGNOSTICS inserted = ROW_COUNT;
+  IF inserted <> 1 THEN
+    RETURN jsonb_build_object('error', 'tool_call_conflict');
+  END IF;
+  INSERT INTO forge_agent.tool_results
+      (run_id, call_id, outcome, exit_code, stdout, stderr, output_truncated)
+    VALUES (p_run_id, p_call_id,
+            CASE WHEN NULLIF(p_result->>'error', '') IS NOT NULL
+                 THEN 'execution_error' ELSE 'exited' END,
+            CASE WHEN NULLIF(p_result->>'error', '') IS NOT NULL
+                 THEN NULL ELSE 0 END,
+            COALESCE(p_result->>'text', ''),
+            COALESCE(p_result->>'error', ''),
+            COALESCE((p_result->>'truncated')::boolean, false));
+  INSERT INTO forge_agent.run_events (run_id, event_type, data, sequence)
+    VALUES (p_run_id, 'tool_finished',
+            jsonb_build_object('call_id', p_call_id, 'name', p_tool_name,
+              'outcome', CASE WHEN NULLIF(p_result->>'error', '') IS NOT NULL
+                              THEN 'failed' ELSE 'completed' END),
+            (SELECT COALESCE(MAX(sequence), 0) + 1 FROM forge_agent.run_events
+             WHERE run_id = p_run_id))
+    RETURNING * INTO ev;
+  PERFORM pg_notify('forge_agent_events', '');
+  RETURN to_jsonb(ev);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_finished(uuid, text, text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_finished TO forge_agent;
+
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_interrupt_conversation_runs(p_tools_only boolean)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+  rec RECORD;
+  interrupted jsonb := '[]'::jsonb;
+BEGIN
+  FOR rec IN
+    UPDATE forge_agent.runs r SET status = 'interrupted'
+      FROM forge_agent.conversations c
+      WHERE c.id = r.conversation_id
+        AND c.owner_id = current_setting('forge.coding_owner', true)
+        AND NOT r.distributed AND r.status = 'running'
+        AND (NOT COALESCE(p_tools_only, false) OR EXISTS (
+          SELECT 1 FROM forge_agent.run_events e WHERE e.run_id = r.id
+            AND e.sequence = 1 AND e.data ? 'tool_repository'))
+      RETURNING r.id
+  LOOP
+    UPDATE forge_agent.tool_calls SET status = 'outcome_unknown'
+      WHERE run_id = rec.id AND status = 'running';
+    INSERT INTO forge_agent.run_events (run_id, event_type, data, sequence)
+      VALUES (rec.id, 'interrupted',
+              jsonb_build_object('error', 'worker_restarted'),
+              (SELECT COALESCE(MAX(sequence), 0) + 1 FROM forge_agent.run_events
+               WHERE run_id = rec.id));
+    PERFORM pg_notify('forge_agent_events', '');
+    interrupted := interrupted || to_jsonb(rec.id);
+  END LOOP;
+  RETURN jsonb_build_object('interrupted', interrupted);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_interrupt_conversation_runs(boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_interrupt_conversation_runs TO forge_agent;
+
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_calls_mark_outcome_unknown(p_run_id uuid)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE updated_count int;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM forge_agent.runs rr
+    JOIN forge_agent.conversations c ON c.id = rr.conversation_id
+    WHERE rr.id = p_run_id
+      AND c.owner_id = current_setting('forge.coding_owner', true)) THEN
+    RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
+  END IF;
+  UPDATE forge_agent.tool_calls SET status = 'outcome_unknown'
+    WHERE run_id = p_run_id AND status = 'running';
+  GET DIAGNOSTICS updated_count = ROW_COUNT;
+  RETURN jsonb_build_object('updated', updated_count);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_calls_mark_outcome_unknown(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_calls_mark_outcome_unknown TO forge_agent;
+
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.workflow_retry_allowance_amend(p_project text, p_root uuid, p_policy jsonb)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+BEGIN
+  BEGIN
+    PERFORM forge_agent.amend_agent_retry_policy(p_project, p_root, p_policy);
+    RETURN jsonb_build_object('amended', true);
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLSTATE IN ('P0009', 'P0006') THEN
+      RETURN jsonb_build_object('skipped', SQLSTATE);
+    END IF;
+    RAISE;
+  END;
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.workflow_retry_allowance_amend(text, uuid, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.workflow_retry_allowance_amend TO forge_agent;
 
 CREATE OR REPLACE FUNCTION forge_external_agent._scope(p_project text,p_profile text) RETURNS forge_external_agent.scope_grants LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
 DECLARE g forge_external_agent.scope_grants%ROWTYPE;n bigint;effective name;

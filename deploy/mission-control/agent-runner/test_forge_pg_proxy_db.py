@@ -596,7 +596,7 @@ class EntryPointSqlTest(ProxyDbTestCase, FixtureMixin):
         result = self.call("ide_chat_update", [
             "mission-control", own, "own-renamed", False, None, None,
             False, None, False, None, False, True, None, None, False,
-            True])
+            True, False])
         self.assertIsNotNone(result)
         self.assertEqual(result["id"], own)
         self.assertEqual(result["title"], "own-renamed")
@@ -610,7 +610,7 @@ class EntryPointSqlTest(ProxyDbTestCase, FixtureMixin):
         result = self.call("ide_chat_update", [
             "mission-control", chat, "renamed", False, None, None,
             False, None, False, None, False, True, None, None, False,
-            True])
+            True, False])
         self.assertIsNone(result)
 
     def test_mail_thread_update_scopes_to_owner_and_id(self):
@@ -759,6 +759,328 @@ class EntryPointSqlTest(ProxyDbTestCase, FixtureMixin):
         self.assertEqual(result["workflow_review_id"], own_review)
         self.assertEqual(result["workflow_id"], workflow)
         self.assertEqual(result["kind"], "decide")
+
+
+class IdeCompositeDbTest(ProxyDbTestCase, FixtureMixin):
+    """C2: the IDE composites and the bulk tool-call update run
+    server-side with the Python coordinator's semantics."""
+
+    def _admit(self, conversation=None, request_id="req-1", model="m",
+               fingerprint="fp-1", messages=None, settings=None,
+               model_allowed=True, chat_id=None, expected_revision=None,
+               mail_thread_id=None, mail_source_run_id=None,
+               distributed=False, explicit_conversation=False):
+        conversation = conversation or _uuid()
+        messages = messages if messages is not None else [
+            {"role": "user", "content": "hi"}]
+        settings = settings if settings is not None else {
+            "model": model, "max_tokens": 384, "temperature": 0.7,
+            "fingerprint": fingerprint, "allow_partial": True}
+        return self.call("ide_run_admit", [
+            conversation, request_id, model, fingerprint,
+            json.dumps(messages), json.dumps(settings), model_allowed,
+            chat_id, expected_revision, mail_thread_id, mail_source_run_id,
+            distributed, explicit_conversation])
+
+    def _admitted_run(self, **kwargs):
+        result = self._admit(**kwargs)
+        self.assertNotIn("error", result, result)
+        return result
+
+    def test_admit_writes_run_messages_and_queued_event(self):
+        conversation = _uuid()
+        result = self._admitted_run(
+            conversation=conversation, request_id="req-1",
+            messages=[{"role": "user", "content": "hello"},
+                      {"role": "user", "content": "again"}])
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(result["conversation_id"], conversation)
+        run_id = result["run_id"]
+        rows = self.sql(
+            "SELECT status, model_id FROM forge_agent.runs WHERE id = %s",
+            (run_id,))
+        self.assertEqual(rows[0]["status"], "queued")
+        self.assertEqual(rows[0]["model_id"], "m")
+        rows = self.sql(
+            "SELECT position, role, content FROM forge_agent.messages"
+            " WHERE conversation_id = %s ORDER BY position",
+            (conversation,))
+        self.assertEqual(
+            [(row["position"], row["content"]) for row in rows],
+            [(1, "hello"), (2, "again")])
+        rows = self.sql(
+            "SELECT sequence, event_type, data->>'fingerprint' AS fp"
+            " FROM forge_agent.run_events WHERE run_id = %s", (run_id,))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["event_type"], "queued")
+        self.assertEqual(rows[0]["fp"], "fp-1")
+
+    def test_admit_is_idempotent_for_same_request(self):
+        conversation = _uuid()
+        first = self._admitted_run(conversation=conversation)
+        second = self._admit(conversation=conversation)
+        self.assertEqual(second["run_id"], first["run_id"])
+        self.assertEqual(second["status"], first["status"])
+        conflict = self._admit(conversation=conversation,
+                               fingerprint="different")
+        self.assertEqual(conflict, {"error": "request_id_conflict"})
+
+    def test_admit_rejects_other_owners_conversation(self):
+        conversation = _uuid()
+        self.sql(
+            "INSERT INTO forge_agent.conversations (id, owner_id)"
+            " VALUES (%s, %s)", (conversation, "other-owner"))
+        result = self._admit(conversation=conversation)
+        self.assertEqual(result, {"error": "conversation_not_found"})
+
+    def test_admit_linked_chat_revision_conflict(self):
+        chat_id = _uuid()
+        self._insert_chat("mission-control", chat_id, "chat")
+        # A fresh chat has revision 0, so the expected revision is NULL.
+        conflict = self._admit(
+            chat_id=chat_id, expected_revision=3,
+            messages=[{"role": "user", "content": "hi"},
+                      {"role": "user", "content": "more"}])
+        self.assertEqual(conflict, {"error": "revision_conflict"})
+        # The saved transcript is [{"user": "hi"}]; the submitted list
+        # must be exactly the saved messages plus the new turn.
+        admitted = self._admitted_run(
+            chat_id=chat_id, expected_revision=None,
+            messages=[{"role": "user", "content": "hi"},
+                      {"role": "user", "content": "more"}])
+        rows = self.sql(
+            "SELECT ide_chat_id FROM forge_agent.runs WHERE id = %s",
+            (admitted["run_id"],))
+        # ide_chat_id decodes as uuid.UUID once any imported module
+        # has called psycopg2.extras.register_uuid(); compare as text.
+        self.assertEqual(str(rows[0]["ide_chat_id"]), chat_id)
+
+    def test_admit_chat_busy(self):
+        chat_id = _uuid()
+        self._insert_chat("mission-control", chat_id, "chat")
+        self._admitted_run(
+            chat_id=chat_id, expected_revision=None,
+            messages=[{"role": "user", "content": "hi"},
+                      {"role": "user", "content": "more"}])
+        busy = self._admit(
+            chat_id=chat_id, expected_revision=None,
+            messages=[{"role": "user", "content": "hi"},
+                      {"role": "user", "content": "more"}])
+        self.assertEqual(busy, {"error": "chat_busy"})
+
+    def test_claim_next_claims_oldest_queued_run(self):
+        first = self._admitted_run(request_id="req-1")
+        second = self._admitted_run(request_id="req-2")
+        # runs.created_at defaults to now(), so both rows share the
+        # test transaction's timestamp and the (created_at, id) order
+        # would tie on random UUIDs: stagger them explicitly.
+        self.sql(
+            "UPDATE forge_agent.runs"
+            " SET created_at = clock_timestamp() - interval '1 hour'"
+            " WHERE id = %s", (first["run_id"],))
+        claimed = self.call("ide_run_claim_next", [False])
+        self.assertEqual(claimed["run_id"], first["run_id"])
+        self.assertEqual(claimed["model_id"], "m")
+        self.assertEqual(claimed["settings"]["fingerprint"], "fp-1")
+        self.assertEqual(claimed["messages"],
+                         [{"role": "user", "content": "hi"}])
+        rows = self.sql(
+            "SELECT status FROM forge_agent.runs WHERE id = %s",
+            (first["run_id"],))
+        self.assertEqual(rows[0]["status"], "running")
+        rows = self.sql(
+            "SELECT event_type FROM forge_agent.run_events"
+            " WHERE run_id = %s ORDER BY sequence",
+            (first["run_id"],))
+        self.assertEqual([row["event_type"] for row in rows],
+                         ["queued", "model_started"])
+        claimed = self.call("ide_run_claim_next", [False])
+        self.assertEqual(claimed["run_id"], second["run_id"])
+        self.assertIsNone(self.call("ide_run_claim_next", [False]))
+
+    def test_claim_next_tools_only(self):
+        self._admitted_run(request_id="req-plain")
+        tool_settings = {"model": "m", "max_tokens": 384,
+                         "temperature": 0.7, "fingerprint": "fp-tool",
+                         "allow_partial": True,
+                         "tool_repository": "r", "tool_revision": "v"}
+        tool = self._admitted_run(request_id="req-tool",
+                                  fingerprint="fp-tool",
+                                  settings=tool_settings)
+        claimed = self.call("ide_run_claim_next", [True])
+        self.assertEqual(claimed["run_id"], tool["run_id"])
+
+    def test_tool_started_and_finished(self):
+        admitted = self._admitted_run()
+        run_id = admitted["run_id"]
+        # Not running yet: the tool calls are inactive.
+        inactive = self.call("ide_tool_started", [
+            run_id, "c1", "tool", json.dumps({"a": 1})])
+        self.assertEqual(inactive, {"error": "tool_run_inactive"})
+        self.call("ide_run_claim_next", [False])
+        started = self.call("ide_tool_started", [
+            run_id, "c1", "tool", json.dumps({"a": 1})])
+        self.assertEqual(started["event_type"], "tool_started")
+        self.assertEqual(started["data"]["call_id"], "c1")
+        duplicate = self.call("ide_tool_started", [
+            run_id, "c1", "tool", json.dumps({"a": 1})])
+        self.assertEqual(duplicate, {"error": "tool_call_conflict"})
+        finished = self.call("ide_tool_finished", [
+            run_id, "c1", "tool", json.dumps({"text": "done"})])
+        self.assertEqual(finished["event_type"], "tool_finished")
+        self.assertEqual(finished["data"]["outcome"], "completed")
+        rows = self.sql(
+            "SELECT outcome, exit_code, stdout FROM"
+            " forge_agent.tool_results WHERE run_id = %s", (run_id,))
+        self.assertEqual(rows[0]["outcome"], "exited")
+        self.assertEqual(rows[0]["exit_code"], 0)
+        self.assertEqual(rows[0]["stdout"], "done")
+        again = self.call("ide_tool_finished", [
+            run_id, "c1", "tool", json.dumps({"text": "done"})])
+        self.assertEqual(again, {"error": "tool_call_conflict"})
+
+    def test_tool_finished_records_execution_error(self):
+        admitted = self._admitted_run()
+        run_id = admitted["run_id"]
+        self.call("ide_run_claim_next", [False])
+        self.call("ide_tool_started", [
+            run_id, "c1", "tool", json.dumps({})])
+        finished = self.call("ide_tool_finished", [
+            run_id, "c1", "tool",
+            json.dumps({"error": "boom", "truncated": True})])
+        self.assertEqual(finished["data"]["outcome"], "failed")
+        rows = self.sql(
+            "SELECT outcome, exit_code, stderr, output_truncated FROM"
+            " forge_agent.tool_results WHERE run_id = %s", (run_id,))
+        self.assertEqual(rows[0]["outcome"], "execution_error")
+        self.assertIsNone(rows[0]["exit_code"])
+        self.assertEqual(rows[0]["stderr"], "boom")
+        self.assertTrue(rows[0]["output_truncated"])
+
+    def test_interrupt_marks_running_calls_unknown(self):
+        admitted = self._admitted_run()
+        run_id = admitted["run_id"]
+        self.call("ide_run_claim_next", [False])
+        self.call("ide_tool_started", [
+            run_id, "c1", "tool", json.dumps({})])
+        result = self.call("ide_interrupt_conversation_runs", [False])
+        self.assertEqual(result, {"interrupted": [run_id]})
+        rows = self.sql(
+            "SELECT status FROM forge_agent.runs WHERE id = %s", (run_id,))
+        self.assertEqual(rows[0]["status"], "interrupted")
+        rows = self.sql(
+            "SELECT status FROM forge_agent.tool_calls WHERE run_id = %s",
+            (run_id,))
+        self.assertEqual(rows[0]["status"], "outcome_unknown")
+        rows = self.sql(
+            "SELECT event_type, data->>'error' AS error FROM"
+            " forge_agent.run_events WHERE run_id = %s ORDER BY sequence",
+            (run_id,))
+        self.assertEqual(rows[-1]["event_type"], "interrupted")
+        self.assertEqual(rows[-1]["error"], "worker_restarted")
+        result = self.call("ide_interrupt_conversation_runs", [False])
+        self.assertEqual(result, {"interrupted": []})
+
+    def test_tool_call_update_by_run_counts_running_calls(self):
+        admitted = self._admitted_run()
+        run_id = admitted["run_id"]
+        self.call("ide_run_claim_next", [False])
+        for call_id in ("c1", "c2"):
+            self.call("ide_tool_started", [
+                run_id, call_id, "tool", json.dumps({})])
+        self.call("ide_tool_finished", [
+            run_id, "c1", "tool", json.dumps({"text": "done"})])
+        result = self.call("ide_tool_call_update_by_run", [
+            run_id, "outcome_unknown", "running"])
+        self.assertEqual(result, {"updated": 1})
+        # The standalone bulk entry point reports the same count.
+        result = self.call("ide_tool_calls_mark_outcome_unknown", [run_id])
+        self.assertEqual(result, {"updated": 0})
+
+    def test_retry_allowance_amend_skips_unknown_root(self):
+        result = self.call("workflow_retry_allowance_amend", [
+            "homelab", _uuid(), json.dumps(
+                {"version": "forge-repair-v1", "max_rounds": 20,
+                 "max_stagnant_rounds": 20, "max_infrastructure_retries": 20,
+                 "required_hosted_checks": []})])
+        self.assertEqual(result, {"skipped": "P0009"})
+
+    def test_retry_allowance_amend_widens_limits(self):
+        task_id = self.insert_task()
+        # Production emits the sequence-1 'queued' event at dispatch;
+        # without it the amend's checkpoint would land at sequence 1
+        # and violate coding_events_sequence_kind_check.
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_events"
+            " (owner_id, project_alias, task_id, sequence, event_kind)"
+            " VALUES ('mission-control', 'homelab', %s, 1, 'queued')",
+            (task_id,))
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_worker_grants"
+            " (worker_role, owner_id, project_alias, agent_profile, mode)"
+            " VALUES (%s, %s, %s, %s, %s)",
+            ("forge_agent", "mission-control", "homelab", "muse", "plan"))
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_review_budget"
+            " (owner_id, project_alias, root_task_id, policy)"
+            " VALUES (%s, %s, %s, %s)",
+            ("mission-control", "homelab", task_id, json.dumps(
+                {"version": "forge-repair-v1", "max_rounds": 3,
+                 "max_stagnant_rounds": 3, "max_infrastructure_retries": 3,
+                 "required_hosted_checks": ["check"]})))
+        policy = {"version": "forge-repair-v1", "max_rounds": 20,
+                  "max_stagnant_rounds": 20, "max_infrastructure_retries": 20,
+                  "required_hosted_checks": ["check"]}
+        result = self.call("workflow_retry_allowance_amend", [
+            "homelab", task_id, json.dumps(policy)])
+        self.assertEqual(result, {"amended": True})
+        # The amend ran in this test's own (uncommitted) transaction,
+        # so the policy is read back on the same connection.
+        rows = self.sql(
+            "SELECT policy FROM forge_agent.coding_review_budget"
+            " WHERE root_task_id = %s", (task_id,))
+        self.assertEqual(rows[0]["policy"]["max_rounds"], 20)
+
+    def test_admit_through_the_live_proxy_is_audited(self):
+        # The proxy commits each operation, so the admitted run would
+        # leak into the later claim/interrupt tests of this class: the
+        # run rows are removed again in the finally block. The audit
+        # row is the assertion target and stays.
+        run_id = None
+        conversation_id = None
+        try:
+            status, payload = self.http_post("coordinator", "/v1/operation", {
+                "operation": "op.ide_run_admit",
+                "args": {
+                    "conversation_id": _uuid(), "request_id": "req-http",
+                    "model_id": "m", "fingerprint": "fp-http",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "settings": {"model": "m", "fingerprint": "fp-http"},
+                    "model_allowed": True}})
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(payload["result"]["status"], "queued")
+            run_id = payload["result"]["run_id"]
+            conversation_id = payload["result"]["conversation_id"]
+            # forge_agent cannot read the audit schema; the fixture
+            # connection (forge_agent_owner) can.
+            rows = self.fixture_sql(
+                "SELECT operation FROM forge_pg_proxy.audit"
+                " WHERE operation = 'entry.ide_run_admit'")
+            self.assertEqual(len(rows), 1)
+        finally:
+            if run_id is not None:
+                self.fixture_sql(
+                    "DELETE FROM forge_agent.run_events WHERE run_id = %s",
+                    (run_id,))
+                self.fixture_sql(
+                    "DELETE FROM forge_agent.messages WHERE run_id = %s",
+                    (run_id,))
+                self.fixture_sql(
+                    "DELETE FROM forge_agent.runs WHERE id = %s", (run_id,))
+            if conversation_id is not None:
+                self.fixture_sql(
+                    "DELETE FROM forge_agent.conversations WHERE id = %s",
+                    (conversation_id,))
 
 
 class MigrationStageTest(ProxyDbTestCase, FixtureMixin):

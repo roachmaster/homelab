@@ -366,6 +366,159 @@ class TranslateTest(unittest.TestCase):
             translate("SELECT * FROM forge_agent.coding_tasks WHERE "
                       "owner_id=%s FOR UPDATE", ("o",))
 
+    def test_update_require_revision_guard(self):
+        # The WHERE revision is the optimistic-concurrency guard, not
+        # the new value: it must reach require_revision (regression
+        # test — the first C2 translator bound it to "revision" and
+        # the guard was silently dropped).
+        result = self.op(
+            "UPDATE forge_agent.coding_tasks SET status = %s "
+            "WHERE (owner_id, project_alias, id) = (%s, %s, %s) "
+            "AND revision = %s",
+            ("completed", "o", "homelab",
+             "00000000-0000-0000-0000-000000000001", 7))
+        self.assertEqual(result.operation, "op.coding_task_update")
+        self.assertEqual(result.args["require_revision"], 7)
+        self.assertNotIn("revision", result.args)
+
+    def test_update_require_enabled_and_phase_guards(self):
+        result = self.op(
+            "UPDATE forge_agent.coding_workflows SET enabled = %s "
+            "WHERE workflow_id = %s AND enabled = %s",
+            (True, "00000000-0000-0000-0000-000000000001", True))
+        self.assertEqual(result.args["require_enabled"], True)
+        self.assertEqual(result.args["enabled"], True)
+        result = self.op(
+            "UPDATE forge_agent.coding_workflows SET phase = %s "
+            "WHERE workflow_id = %s AND phase NOT IN ('completed', "
+            "'cancelled', 'escalated')",
+            ("checks", "00000000-0000-0000-0000-000000000001"))
+        self.assertEqual(result.args["require_phase_not_in"],
+                         ["completed", "cancelled", "escalated"])
+
+    def test_update_require_status_guard(self):
+        result = self.op(
+            "UPDATE forge_agent.coding_reviews SET status = %s "
+            "WHERE review_id = %s AND status = %s",
+            ("approved", "00000000-0000-0000-0000-000000000001",
+             "awaiting_review"))
+        self.assertEqual(result.operation, "op.coding_review_update")
+        self.assertEqual(result.args["status"], "approved")
+        self.assertEqual(result.args["require_status"], "awaiting_review")
+
+    def test_update_tool_calls_by_run(self):
+        # The bulk recover form (queue_store.py recover) has no
+        # call_id: it routes to the by-run entry point and shapes
+        # {"updated": n} as the rowcount.
+        result = self.op(
+            "UPDATE forge_agent.tool_calls SET status = %s "
+            "WHERE run_id = %s AND status = 'running'",
+            ("outcome_unknown", "00000000-0000-0000-0000-000000000001"))
+        self.assertEqual(result.operation,
+                         "op.ide_tool_call_update_by_run")
+        self.assertEqual(result.args["status"], "outcome_unknown")
+        self.assertEqual(result.args["require_status"], "running")
+        self.assertEqual(result.shape({"updated": 3}), ([], [], 3))
+
+    def test_insert_select_run_event(self):
+        result = self.op(
+            "INSERT INTO forge_agent.run_events (run_id, sequence, "
+            "event_type, data) SELECT %s, coalesce(max(sequence), 0) + 1, "
+            "%s, %s FROM forge_agent.run_events WHERE run_id = %s",
+            ("00000000-0000-0000-0000-000000000001", "queued", {"x": 1},
+             "00000000-0000-0000-0000-000000000001"))
+        self.assertEqual(result.operation, "op.ide_run_event_insert")
+        self.assertNotIn("sequence", result.args)
+
+    def test_insert_select_message(self):
+        result = self.op(
+            "INSERT INTO forge_agent.messages (conversation_id, position, "
+            "run_id, role, content) SELECT %s, coalesce(max(position), 0) "
+            "+ 1, %s, %s, %s FROM forge_agent.messages "
+            "WHERE conversation_id = %s",
+            ("00000000-0000-0000-0000-000000000001",
+             "00000000-0000-0000-0000-000000000001", "assistant", "hi",
+             "00000000-0000-0000-0000-000000000001"))
+        self.assertEqual(result.operation, "op.ide_message_insert")
+        self.assertNotIn("position", result.args)
+
+    def test_insert_select_mail_message(self):
+        result = self.op(
+            "INSERT INTO forge_agent.mail_messages (owner_id, thread_id, "
+            "sequence, run_id, role, content) SELECT %s, %s, "
+            "coalesce(max(sequence), 0) + 1, %s, %s, %s FROM "
+            "forge_agent.mail_messages WHERE (owner_id, thread_id) = "
+            "(%s, %s)",
+            ("o", "00000000-0000-0000-0000-000000000001",
+             "00000000-0000-0000-0000-000000000001", "assistant", "hi",
+             "o", "00000000-0000-0000-0000-000000000001"))
+        self.assertEqual(result.operation, "op.mail_message_insert")
+        self.assertNotIn("sequence", result.args)
+
+    def test_insert_select_review_retry_copy(self):
+        result = self.op(
+            "INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,"
+            "task_id,attempt_id,plan_decision_id,scope_plan_decision_id,"
+            "reconciliation_receipt_id,base_revision,workspace_digest,"
+            "parent_result_sha256,source_revision,review_no,round,"
+            "stagnant_rounds,infrastructure_retries,previous_review_id,"
+            "candidate_commit,summary,phase,owner_decision,verification,"
+            "target_publication_id,source_publication_id,"
+            "gate_manifest_sha256) SELECT owner_id,project_alias,task_id,"
+            "attempt_id,plan_decision_id,scope_plan_decision_id,"
+            "reconciliation_receipt_id,base_revision,workspace_digest,"
+            "parent_result_sha256,%s,(SELECT coalesce(max(review_no),0)+1 "
+            "FROM forge_agent.coding_reviews WHERE owner_id=%s AND "
+            "project_alias=%s AND task_id=%s),round,stagnant_rounds,"
+            "infrastructure_retries+1,review_id,candidate_commit,%s,phase,"
+            "owner_decision,verification,target_publication_id,"
+            "source_publication_id,gate_manifest_sha256 FROM "
+            "forge_agent.coding_reviews WHERE review_id=%s "
+            "RETURNING review_id",
+            (8, "o", "homelab", "00000000-0000-0000-0000-000000000001",
+             "note", "00000000-0000-0000-0000-000000000001"))
+        self.assertEqual(result.operation, "op.coding_review_insert_copy")
+        self.assertEqual(result.args["source_revision"], 8)
+        self.assertEqual(result.args["summary"], "note")
+        self.assertTrue(result.args["increment_infrastructure_retries"])
+        self.assertEqual(result.columns, ["review_id"])
+
+    def test_insert_select_review_delivery_copy(self):
+        result = self.op(
+            "INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,"
+            "task_id,attempt_id,plan_decision_id,scope_plan_decision_id,"
+            "reconciliation_receipt_id,base_revision,workspace_digest,"
+            "parent_result_sha256,source_revision,review_no,round,"
+            "stagnant_rounds,infrastructure_retries,previous_review_id,"
+            "findings,verified_finding_ids,verification,summary,phase,"
+            "owner_decision) SELECT owner_id,project_alias,task_id,"
+            "attempt_id,plan_decision_id,scope_plan_decision_id,%s,"
+            "base_revision,workspace_digest,parent_result_sha256,"
+            "source_revision,review_no+1,round,stagnant_rounds,"
+            "infrastructure_retries,review_id,findings,"
+            "verified_finding_ids,verification-'failure_stage'-"
+            "'exception_type',%s,phase,owner_decision FROM "
+            "forge_agent.coding_reviews WHERE review_id=%s "
+            "RETURNING review_id",
+            ("00000000-0000-0000-0000-000000000001", "delivered",
+             "00000000-0000-0000-0000-000000000001"))
+        self.assertEqual(result.operation, "op.coding_review_insert_copy")
+        self.assertTrue(result.args["strip_verification_keys"])
+
+    def test_insert_select_workflow_action_review_copy(self):
+        result = self.op(
+            "INSERT INTO forge_agent.coding_workflow_actions(workflow_id,"
+            "owner_id,project_alias,workflow_review_id,kind,source_key) "
+            "SELECT workflow_id,owner_id,project_alias,workflow_review_id,"
+            "'decide',%s FROM forge_agent.coding_workflow_reviews WHERE "
+            "workflow_review_id=%s AND status='reviewing' "
+            "ON CONFLICT DO NOTHING",
+            ("key1", "00000000-0000-0000-0000-000000000001"))
+        self.assertEqual(result.operation,
+                         "op.coding_workflow_action_insert")
+        self.assertTrue(result.args["only_if_reviewing"])
+        self.assertTrue(result.args["on_conflict_do_nothing"])
+
 
 if __name__ == "__main__":
     unittest.main()

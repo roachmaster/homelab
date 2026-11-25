@@ -942,6 +942,71 @@ class ProxyCatalogTest(unittest.TestCase):
              "archive": True})
 
 
+class ProxyCompositeTest(unittest.TestCase):
+    def test_composite_entry_points_validate(self):
+        # C2: the IDE composites, the savepoint-flow composite, and
+        # the bulk tool-call update are registered entry points with
+        # the parameters the coordinator passes; required parameters
+        # are enforced and every one is in the coordinator allowlist.
+        run_id = "00000000-0000-0000-0000-000000000001"
+        for name, args in (
+                ("ide_run_admit", {
+                    "conversation_id": run_id, "request_id": "r1",
+                    "model_id": "m", "fingerprint": "f",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "settings": {"model": "m"}, "model_allowed": True}),
+                ("ide_run_claim_next", {}),
+                ("ide_tool_started", {
+                    "run_id": run_id, "call_id": "c1", "tool_name": "t",
+                    "arguments": {}}),
+                ("ide_tool_finished", {
+                    "run_id": run_id, "call_id": "c1", "tool_name": "t",
+                    "result": {"text": "ok"}}),
+                ("ide_interrupt_conversation_runs", {}),
+                ("ide_tool_calls_mark_outcome_unknown", {"run_id": run_id}),
+                ("workflow_retry_allowance_amend", {
+                    "project": "homelab", "root": run_id, "policy": {}}),
+                ("ide_tool_call_update_by_run", {
+                    "run_id": run_id, "status": "outcome_unknown"})):
+            self.assertIn(name, proxy.ENTRY_POINTS)
+            proxy.validate_args(proxy.ENTRY_POINTS[name][0], args)
+            self.assertIn(name,
+                          proxy.CALLER_ALLOWLISTS["coordinator"]["op"])
+        with self.assertRaises(proxy.Rejected):
+            proxy.validate_args(proxy.ENTRY_POINTS["ide_run_admit"][0],
+                                {"request_id": "r1"})
+
+    def test_require_revision_reaches_the_server(self):
+        # The optimistic-concurrency guard must travel as the
+        # require_revision parameter, not as the new revision value.
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        instance.execute(coordinator, "op.coding_task_update", {
+            "owner_id": "mission-control", "project_alias": "homelab",
+            "id": "00000000-0000-0000-0000-000000000001",
+            "status": "completed", "require_revision": 7})
+        calls = [s for s in created[0].statements
+                 if "forge_pg_proxy_api.coding_task_update" in s[0]]
+        self.assertEqual(len(calls), 1)
+        params = proxy.ENTRY_POINTS["coding_task_update"][0]
+        index = [i for i, p in enumerate(params)
+                 if p[0] == "require_revision"][0]
+        self.assertEqual(calls[0][1][index], 7)
+
+    def test_composite_call_is_audited(self):
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        instance.execute(
+            coordinator, "op.ide_tool_calls_mark_outcome_unknown",
+            {"run_id": "00000000-0000-0000-0000-000000000001"})
+        statements = created[0].statements
+        self.assertTrue(any(
+            "forge_pg_proxy_api.ide_tool_calls_mark_outcome_unknown" in s[0]
+            for s in statements))
+        self.assertTrue(any("forge_pg_proxy_api.audit" in s[0]
+                            for s in statements))
+
+
 class TupleRowCursor(FakeCursor):
     """A cursor that returns rows the way psycopg2 does: fetchone()
     yields a 1-tuple, not a dict. A function returning jsonb yields

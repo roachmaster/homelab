@@ -32,6 +32,7 @@ separate permissions: a caller that only waits on a channel cannot
 emit on it.
 """
 
+import datetime
 import json
 import os
 import re
@@ -122,6 +123,20 @@ def validate_value(kind, value):
     if kind == "text[]":
         if not isinstance(value, list) or not all(
                 isinstance(item, str) for item in value):
+            raise Rejected(400, "invalid_argument")
+        return value
+    if kind == "uuid[]":
+        if not isinstance(value, list) or not all(
+                isinstance(item, str) and UUID_RE.match(item.lower())
+                for item in value):
+            raise Rejected(400, "invalid_argument")
+        return value
+    if kind == "timestamptz":
+        # An ISO string (Postgres casts the quoted literal) or a
+        # datetime, which psycopg2 adapts directly.
+        if isinstance(value, datetime.datetime):
+            return value
+        if not isinstance(value, str) or len(value) > 64:
             raise Rejected(400, "invalid_argument")
         return value
     raise Rejected(400, "invalid_argument")
@@ -311,27 +326,27 @@ FUNC_CATALOG = {
 ENTRY_POINTS = {
     # coding_tasks
     "coding_task_insert": ([("owner_id", "text", True), ("project_alias", "text", True), ("id", "uuid", True), ("idempotency_key", "text", True), ("intent_digest", "text", True), ("base_revision", "text", True), ("mode", "text", True), ("agent_profile", "text", True), ("prompt", "text", True), ("acceptance_criteria", "text", True), ("pinned_recipe", "jsonb", True), ("recipe_digest", "text", True), ("title", "text", False), ("auto_repair", "boolean", False), ("review_required", "boolean", False), ("workflow_required", "boolean", False), ("workflow_id", "uuid", False), ("workflow_review_id", "uuid", False), ("review_target_sha256", "text", False), ("parent_task_id", "uuid", False), ("repair_source_review_id", "uuid", False), ("repair_candidate_commit", "text", False), ("scope_plan_decision_id", "uuid", False), ("repair_root_task_id", "uuid", False)], True),
-    "coding_task_update": ([("owner_id", "text", True), ("project_alias", "text", True), ("id", "uuid", True), ("status", "text", False), ("mode", "text", False), ("revision", "bigint", False), ("agent_profile", "text", False), ("pinned_recipe", "jsonb", False), ("recipe_digest", "text", False), ("cancelled_at", "text", False), ("set_cancelled_at_now", "boolean", False), ("clear_cancelled_at", "boolean", False), ("accepted_at", "text", False), ("set_accepted_at_now", "boolean", False), ("touch_accepted_at", "boolean", False), ("clear_accepted_at", "boolean", False), ("latest_attempt_id", "uuid", False), ("resume_workspace_digest", "text", False), ("plan_decision_id", "uuid", False), ("feedback_id", "uuid", False), ("feedback_sha256", "text", False), ("legacy_resume_note", "text", False), ("auto_repair", "boolean", False), ("review_required", "boolean", False), ("workflow_required", "boolean", False), ("workflow_id", "uuid", False), ("workflow_review_id", "uuid", False), ("workflow_feedback_review_id", "uuid", False), ("clear_workflow_feedback_review_id", "boolean", False), ("workflow_feedback_sha256", "text", False), ("clear_workflow_feedback_sha256", "boolean", False), ("title", "text", False), ("review_note", "text", False), ("bump_revision", "boolean", False), ("cancel_transition", "boolean", False), ("cancel_or_request_transition", "boolean", False)], True),
+    "coding_task_update": ([("owner_id", "text", True), ("project_alias", "text", True), ("id", "uuid", True), ("status", "text", False), ("mode", "text", False), ("revision", "bigint", False), ("agent_profile", "text", False), ("pinned_recipe", "jsonb", False), ("recipe_digest", "text", False), ("cancelled_at", "text", False), ("set_cancelled_at_now", "boolean", False), ("clear_cancelled_at", "boolean", False), ("accepted_at", "text", False), ("set_accepted_at_now", "boolean", False), ("touch_accepted_at", "boolean", False), ("clear_accepted_at", "boolean", False), ("latest_attempt_id", "uuid", False), ("resume_workspace_digest", "text", False), ("plan_decision_id", "uuid", False), ("feedback_id", "uuid", False), ("feedback_sha256", "text", False), ("legacy_resume_note", "text", False), ("auto_repair", "boolean", False), ("review_required", "boolean", False), ("workflow_required", "boolean", False), ("workflow_id", "uuid", False), ("workflow_review_id", "uuid", False), ("workflow_feedback_review_id", "uuid", False), ("clear_workflow_feedback_review_id", "boolean", False), ("workflow_feedback_sha256", "text", False), ("clear_workflow_feedback_sha256", "boolean", False), ("title", "text", False), ("review_note", "text", False), ("bump_revision", "boolean", False), ("cancel_transition", "boolean", False), ("cancel_or_request_transition", "boolean", False), ("require_revision", "bigint", False)], True),
     # coding_workflows
     "coding_workflow_insert": ([("owner_id", "text", True), ("project_alias", "text", True), ("root_task_id", "uuid", True), ("policy_digest", "text", True), ("snapshot", "jsonb", True)], True),
-    "coding_workflow_update": ([("workflow_id", "uuid", True), ("phase", "text", False), ("enabled", "boolean", False), ("escalation_reason", "text", False), ("plan_revisions_delta", "integer", False), ("snapshot", "jsonb", False)], True),
+    "coding_workflow_update": ([("workflow_id", "uuid", True), ("phase", "text", False), ("enabled", "boolean", False), ("escalation_reason", "text", False), ("plan_revisions_delta", "integer", False), ("snapshot", "jsonb", False), ("require_enabled", "boolean", False), ("require_phase_not_in", "text[]", False), ("require_phase_distinct_from", "text", False)], True),
     # coding_workflow_reviews
     "coding_workflow_review_insert": ([("workflow_id", "uuid", True), ("owner_id", "text", True), ("project_alias", "text", True), ("target_kind", "text", True), ("source_task_id", "uuid", True), ("source_attempt_id", "uuid", True), ("source_result_sha256", "text", True), ("source_revision", "bigint", True), ("source_review_id", "uuid", False), ("candidate_commit", "text", False), ("gate_manifest_sha256", "text", False), ("supersedes_workflow_review_id", "uuid", False), ("review_generation", "integer", False), ("supersedes_review_id", "uuid", False), ("workflow_review_id", "uuid", False), ("on_conflict_do_nothing", "boolean", False)], True),
     "coding_workflow_review_update": ([("workflow_review_id", "uuid", True), ("status", "text", False), ("diagnostics", "jsonb", False), ("target_json", "text", False), ("target_sha256", "text", False), ("reviewer_task_id", "uuid", False), ("reviewer_attempt_id", "uuid", False), ("reviewer_result_sha256", "text", False), ("verdict_json", "text", False), ("verdict_sha256", "text", False)], True),
     # coding_workflow_actions
-    "coding_workflow_action_insert": ([("workflow_id", "uuid", True), ("owner_id", "text", True), ("project_alias", "text", True), ("kind", "text", True), ("source_key", "text", True), ("workflow_review_id", "uuid", False), ("source_publication_id", "uuid", False), ("status", "text", False), ("intent", "jsonb", False), ("finish_receipt", "jsonb", False), ("only_if_reviewing", "boolean", False), ("on_conflict_do_nothing", "boolean", False)], True),
+    "coding_workflow_action_insert": ([("workflow_id", "uuid", False), ("owner_id", "text", False), ("project_alias", "text", False), ("kind", "text", False), ("source_key", "text", True), ("workflow_review_id", "uuid", False), ("source_publication_id", "uuid", False), ("status", "text", False), ("intent", "jsonb", False), ("finish_receipt", "jsonb", False), ("only_if_reviewing", "boolean", False), ("on_conflict_do_nothing", "boolean", False)], True),
     "coding_workflow_action_update": ([("action_id", "uuid", True), ("status", "text", False), ("worker_id", "text", False), ("clear_worker_id", "boolean", False), ("lease_token", "uuid", False), ("clear_lease_token", "boolean", False), ("lease_expires_at", "text", False), ("clear_lease_expires_at", "boolean", False), ("lease_60s", "boolean", False), ("intent", "jsonb", False), ("finish_receipt", "jsonb", False), ("finish_token", "uuid", False), ("clear_finish_token", "boolean", False)], True),
     # coding_events / control receipts / reviews / plan decisions
     "coding_event_insert": ([("owner_id", "text", True), ("project_alias", "text", True), ("task_id", "uuid", True), ("event_kind", "text", True), ("payload", "jsonb", True), ("progress_attempt_id", "uuid", False), ("progress_sequence", "integer", False), ("correlation_id", "uuid", False), ("first", "boolean", False)], True),
     "coding_control_receipt_insert": ([("owner_id", "text", True), ("project_alias", "text", True), ("task_id", "uuid", True), ("action", "text", True), ("idempotency_key", "text", True), ("intent_digest", "text", True), ("base_revision", "bigint", True), ("result_revision", "bigint", True), ("receipt_json", "jsonb", True)], True),
     "coding_review_insert": ([("owner_id", "text", True), ("project_alias", "text", True), ("task_id", "uuid", True), ("attempt_id", "uuid", True), ("plan_decision_id", "uuid", False), ("scope_plan_decision_id", "uuid", False), ("reconciliation_receipt_id", "uuid", True), ("base_revision", "text", True), ("workspace_digest", "text", True), ("parent_result_sha256", "text", True), ("source_revision", "bigint", True), ("round", "integer", False), ("previous_review_id", "uuid", False), ("candidate_commit", "text", False), ("summary", "text", False), ("phase", "text", False), ("owner_decision", "jsonb", False), ("findings", "jsonb", False), ("verification", "jsonb", False), ("target_publication_id", "uuid", False), ("source_publication_id", "uuid", False), ("gate_manifest_sha256", "text", False)], True),
     "coding_review_insert_copy": ([("source_review_id", "uuid", True), ("reconciliation_receipt_id", "uuid", False), ("summary", "text", False), ("source_revision", "bigint", False), ("increment_infrastructure_retries", "boolean", False), ("strip_verification_keys", "boolean", False)], True),
-    "coding_review_update": ([("review_id", "uuid", True), ("status", "text", False), ("owner_decision", "jsonb", False), ("clear_owner_decision", "boolean", False), ("findings", "jsonb", False), ("summary", "text", False), ("reason", "text", False), ("feedback_id", "uuid", False), ("candidate_commit", "text", False), ("clear_candidate_commit", "boolean", False), ("gate_manifest_sha256", "text", False), ("clear_gate_manifest_sha256", "boolean", False), ("verification", "jsonb", False)], True),
+    "coding_review_update": ([("review_id", "uuid", True), ("status", "text", False), ("owner_decision", "jsonb", False), ("clear_owner_decision", "boolean", False), ("findings", "jsonb", False), ("summary", "text", False), ("reason", "text", False), ("feedback_id", "uuid", False), ("candidate_commit", "text", False), ("clear_candidate_commit", "boolean", False), ("gate_manifest_sha256", "text", False), ("clear_gate_manifest_sha256", "boolean", False), ("verification", "jsonb", False), ("require_status", "text", False), ("require_previous_review_id", "uuid", False)], True),
     "coding_plan_decision_insert": ([("decision_id", "uuid", True), ("owner_id", "text", True), ("project_alias", "text", True), ("task_id", "uuid", True), ("plan_attempt_id", "uuid", True), ("plan_sha256", "text", True), ("source_revision", "bigint", True), ("base_revision", "text", True), ("decision", "text", True), ("agent_profile", "text", True), ("note", "text", True), ("idempotency_key", "text", True), ("receipt_json", "jsonb", True)], True),
     "coding_review_policy_upsert": ([("owner_id", "text", True), ("project_alias", "text", True), ("version", "text", True), ("max_rounds", "integer", True), ("max_stagnant_rounds", "integer", True), ("max_infrastructure_retries", "integer", True), ("required_hosted_checks", "text[]", True)], True),
     "coding_review_budget_insert": ([("owner_id", "text", True), ("project_alias", "text", True), ("root_task_id", "uuid", True), ("policy", "jsonb", True)], True),
     "coding_worker_grant_insert": ([("worker_role", "text", True), ("owner_id", "text", True), ("project_alias", "text", True), ("agent_profile", "text", True), ("mode", "text", True)], True),
-    "coding_usage_refresh_request_insert": ([("owner_id", "text", True), ("profile_alias", "text", True), ("project_alias", "text", True), ("status", "text", True)], True),
+    "coding_usage_refresh_request_insert": ([("owner_id", "text", True), ("profile_alias", "text", True), ("project_alias", "text", True), ("status", "text", True), ("refresh_id", "uuid", False)], True),
     # IDE tables
     "ide_conversation_insert": ([("id", "uuid", True), ("owner_id", "text", True), ("title", "text", False)], True),
     "ide_conversation_delete": ([("owner_id", "text", True), ("ids", "text[]", True)], True),
@@ -341,6 +356,7 @@ ENTRY_POINTS = {
     "ide_message_insert": ([("conversation_id", "uuid", True), ("position", "bigint", False), ("run_id", "uuid", True), ("role", "text", True), ("content", "text", True), ("tool_call_id", "text", False), ("tool_result_call_id", "text", False)], True),
     "ide_tool_call_insert": ([("run_id", "uuid", True), ("call_id", "text", True), ("tool_name", "text", True), ("arguments", "jsonb", True), ("status", "text", False)], True),
     "ide_tool_call_update": ([("run_id", "uuid", True), ("call_id", "text", True), ("status", "text", True)], True),
+    "ide_tool_call_update_by_run": ([("run_id", "uuid", True), ("status", "text", True), ("require_status", "text", False)], True),
     "ide_tool_result_insert": ([("run_id", "uuid", True), ("call_id", "text", True), ("outcome", "text", True), ("exit_code", "integer", False), ("stdout", "text", False), ("stderr", "text", False), ("output_truncated", "boolean", False)], True),
     "ide_run_event_insert": ([("run_id", "uuid", True), ("event_type", "text", True), ("data", "jsonb", True)], True),
     "ide_workspace_tab_insert": ([("owner_id", "text", True), ("tab_id", "text", True), ("lease", "text", True), ("revision", "bigint", False), ("base_history_revision", "bigint", True), ("base_history_fingerprint", "text", True), ("snapshot", "jsonb", False), ("chat_history_enabled", "boolean", False)], True),
@@ -349,7 +365,7 @@ ENTRY_POINTS = {
     "ide_workspace_history_insert": ([("owner_id", "text", True), ("revision", "bigint", False), ("transcripts", "jsonb", False), ("chat_history_active", "boolean", False)], True),
     "ide_workspace_history_update": ([("owner_id", "text", True), ("revision", "bigint", False), ("bump_revision", "boolean", False), ("transcripts", "jsonb", False), ("chat_history_active", "boolean", False)], True),
     "ide_chat_insert": ([("owner_id", "text", True), ("id", "uuid", True), ("title", "text", False), ("messages", "jsonb", False), ("revision", "bigint", False), ("expires_on", "text", False), ("time_zone", "text", False), ("expires_at", "text", False)], True),
-    "ide_chat_update": ([("owner_id", "text", True), ("id", "uuid", True), ("title", "text", False), ("clear_title", "boolean", False), ("messages", "jsonb", False), ("expires_on", "text", False), ("clear_expires_on", "boolean", False), ("time_zone", "text", False), ("clear_time_zone", "boolean", False), ("expires_at", "text", False), ("clear_expires_at", "boolean", False), ("bump_revision", "boolean", False), ("set_removed_at", "boolean", False), ("removal_reason", "text", False), ("set_retention_if_fresh", "boolean", False), ("require_unexpired", "boolean", False)], True),
+    "ide_chat_update": ([("owner_id", "text", True), ("id", "uuid", True), ("title", "text", False), ("clear_title", "boolean", False), ("messages", "jsonb", False), ("expires_on", "text", False), ("clear_expires_on", "boolean", False), ("time_zone", "text", False), ("clear_time_zone", "boolean", False), ("expires_at", "text", False), ("clear_expires_at", "boolean", False), ("bump_revision", "boolean", False), ("set_removed_at", "boolean", False), ("removal_reason", "text", False), ("set_retention_if_fresh", "boolean", False), ("require_unexpired", "boolean", False), ("require_removed_at_null", "boolean", False)], True),
     # mail tables
     "mail_thread_insert": ([("owner_id", "text", True), ("id", "uuid", True), ("subject", "text", True), ("profile_id", "text", True), ("context_remaining_tokens", "integer", True)], True),
     "mail_thread_update": ([("owner_id", "text", True), ("id", "uuid", True), ("latest_run_id", "uuid", False), ("context_remaining_tokens", "integer", False), ("archive", "boolean", False), ("archive_base_revision", "bigint", False), ("manual_archive", "boolean", False), ("require_not_manually_archived", "boolean", False)], True),
@@ -374,6 +390,18 @@ ENTRY_POINTS = {
     "ext_workflow_cancel": ([("project_alias", "text", True), ("task_id", "uuid", True), ("expected_revision", "bigint", True), ("idempotency_key", "text", True), ("actor_kind", "text", True), ("actor_id", "text", True), ("cause", "text", True)], True),
     "coding_workflow_cancel": ([("project_alias", "text", True), ("task_id", "uuid", True), ("expected_revision", "bigint", True), ("idempotency_key", "text", True), ("actor_kind", "text", True), ("actor_id", "text", True), ("cause", "text", True)], True),
     "workflow_action_lease": ([("worker_id", "text", True)], True),
+    # IDE composites: replicate the locked queue_store sequences server-side
+    # so the proxy caller issues one op.* call instead of a transaction
+    # of row-locking statements (which the translator cannot express).
+    "ide_run_admit": ([("conversation_id", "uuid", True), ("request_id", "text", True), ("model_id", "text", True), ("fingerprint", "text", True), ("messages", "jsonb", True), ("settings", "jsonb", True), ("model_allowed", "boolean", True), ("chat_id", "uuid", False), ("expected_revision", "bigint", False), ("mail_thread_id", "uuid", False), ("mail_source_run_id", "uuid", False), ("distributed", "boolean", False), ("explicit_conversation", "boolean", False)], True),
+    "ide_run_claim_next": ([("tools_only", "boolean", False)], True),
+    "ide_tool_started": ([("run_id", "uuid", True), ("call_id", "text", True), ("tool_name", "text", True), ("arguments", "jsonb", True)], True),
+    "ide_tool_finished": ([("run_id", "uuid", True), ("call_id", "text", True), ("tool_name", "text", True), ("result", "jsonb", True)], True),
+    "ide_interrupt_conversation_runs": ([("tools_only", "boolean", False)], True),
+    "ide_tool_calls_mark_outcome_unknown": ([("run_id", "uuid", True)], True),
+    # Savepoint flow: work_workflow.py _amend_retry_allowance swallows
+    # P0009/P0006 from forge_agent.amend_agent_retry_policy.
+    "workflow_retry_allowance_amend": ([("project", "text", True), ("root", "uuid", True), ("policy", "jsonb", True)], True),
 }
 
 # ---------------------------------------------------------------------------
@@ -417,14 +445,14 @@ READ_TABLES = {
     "forge_agent.coding_feedback": (["feedback_id", "task_id", "review_id"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
     "forge_agent.coding_hosted_checks": (["task_id", "observation_id"], "observed_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
     "forge_agent.conversations": (["id", "owner_id"], "created_at", ("owner",)),
-    "forge_agent.runs": (["id", "conversation_id", "status", "request_id"], "created_at", ("join", "JOIN forge_agent.conversations c ON c.id = t.conversation_id", "c.owner_id")),
+    "forge_agent.runs": (["id", "conversation_id", "status", "request_id", "distributed"], "created_at", ("join", "JOIN forge_agent.conversations c ON c.id = t.conversation_id", "c.owner_id")),
     "forge_agent.messages": (["conversation_id", "position", "run_id"], "position", ("join", "JOIN forge_agent.conversations c ON c.id = t.conversation_id", "c.owner_id")),
     "forge_agent.tool_calls": (["run_id", "call_id"], "created_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
     "forge_agent.tool_results": (["run_id", "call_id"], "recorded_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
     "forge_agent.run_events": (["run_id", "sequence"], "sequence", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
     "forge_agent.ide_workspace_tabs": (["owner_id", "tab_id"], "touched_at", ("owner",)),
     "forge_agent.ide_workspace_history": (["owner_id"], "revision", ("owner",)),
-    "forge_agent.ide_chats": (["owner_id", "id"], "updated_at", ("owner",)),
+    "forge_agent.ide_chats": (["owner_id", "id", "removed_at", "title", "expires_at"], "updated_at", ("owner",)),
     "forge_agent.jenkins_events": (["event_id", "owner_id", "project_alias", "job_name"], "sequence", ("owner",)),
     "forge_agent.jenkins_event_deliveries": (["delivery_row_id", "event_id", "status", "consumer_name"], "created_at", ("join", "JOIN forge_agent.jenkins_events je ON je.event_id = t.event_id", "je.owner_id")),
     "forge_agent.jenkins_observations": (["owner_id", "project_alias", "jenkins_instance", "job_name", "observation_key"], "updated_at", ("owner",)),
@@ -444,6 +472,889 @@ READ_TABLES = {
     "forge_external_agent.artifacts": (["assignment_id"], "submitted_at", ("join", "JOIN forge_external_agent.assignments a ON a.assignment_id = t.assignment_id", "a.owner_id")),
     "forge_external_agent.readiness": (["external_role", "owner_id", "project_alias", "profile_alias"], "observed_at", ("owner",)),
     "forge_external_agent.scope_grants": (["external_role", "owner_id", "project_alias", "profile_alias"], "external_role", ("owner",)),
+}
+
+# Named fixed read queries (``readq.<name>``): SQL too complex for the
+# generic ``read.<table>`` rule (JOINs, aggregates, subqueries, CTEs,
+# comparisons, IN-lists). Each entry is (SQL, [(param, kind, required)]).
+# The SQL is FIXED: the caller supplies only named arguments, validated
+# against the declared kinds, and a parameter whose name ends in
+# ``_owner_id`` is bound to the caller's own owner (a foreign owner
+# value is refused). A readq returns {"rows": [...]}.
+READ_QUERIES = {
+    # queue_store: the run that produced a mail thread's first event.
+    "run_fingerprint_by_mail": (
+        "SELECT r.id, e.data->>'fingerprint' AS fingerprint "
+        "FROM forge_agent.runs r "
+        "JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1 "
+        "WHERE (r.mail_owner_id, r.mail_thread_id) = "
+        "(%(mail_owner_id)s, %(mail_thread_id)s) "
+        "AND r.request_id = %(request_id)s",
+        [("mail_owner_id", "text", True), ("mail_thread_id", "uuid", True),
+         ("request_id", "text", True)]),
+    # queue_store: the run for a conversation + request id.
+    "run_fingerprint_by_conversation": (
+        "SELECT r.id, r.status, e.data->>'fingerprint' AS fingerprint "
+        "FROM forge_agent.runs r "
+        "JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1 "
+        "WHERE r.conversation_id = %(conversation_id)s "
+        "AND r.request_id = %(request_id)s",
+        [("conversation_id", "uuid", True), ("request_id", "text", True)]),
+    # queue_store: open-run totals for a conversation's owner.
+    "run_queue_totals": (
+        "SELECT count(*) AS total, "
+        "coalesce(bool_or(r.conversation_id = %(conversation_id)s), false) "
+        "AS same_conversation "
+        "FROM forge_agent.runs r "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "WHERE c.owner_id = %(owner_id)s AND r.status IN "
+        "('queued', 'running', 'waiting_for_tool', 'result_ready')",
+        [("conversation_id", "uuid", True), ("owner_id", "text", True)]),
+    # queue_store: message totals for one conversation.
+    "message_totals": (
+        "SELECT count(*) AS count, "
+        "coalesce(sum(octet_length(content)), 0) AS bytes, "
+        "coalesce(max(position), 0) AS last_position "
+        "FROM forge_agent.messages WHERE conversation_id = %(conversation_id)s",
+        [("conversation_id", "uuid", True)]),
+    # queue_store: which chat/mail a run belongs to.
+    "run_chat_mail": (
+        "SELECT r.ide_chat_id, r.mail_owner_id, r.mail_thread_id "
+        "FROM forge_agent.runs r "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "WHERE r.id = %(run_id)s AND c.owner_id = %(owner_id)s",
+        [("run_id", "uuid", True), ("owner_id", "text", True)]),
+    # queue_store: one run's detail (answer + finish reason subqueries).
+    "run_detail": (
+        "SELECT r.id AS run_id, r.conversation_id, r.status, "
+        "r.model_id AS model, r.ide_chat_id AS chat_id, "
+        "r.ide_chat_revision AS revision, "
+        "CASE WHEN r.status = 'completed' THEN "
+        "(SELECT m.content FROM forge_agent.messages m "
+        "WHERE m.conversation_id = r.conversation_id AND m.run_id = r.id "
+        "AND m.role = 'assistant' ORDER BY m.position DESC LIMIT 1) "
+        "END AS answer, "
+        "CASE WHEN r.status = 'completed' THEN "
+        "(SELECT e.data->>'finish_reason' FROM forge_agent.run_events e "
+        "WHERE e.run_id = r.id AND e.event_type = 'completed' "
+        "ORDER BY e.sequence DESC LIMIT 1) END AS finish_reason "
+        "FROM forge_agent.runs r "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "LEFT JOIN forge_agent.ide_chats h "
+        "ON (h.owner_id, h.id) = (r.ide_chat_owner_id, r.ide_chat_id) "
+        "WHERE r.id = %(run_id)s AND c.owner_id = %(owner_id)s "
+        "AND r.mail_thread_id IS NULL "
+        "AND (NOT %(distributed_chat)s OR "
+        "(r.distributed AND r.ide_chat_id IS NOT NULL)) "
+        "AND (r.ide_chat_id IS NULL OR (h.removed_at IS NULL AND "
+        "(h.expires_at IS NULL OR h.expires_at > clock_timestamp())))",
+        [("run_id", "uuid", True), ("owner_id", "text", True),
+         ("distributed_chat", "boolean", True)]),
+    # queue_store: transcripts of recent completed runs (partial allowed).
+    "recent_completed_transcripts": (
+        "SELECT jsonb_agg(jsonb_build_object('role', m.role, "
+        "'content', m.content) ORDER BY m.position) AS messages "
+        "FROM (SELECT r.id, r.conversation_id, r.created_at "
+        "FROM forge_agent.runs r "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1 "
+        "AND e.event_type = 'queued' "
+        "WHERE c.owner_id = %(owner_id)s AND r.status = 'completed' "
+        "AND e.data @> '{\"allow_partial\": true}'::jsonb "
+        "AND r.ide_chat_id IS NULL "
+        "ORDER BY r.created_at DESC, r.id DESC LIMIT 16) recent "
+        "JOIN forge_agent.messages m "
+        "ON m.conversation_id = recent.conversation_id "
+        "AND m.run_id = recent.id "
+        "GROUP BY recent.id, recent.created_at "
+        "ORDER BY recent.created_at DESC, recent.id DESC",
+        [("owner_id", "text", True)]),
+    # queue_store: a run's mail source (thread, source run, profile).
+    "run_mail_source": (
+        "SELECT r.mail_thread_id, "
+        "coalesce(r.mail_source_run_id, r.id) AS source_run_id, "
+        "e.data->'mail_profile' AS profile "
+        "FROM forge_agent.runs r "
+        "JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1 "
+        "WHERE r.id = %(run_id)s AND r.mail_owner_id = %(mail_owner_id)s",
+        [("run_id", "uuid", True), ("mail_owner_id", "text", True)]),
+    # queue_store: does a conversation have a chat- or mail-linked run?
+    "run_has_chat_or_mail": (
+        "SELECT 1 FROM forge_agent.runs WHERE conversation_id = "
+        "%(conversation_id)s AND (ide_chat_id IS NOT NULL "
+        "OR mail_thread_id IS NOT NULL) LIMIT 1",
+        [("conversation_id", "uuid", True)]),
+    # queue_store: distributed result-ready runs awaiting inference.
+    "inference_ready_runs": (
+        "SELECT result.run_id FROM forge_agent.inference_results result "
+        "JOIN forge_agent.runs r ON r.id = result.run_id "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "WHERE c.owner_id = %(owner_id)s AND r.distributed "
+        "AND r.status = 'result_ready' "
+        "ORDER BY (r.mail_thread_id IS NOT NULL), result.accepted_at, "
+        "result.run_id LIMIT %(limit)s",
+        [("owner_id", "text", True), ("limit", "integer", True)]),
+    # queue_store: stale distributed runs (deadline or lease passed).
+    "stale_distributed_runs": (
+        "SELECT r.id FROM forge_agent.runs r "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "WHERE c.owner_id = %(owner_id)s AND r.distributed "
+        "AND r.status IN ('queued', 'running') "
+        "AND (r.run_deadline <= clock_timestamp() "
+        "OR r.lease_until <= clock_timestamp()) "
+        "ORDER BY least(r.run_deadline, r.lease_until), r.id "
+        "LIMIT %(limit)s",
+        [("owner_id", "text", True), ("limit", "integer", True)]),
+    # queue_store: which of the requested models has a fresh GPU worker.
+    "gpu_ready_models": (
+        "SELECT DISTINCT model_id FROM forge_agent.gpu_worker_readiness "
+        "WHERE model_id = ANY(%(model_ids)s) AND ready "
+        "AND seen_at > clock_timestamp() - interval '30 seconds'",
+        [("model_ids", "text[]", True)]),
+    # queue_store: run events after a sequence (fingerprint stripped).
+    "run_events_after": (
+        "SELECT sequence, event_type AS type, data - 'fingerprint' AS data, "
+        "recorded_at FROM forge_agent.run_events "
+        "WHERE run_id = %(run_id)s AND sequence > %(sequence)s "
+        "ORDER BY sequence LIMIT 100",
+        [("run_id", "uuid", True), ("sequence", "integer", True)]),
+    # queue_store: is a GPU worker fresh for this model?
+    "gpu_worker_ready": (
+        "SELECT EXISTS (SELECT 1 FROM forge_agent.gpu_worker_readiness "
+        "WHERE model_id = %(model_id)s AND ready "
+        "AND seen_at > clock_timestamp() - interval '30 seconds') "
+        "AS worker_ready",
+        [("model_id", "text", True)]),
+    # queue_store: messages with the queued source prompt substituted.
+    "run_messages_with_source_prompt": (
+        "SELECT m.role, CASE WHEN m.position = "
+        "(queued.data->>'source_message_position')::int "
+        "THEN queued.data->>'source_prompt' ELSE m.content END AS content "
+        "FROM forge_agent.messages m "
+        "JOIN forge_agent.run_events queued "
+        "ON queued.run_id = m.run_id AND queued.sequence = 1 "
+        "WHERE m.run_id = %(run_id)s ORDER BY m.position",
+        [("run_id", "uuid", True)]),
+    # chat_history_store: source position/attachment of a chat's run.
+    "ide_chat_source": (
+        "SELECT (queued.data->>'source_message_position')::int AS position, "
+        "queued.data->'source_attachment' AS attachment "
+        "FROM forge_agent.runs r "
+        "JOIN forge_agent.run_events queued "
+        "ON queued.run_id = r.id AND queued.sequence = 1 "
+        "WHERE r.ide_chat_owner_id = %(ide_chat_owner_id)s "
+        "AND r.ide_chat_id = %(ide_chat_id)s AND r.status = 'completed' "
+        "AND r.ide_chat_revision <= %(revision)s "
+        "AND queued.data ? 'source_attachment' "
+        "ORDER BY r.ide_chat_revision",
+        [("ide_chat_owner_id", "text", True), ("ide_chat_id", "uuid", True),
+         ("revision", "integer", True)]),
+    # chat_history_store: visible chats (not removed, titled, unexpired).
+    # chat_id set for one chat; cursor_* for keyset paging; limit 1 for
+    # the latest / one-chat reads.
+    "ide_chats_visible": (
+        "SELECT id, revision, title, messages, updated_at, expires_on, "
+        "time_zone, expires_at FROM forge_agent.ide_chats "
+        "WHERE owner_id = %(owner_id)s AND removed_at IS NULL "
+        "AND title IS NOT NULL "
+        "AND (expires_at IS NULL OR expires_at > clock_timestamp()) "
+        "AND (%(chat_id)s::uuid IS NULL OR id = %(chat_id)s) "
+        "AND (%(cursor_updated_at)s::timestamptz IS NULL "
+        "OR (updated_at, id) < (%(cursor_updated_at)s, %(cursor_id)s)) "
+        "ORDER BY updated_at DESC, id DESC LIMIT %(limit)s",
+        [("owner_id", "text", True), ("chat_id", "uuid", False),
+         ("cursor_updated_at", "timestamptz", False),
+         ("cursor_id", "uuid", False), ("limit", "integer", True)]),
+    # mail_store: messages of a thread that have an assistant reply.
+    "mail_thread_messages": (
+        "SELECT m.role, m.content FROM forge_agent.mail_messages m "
+        "WHERE (m.owner_id, m.thread_id) = (%(owner_id)s, %(thread_id)s) "
+        "AND EXISTS (SELECT 1 FROM forge_agent.mail_messages reply "
+        "WHERE reply.run_id = m.run_id AND reply.role = 'assistant') "
+        "ORDER BY m.sequence",
+        [("owner_id", "text", True), ("thread_id", "uuid", True)]),
+    # mail_store: the last error of a run's failed/interrupted/cancelled
+    # events.
+    "run_last_error": (
+        "SELECT data->>'error' AS error FROM forge_agent.run_events "
+        "WHERE run_id = %(run_id)s "
+        "AND event_type IN ('failed', 'interrupted', 'cancelled') "
+        "ORDER BY sequence DESC LIMIT 1",
+        [("run_id", "uuid", True)]),
+    # mail_store: one page of a thread's messages with each message's
+    # timestamp and (for assistant messages) a length finish reason.
+    "mail_page": (
+        "WITH page AS (SELECT sequence, role, content, run_id "
+        "FROM forge_agent.mail_messages "
+        "WHERE (owner_id, thread_id) = (%(owner_id)s, %(thread_id)s) "
+        "AND sequence > %(sequence)s ORDER BY sequence LIMIT %(limit)s) "
+        "SELECT p.sequence, p.role, p.content, "
+        "CASE WHEN p.role = 'user' THEN "
+        "(SELECT r.created_at FROM forge_agent.runs r "
+        "WHERE (r.mail_owner_id, r.mail_thread_id, r.id) = "
+        "(%(owner_id)s, %(thread_id)s, p.run_id)) ELSE "
+        "(SELECT e.recorded_at FROM forge_agent.runs r "
+        "JOIN forge_agent.run_events e "
+        "ON e.run_id = r.id AND e.event_type = 'completed' "
+        "WHERE (r.mail_owner_id, r.mail_thread_id) = "
+        "(%(owner_id)s, %(thread_id)s) "
+        "AND (r.id = p.run_id OR r.mail_source_run_id = p.run_id) "
+        "ORDER BY e.recorded_at DESC, r.id DESC, e.sequence DESC LIMIT 1) "
+        "END AS created_at, "
+        "CASE WHEN p.role = 'assistant' THEN "
+        "(SELECT 'length' FROM forge_agent.runs r "
+        "JOIN forge_agent.run_events e "
+        "ON e.run_id = r.id AND e.event_type = 'completed' "
+        "WHERE (r.mail_owner_id, r.mail_thread_id) = "
+        "(%(owner_id)s, %(thread_id)s) "
+        "AND (r.id = p.run_id OR r.mail_source_run_id = p.run_id) "
+        "AND e.data->>'finish_reason' = 'length' LIMIT 1) "
+        "END AS finish_reason FROM page p ORDER BY p.sequence",
+        [("owner_id", "text", True), ("thread_id", "uuid", True),
+         ("sequence", "integer", True), ("limit", "integer", True)]),
+    # jenkins_store: the next sequence for a project's Jenkins events.
+    "jenkins_next_sequence": (
+        "SELECT coalesce(max(sequence), 0) + 1 AS next_seq "
+        "FROM forge_agent.jenkins_events "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s",
+        [("owner_id", "text", True), ("project_alias", "text", True)]),
+    # usage_store: attempts leased out, for the given profiles.
+    "attempts_leased": (
+        "SELECT a.project_alias, a.task_id, a.agent_profile "
+        "FROM forge_agent.coding_attempts a "
+        "WHERE a.owner_id = %(owner_id)s "
+        "AND a.agent_profile = ANY(%(profiles)s) "
+        "AND a.lease_expires_at IS NOT NULL "
+        "AND a.lease_expires_at > %(now)s ORDER BY a.started_at ASC",
+        [("owner_id", "text", True), ("profiles", "text[]", True),
+         ("now", "timestamptz", True)]),
+    # usage_store: latest refresh request per profile.
+    "usage_refresh_pending": (
+        "SELECT DISTINCT ON (profile_alias) profile_alias, refresh_id, "
+        "status, requested_at "
+        "FROM forge_agent.coding_usage_refresh_requests "
+        "WHERE owner_id = %(owner_id)s AND profile_alias = ANY(%(profiles)s) "
+        "AND (status IN ('pending', 'in_progress') "
+        "OR requested_at >= clock_timestamp() "
+        "- make_interval(secs => %(secs)s)) "
+        "ORDER BY profile_alias, requested_at DESC",
+        [("owner_id", "text", True), ("profiles", "text[]", True),
+         ("secs", "integer", True)]),
+    # work_owner_control / work_workflow / work_owner_reverification:
+    # fresh worker readiness for the given policy digests.
+    "worker_readiness_fresh": (
+        "SELECT policy_digest, projects, profiles "
+        "FROM forge_agent.coding_worker_readiness "
+        "WHERE owner_id = %(owner_id)s "
+        "AND policy_digest = ANY(%(policy_digests)s) "
+        "AND observed_at >= clock_timestamp() - interval '90 seconds'",
+        [("owner_id", "text", True), ("policy_digests", "text[]", True)]),
+
+    # work_store: a workflow with its review budget's code revisions.
+    "workflow_with_budget": (
+        "SELECT w.*, coalesce(b.repair_rounds, 0) AS code_revisions "
+        "FROM forge_agent.coding_workflows w "
+        "LEFT JOIN forge_agent.coding_review_budget b "
+        "ON (b.owner_id, b.project_alias, b.root_task_id) = "
+        "(w.owner_id, w.project_alias, w.root_task_id) "
+        "WHERE w.owner_id = %(owner_id)s "
+        "AND w.project_alias = %(project_alias)s "
+        "AND w.workflow_id = %(workflow_id)s",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("workflow_id", "uuid", True)]),
+    # work_store: the retry-policy checkpoint for a snapshot digest.
+    "retry_policy_checkpoint": (
+        "SELECT payload FROM forge_agent.coding_events "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND task_id = %(task_id)s AND event_kind = 'checkpoint' "
+        "AND payload->>'stage' = 'retry_policy_updated' "
+        "AND payload->>'policy' = 'forge-agent-retry-v1' "
+        "AND payload->>'workflow_id' = %(workflow_id)s "
+        "AND payload->>'snapshot_digest' = %(snapshot_digest)s "
+        "ORDER BY sequence DESC LIMIT 1",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True), ("workflow_id", "text", True),
+         ("snapshot_digest", "text", True)]),
+    # work_store: is a published publication's latest hosted check green?
+    "publication_required_green": (
+        "SELECT h.required_green FROM forge_agent.coding_publications p "
+        "JOIN forge_agent.coding_reviews r "
+        "ON r.review_id = p.review_id AND r.status = 'approved' "
+        "JOIN LATERAL (SELECT x.required_green "
+        "FROM forge_agent.coding_hosted_checks x "
+        "WHERE x.publication_id = p.publication_id "
+        "AND x.candidate_commit = p.commit_sha "
+        "ORDER BY x.observed_at DESC, x.observation_id DESC LIMIT 1) h "
+        "ON true "
+        "WHERE p.owner_id = %(owner_id)s "
+        "AND p.project_alias = %(project_alias)s "
+        "AND p.task_id = %(task_id)s AND p.attempt_id = %(attempt_id)s "
+        "AND p.status = 'published' AND p.commit_sha = r.candidate_commit "
+        "ORDER BY p.created_at DESC LIMIT 1",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True), ("attempt_id", "uuid", True)]),
+    # work_store: the latest review with its effective max rounds.
+    "review_with_max_rounds": (
+        "SELECT r.*, coalesce((SELECT (b.policy->>'max_rounds')::integer "
+        "FROM forge_agent.coding_review_budget b "
+        "JOIN forge_agent.coding_tasks t "
+        "ON (t.owner_id, t.project_alias, "
+        "coalesce(t.repair_root_task_id, t.id)) = "
+        "(b.owner_id, b.project_alias, b.root_task_id) "
+        "WHERE t.owner_id = r.owner_id AND t.project_alias = r.project_alias "
+        "AND t.id = r.task_id), p.max_rounds, %(fallback_max_rounds)s) "
+        "AS max_rounds "
+        "FROM forge_agent.coding_reviews r "
+        "LEFT JOIN forge_agent.coding_review_policy p "
+        "USING (owner_id, project_alias) "
+        "WHERE r.owner_id = %(owner_id)s "
+        "AND r.project_alias = %(project_alias)s "
+        "AND r.task_id = %(task_id)s "
+        "ORDER BY r.review_no DESC LIMIT 1",
+        [("fallback_max_rounds", "integer", True),
+         ("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True)]),
+    # work_store: the effective max infrastructure retries.
+    "max_infrastructure_retries": (
+        "SELECT coalesce((SELECT "
+        "(b.policy->>'max_infrastructure_retries')::integer "
+        "FROM forge_agent.coding_review_budget b "
+        "WHERE b.owner_id = %(owner_id)s "
+        "AND b.project_alias = %(project_alias)s "
+        "AND b.root_task_id = %(root_task_id)s), "
+        "p.max_infrastructure_retries) AS max_infrastructure_retries "
+        "FROM forge_agent.coding_review_policy p "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("root_task_id", "uuid", True)]),
+    # work_store: the latest merged merge_commit per project.
+    "merge_commit_by_project": (
+        "SELECT DISTINCT ON (a.project_alias) a.project_alias, "
+        "a.finish_receipt->'receipt'->>'merge_commit' AS merge_commit "
+        "FROM forge_agent.coding_workflow_actions a "
+        "JOIN forge_agent.coding_workflows w USING (workflow_id) "
+        "WHERE a.owner_id = %(owner_id)s AND a.kind = 'merge' "
+        "AND a.status = 'completed' AND a.finish_receipt->>'status' = 'merged' "
+        "AND a.finish_receipt->'receipt'->>'merge_commit' = "
+        "a.intent->>'merge_commit' AND w.phase = 'completed' "
+        "ORDER BY a.project_alias, a.updated_at DESC, a.action_id DESC",
+        [("owner_id", "text", True)]),
+    # work_store: a task's intent digest + its first-event receipt.
+    "task_receipt_by_idempotency": (
+        "SELECT t.intent_digest, e.payload AS receipt_json "
+        "FROM forge_agent.coding_tasks t "
+        "JOIN forge_agent.coding_events e "
+        "ON (e.owner_id, e.project_alias, e.task_id) = "
+        "(t.owner_id, t.project_alias, t.id) AND e.sequence = 1 "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = %(project_alias)s "
+        "AND t.idempotency_key = %(idempotency_key)s",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("idempotency_key", "text", True)]),
+    # work_store: events of a task after a sequence, paged.
+    "coding_events_after": (
+        "SELECT event_id, correlation_id, sequence, event_kind, "
+        "created_at, payload FROM forge_agent.coding_events "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND task_id = %(task_id)s AND sequence > %(sequence)s "
+        "ORDER BY sequence ASC LIMIT %(limit)s",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True), ("sequence", "integer", True),
+         ("limit", "integer", True)]),
+    # work_store: result chunks overlapping a byte range, with spans.
+    "result_chunks_page": (
+        "WITH spans AS (SELECT chunk_index, content, byte_length, "
+        "coalesce(sum(byte_length) OVER (ORDER BY chunk_index "
+        "ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) "
+        "AS start_byte, "
+        "sum(byte_length) OVER (ORDER BY chunk_index) AS end_byte "
+        "FROM forge_agent.coding_result_chunks "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND task_id = %(task_id)s AND attempt_id = %(attempt_id)s) "
+        "SELECT chunk_index, content, byte_length, start_byte, end_byte "
+        "FROM spans WHERE end_byte > %(end_byte)s "
+        "AND start_byte < %(start_byte)s ORDER BY chunk_index ASC",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True), ("attempt_id", "uuid", True),
+         ("end_byte", "integer", True), ("start_byte", "integer", True)]),
+    # work_store: the root task of a workflow.
+    "workflow_root_task": (
+        "SELECT w.root_task_id FROM forge_agent.coding_tasks t "
+        "JOIN forge_agent.coding_workflows w ON w.workflow_id = t.workflow_id "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = %(project_alias)s AND t.id = %(task_id)s",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True)]),
+    # work_store: how many attempts are reserved, and whether one
+    # attempt stopped.
+    "attempt_reservation": (
+        "SELECT count(*) FILTER (WHERE reservation_active "
+        "OR lease_expires_at IS NOT NULL) AS reserved, "
+        "bool_or(attempt_id = %(attempt_id)s AND phase = 'stopped') "
+        "AS attempt_stopped FROM forge_agent.coding_attempts "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND task_id = %(task_id)s",
+        [("attempt_id", "uuid", True), ("owner_id", "text", True),
+         ("project_alias", "text", True), ("task_id", "uuid", True)]),
+    # work_store: the latest merged merge_commit for a project.
+    "merge_head": (
+        "SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head "
+        "FROM forge_agent.coding_workflow_actions a "
+        "JOIN forge_agent.coding_workflows w USING (workflow_id) "
+        "WHERE a.owner_id = %(owner_id)s "
+        "AND a.project_alias = %(project_alias)s AND a.kind = 'merge' "
+        "AND a.status = 'completed' AND a.finish_receipt->>'status' = 'merged' "
+        "AND a.finish_receipt->'receipt'->>'merge_commit' = "
+        "a.intent->>'merge_commit' AND w.phase = 'completed' "
+        "ORDER BY a.updated_at DESC, a.action_id DESC LIMIT 1",
+        [("owner_id", "text", True), ("project_alias", "text", True)]),
+    # work_owner_control / work_owner_reverification: how many decide
+    # actions used a source-key prefix (kind fixed by the caller).
+    "action_source_count": (
+        "SELECT count(*) AS used FROM forge_agent.coding_workflow_actions "
+        "WHERE workflow_id = %(workflow_id)s "
+        "AND (%(kind)s::text IS NULL OR kind = %(kind)s) "
+        "AND source_key LIKE %(prefix)s || '%%'",
+        [("workflow_id", "uuid", True), ("kind", "text", False),
+         ("prefix", "text", True)]),
+    # work_owner_control / work_owner_reverification: the retries spent
+    # across a workflow's reviews.
+    "verification_retries_sum": (
+        "SELECT coalesce(sum(greatest(q.infrastructure_retries "
+        "- previous.infrastructure_retries, 0)), 0)::integer AS n "
+        "FROM forge_agent.coding_reviews q "
+        "JOIN forge_agent.coding_reviews previous "
+        "ON previous.review_id = q.previous_review_id "
+        "JOIN forge_agent.coding_tasks t "
+        "ON (t.owner_id, t.project_alias, t.id) = "
+        "(q.owner_id, q.project_alias, q.task_id) "
+        "WHERE t.workflow_id = %(workflow_id)s "
+        "AND q.review_id <> %(review_id)s",
+        [("workflow_id", "uuid", True), ("review_id", "uuid", True)]),
+    # work_owner_reverification / work_workflow: the latest review_no.
+    "max_review_no": (
+        "SELECT max(review_no) AS latest FROM forge_agent.coding_reviews "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND task_id = %(task_id)s",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True)]),
+    # work_owner_control: decide actions by source key, policy, or both.
+    "workflow_actions_by_source_or_policy": (
+        "SELECT * FROM forge_agent.coding_workflow_actions "
+        "WHERE workflow_id = %(workflow_id)s AND kind = 'decide' "
+        "AND (source_key = %(source_key)s "
+        "OR source_key LIKE %(source_pattern)s "
+        "OR intent->>'policy' = ANY(%(policies)s)) "
+        "ORDER BY created_at, action_id LIMIT %(limit)s",
+        [("workflow_id", "uuid", True), ("source_key", "text", True),
+         ("source_pattern", "text", True), ("policies", "text[]", True),
+         ("limit", "integer", True)]),
+    # work_owner_control: decide actions for one request (policy match
+    # plus the request's task id and idempotency key).
+    "workflow_actions_by_source_or_policy_request": (
+        "SELECT * FROM forge_agent.coding_workflow_actions "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND workflow_id = %(workflow_id)s AND kind = 'decide' "
+        "AND (source_key LIKE %(source_pattern)s "
+        "OR intent->>'policy' = %(policy)s) "
+        "AND intent->'request'->>'task_id' = %(task_id)s "
+        "AND intent->'request'->>'idempotency_key' = %(idempotency_key)s "
+        "LIMIT 2",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("workflow_id", "uuid", True), ("source_pattern", "text", True),
+         ("policy", "text", True), ("task_id", "text", True),
+         ("idempotency_key", "text", True)]),
+    # work_owner_control: does a decide action exist for this source?
+    "workflow_actions_by_source_or_policy_exists": (
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions "
+        "WHERE workflow_id = %(workflow_id)s AND kind = 'decide' "
+        "AND (source_key LIKE %(source_pattern)s "
+        "OR intent->>'policy' = %(policy)s)) AS orphaned",
+        [("workflow_id", "uuid", True), ("source_pattern", "text", True),
+         ("policy", "text", True)]),
+    # work_owner_reverification: the decide action that finished a review.
+    "workflow_action_by_receipt_review": (
+        "SELECT * FROM forge_agent.coding_workflow_actions "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND workflow_id = %(workflow_id)s AND kind = 'decide' "
+        "AND finish_receipt->'receipt'->>'review_id' = %(review_id)s "
+        "AND intent->>'policy' = ANY(%(policies)s)",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("workflow_id", "uuid", True), ("review_id", "text", True),
+         ("policies", "text[]", True)]),
+    # work_workflow: completed deadline-retry actions not yet published.
+    "deadline_retry_actions": (
+        "SELECT x.* FROM forge_agent.coding_workflow_actions x "
+        "WHERE x.workflow_id = %(workflow_id)s "
+        "AND x.owner_id = %(owner_id)s "
+        "AND x.project_alias = %(project_alias)s AND x.kind = 'decide' "
+        "AND x.status = 'completed' "
+        "AND x.source_key LIKE 'native-deadline-retry:%%' "
+        "AND x.intent->>'policy' = %(policy)s "
+        "AND x.intent->>'task_id' = %(task_id)s "
+        "AND NOT EXISTS (SELECT FROM forge_agent.coding_attempts p "
+        "WHERE (p.owner_id, p.project_alias, p.task_id) = "
+        "(x.owner_id, x.project_alias, %(task_id)s) "
+        "AND p.phase = 'stopped' AND p.result_sha256 IS NOT NULL "
+        "AND NOT p.reservation_active AND p.lease_expires_at IS NULL "
+        "AND p.published_at > x.created_at "
+        "AND p.published_at < %(before)s "
+        "AND EXISTS (SELECT FROM forge_agent.coding_reconciliation_receipts r "
+        "WHERE (r.owner_id, r.project_alias, r.task_id, r.attempt_id) = "
+        "(p.owner_id, p.project_alias, p.task_id, p.attempt_id))) "
+        "ORDER BY x.created_at, x.action_id",
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("project_alias", "text", True), ("policy", "text", True),
+         ("task_id", "uuid", True), ("before", "timestamptz", True)]),
+    # work_owner_control / work_workflow: is a workflow busy? The four
+    # call sites differ in the task statuses, the attempts branch, and
+    # the publication statuses; all three are parameters.
+    "workflow_busy": (
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks "
+        "WHERE workflow_id = %(workflow_id)s "
+        "AND status = ANY(%(task_statuses)s)) "
+        "OR (%(include_attempts)s AND EXISTS(SELECT 1 "
+        "FROM forge_agent.coding_attempts a "
+        "JOIN forge_agent.coding_tasks t "
+        "ON (t.owner_id, t.project_alias, t.id) = "
+        "(a.owner_id, a.project_alias, a.task_id) "
+        "WHERE t.workflow_id = %(workflow_id)s "
+        "AND (a.reservation_active OR a.lease_expires_at IS NOT NULL))) "
+        "OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions "
+        "WHERE workflow_id = %(workflow_id)s "
+        "AND status IN ('pending', 'leased')) "
+        "OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p "
+        "JOIN forge_agent.coding_tasks t "
+        "ON (t.owner_id, t.project_alias, t.id) = "
+        "(p.owner_id, p.project_alias, p.task_id) "
+        "WHERE t.workflow_id = %(workflow_id)s "
+        "AND (%(publication_statuses)s::text[] IS NULL "
+        "OR p.status = ANY(%(publication_statuses)s))) "
+        "OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q "
+        "JOIN forge_agent.coding_tasks t "
+        "ON (t.owner_id, t.project_alias, t.id) = "
+        "(q.owner_id, q.project_alias, q.task_id) "
+        "WHERE t.workflow_id = %(workflow_id)s "
+        "AND q.status IN ('pending', 'checking')) AS busy",
+        [("workflow_id", "uuid", True), ("task_statuses", "text[]", True),
+         ("include_attempts", "boolean", True),
+         ("publication_statuses", "text[]", False)]),
+    # work_owner_control / work_workflow: is a writer still active on a
+    # workflow (reserved attempt or live lease)?
+    "writer_active": (
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a "
+        "JOIN forge_agent.coding_tasks t "
+        "ON (t.owner_id, t.project_alias, t.id) = "
+        "(a.owner_id, a.project_alias, a.task_id) "
+        "WHERE t.workflow_id = %(workflow_id)s "
+        "AND (a.reservation_active OR a.lease_expires_at IS NOT NULL)) "
+        "AS writer",
+        [("workflow_id", "uuid", True)]),
+    # work_workflow: was a needs_reconcile event witnessed for an attempt?
+    "needs_reconcile_witnessed": (
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND task_id = %(task_id)s AND event_kind = 'needs_reconcile' "
+        "AND payload->>'attempt_id' = %(attempt_id)s "
+        "AND payload->>'reason' IN "
+        "('deadline_exceeded', 'stopped_without_publication') "
+        "AND created_at >= %(since)s) AS witnessed",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True), ("attempt_id", "text", True),
+         ("since", "timestamptz", True)]),
+    # work_workflow: was a blocking event witnessed for a task?
+    "blocked_witnessed": (
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND task_id = %(task_id)s AND created_at >= %(since)s "
+        "AND (event_kind IN ('quota_blocked', 'blocked_auth', "
+        "'blocked_permission', 'cancel_requested', 'cancelled') "
+        "OR payload->>'status' IN ('quota_blocked', 'blocked_auth', "
+        "'blocked_permission', 'cancel_requested', 'cancelled'))) AS blocked",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True), ("since", "timestamptz", True)]),
+    # work_workflow: does a sibling task of a workflow carry a failure?
+    "sibling_failure": (
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks "
+        "WHERE workflow_id = %(workflow_id)s AND id <> %(task_id)s "
+        "AND status IN ('failed', 'needs_reconcile', 'quota_blocked', "
+        "'blocked_auth', 'blocked_permission', 'cancelled')) "
+        "AS sibling_failure",
+        [("workflow_id", "uuid", True), ("task_id", "uuid", True)]),
+    # work_workflow: attempts of a workflow's tasks, with result content.
+    "attempt_result_content": (
+        "SELECT a.result_sha256, a.result_byte_count, a.phase, "
+        "a.reservation_active, a.lease_expires_at, "
+        "string_agg(c.content, '' ORDER BY c.chunk_index) AS content "
+        "FROM forge_agent.coding_attempts a "
+        "JOIN forge_agent.coding_result_chunks c "
+        "ON (c.owner_id, c.project_alias, c.task_id, c.attempt_id) = "
+        "(a.owner_id, a.project_alias, a.task_id, a.attempt_id) "
+        "WHERE a.owner_id = %(owner_id)s AND a.task_id = %(task_id)s "
+        "AND a.attempt_id = %(attempt_id)s "
+        "GROUP BY a.owner_id, a.project_alias, a.task_id, a.attempt_id",
+        [("owner_id", "text", True), ("task_id", "uuid", True),
+         ("attempt_id", "uuid", True)]),
+    # work_workflow: the resume receipt for a reconciliation.
+    "resume_receipt": (
+        "SELECT r.attempt_id, r.task_revision, r.workspace_digest, "
+        "c.receipt_json FROM forge_agent.coding_reconciliation_receipts r "
+        "JOIN forge_agent.coding_control_receipts c "
+        "ON (c.owner_id, c.project_alias, c.task_id) = "
+        "(r.owner_id, r.project_alias, r.task_id) "
+        "WHERE (r.owner_id, r.project_alias, r.task_id, r.receipt_id) = "
+        "(%(owner_id)s, %(project_alias)s, %(task_id)s, %(receipt_id)s) "
+        "AND c.action = 'resume' AND c.idempotency_key = %(idempotency_key)s "
+        "AND c.base_revision = r.task_revision "
+        "AND c.result_revision = r.task_revision + 1",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_id", "uuid", True), ("receipt_id", "uuid", True),
+         ("idempotency_key", "text", True)]),
+    # work_workflow: tasks of a workflow with their latest attempt.
+    "tasks_with_attempts": (
+        "SELECT t.*, a.phase AS attempt_phase, a.result_sha256, "
+        "a.reservation_active, a.lease_expires_at, a.published_at "
+        "FROM forge_agent.coding_tasks t "
+        "LEFT JOIN forge_agent.coding_attempts a "
+        "ON (a.owner_id, a.project_alias, a.task_id, a.attempt_id) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id) "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = %(project_alias)s "
+        "AND t.workflow_id = %(workflow_id)s ORDER BY t.created_at",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("workflow_id", "uuid", True)]),
+    # work_workflow: published publications with an approved peer review
+    # and a green hosted check.
+    "published_with_green": (
+        "SELECT p.*, q.candidate_commit, q.gate_manifest_sha256 "
+        "FROM forge_agent.coding_publications p "
+        "JOIN forge_agent.coding_tasks t "
+        "ON (t.owner_id, t.project_alias, t.id, t.latest_attempt_id) = "
+        "(p.owner_id, p.project_alias, p.task_id, p.attempt_id) "
+        "JOIN forge_agent.coding_reviews q ON q.review_id = p.review_id "
+        "WHERE t.workflow_id = %(workflow_id)s AND p.status = 'published' "
+        "AND q.status = 'approved' AND q.repair_task_id IS NULL "
+        "AND q.owner_decision->>'closed_by' = 'peer_reviewer' "
+        "AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h "
+        "WHERE h.publication_id = p.publication_id "
+        "AND h.candidate_commit = p.commit_sha "
+        "ORDER BY h.observed_at DESC, h.observation_id DESC LIMIT 1) IS TRUE "
+        "ORDER BY p.created_at DESC",
+        [("workflow_id", "uuid", True)]),
+    # work_workflow: the source and root task of a workflow review.
+    "review_root_tasks": (
+        "SELECT r.source_task_id, w.root_task_id "
+        "FROM forge_agent.coding_workflow_reviews r "
+        "JOIN forge_agent.coding_workflows w USING (workflow_id) "
+        "WHERE r.workflow_review_id = %(workflow_review_id)s",
+        [("workflow_review_id", "uuid", True)]),
+    # queue_store: tab ids beyond the keep offset, for pruning.
+    "ide_tabs_beyond_offset": (
+        "SELECT tab_id FROM forge_agent.ide_workspace_tabs "
+        "WHERE owner_id = %(owner_id)s "
+        "ORDER BY touched_at DESC, tab_id OFFSET %(offset)s",
+        [("owner_id", "text", True), ("offset", "integer", True)]),
+    # work_workflow: workflows whose retry policy needs an update.
+    "sweep_retry_policy_workflows": (
+        "SELECT w.* FROM forge_agent.coding_workflows w "
+        "JOIN forge_agent.coding_review_budget b "
+        "ON (b.owner_id, b.project_alias, b.root_task_id) = "
+        "(w.owner_id, w.project_alias, w.root_task_id) "
+        "WHERE w.owner_id = %(owner_id)s "
+        "AND w.project_alias = ANY(%(project_aliases)s) "
+        "AND w.phase NOT IN ('completed', 'cancelled') "
+        "AND ((w.snapshot->>'max_plan_revisions')::integer < 20 "
+        "OR (w.snapshot->>'max_code_revisions')::integer < 20 "
+        "OR b.policy->'max_rounds' <> '20'::jsonb "
+        "OR b.policy->'max_stagnant_rounds' <> '20'::jsonb "
+        "OR b.policy->'max_infrastructure_retries' <> '20'::jsonb) "
+        "AND NOT EXISTS (SELECT FROM forge_agent.coding_events e "
+        "WHERE (e.owner_id, e.project_alias, e.task_id) = "
+        "(w.owner_id, w.project_alias, w.root_task_id) "
+        "AND e.event_kind = 'checkpoint' "
+        "AND e.payload->>'stage' = 'retry_policy_updated' "
+        "AND e.payload->>'policy' = 'forge-agent-retry-v1' "
+        "AND e.payload->>'scope_id' = w.workflow_id::text) "
+        "AND (%(cursor_created_at)s::timestamptz IS NULL "
+        "OR (w.created_at, w.workflow_id) > "
+        "(%(cursor_created_at)s::timestamptz, %(cursor_id)s::uuid)) "
+        "ORDER BY w.created_at, w.workflow_id LIMIT 64",
+        [("owner_id", "text", True), ("project_aliases", "text[]", True),
+         ("cursor_created_at", "timestamptz", False),
+         ("cursor_id", "uuid", False)]),
+    # work_workflow: workflow-less tasks whose budget policy is stale.
+    "sweep_orphan_tasks": (
+        "SELECT t.project_alias, t.id, t.created_at, t.agent_profile, "
+        "t.mode, b.policy FROM forge_agent.coding_tasks t "
+        "JOIN forge_agent.coding_review_budget b "
+        "ON (b.owner_id, b.project_alias, b.root_task_id) = "
+        "(t.owner_id, t.project_alias, t.id) "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = ANY(%(project_aliases)s) "
+        "AND t.workflow_id IS NULL "
+        "AND (t.status NOT IN ('completed', 'cancelled') "
+        "OR EXISTS (SELECT FROM forge_agent.coding_tasks child "
+        "WHERE (child.owner_id, child.project_alias, "
+        "child.repair_root_task_id) = (t.owner_id, t.project_alias, t.id) "
+        "AND child.status NOT IN ('completed', 'cancelled'))) "
+        "AND b.policy IS DISTINCT FROM %(policy)s "
+        "AND (b.policy - ARRAY['max_rounds', 'max_stagnant_rounds', "
+        "'max_infrastructure_retries']) = "
+        "(%(policy)s::jsonb - ARRAY['max_rounds', 'max_stagnant_rounds', "
+        "'max_infrastructure_retries']) "
+        "AND (%(cursor_created_at)s::timestamptz IS NULL "
+        "OR (t.created_at, t.id) > "
+        "(%(cursor_created_at)s::timestamptz, %(cursor_id)s::uuid)) "
+        "ORDER BY t.created_at, t.id LIMIT 64",
+        [("owner_id", "text", True), ("project_aliases", "text[]", True),
+         ("policy", "jsonb", True),
+         ("cursor_created_at", "timestamptz", False),
+         ("cursor_id", "uuid", False)]),
+    # work_workflow: tasks needing reconcile after a deadline miss.
+    "sweep_needs_reconcile": (
+        "SELECT t.project_alias, t.id, t.revision, r.receipt_id, "
+        "a.attempt_id FROM forge_agent.coding_tasks t "
+        "JOIN forge_agent.coding_workflows w "
+        "ON (w.owner_id, w.project_alias, w.workflow_id) = "
+        "(t.owner_id, t.project_alias, t.workflow_id) "
+        "JOIN forge_agent.coding_attempts a "
+        "ON (a.owner_id, a.project_alias, a.task_id, a.attempt_id) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id) "
+        "JOIN forge_agent.coding_reconciliation_receipts r "
+        "ON (r.owner_id, r.project_alias, r.task_id, r.attempt_id, "
+        "r.task_revision) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id, t.revision) "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = ANY(%(project_aliases)s) "
+        "AND t.workflow_required AND t.mode = 'implement' "
+        "AND t.status IN ('needs_reconcile', 'failed') "
+        "AND w.phase IN ('implement', 'repair', 'escalated') "
+        "AND (w.enabled OR w.phase = 'escalated') "
+        "AND (w.phase <> 'escalated' OR w.escalation_reason IN "
+        "('Agent stopped: needs_reconcile', 'Agent stopped: failed')) "
+        "AND t.cancelled_at IS NULL AND t.workflow_review_id IS NULL "
+        "AND a.result_sha256 IS NULL AND a.phase = 'stopped' "
+        "AND NOT a.reservation_active AND a.lease_expires_at IS NULL "
+        "AND a.finished_at >= a.deadline_at "
+        "AND r.created_at >= a.deadline_at "
+        "AND a.pinned_recipe->>'policy_digest' = ANY(%(policy_digests)s) "
+        "AND t.agent_profile = w.snapshot->>'author_profile' "
+        "AND t.recipe_digest = w.snapshot->'recipes'->'author_implement'->>'digest' "
+        "AND EXISTS (SELECT 1 FROM forge_agent.coding_events e "
+        "WHERE (e.owner_id, e.project_alias, e.task_id) = "
+        "(t.owner_id, t.project_alias, t.id) "
+        "AND e.event_kind = 'needs_reconcile' "
+        "AND e.payload->>'attempt_id' = a.attempt_id::text "
+        "AND e.payload->>'reason' IN "
+        "('deadline_exceeded', 'stopped_without_publication') "
+        "AND e.created_at >= a.deadline_at) "
+        "AND NOT EXISTS (SELECT 1 FROM forge_agent.coding_workflow_actions x "
+        "WHERE x.workflow_id = w.workflow_id AND x.kind = 'decide' "
+        "AND (x.source_key = 'native-deadline-retry:' || a.attempt_id::text "
+        "OR (%(allow_any_retry)s AND "
+        "x.source_key LIKE 'native-deadline-retry:%%'))) "
+        "ORDER BY r.created_at DESC LIMIT 64",
+        [("owner_id", "text", True), ("project_aliases", "text[]", True),
+         ("policy_digests", "text[]", True),
+         ("allow_any_retry", "boolean", True)]),
+    # work_workflow: escalated code reviews awaiting a peer verdict.
+    "sweep_escalated_reviews": (
+        "SELECT r.workflow_review_id, r.target_sha256, r.source_revision, "
+        "t.project_alias, a.attempt_id, a.result_sha256 "
+        "FROM forge_agent.coding_workflow_reviews r "
+        "JOIN forge_agent.coding_workflows w USING (workflow_id) "
+        "JOIN forge_agent.coding_tasks t "
+        "ON (t.owner_id, t.project_alias, t.id) = "
+        "(r.owner_id, r.project_alias, r.reviewer_task_id) "
+        "JOIN forge_agent.coding_attempts a "
+        "ON (a.owner_id, a.project_alias, a.task_id, a.attempt_id) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id) "
+        "WHERE r.owner_id = %(owner_id)s "
+        "AND r.project_alias = ANY(%(project_aliases)s) "
+        "AND r.target_kind = 'code' AND r.status = 'escalated' "
+        "AND w.phase = 'escalated' AND NOT w.enabled "
+        "AND w.escalation_reason = %(escalation_reason)s "
+        "AND t.status = 'awaiting_review' AND a.phase = 'stopped' "
+        "AND NOT a.reservation_active AND a.lease_expires_at IS NULL "
+        "AND a.result_sha256 IS NOT NULL "
+        "AND NOT EXISTS (SELECT 1 FROM forge_agent.coding_workflow_actions x "
+        "WHERE x.workflow_id = w.workflow_id "
+        "AND x.source_key LIKE 'peer-verdict-replay:%%') "
+        "ORDER BY r.updated_at DESC LIMIT 64",
+        [("owner_id", "text", True), ("project_aliases", "text[]", True),
+         ("escalation_reason", "text", True)]),
+    # work_workflow: handoff reviews failed by a publication command.
+    "sweep_publication_failures": (
+        "SELECT t.project_alias, t.id, t.revision, q.review_id, "
+        "q.reconciliation_receipt_id FROM forge_agent.coding_tasks t "
+        "JOIN forge_agent.coding_workflows w USING (workflow_id) "
+        "JOIN forge_agent.coding_reviews q "
+        "ON (q.owner_id, q.project_alias, q.task_id, q.attempt_id) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id) "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = ANY(%(project_aliases)s) "
+        "AND t.workflow_required AND t.parent_task_id IS NOT NULL "
+        "AND t.mode = 'implement' AND t.status = 'awaiting_review' "
+        "AND t.cancelled_at IS NULL AND w.phase = 'escalated' "
+        "AND NOT w.enabled "
+        "AND w.escalation_reason = 'publication_command_failed' "
+        "AND q.status = 'handoff' AND q.phase = 'local' "
+        "AND q.reason = 'publication_command_failed' "
+        "AND q.candidate_commit IS NULL "
+        "AND q.verification->'checks_passed' = 'false'::jsonb "
+        "AND q.verification->'checks' = '[]'::jsonb "
+        "AND q.verification->'cleanup_confirmed' = 'true'::jsonb "
+        "AND q.source_revision = t.revision AND q.finish_token IS NOT NULL "
+        "AND q.finish_receipt->>'status' = 'handoff' "
+        "AND q.finish_receipt->'outcome'->>'reason' = "
+        "'publication_command_failed' "
+        "AND q.infrastructure_retries < coalesce((SELECT "
+        "(b.policy->>'max_infrastructure_retries')::integer "
+        "FROM forge_agent.coding_review_budget b "
+        "WHERE (b.owner_id, b.project_alias, b.root_task_id) = "
+        "(w.owner_id, w.project_alias, w.root_task_id)), "
+        "(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer) "
+        "ORDER BY q.updated_at DESC LIMIT 64",
+        [("owner_id", "text", True), ("project_aliases", "text[]", True)]),
+    # work_workflow: handoff reviews awaiting source readiness delivery.
+    "sweep_handoff_reviews": (
+        "SELECT t.project_alias, t.id, t.revision, q.review_id, "
+        "r.receipt_id FROM forge_agent.coding_tasks t "
+        "JOIN forge_agent.coding_workflows w USING (workflow_id) "
+        "JOIN forge_agent.coding_reviews q "
+        "ON (q.owner_id, q.project_alias, q.task_id, q.attempt_id) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id) "
+        "JOIN forge_agent.coding_reconciliation_receipts r "
+        "ON (r.owner_id, r.project_alias, r.task_id, r.attempt_id, "
+        "r.task_revision) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id, t.revision) "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = ANY(%(project_aliases)s) "
+        "AND t.workflow_required AND t.parent_task_id IS NOT NULL "
+        "AND t.status = 'awaiting_review' AND t.cancelled_at IS NULL "
+        "AND w.phase = 'escalated' AND NOT w.enabled "
+        "AND q.phase = 'local' AND q.status = 'handoff' "
+        "AND q.candidate_commit IS NULL AND q.source_revision = t.revision "
+        "AND q.reason IN ('review_unavailable', 'workspace_busy') "
+        "AND w.escalation_reason = q.reason "
+        "AND q.infrastructure_retries IN "
+        "((w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer, "
+        "coalesce((SELECT (b.policy->>'max_infrastructure_retries')::integer "
+        "FROM forge_agent.coding_review_budget b "
+        "WHERE (b.owner_id, b.project_alias, b.root_task_id) = "
+        "(w.owner_id, w.project_alias, w.root_task_id)), "
+        "(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer)) "
+        "AND q.infrastructure_retries > 0 AND r.created_at > q.updated_at "
+        "AND r.workspace_digest = q.workspace_digest "
+        "AND q.finish_token IS NOT NULL "
+        "AND q.finish_receipt->>'status' = 'handoff' "
+        "AND q.finish_receipt->'outcome'->'verification'->'checks' = "
+        "'[]'::jsonb "
+        "AND NOT EXISTS (SELECT 1 FROM forge_agent.coding_workflow_actions a "
+        "WHERE a.workflow_id = w.workflow_id "
+        "AND a.source_key LIKE 'source-readiness-delivery:%%') "
+        "ORDER BY r.created_at DESC LIMIT 64",
+        [("owner_id", "text", True), ("project_aliases", "text[]", True)]),
 }
 
 # Caller allowlists. "fn" is the set of fully qualified function
@@ -490,8 +1401,9 @@ CALLER_ALLOWLISTS = {
             "forge_agent.retry_event_reserve",
             "forge_agent.retry_event_resolve",
         },
-        "op": {"coding_task_insert", "coding_task_update", "coding_workflow_insert", "coding_workflow_update", "coding_workflow_review_insert", "coding_workflow_review_update", "coding_workflow_action_insert", "coding_workflow_action_update", "coding_event_insert", "coding_control_receipt_insert", "coding_review_insert", "coding_review_insert_copy", "coding_review_update", "coding_plan_decision_insert", "coding_review_policy_upsert", "coding_review_budget_insert", "coding_worker_grant_insert", "coding_usage_refresh_request_insert", "ide_conversation_insert", "ide_conversation_delete", "ide_run_insert", "ide_run_update", "ide_run_delete", "ide_message_insert", "ide_tool_call_insert", "ide_tool_call_update", "ide_tool_result_insert", "ide_run_event_insert", "ide_workspace_tab_insert", "ide_workspace_tab_update", "ide_workspace_tab_delete", "ide_workspace_history_insert", "ide_workspace_history_update", "ide_chat_insert", "ide_chat_update", "mail_thread_insert", "mail_thread_update", "mail_message_insert", "jenkins_event_insert", "jenkins_event_delivery_insert", "jenkins_event_delivery_update", "jenkins_observation_insert", "inference_result_delete", "ext_workflow_insert", "ext_workflow_update", "ext_task_insert", "ext_context_insert", "ext_review_insert", "ext_review_update", "ext_action_insert", "ext_action_update", "ext_plan_approve_override_insert", "ext_workflow_cancel", "coding_workflow_cancel", "workflow_action_lease"},
+        "op": {"coding_task_insert", "coding_task_update", "coding_workflow_insert", "coding_workflow_update", "coding_workflow_review_insert", "coding_workflow_review_update", "coding_workflow_action_insert", "coding_workflow_action_update", "coding_event_insert", "coding_control_receipt_insert", "coding_review_insert", "coding_review_insert_copy", "coding_review_update", "coding_plan_decision_insert", "coding_review_policy_upsert", "coding_review_budget_insert", "coding_worker_grant_insert", "coding_usage_refresh_request_insert", "ide_conversation_insert", "ide_conversation_delete", "ide_run_insert", "ide_run_update", "ide_run_delete", "ide_message_insert", "ide_tool_call_insert", "ide_tool_call_update", "ide_tool_call_update_by_run", "ide_tool_result_insert", "ide_run_event_insert", "ide_workspace_tab_insert", "ide_workspace_tab_update", "ide_workspace_tab_delete", "ide_workspace_history_insert", "ide_workspace_history_update", "ide_chat_insert", "ide_chat_update", "mail_thread_insert", "mail_thread_update", "mail_message_insert", "jenkins_event_insert", "jenkins_event_delivery_insert", "jenkins_event_delivery_update", "jenkins_observation_insert", "inference_result_delete", "ext_workflow_insert", "ext_workflow_update", "ext_task_insert", "ext_context_insert", "ext_review_insert", "ext_review_update", "ext_action_insert", "ext_action_update", "ext_plan_approve_override_insert", "ext_workflow_cancel", "coding_workflow_cancel", "workflow_action_lease", "ide_run_admit", "ide_run_claim_next", "ide_tool_started", "ide_tool_finished", "ide_interrupt_conversation_runs", "ide_tool_calls_mark_outcome_unknown", "workflow_retry_allowance_amend"},
         "read": "*",
+        "readq": {"action_source_count", "attempt_reservation", "attempt_result_content", "attempts_leased", "blocked_witnessed", "coding_events_after", "deadline_retry_actions", "gpu_ready_models", "gpu_worker_ready", "ide_chat_source", "ide_chats_visible", "ide_tabs_beyond_offset", "inference_ready_runs", "jenkins_next_sequence", "mail_page", "mail_thread_messages", "max_infrastructure_retries", "max_review_no", "merge_commit_by_project", "merge_head", "message_totals", "needs_reconcile_witnessed", "publication_required_green", "published_with_green", "recent_completed_transcripts", "result_chunks_page", "resume_receipt", "retry_policy_checkpoint", "review_root_tasks", "review_with_max_rounds", "run_chat_mail", "run_detail", "run_events_after", "run_fingerprint_by_conversation", "run_fingerprint_by_mail", "run_has_chat_or_mail", "run_last_error", "run_mail_source", "run_messages_with_source_prompt", "run_queue_totals", "sibling_failure", "stale_distributed_runs", "sweep_escalated_reviews", "sweep_handoff_reviews", "sweep_needs_reconcile", "sweep_orphan_tasks", "sweep_publication_failures", "sweep_retry_policy_workflows", "task_receipt_by_idempotency", "tasks_with_attempts", "usage_refresh_pending", "verification_retries_sum", "worker_readiness_fresh", "workflow_action_by_receipt_review", "workflow_actions_by_source_or_policy", "workflow_actions_by_source_or_policy_exists", "workflow_actions_by_source_or_policy_request", "workflow_busy", "workflow_root_task", "workflow_with_budget", "writer_active"},
         "notify": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_external_delivery", "forge_jenkins_events", "forge_coding_usage_refresh"},
         "subscribe": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_agent_results", "forge_jenkins_events"},
     },
@@ -640,6 +1552,8 @@ class Caller:
                     break
             allowed = self.allowlist["read"]
             return allowed == "*" or table in allowed
+        if operation.startswith("readq."):
+            return operation[6:] in self.allowlist.get("readq", ())
         if operation.startswith("notify."):
             return operation[7:] in self.allowlist["notify"]
         if operation.startswith("subscribe."):
@@ -742,6 +1656,11 @@ class Proxy:
             if table not in READ_TABLES:
                 raise Rejected(400, "unknown_operation")
             return ("read_" + mode, table, None, False)
+        if operation.startswith("readq."):
+            name = operation[6:]
+            if name not in READ_QUERIES:
+                raise Rejected(400, "unknown_operation")
+            return ("readq", name, READ_QUERIES[name][1], False)
         if operation.startswith("notify."):
             channel = operation[7:]
             if channel not in NOTIFY_CHANNELS:
@@ -763,8 +1682,51 @@ class Proxy:
             return self.notify(caller, target)
         if is_write:
             return self._execute_write(caller, kind, target, params, args)
+        if kind == "readq":
+            return self._execute_read_query(caller, target, params, args)
         return self._execute_read(caller, target, args,
                                   mode=kind[len("read_"):])
+
+    def _execute_read_query(self, caller, name, params, args):
+        """One named fixed read query, as the caller's DB role.
+
+        The SQL is fixed in READ_QUERIES: the caller supplies only
+        named arguments, validated against the declared kinds. A
+        parameter whose name ends in ``_owner_id`` is owner-scoped:
+        the client-supplied value must equal the caller's owner and
+        the bound value is always the caller's owner, so a fixed
+        query can never select another owner's rows.
+        """
+        values = validate_args(params, args or {})
+        bound = {}
+        for (param_name, _, _), value in zip(params, values):
+            if param_name.endswith("_owner_id"):
+                if value is not None and value != caller.owner:
+                    raise Rejected(403, "not_allowed")
+                bound[param_name] = caller.owner
+            else:
+                bound[param_name] = value
+        sql = READ_QUERIES[name][0]
+        conn = self._checkout(caller.role)
+        try:
+            with closing(conn.cursor()) as cur:
+                cur.execute("BEGIN")
+                cur.execute("SET LOCAL forge.coding_owner = %s",
+                            (caller.owner,))
+                cur.execute(sql, bound)
+                columns = [desc[0] for desc in cur.description] \
+                    if cur.description else []
+                rows = [dict(zip(columns, row)) for row in cur.fetchall()]
+                cur.execute("COMMIT")
+                return {"rows": rows}
+        except Rejected:
+            conn.rollback()
+            raise
+        except Exception as error:
+            conn.rollback()
+            raise Rejected(503, "database_error") from error
+        finally:
+            self._checkin(caller.role, conn)
 
     def _execute_write(self, caller, kind, target, params, args):
         # Validate before opening a connection: a rejected request must
@@ -851,6 +1813,27 @@ class Proxy:
         order_desc = args.get("order_desc", False)
         if not isinstance(order_desc, bool):
             raise Rejected(400, "invalid_argument")
+        # order: a single column name, or a list of
+        # {"column": ..., "desc": bool} for multi-column ORDER BY.
+        # Defaults to the table's registered order column.
+        order_spec = args.get("order")
+        order_columns = []
+        if order_spec is None:
+            order_columns = [(order, order_desc)]
+        elif isinstance(order_spec, str):
+            if not re.fullmatch(r"[a-z_][a-z0-9_]*", order_spec):
+                raise Rejected(400, "invalid_argument")
+            order_columns = [(order_spec, order_desc)]
+        elif isinstance(order_spec, list) and order_spec and all(
+                isinstance(item, dict) and set(item) <= {"column", "desc"}
+                and isinstance(item.get("column"), str)
+                and re.fullmatch(r"[a-z_][a-z0-9_]*", item["column"])
+                and isinstance(item.get("desc", False), bool)
+                for item in order_spec):
+            order_columns = [(item["column"], item.get("desc", False))
+                             for item in order_spec]
+        else:
+            raise Rejected(400, "invalid_argument")
         if owner[0] == "owner":
             owner_pred, owner_values = "t.owner_id = %s", [caller.owner]
             join = ""
@@ -870,9 +1853,29 @@ class Proxy:
                 owner_pred = f"t.{owner[1]} = %s"
                 owner_values = [caller.role]
             join = ""
-        where = " AND ".join([owner_pred]
-                             + [f"t.{key} = %s" for key in filters])
-        values = owner_values + [filters[key] for key in filters]
+        # Filter forms: a scalar is equality; a list is IN (ANY); a
+        # {"is_null": bool} object is IS NULL / IS NOT NULL. List
+        # values are bounded so a read cannot smuggle an unbounded IN.
+        predicates, values = [owner_pred], list(owner_values)
+        for key in filters:
+            value = filters[key]
+            if isinstance(value, list):
+                if not value or len(value) > 64 or any(
+                        not isinstance(item, (str, int, float))
+                        or isinstance(item, bool) for item in value):
+                    raise Rejected(400, "invalid_argument")
+                predicates.append(f"t.{key} = ANY(%s)")
+                values.append(value)
+            elif isinstance(value, dict) and set(value) == {"is_null"} \
+                    and isinstance(value["is_null"], bool):
+                predicates.append(
+                    f"t.{key} IS {'NULL' if value['is_null'] else 'NOT NULL'}")
+            elif value is None or isinstance(value, (str, int, float, bool)):
+                predicates.append(f"t.{key} = %s")
+                values.append(value)
+            else:
+                raise Rejected(400, "invalid_argument")
+        where = " AND ".join(predicates)
         if mode == "count":
             sql = (f"SELECT count(*) AS count FROM {table} t{join} "
                    f"WHERE {where}")
@@ -880,9 +1883,11 @@ class Proxy:
             sql = (f"SELECT EXISTS(SELECT 1 FROM {table} t{join} "
                    f"WHERE {where}) AS \"exists\"")
         else:
-            direction = "DESC" if order_desc else "ASC"
+            order_by = ", ".join(
+                f"t.{column} {'DESC' if desc else 'ASC'}"
+                for column, desc in order_columns)
             sql = (f"SELECT t.* FROM {table} t{join} WHERE {where} "
-                   f"ORDER BY t.{order} {direction} LIMIT %s OFFSET %s")
+                   f"ORDER BY {order_by} LIMIT %s OFFSET %s")
             values = values + [limit, offset]
         conn = self._checkout(caller.role)
         try:
