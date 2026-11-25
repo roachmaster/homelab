@@ -36,6 +36,7 @@ from work_external_review_context import ExternalReviewContext,validate_target
 from work_peer_review import MAX_VERDICT_BYTES
 from work_worker_config import WorkerConfig, verify_recipe
 from work_cli_transport import CliTransportError, parse_record
+from work_quota_diagnostics import quota_diagnostic
 
 UNIT_RE = re.compile(r"forge-coding-[0-9a-f]{32}")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -322,6 +323,7 @@ class CliOutcome:
     summary: str
     stop_proof: dict
     fresh_session: bool = True
+    quota_diagnostic: dict | None = None
 
 
 _BLOCKED_FAILURES = frozenset({"quota_blocked", "blocked_auth", "blocked_permission"})
@@ -336,7 +338,7 @@ _FAILURE_PRIORITY = {
 def _blocked_outcomes(message):
     text = message.lower() if isinstance(message, str) else ""
     found = set()
-    if any(code in text for code in ("usage_limit_reached", "insufficient_quota", "quota_exhausted", "quota_exceeded")):
+    if quota_diagnostic(message) is not None:
         found.add("quota_blocked")
     if any(code in text for code in ("unauthorized", "authentication_required", "invalid_grant", "not logged in", "not_logged_in")):
         found.add("blocked_auth")
@@ -517,6 +519,7 @@ class CliParser:
         self._stderr_scan_tail = bytearray()
         self._stderr_blocked = set()
         self._stderr_denied = False
+        self.quota_diagnostic = None
         self._grok_events = GrokEvents(expected_conversation_id) if backend == "grok" else None
         self._muse_events = MuseEvents() if backend == "muse" else None
         if expected_conversation_id is not None:
@@ -534,6 +537,9 @@ class CliParser:
 
     def _record_failure_text(self, *messages):
         found = set()
+        diagnostic = quota_diagnostic('\n'.join(x for x in messages if isinstance(x, str)))
+        if diagnostic is not None:
+            self.quota_diagnostic = diagnostic
         for message in messages:
             found.update(_blocked_outcomes(message))
         if found:
@@ -553,10 +559,13 @@ class CliParser:
         if stderr:
             window = (self._stderr_scan_tail + data).decode("utf-8", errors="replace").lower()
             self._stderr_blocked.update(_blocked_outcomes(window))
+            diagnostic = quota_diagnostic(window)
+            if diagnostic is not None:
+                self.quota_diagnostic = diagnostic
             if "no output produced" in window or "permission that headless mode cannot prompt" in window:
                 self._stderr_denied = True
             self._stderr_scan_tail.extend(data)
-            del self._stderr_scan_tail[:-64]
+            del self._stderr_scan_tail[:-4096]
             self.stderr_tail.extend(data)
             del self.stderr_tail[:-4096]
             return
@@ -720,6 +729,10 @@ class CliParser:
         # An empty-output diagnostic is less specific than a provider's quota
         # or authentication failure. Preserve the actionable blocked state.
         if failure in {"quota_blocked", "blocked_auth"}:
+            if failure == 'quota_blocked':
+                return CliOutcome(failure, '', self.conversation_id, self.usage,
+                                  'Provider quota is exhausted; the stopped assignment is waiting for allowance.',
+                                  proof, quota_diagnostic=self.quota_diagnostic)
             return CliOutcome(failure, "", self.conversation_id, self.usage,
                               "Agent invocation did not complete successfully.", proof)
         if self._stderr_denied:
