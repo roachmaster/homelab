@@ -1,4 +1,56 @@
-# Current: Git-independent artifact and verification identities — 2026-11-25
+# Current: Stabilize the event stream and measure bottlenecks — 2026-11-25
+
+User requests fixing the live event stream and identifying its bottlenecks and
+errors. Root owns integration, scoped operational recovery, final qualification
+and publication. Independent readers trace native workflow/review/retry state,
+external Muse assignment/delivery state, and Jenkins/post-merge/release timings.
+Writers receive separate worktrees after a cause and reproducer are established.
+
+Start from origin/main 0ed84188. Preserve original owners, approved Plans,
+source artifacts, immutable receipts, real cancellation and twenty attempts per
+event. Do not reset exhausted counters, manufacture successful checks, replay an
+uncertain mutation or switch model providers without existing authorization.
+Use typed selected recovery/provider ports, bound transient retries and establish
+actual service/readiness state before resuming work. Current-state scans remain
+the durable delivery mechanism; NOTIFY is only a wake-up hint.
+
+Initial evidence at20:44UTC: Jenkins queue is empty, no builds are running, and
+latest exact-main build86 passed. Nine native workflows escalated after author
+invocations failed in a burst at20:34; most invocations lasted about3.5seconds.
+The shared CLI failure is confirmed: Antigravity's selected Gemini model returned
+RESOURCE_EXHAUSTED / Individual quota reached, which the old parser mislabeled
+failed. Most retries then failed within four seconds. The user explicitly selects
+Claude Opus5.5 through agy as the backup, while retaining the Gemini primary.
+Versioned optional backup configuration and source-bound policy overlays must
+preserve original workflow snapshots, Plans, source receipts and model history.
+Actual quota failures pause exhausted model admission; configured backup routing
+and reset waiting are bounded separately from compilation/test repair events.
+No AI-credit fallback or automatic consumer OAuth polling is authorized.
+
+An explicit interactive /usage read at21:00UTC observed Gemini weekly9.57% /
+five-hour100%, and shared Claude/GPT weekly98.30% / five-hour97.60%. /credits
+reported credit spending disabled. These are manual TUI observations, not a
+qualified headless allowance API. The official installed CLI is now1.5.17;
+stage an immutable copy for workers rather than a self-updating executable path.
+
+Muse's
+only unfinished external workflow is b3a05d8a in Repair with a fresh owned lease,
+but no new submitted artifact or progress checkpoint from its current assignment.
+Repeated native-Jenkins reconciliation warnings are two retired, inactive actions
+with genuine never-submitted cancellation receipts. Add narrow historical proof
+recognition plus bounded correlated error diagnostics; preserve the mutation
+transport pins and every old binding. CI build86 spent27m14.6s of38m45.7s in the
+sequential main backend suite; cache HITs and4.49s deployment rule out cold builds
+and activation as the main delay. Bounded whole-module test processes must retain
+every unique test and exact execution inventory; no skips or gate substitution.
+
+Muse's last repair took440.3minutes without a progress checkpoint, then main
+drift caused another author turn. Trusted private Git preparation should integrate
+clean main changes, freeze the selected tree/base, and obtain fresh independent
+review and exact-source CI. Only genuine conflicts need the original author.
+This does not claim control over the externally owned Muse execution speed.
+
+# Previous: Git-independent artifact and verification identities — 2026-11-25
 
 User requests implementing the content-identity design described after task
 recovery. Separate stable task UUIDs, canonical source-content SHA-256 manifests,
