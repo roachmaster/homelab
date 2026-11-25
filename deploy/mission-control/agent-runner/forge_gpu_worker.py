@@ -182,6 +182,11 @@ def main():
         raise ValueError("Expected a hexadecimal model bearer credential")
 
     def connect():
+        from proxy_client import connect_from_config, proxy_configured
+        if proxy_configured():
+            # The unit file sets FORGE_PG_PROXY_URL + TOKEN_FILE; the
+            # caller is this worker's own identity, not the env default.
+            return connect_from_config(caller="gpu")
         return psycopg2.connect(host="127.0.0.1", hostaddr="127.0.0.1", port=port,
                                 dbname="forge_agent", user="forge_gpu_worker", passfile=str(passfile),
                                 sslmode="disable", connect_timeout=4, application_name="forge-gpu-worker",

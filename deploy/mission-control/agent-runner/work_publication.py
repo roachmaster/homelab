@@ -348,7 +348,7 @@ class PublicationWorkerFactory:
         for alias in self.config.repositories:
             if not selected.is_job_allowed(alias, delivery.jenkins_job):
                 raise ValueError("Jenkins events job is not allowed")
-        connect = lambda: psycopg2.connect(**section.database.connection_arguments())
+        connect = section.database.connect_factory()
         verification = jenkins_api.create_jenkins_service(selected, connect, with_consumers=False)
         drain = jenkins_api.create_jenkins_service(selected, connect, with_consumers=False)
 
@@ -438,10 +438,9 @@ class PublicationWorkerFactory:
 
 
 def default_store_factory(config):
-    import psycopg2
     from work_worker_store import WorkerDB
 
-    connection = lambda: psycopg2.connect(**config.worker.database.connection_arguments(reconciler=True))
+    connection = config.worker.database.connect_factory(reconciler=True)
     return WorkerDB(connection, config.worker.owner, reconcile_connect_factory=connection)
 
 

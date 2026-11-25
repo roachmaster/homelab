@@ -520,5 +520,132 @@ class TranslateTest(unittest.TestCase):
         self.assertTrue(result.args["on_conflict_do_nothing"])
 
 
+class TransportSelectionTest(unittest.TestCase):
+    """The proxy transport switch: env vars for the runner/GPU, the
+    database.proxy section for the worker/publication configs."""
+
+    def test_connect_factory_returns_fresh_proxy_connections(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", delete=False) as handle:
+            handle.write("fake-token")
+            token_file = handle.name
+        factory = proxy_client.connect_factory(
+            "http://127.0.0.1:18087", "worker", token_file=token_file)
+        first = factory()
+        second = factory()
+        self.assertIsInstance(first, ProxyConnection)
+        self.assertIsInstance(second, ProxyConnection)
+        self.assertIsNot(first, second)
+        self.assertEqual(first.client.caller, "worker")
+        self.assertEqual(first.client.url, "http://127.0.0.1:18087")
+
+    def test_caller_for_role_covers_every_proxy_role(self):
+        self.assertEqual(proxy_client.caller_for_role("forge_agent"),
+                         "coordinator")
+        self.assertEqual(proxy_client.caller_for_role("forge_coding_worker"),
+                         "worker")
+        self.assertEqual(
+            proxy_client.caller_for_role("forge_coding_reconciler"),
+            "reconciler")
+        self.assertEqual(proxy_client.caller_for_role("forge_gpu_worker"),
+                         "gpu")
+        self.assertEqual(proxy_client.caller_for_role("muse_proxy_writer"),
+                         "muse")
+        self.assertEqual(proxy_client.caller_for_role("forge_pg_proxy"),
+                         "operator")
+
+    def test_caller_for_role_rejects_an_unknown_role(self):
+        with self.assertRaises(ValueError):
+            proxy_client.caller_for_role("postgres")
+
+    def test_queue_store_connect_uses_proxy_when_configured(self):
+        import queue_store
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", delete=False) as handle:
+            handle.write("fake-token")
+            token_file = handle.name
+        env = {
+            "FORGE_PG_PROXY_URL": "http://127.0.0.1:18087",
+            "FORGE_PG_PROXY_TOKEN_FILE": token_file,
+            "FORGE_PG_PROXY_CALLER": "coordinator",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            connection = queue_store.connect()
+        self.assertIsInstance(connection, ProxyConnection)
+        self.assertEqual(connection.client.caller, "coordinator")
+
+    def test_queue_store_connect_stays_direct_without_proxy_env(self):
+        import queue_store
+        env = {key: "" for key in ("FORGE_PG_PROXY_URL",
+                                   "FORGE_PG_PROXY_TOKEN_FILE",
+                                   "FORGE_PG_PROXY_CALLER")}
+        with patch.dict(os.environ, env, clear=False):
+            with patch.object(queue_store.psycopg2, "connect",
+                              return_value="direct") as direct:
+                self.assertEqual(queue_store.connect(), "direct")
+            direct.assert_called_once()
+
+    def test_database_config_proxy_parses_and_selects_caller(self):
+        from test_work_executor import raw_config
+        from work_worker_config import parse_config
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            token_path = os.path.join(root, "worker.token")
+            with open(token_path, "w", encoding="utf-8") as handle:
+                handle.write("fake-token")
+            raw = raw_config(root)
+            raw["database"]["proxy"] = {
+                "url": "http://127.0.0.1:18087",
+                "token_file": token_path,
+            }
+            config = parse_config(raw)
+            self.assertEqual(config.database.proxy.url,
+                             "http://127.0.0.1:18087")
+            worker = config.database.connect_factory()()
+            self.assertIsInstance(worker, ProxyConnection)
+            self.assertEqual(worker.client.caller, "worker")
+            reconciler = config.database.connect_factory(
+                reconciler=True)()
+            self.assertEqual(reconciler.client.caller, "reconciler")
+
+    def test_database_config_without_proxy_stays_direct(self):
+        from test_work_executor import raw_config
+        from work_worker_config import parse_config
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            config = parse_config(raw_config(root))
+            self.assertIsNone(config.database.proxy)
+            with patch("psycopg2.connect",
+                      return_value="direct") as direct:
+                self.assertEqual(config.database.connect_factory()(),
+                                 "direct")
+            self.assertEqual(direct.call_args.kwargs["user"],
+                             "forge_coding_worker")
+            with patch("psycopg2.connect",
+                      return_value="direct") as direct:
+                self.assertEqual(
+                    config.database.connect_factory(reconciler=True)(),
+                    "direct")
+            self.assertEqual(direct.call_args.kwargs["user"],
+                             "forge_coding_reconciler")
+
+    def test_database_config_proxy_rejects_bad_url_and_extra_keys(self):
+        from test_work_executor import raw_config
+        from work_worker_config import parse_config
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            raw = raw_config(root)
+            raw["database"]["proxy"] = {"url": "not-a-url",
+                                        "token_file": "/x.token"}
+            with self.assertRaises(ValueError):
+                parse_config(raw)
+            raw = raw_config(root)
+            raw["database"]["proxy"] = {"url": "http://127.0.0.1:18087",
+                                        "token_file": "/x.token",
+                                        "extra": True}
+            with self.assertRaises(ValueError):
+                parse_config(raw)
+
+
 if __name__ == "__main__":
     unittest.main()

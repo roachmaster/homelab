@@ -203,6 +203,44 @@ def proxy_configured(*, url=None, token_file=None):
     return bool(url or os.environ.get("FORGE_PG_PROXY_URL"))
 
 
+# The proxy caller name for each database role that connects through the
+# proxy (the proxy config maps caller -> role; the reverse map lets a
+# config-file database section derive its caller from its effective user).
+ROLE_CALLERS = {
+    "forge_agent": "coordinator",
+    "forge_coding_worker": "worker",
+    "forge_coding_reconciler": "reconciler",
+    "forge_gpu_worker": "gpu",
+    "muse_proxy_writer": "muse",
+    "forge_pg_proxy": "operator",
+}
+
+
+def caller_for_role(role):
+    """Return the proxy caller name for a database role.
+
+    Raises ValueError for a role with no proxy caller: a config that
+    selects the proxy transport must connect as a known caller role.
+    """
+    try:
+        return ROLE_CALLERS[role]
+    except KeyError:
+        raise ValueError(f"No proxy caller for database role {role!r}") from None
+
+
+def connect_factory(url, caller, *, token_file=None, token=None,
+                    timeout=DEFAULT_TIMEOUT_SECONDS):
+    """Return a zero-arg connection factory for ``caller`` at ``url``.
+
+    Each call returns a fresh :class:`ProxyConnection`, so the factory is
+    a drop-in replacement for a ``lambda: psycopg2.connect(...)`` factory.
+    """
+    def factory():
+        return connect(url, caller, token=token, token_file=token_file,
+                       timeout=timeout)
+    return factory
+
+
 class ProxyCursor:
     """A psycopg2-compatible cursor backed by proxy operations."""
 

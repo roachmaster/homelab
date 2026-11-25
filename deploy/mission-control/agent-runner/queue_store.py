@@ -75,6 +75,17 @@ class Submit:
 
 
 def connect():
+    """Connection for the runner (coordinator) stores.
+
+    Selects the proxy transport when FORGE_PG_PROXY_URL is set (caller
+    from FORGE_PG_PROXY_CALLER, default "coordinator"); otherwise the
+    direct psycopg2 connection as before. This one factory wires
+    queue_store, WorkStore, JenkinsStore, UsageStore, chat_history_store
+    and mail_store: they all build from it.
+    """
+    from proxy_client import connect_from_config, proxy_configured
+    if proxy_configured():
+        return connect_from_config()
     return psycopg2.connect(host="/var/run/postgresql", port=5432, dbname="forge_agent",
                             user="forge_agent", connect_timeout=4, application_name="forge-agent-runner",
                             options="-c statement_timeout=5000 -c lock_timeout=4000")

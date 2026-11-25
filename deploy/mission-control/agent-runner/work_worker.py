@@ -529,12 +529,11 @@ def default_external_context_factory(store):
 
 
 def default_store_factory(config):
-    import psycopg2
     from work_worker_store import WorkerDB
 
     return WorkerDB(
-        lambda: psycopg2.connect(**config.database.connection_arguments()), config.owner,
-        reconcile_connect_factory=lambda: psycopg2.connect(**config.database.connection_arguments(reconciler=True)),
+        config.database.connect_factory(), config.owner,
+        reconcile_connect_factory=config.database.connect_factory(reconciler=True),
     )
 
 

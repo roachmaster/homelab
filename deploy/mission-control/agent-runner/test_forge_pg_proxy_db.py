@@ -1083,6 +1083,109 @@ class IdeCompositeDbTest(ProxyDbTestCase, FixtureMixin):
                     (conversation_id,))
 
 
+class CallerTransportDbTest(ProxyDbTestCase, FixtureMixin):
+    """C3 transport: each migrated caller operates through the live
+    proxy via its own factory (WorkerDB from a database.proxy config,
+    queue_store from the runner env, the GPU caller by identity)."""
+
+    def _proxy_url(self):
+        return f"http://127.0.0.1:{self.proxy_port}"
+
+    def _token_file(self, caller):
+        return os.path.join(self.cluster.root, f"{caller}.token")
+
+    def test_worker_db_advertise_through_the_proxy(self):
+        from pathlib import Path
+        from work_worker_config import DatabaseConfig, ProxyConfig
+        from work_worker_store import WorkerDB
+        worker_id = "db-test-worker-" + _uuid()[:8]
+        config = DatabaseConfig(
+            Path("/var/run/postgresql"), 5432, "forge_agent",
+            "forge_coding_worker",
+            proxy=ProxyConfig(self._proxy_url(),
+                              Path(self._token_file("worker"))))
+        # advertise() intersects the advertisement with the worker
+        # role's trusted grants and raises 42501 without one.
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_worker_grants"
+            " (worker_role, owner_id, project_alias, agent_profile, mode)"
+            " VALUES ('forge_coding_worker', 'mission-control', 'homelab',"
+            " 'agy', 'plan')")
+        try:
+            store = WorkerDB(config.connect_factory(), "mission-control")
+            store.advertise(
+                worker_id, _uuid(),
+                [{"alias": "homelab", "base_revision": None}],
+                [{"alias": "agy", "backend": "antigravity",
+                  "model": "fixture-model", "modes": ["plan"]}],
+                "0" * 64)
+            rows = self.fixture_sql(
+                "SELECT worker_id FROM forge_agent.coding_worker_readiness"
+                " WHERE worker_id = %s", (worker_id,))
+            self.assertEqual([row[0] for row in rows], [worker_id])
+            audit = self.fixture_sql(
+                "SELECT db_role FROM forge_pg_proxy.audit"
+                " WHERE operation = 'function.forge_coding_worker_api.advertise'"
+                " AND db_role = 'forge_coding_worker'")
+            self.assertEqual(len(audit), 1)
+        finally:
+            self.fixture_sql(
+                "DELETE FROM forge_agent.coding_worker_readiness"
+                " WHERE worker_id = %s", (worker_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.coding_worker_grants"
+                " WHERE worker_role = 'forge_coding_worker'"
+                " AND owner_id = 'mission-control'"
+                " AND project_alias = 'homelab'"
+                " AND agent_profile = 'agy' AND mode = 'plan'")
+
+    def test_worker_db_reconcile_factory_uses_the_reconciler_caller(self):
+        from pathlib import Path
+        from work_worker_config import DatabaseConfig, ProxyConfig
+        config = DatabaseConfig(
+            Path("/var/run/postgresql"), 5432, "forge_agent",
+            "forge_coding_worker",
+            proxy=ProxyConfig(self._proxy_url(),
+                              Path(self._token_file("reconciler"))))
+        connection = config.connect_factory(reconciler=True)()
+        self.assertEqual(connection.client.caller, "reconciler")
+        connection.close()
+
+    def test_queue_store_connect_reads_through_the_proxy(self):
+        import queue_store
+        from unittest.mock import patch
+        env = {
+            "FORGE_PG_PROXY_URL": self._proxy_url(),
+            "FORGE_PG_PROXY_TOKEN_FILE": self._token_file("coordinator"),
+            "FORGE_PG_PROXY_CALLER": "coordinator",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            connection = queue_store.connect()
+            try:
+                from proxy_client import ProxyConnection
+                self.assertIsInstance(connection, ProxyConnection)
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT count(*) FROM forge_agent.coding_tasks")
+                    self.assertEqual(cursor.fetchone()[0], 0)
+            finally:
+                connection.close()
+
+    def test_gpu_caller_next_model_probe_through_the_proxy(self):
+        import proxy_client
+        connection = proxy_client.connect(
+            self._proxy_url(), "gpu",
+            token_file=self._token_file("gpu"))
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT forge_agent_worker_api.next_model(%s)", ([],))
+                row = cursor.fetchone()
+            self.assertIsNotNone(row)
+        finally:
+            connection.close()
+
+
 class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
     """Finding 11: preparation and cutover are separate, verifiable
     stages — an ordinary apply.sql run stops at preparation."""

@@ -331,7 +331,7 @@ _TXN_SEMANTIC_RE = re.compile(
 _SELECT_ONE_RE = re.compile(r"^SELECT (1|TRUE|FALSE)$", re.IGNORECASE)
 
 
-def _translate_special(sql, params):
+def _translate_special(sql, params, caller=None):
     """Locally-answered statements; None when the statement is not special."""
     match = _SET_CONFIG_RE.match(sql)
     if match:
@@ -1601,7 +1601,7 @@ def translate(sql, params=None, caller=None):
     if "FOR UPDATE" in upper or "SKIP LOCKED" in upper:
         raise UnsupportedStatement(
             sql, "row locking (FOR UPDATE / SKIP LOCKED) needs a composite")
-    special = _translate_special(flat, params)
+    special = _translate_special(flat, params, caller)
     if special is not None:
         return special
     if upper.startswith("SELECT"):
