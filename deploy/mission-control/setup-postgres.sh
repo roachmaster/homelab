@@ -282,8 +282,10 @@ IFS=: read -r _ _ uid gid _ home shell < <(getent passwd "$runner")
 psql_as postgres postgres -f "$directory/sql/provision.sql"
 psql_as postgres forge_agent -c 'SET ROLE forge_agent_owner' -f "$directory/sql/apply.sql" \
     -f "$directory/sql/management/grant-runner.sql"
-# A fresh provision applies the cutover migration, so re-select the
-# auth files after apply.sql before verifying the cluster.
+# apply.sql stops at the preparation migration (39); cutover (40)
+# applies only via proxy-cutover.sh. Re-select the auth files after
+# apply.sql so a post-cutover re-provision still installs the proxy
+# HBA template before verifying the cluster.
 hba_changed=false
 install_auth_files
 if [[ "$hba_changed" == true ]]; then

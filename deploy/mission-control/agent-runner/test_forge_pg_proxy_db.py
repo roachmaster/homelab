@@ -7,9 +7,10 @@ and HBA rules apply, and the real proxy serves HTTP. The fixture
 builds the cluster from initdb (trust auth for the functional
 cluster; the admission cluster installs the real HBA template),
 applies provision.sql + migrations to a target version, and tears
-the cluster down afterwards. Run via the `proxy-db` gate in
-merge-gates.sh; the disposable-Postgres flag does not affect it
-(this suite owns its cluster, it does not use the shared fixture).
+the cluster down afterwards. The suite runs inside the
+py-agent-runner gate (unittest discover); the
+disposable-Postgres flag does not affect it (this suite owns its
+cluster, it does not use the shared fixture).
 """
 
 import json
@@ -50,20 +51,40 @@ def _free_port():
 
 
 def _parse_apply_sql():
-    """(version, filename, name) triples from apply.sql, in order."""
+    """(version, filename, name) triples from apply.sql, in order.
+
+    apply.sql stops at the preparation migration (39); cutover (40)
+    applies only via apply-cutover.sql, so the count is not pinned
+    to 40 — assert the files and values agree and the versions are
+    contiguous from 1."""
     with open(os.path.join(SQL_DIR, "apply.sql"),
                encoding="utf-8") as handle:
         text = handle.read()
     files = re.findall(r"\\ir migrations/(\d{4}_[a-z0-9_]+\.sql)", text)
     values = re.findall(
         r"VALUES\s*\(\s*(\d+)\s*,\s*'([a-z0-9_]+)'\s*\)", text)
-    assert len(files) == len(values) == 40, (
+    assert len(files) == len(values), (
         f"apply.sql parse: {len(files)} files, {len(values)} values")
     triples = [(int(version), filename, name)
                for filename, (version, name) in zip(files, values)]
-    assert [version for version, _, _ in triples] == sorted(
-        version for version, _, _ in triples)
+    assert [version for version, _, _ in triples] == list(
+        range(1, len(triples) + 1))
     return triples
+
+
+def _parse_cutover_sql():
+    """(version, filename, name) for the cutover migration (40) from
+    apply-cutover.sql: the only path that applies it."""
+    with open(os.path.join(SQL_DIR, "apply-cutover.sql"),
+               encoding="utf-8") as handle:
+        text = handle.read()
+    files = re.findall(r"\\ir migrations/(\d{4}_[a-z0-9_]+\.sql)", text)
+    values = re.findall(
+        r"VALUES\s*\(\s*(\d+)\s*,\s*'([a-z0-9_]+)'\s*\)", text)
+    assert len(files) == len(values) == 1, (
+        f"apply-cutover.sql parse: {len(files)} files, "
+        f"{len(values)} values")
+    return (int(values[0][0]), files[0], values[0][1])
 
 
 class ScratchCluster:
@@ -180,6 +201,35 @@ class ScratchCluster:
                       f"'{MUSE_EVENTS_PASSWORD}'")
         self.psql("postgres",
                   "GRANT CONNECT ON DATABASE forge_agent TO muse_events")
+
+    def apply_cutover(self):
+        """Apply ONLY migration 40 via apply-cutover.sql's model, as
+        forge_agent_owner, in one transaction: the cutover guard
+        (39 applied) plus the migration and its schema_migrations
+        row. The caller re-runs apply_grant_files() afterwards, the
+        way setup-postgres.sh does (the grant files re-apply the
+        cutover revocation when 40 is recorded)."""
+        version, filename, name = _parse_cutover_sql()
+        path = os.path.join(SQL_DIR, "migrations", filename)
+        script = os.path.join(self.root, "apply-cutover.sql")
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write("\n".join([
+                "\\set ON_ERROR_STOP on",
+                "BEGIN ISOLATION LEVEL READ COMMITTED;",
+                "SELECT pg_catalog.pg_advisory_xact_lock(20261111, 1);",
+                "DO $cutover_guard$ BEGIN IF NOT EXISTS("
+                "SELECT 1 FROM forge_agent.schema_migrations"
+                " WHERE version = 39 AND name = 'pg_proxy_preparation'"
+                ") THEN RAISE EXCEPTION 'cutover requires the"
+                " preparation migration (39) first'; END IF; END"
+                " $cutover_guard$;",
+                f"\\ir {path}",
+                "INSERT INTO forge_agent.schema_migrations"
+                f" (version, name) VALUES ({version}, '{name}');",
+                "COMMIT;",
+            ]) + "\n")
+        self.psql_file("forge_agent", script,
+                       role="postgres", set_role="forge_agent_owner")
 
     def apply_grant_files(self):
         mgmt = os.path.join(SQL_DIR, "management")
