@@ -1,8 +1,9 @@
-"""Explicit, audited AGY backup route for a genuinely quota-stopped source.
+"""Audited AGY execution overlays and private stopped-source recovery.
 
-The original workflow authority, Plans and attempts remain immutable. A completed
-operator action selects future execution recipes for this workflow only. No
-normal submission or provider invocation automatically chooses a paid fallback.
+Original workflow authority, Plans and attempts remain immutable. Quota routing
+uses explicitly configured backups. The separate private binary-pin port resumes
+the unchanged failed Plan recipe only after source-bound installation evidence;
+it grants no Plan/code approval and has no automatic scanner or public API.
 """
 from copy import deepcopy
 from dataclasses import dataclass
@@ -10,7 +11,9 @@ from datetime import UTC,datetime,timedelta
 import hashlib
 import json
 from pathlib import Path
+import os
 import re
+import stat
 from uuid import UUID
 
 from psycopg2.extras import Json
@@ -407,3 +410,245 @@ class QuotaAuditProofFactory:
     def __init__(self,manifest_path,selected_config_path,log_root,*,worker_uid=1000):
         self.args=(manifest_path,selected_config_path,log_root,worker_uid)
     def create(self):return QuotaAuditProof(*self.args)
+
+
+BINARY_PIN_POLICY='forge-stopped-binary-pin-recovery-v1'
+BINARY_PIN_FAILURE='Configured coding program changed after worker startup.'
+_BINARY_ADMISSION=object()
+
+
+@dataclass(frozen=True)
+class BinaryPinRecovery:
+    project_alias:str
+    task_id:UUID
+    attempt_id:UUID
+    expected_revision:int
+    reconciliation_receipt_id:UUID
+    idempotency_key:str
+    note:str
+    def __post_init__(self):
+        if (not isinstance(self.project_alias,str) or not re.fullmatch('[A-Za-z0-9_.-]{1,64}',self.project_alias)
+            or any(not isinstance(x,UUID) for x in(self.task_id,self.attempt_id,self.reconciliation_receipt_id))
+            or type(self.expected_revision)is not int or not 1<=self.expected_revision<2**53
+            or not isinstance(self.idempotency_key,str) or not re.fullmatch('[A-Za-z0-9_.-]{1,128}',self.idempotency_key)
+            or not isinstance(self.note,str) or not self.note.strip() or len(self.note.encode())>1024):
+            raise ValueError('Invalid stopped binary-pin recovery')
+
+
+@dataclass(frozen=True)
+class BinaryPinEvidence:
+    task_id:UUID
+    attempt_id:UUID
+    source_revision:int
+    reconciliation_receipt_id:UUID
+    recipe_digest:str
+    binary_path:str
+    binary_sha256:str
+    binary_version:str
+    source_config_sha256:str
+    manifest_sha256:str
+    worker_id:str
+    incarnation:UUID
+    activated_at:datetime
+    def __post_init__(self):
+        if (any(not isinstance(x,UUID)for x in(self.task_id,self.attempt_id,self.reconciliation_receipt_id,self.incarnation))
+            or type(self.source_revision)is not int or not 1<=self.source_revision<2**53
+            or any(not isinstance(x,str)or not re.fullmatch('[0-9a-f]{64}',x)
+                for x in(self.recipe_digest,self.binary_sha256,self.source_config_sha256,self.manifest_sha256))
+            or not isinstance(self.worker_id,str)or not re.fullmatch('[A-Za-z0-9_.-]{1,64}',self.worker_id)
+            or not isinstance(self.binary_version,str)or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',self.binary_version)
+            or not isinstance(self.binary_path,str)or not self.binary_path.startswith('/opt/')
+            or Path(self.binary_path).name!='agy' or Path(self.binary_path).parent.name!=self.binary_version
+            or '..'in Path(self.binary_path).parts
+            or not isinstance(self.activated_at,datetime)or self.activated_at.tzinfo is None
+            or self.activated_at.utcoffset()!=timedelta(0)):
+            raise ValueError('Invalid immutable binary-pin evidence')
+
+
+@dataclass(frozen=True)
+class BoundBinaryPinAuthority:
+    store:object
+    cursor:object
+    workflow_id:UUID
+    task_id:UUID
+    attempt_id:UUID
+    revision:int
+    admission:object
+    def validate(self,cursor,task,kind):
+        if (self.admission is not _BINARY_ADMISSION or cursor is not self.cursor or kind!='stopped_binary_pin'
+            or task['workflow_id']!=self.workflow_id or task['id']!=self.task_id
+            or task['latest_attempt_id']!=self.attempt_id or task['revision']!=self.revision
+            or task['mode']!='plan' or task['status']!='failed'):
+            raise Rejected(403,'denied')
+
+
+class StoppedBinaryPinRecovery:
+    """Private operator recovery; no model selection, approval or automatic scan."""
+    def __init__(self,flow,proof):self.flow,self.proof=flow,proof
+    def recover(self,command):
+        if not isinstance(command,BinaryPinRecovery):raise TypeError('Expected typed stopped binary-pin recovery')
+        from work_workflow import recipe_from_snapshot,_ready_for_recipe
+        flow=self.flow;store=flow.store;store._require_project(command.project_alias)
+        request={key:str(value)if isinstance(value,UUID)else value for key,value in vars(command).items()}
+        key='stopped-binary-pin:'+str(command.attempt_id)
+        with flow._transaction()as cursor:
+            flow._project_lock(cursor,command.project_alias)
+            cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(%s,%s,%s) FOR UPDATE',
+                (store.owner,command.project_alias,command.task_id));task=cursor.fetchone()
+            if not task:raise Rejected(404,'not_found')
+            cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE(owner_id,project_alias,workflow_id)=(%s,%s,%s) FOR UPDATE',
+                (store.owner,command.project_alias,task['workflow_id']));w=cursor.fetchone()
+            if not w:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT status,intent,finish_receipt FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",(w['workflow_id'],key))
+            previous=cursor.fetchone()
+            if previous:
+                intent=previous['intent'];finish=previous['finish_receipt']
+                if not isinstance(intent,dict)or intent.get('request')!=request:raise Rejected(409,'idempotency_conflict')
+                if (previous['status']!='completed' or intent.get('policy')!=BINARY_PIN_POLICY
+                    or not isinstance(finish,dict)or finish.get('status')!='stopped_binary_pin_recovered'
+                    or finish.get('intent_sha256')!=sha256_canonical(intent)):
+                    raise Rejected(409,'reconcile_required')
+                return dict(finish['receipt'])
+            flow._current_policy(w);p=w['snapshot'];recipe=recipe_from_snapshot(p,'author_plan')
+            if (w['root_task_id']!=task['id'] or task['mode']!='plan' or task['status']!='failed'
+                or task['revision']!=command.expected_revision or task['latest_attempt_id']!=command.attempt_id
+                or task['cancelled_at']is not None or not task['workflow_required']or task['workflow_review_id']is not None
+                or task['parent_task_id']is not None or task['plan_decision_id']is not None or task['scope_plan_decision_id']is not None
+                or task['agent_profile']!=p['author_profile']or recipe.backend!='antigravity'
+                or task['pinned_recipe']!=recipe.to_dict()or task['recipe_digest']!=recipe.digest
+                or w['phase']not in {'plan','plan_revision','escalated'}
+                or w['phase']=='escalated'and(w['enabled']or w['escalation_reason']!='Agent stopped: failed')
+                or w['phase']!='escalated'and not w['enabled']):raise Rejected(409,'not_reviewable')
+            cursor.execute('SELECT * FROM forge_agent.coding_attempts WHERE(owner_id,project_alias,task_id,attempt_id)=(%s,%s,%s,%s)',
+                (store.owner,command.project_alias,task['id'],command.attempt_id));attempt=cursor.fetchone()
+            cursor.execute('SELECT * FROM forge_agent.coding_reconciliation_receipts WHERE(owner_id,project_alias,task_id,attempt_id,receipt_id)=(%s,%s,%s,%s,%s)',
+                (store.owner,command.project_alias,task['id'],command.attempt_id,command.reconciliation_receipt_id));rec=cursor.fetchone()
+            if (not attempt or not rec or rec['task_revision']!=task['revision']or attempt['phase']!='stopped'
+                or attempt['outcome']!='failed'or attempt['summary']!=BINARY_PIN_FAILURE
+                or attempt['reservation_active']or attempt['lease_expires_at']is not None
+                or not attempt['finished_at']or not attempt['published_at']or attempt['result_sha256']is not None
+                or attempt['pinned_recipe']!=recipe.to_dict()or attempt['recipe_digest']!=recipe.digest
+                or attempt['agent_profile']!=task['agent_profile']):raise Rejected(409,'reconcile_required')
+            stop=rec['stop_proof']
+            try:checked=datetime.fromisoformat(stop['checked_at'].replace('Z','+00:00'))
+            except(KeyError,TypeError,ValueError):raise Rejected(409,'reconcile_required')from None
+            if (stop.get('scope_stopped')is not True or stop.get('source')!='systemd'
+                or stop.get('unit_name')!=attempt['unit_name']or checked.tzinfo is None or checked<attempt['started_at']):
+                raise Rejected(409,'reconcile_required')
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND id<>%s AND mode IN('plan','implement') AND created_at>=%s) "
+                "OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND(status IN('queued','running','cancelled','cancel_requested')OR cancelled_at IS NOT NULL)) "
+                "OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id)WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) "
+                "OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) "
+                "OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_reviews WHERE workflow_id=%s AND status='reviewing') "
+                "OR EXISTS(SELECT 1 FROM forge_agent.coding_plan_decisions WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND decision='resume') "
+                "OR EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id)WHERE t.workflow_id=%s AND e.event_kind IN('cancelled','cancel_requested')) AS busy",
+                (w['workflow_id'],task['id'],task['created_at'],w['workflow_id'],w['workflow_id'],w['workflow_id'],w['workflow_id'],store.owner,command.project_alias,task['id'],w['workflow_id']))
+            if cursor.fetchone()['busy']:raise Rejected(409,'not_reviewable')
+            evidence=self.proof.acquire(command,task,attempt,w)
+            if (not isinstance(evidence,BinaryPinEvidence)or evidence.task_id!=command.task_id or evidence.attempt_id!=command.attempt_id
+                or evidence.source_revision!=command.expected_revision or evidence.reconciliation_receipt_id!=command.reconciliation_receipt_id
+                or evidence.recipe_digest!=recipe.digest or evidence.activated_at<=attempt['finished_at']or evidence.activated_at>datetime.now(UTC)):
+                raise Rejected(409,'result_mismatch')
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND worker_id=%s AND incarnation=%s "
+                "AND policy_digest=%s AND observed_at>=clock_timestamp()-interval '90 seconds'AND observed_at>=%s",
+                (store.owner,evidence.worker_id,evidence.incarnation,recipe.policy_digest,evidence.activated_at));ready=cursor.fetchall()
+            if not _ready_for_recipe(ready,command.project_alias,task['agent_profile'],'plan',recipe):raise Rejected(503,'unavailable')
+            reviewer=recipe_from_snapshot(p,'reviewer_review')
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=%s AND observed_at>=clock_timestamp()-interval '90 seconds'",
+                (store.owner,reviewer.policy_digest))
+            if not _ready_for_recipe(cursor.fetchall(),command.project_alias,p['reviewer_profile'],'review',reviewer):raise Rejected(503,'unavailable')
+            cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase=%s,escalation_reason='',updated_at=clock_timestamp()WHERE workflow_id=%s",
+                ('plan_revision'if w['plan_revisions']else'plan',w['workflow_id']))
+            for alias,mode in((p['author_profile'],'plan'),(p['reviewer_profile'],'review')):flow._grant(cursor,w,alias,mode)
+            authority=BoundBinaryPinAuthority(store,cursor,w['workflow_id'],task['id'],command.attempt_id,task['revision'],_BINARY_ADMISSION)
+            receipt=store.resume(project_alias=command.project_alias,task_id=task['id'],expected_revision=command.expected_revision,
+                idempotency_key=command.idempotency_key,agent_profile=task['agent_profile'],reconciliation_receipt_id=command.reconciliation_receipt_id,
+                note='Operator verified the immutable AGY binary after a pre-execution pin refusal. '+command.note,
+                allowed_modes={'plan'},resolve_recipe=lambda _:recipe,_authority=authority,actor=operator_actor(store.owner))
+            proof={name:str(value)if isinstance(value,UUID)else value.isoformat()if isinstance(value,datetime)else value for name,value in vars(evidence).items()}
+            intent=dict(policy=BINARY_PIN_POLICY,request=request,workflow_id=str(w['workflow_id']),original_policy_digest=w['policy_digest'],
+                recipe=recipe.to_dict(),recipe_digest=recipe.digest,source_failure=BINARY_PIN_FAILURE,evidence=proof)
+            cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt)VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
+                (w['workflow_id'],store.owner,command.project_alias,key,Json(intent),Json(dict(status='stopped_binary_pin_recovered',intent_sha256=sha256_canonical(intent),receipt=receipt))))
+            insert_event(cursor,store.owner,command.project_alias,task['id'],'checkpoint',dict(stage='stopped_binary_pin_recovery',
+                policy=BINARY_PIN_POLICY,source_attempt_id=str(command.attempt_id),binary_version=evidence.binary_version,
+                binary_sha256=evidence.binary_sha256),actor=operator_actor(store.owner))
+            return receipt
+
+
+class StoppedBinaryPinRecoveryFactory:
+    def __init__(self,flow,proof):self.flow,self.proof=flow,proof
+    def create(self):
+        if not callable(getattr(self.proof,'acquire',None)):raise TypeError('Expected ready immutable binary proof port')
+        return StoppedBinaryPinRecovery(self.flow,self.proof)
+
+
+def _immutable_binary_sha256(path):
+    """Read the explicitly selected root-owned versioned executable, no spawn."""
+    descriptor=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        for part in path.parts[1:-1]:
+            current=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=descriptor)
+            info=os.fstat(current)
+            if info.st_uid!=0 or info.st_mode&0o022:
+                os.close(current);raise ValueError('Unsafe immutable binary parent')
+            os.close(descriptor);descriptor=current
+        target=os.open(path.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=descriptor)
+        with os.fdopen(target,'rb')as stream:
+            before=os.fstat(stream.fileno())
+            if (not stat.S_ISREG(before.st_mode)or before.st_uid!=0 or before.st_mode&0o022 or not before.st_mode&0o111
+                or before.st_nlink!=1 or not 0<before.st_size<=512*1024*1024):raise ValueError('Unsafe immutable binary')
+            digest=hashlib.sha256();total=0
+            while True:
+                block=stream.read(1024*1024)
+                if not block:break
+                total+=len(block)
+                if total>512*1024*1024:raise ValueError('Immutable binary exceeds bound')
+                digest.update(block)
+            after=os.fstat(stream.fileno())
+            if (before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns)or total!=before.st_size:
+                raise ValueError('Immutable binary changed during observation')
+            return digest.hexdigest()
+    finally:os.close(descriptor)
+
+
+class PinnedBinaryProof:
+    """Root-sealed installation/version declaration plus exact selected config."""
+    def __init__(self,path):self.path=path
+    def acquire(self,command,task,attempt,workflow):
+        from work_external_delivery import read_private
+        from work_external_review_context import strict_json
+        from work_worker_config import parse_config,verify_recipe
+        raw=read_private(self.path,owner=0,maximum=65536);value=strict_json(raw)
+        if (not isinstance(value,dict)or set(value)!={'version','owner','binary','worker','sources'}
+            or type(value['version'])is not int or value['version']!=1 or value['owner']!=task['owner_id']
+            or not isinstance(value['sources'],list)or not 1<=len(value['sources'])<=64):raise ValueError('Invalid binary-pin manifest')
+        binary=value['binary'];worker=value['worker']
+        if (not isinstance(binary,dict)or set(binary)!={'path','sha256','version'}
+            or not isinstance(worker,dict)or set(worker)!={'config_path','config_sha256','worker_id','uid','incarnation','activated_at'}
+            or type(worker['uid'])is not int or worker['uid']<=0):raise ValueError('Invalid selected binary worker')
+        sources=[item for item in value['sources']if isinstance(item,dict)and item.get('attempt_id')==str(command.attempt_id)]
+        expected=dict(workflow_id=str(workflow['workflow_id']),task_id=str(command.task_id),attempt_id=str(command.attempt_id),
+            source_revision=command.expected_revision,recipe_digest=task['recipe_digest'],reconciliation_receipt_id=str(command.reconciliation_receipt_id))
+        if len(sources)!=1 or sources[0]!=expected or type(sources[0]['source_revision'])is not int:raise ValueError('Binary-pin manifest source changed')
+        evidence=BinaryPinEvidence(command.task_id,command.attempt_id,command.expected_revision,command.reconciliation_receipt_id,
+            task['recipe_digest'],binary['path'],binary['sha256'],binary['version'],worker['config_sha256'],hashlib.sha256(raw).hexdigest(),
+            worker['worker_id'],UUID(worker['incarnation']),datetime.fromisoformat(worker['activated_at'].replace('Z','+00:00')))
+        if _immutable_binary_sha256(Path(evidence.binary_path))!=evidence.binary_sha256:raise ValueError('Immutable binary digest changed')
+        selected=Path(worker['config_path'])
+        if not selected.is_absolute()or '..'in selected.parts:raise ValueError('Invalid selected worker path')
+        config_raw=read_private(selected,owner=worker['uid'],maximum=65536)
+        if hashlib.sha256(config_raw).hexdigest()!=evidence.source_config_sha256:raise ValueError('Selected worker config changed')
+        config=parse_config(strict_json(config_raw))
+        if (config.owner!=task['owner_id']or config.worker_id!=evidence.worker_id or config.account.uid!=worker['uid']
+            or config.binaries.get('antigravity')!=Path(evidence.binary_path)
+            or not verify_recipe(config,dict(agent_profile=task['agent_profile'],project_alias=command.project_alias,mode='plan',recipe=task['pinned_recipe']))):
+            raise ValueError('Selected worker does not support the unchanged source recipe')
+        return evidence
+
+
+class PinnedBinaryProofFactory:
+    def __init__(self,path):
+        self.path=Path(path)
+        if not self.path.is_absolute()or '..'in self.path.parts:raise ValueError('Expected absolute sealed manifest path')
+    def create(self):return PinnedBinaryProof(self.path)
