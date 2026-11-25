@@ -218,7 +218,7 @@ import sys
 import time
 
 for _ in range(40):
-    connection = http.client.HTTPConnection("127.0.0.1", 18084, timeout=1)
+    connection = http.client.HTTPConnection("127.0.0.1", 18087, timeout=1)
     try:
         connection.request("GET", "/health")
         response = connection.getresponse()

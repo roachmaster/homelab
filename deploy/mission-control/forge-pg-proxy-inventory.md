@@ -71,8 +71,10 @@ SECURITY DEFINER API functions above are the bulk of its work.)
 `review_renew`.
 
 ### forge_agent_worker_api (caller: gpu)
-`advertise`, `next_model`, `claim`, `renew`, `publish`,
-`lock_attempt`.
+`advertise`, `next_model`, `claim`, `renew`, `publish`.
+(`lock_attempt` is an internal function called server-side by
+`claim`/`publish`; it is not a caller operation and no caller may
+invoke it through the proxy.)
 
 ### forge_external_agent_api (callers: muse via writer; coordinator via service role)
 Mutating (writer principal): `advertise`, `claim`, `finish`,
@@ -118,7 +120,7 @@ statement shape for that table/verb. No dynamic SQL.
 | `forge_agent.jenkins_events` | `jenkins_event_insert` | — | — |
 | `forge_agent.jenkins_event_deliveries` | `jenkins_event_delivery_insert` | `jenkins_event_delivery_update` | — |
 | `forge_agent.jenkins_observations` | `jenkins_observation_insert` | — | — |
-| `forge_agent.inference_results` | — | — | `inference_result_delete` |
+| `forge_agent.inference_results` | — | — | `inference_result_delete` (coordinator only; deleting inference results is outside the approved GPU boundary) |
 | `forge_external_workflow.workflows` | `ext_workflow_insert` | `ext_workflow_update` | — |
 | `forge_external_workflow.tasks` | `ext_task_insert` | — | — |
 | `forge_external_workflow.contexts` | `ext_context_insert` | — | — |
@@ -148,7 +150,19 @@ Two kinds, both fixed SQL in the registry — no client-supplied SQL:
 - **Point/list reads** (`read.<table>`): one operation per table,
   equality filters only on that table's registered key columns
   (PK and the indexed lookup columns the codebase uses), fixed
-  column list (all columns), fixed `ORDER BY` + `LIMIT`.
+  column list (all columns), fixed `ORDER BY` + `LIMIT`. Every read
+  is also scoped to the authenticated caller's owner
+  (`forge.coding_owner` bound from trusted config; a foreign
+  `owner_id` filter is refused): tables with an `owner_id` column
+  carry `owner_id = <caller>`; tables without one join to their
+  owning table (workflow reviews/actions to `coding_workflows`,
+  reviews/publications/decisions/feedback/checks to `coding_tasks`,
+  runs/messages to `conversations`, tool calls/results/events and
+  inference results to runs+conversations, Jenkins deliveries to
+  `jenkins_events`, retry admissions to `coding_retry_events`,
+  external reviews/actions to `workflows`, contexts/artifacts to
+  `assignments`); `gpu_worker_readiness` has no owner column and is
+  scoped to the reader's DB role (`worker_name = session_user`).
   Tables: every table in §3 plus `coding_attempts`,
   `coding_result_chunks`, `coding_reconciliation_receipts`,
   `coding_publications`, `coding_worker_readiness`,
@@ -172,13 +186,23 @@ Two kinds, both fixed SQL in the registry — no client-supplied SQL:
 | `forge_coding_jobs` | native worker (WorkStore) | proxy LISTEN + long-poll |
 | `forge_jenkins_events` | jenkins store | proxy LISTEN + long-poll |
 | `forge_external_agent_jobs` | external-agent enqueue | proxy LISTEN + long-poll |
-| usage-refresh channel (`USAGE_REFRESH_NOTIFY_CHANNEL`) | worker store | proxy LISTEN + long-poll |
+| `forge_external_delivery` | external delivery (coordinator publishes; consumers poll `delivery_available`) | proxy `notify` op only |
+| usage-refresh channel (`forge_coding_usage_refresh`, i.e. `USAGE_REFRESH_NOTIFY_CHANNEL`) | worker store | proxy LISTEN + long-poll |
 
 The proxy holds one LISTEN connection per channel and fans out
-notifications to subscribed callers. `pg_notify` calls are issued
-by the proxy itself after the triggering write commits (the
-`pg_notify` statements in `queue_store.py` and `jenkins_store.py`
-become proxy operations).
+notifications to subscribed callers. Subscribing to a channel
+(POST `/v1/notifications` long-poll) and publishing on it
+(`notify.<channel>` op) are separate permissions: the GPU worker
+subscribes to `forge_agent_jobs` but publishes nothing; Muse
+subscribes to `forge_external_agent_jobs` but publishes nothing
+(the channel is notified by the transport functions themselves);
+the coordinator publishes `forge_coding_jobs`, `forge_agent_jobs`,
+`forge_agent_events`, `forge_external_delivery`,
+`forge_jenkins_events`, and `forge_coding_usage_refresh` (its
+`pg_notify` calls in `queue_store.py`, `work_store.py`,
+`jenkins_store.py`, and `usage_store.py` become proxy operations).
+Each subscriber keeps its own cursor per channel, so one waiter
+never consumes another caller's notifications.
 
 ## 6. Connection paths (HBA / roles / auth)
 

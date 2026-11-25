@@ -121,6 +121,44 @@ class ProxyAuthTest(unittest.TestCase):
             with self.assertRaises(proxy.Rejected) as caught:
                 instance.execute(gpu, operation, {})
             self.assertEqual(caught.exception.code, "not_allowed")
+        # The GPU identity is exactly the five approved operations:
+        # no lock_attempt, no inference_result_delete, no reads.
+        for operation in ("fn.forge_agent_worker_api.lock_attempt",
+                          "op.inference_result_delete",
+                          "read.forge_agent.inference_results",
+                          "read.forge_agent.runs",
+                          "read.forge_agent.gpu_worker_readiness",
+                          "notify.forge_agent_jobs"):
+            with self.assertRaises(proxy.Rejected) as caught:
+                instance.execute(gpu, operation, {})
+            self.assertEqual(caught.exception.code, "not_allowed")
+        # Subscription and publication are separate: the GPU worker
+        # may subscribe to forge_agent_jobs but not publish on it,
+        # and Muse may subscribe to its own channel but not publish.
+        self.assertTrue(instance.callers["gpu"].allows(
+            "subscribe.forge_agent_jobs"))
+        self.assertFalse(instance.callers["gpu"].allows(
+            "notify.forge_agent_jobs"))
+        self.assertTrue(instance.callers["muse"].allows(
+            "subscribe.forge_external_agent_jobs"))
+        self.assertFalse(instance.callers["muse"].allows(
+            "notify.forge_external_agent_jobs"))
+        # The coordinator may both publish and subscribe.
+        self.assertTrue(instance.callers["coordinator"].allows(
+            "subscribe.forge_coding_jobs"))
+        self.assertTrue(instance.callers["coordinator"].allows(
+            "notify.forge_coding_jobs"))
+        # The worker publishes nothing and subscribes to its two
+        # channels; the reconciler and operator neither publish nor
+        # subscribe.
+        self.assertFalse(instance.callers["worker"].allows(
+            "notify.forge_coding_jobs"))
+        self.assertTrue(instance.callers["worker"].allows(
+            "subscribe.forge_coding_usage_refresh"))
+        self.assertFalse(instance.callers["reconciler"].allows(
+            "subscribe.forge_coding_jobs"))
+        self.assertFalse(instance.callers["operator"].allows(
+            "subscribe.forge_coding_jobs"))
         # The worker may not use the GPU API or the Muse transport.
         worker = instance.callers["worker"]
         for operation in ("fn.forge_agent_worker_api.claim",
@@ -250,6 +288,30 @@ class ProxyAuditTest(unittest.TestCase):
         self.assertEqual(audits[0][1][:3],
                          ("coordinator", "coordinator", "entry.coding_task_update"))
 
+    def test_audit_preserves_identifiers_and_redacts_payload(self):
+        args = {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "attempt_no": 3,
+            "status": "running",
+            "owner_id": "mission-control",
+            "digest": "a" * 64,
+            "models": ["gpt-oss-20b", "llama-4"],
+            "prompt": "do the thing with the database",
+            "content": "a long free-text result body",
+            "payload": {"key": "value"},
+        }
+        kept = proxy._audit_args(args)
+        self.assertEqual(
+            kept["id"], "00000000-0000-0000-0000-000000000001")
+        self.assertEqual(kept["attempt_no"], 3)
+        self.assertEqual(kept["status"], "running")
+        self.assertEqual(kept["owner_id"], "mission-control")
+        self.assertEqual(kept["digest"], "a" * 64)
+        self.assertEqual(kept["models"], ["gpt-oss-20b", "llama-4"])
+        self.assertEqual(kept["prompt"], "str")
+        self.assertEqual(kept["content"], "str")
+        self.assertEqual(kept["payload"], "dict")
+
     def test_a_failed_audit_rolls_the_mutation_back(self):
         instance, created = make_proxy(fail_audit=True)
         coordinator = instance.callers["coordinator"]
@@ -274,10 +336,71 @@ class ProxyReadTest(unittest.TestCase):
              "limit": 5})
         self.assertEqual(result, {"rows": []})
         selects = [sql for sql, _ in created[0].statements
-                   if sql.startswith("SELECT * FROM")]
+                   if sql.startswith("SELECT t.* FROM")]
         self.assertEqual(len(selects), 1)
         self.assertIn("forge_agent.coding_tasks", selects[0])
         self.assertNotIn("queued", selects[0])
+
+    def test_reads_always_carry_the_callers_owner_scope(self):
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        # No filter at all: the read is still scoped to the caller.
+        instance.execute(coordinator, "read.forge_agent.coding_tasks",
+                         {})
+        selects = [(sql, params) for sql, params in created[0].statements
+                   if sql.startswith("SELECT t.* FROM")]
+        self.assertEqual(len(selects), 1)
+        self.assertIn("t.owner_id = %s", selects[0][0])
+        self.assertEqual(selects[0][1][0], "mission-control")
+
+    def test_reads_reject_a_foreign_owner_filter(self):
+        instance, _ = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        with self.assertRaises(proxy.Rejected) as caught:
+            instance.execute(
+                coordinator, "read.forge_agent.coding_tasks",
+                {"filter": {"owner_id": "other-owner"}})
+        self.assertEqual(caught.exception.code, "not_allowed")
+
+    def test_reads_scope_joined_tables_to_the_owner(self):
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        instance.execute(coordinator,
+                         "read.forge_agent.coding_workflow_reviews",
+                         {"filter": {"status": "reviewing"}})
+        selects = [sql for sql, _ in created[0].statements
+                   if sql.startswith("SELECT t.* FROM")]
+        self.assertEqual(len(selects), 1)
+        self.assertIn(
+            "JOIN forge_agent.coding_workflows wf "
+            "ON wf.workflow_id = t.workflow_id", selects[0])
+        self.assertIn("wf.owner_id = %s", selects[0])
+
+    def test_role_scoped_reads_bind_the_callers_role(self):
+        instance, created = make_proxy()
+        gpu = instance.callers["gpu"]
+        # The GPU worker may not read at all (allowlist), so use the
+        # coordinator's view of the table shape via a direct call:
+        # gpu_worker_readiness is role-scoped to the reader's role.
+        coordinator = instance.callers["coordinator"]
+        instance.execute(coordinator,
+                         "read.forge_agent.gpu_worker_readiness",
+                         {"filter": {"worker_name": "forge_agent"}})
+        selects = [(sql, params) for sql, params in created[0].statements
+                   if sql.startswith("SELECT t.* FROM")]
+        self.assertEqual(len(selects), 1)
+        self.assertIn("t.worker_name = %s", selects[0][0])
+        self.assertEqual(selects[0][1][0], "forge_agent")
+        with self.assertRaises(proxy.Rejected) as caught:
+            instance.execute(
+                coordinator, "read.forge_agent.gpu_worker_readiness",
+                {"filter": {"worker_name": "forge_gpu_worker"}})
+        self.assertEqual(caught.exception.code, "not_allowed")
+        # And the GPU caller itself may not read the table at all.
+        with self.assertRaises(proxy.Rejected) as caught:
+            instance.execute(gpu, "read.forge_agent.gpu_worker_readiness",
+                             {})
+        self.assertEqual(caught.exception.code, "not_allowed")
 
     def test_reads_reject_unknown_tables_and_columns(self):
         instance, _ = make_proxy()
@@ -368,6 +491,63 @@ class ProxyHealthTest(unittest.TestCase):
         self.assertFalse(instance.health())
 
 
+class ProxyHubTest(unittest.TestCase):
+    """NotificationHub fan-out: one waiter's delivery never consumes
+    another's, and already-queued notifications return at once."""
+
+    def _hub_with_note(self, channel="forge_coding_jobs"):
+        hub = proxy.NotificationHub(
+            {"host": "127.0.0.1", "port": 5432, "dbname": "forge_agent"},
+            channels=frozenset({channel}))
+        # Seed one notification the way _listen_loop appends it.
+        with hub._cond:
+            hub._seq[channel] += 1
+            hub._notes[channel].append((hub._seq[channel], {
+                "channel": channel, "payload": "", "pid": 1}))
+            hub._cond.notify_all()
+        return hub
+
+    def test_two_subscribers_both_receive_the_same_notification(self):
+        hub = self._hub_with_note()
+        first = hub.wait("worker", "forge_coding_jobs", 1)
+        second = hub.wait("coordinator", "forge_coding_jobs", 1)
+        self.assertEqual(len(first["notifications"]), 1)
+        self.assertEqual(len(second["notifications"]), 1)
+        self.assertEqual(first["notifications"],
+                         second["notifications"])
+
+    def test_a_second_wait_by_the_same_caller_gets_nothing_new(self):
+        hub = self._hub_with_note()
+        first = hub.wait("worker", "forge_coding_jobs", 1)
+        self.assertEqual(len(first["notifications"]), 1)
+        second = hub.wait("worker", "forge_coding_jobs", 0)
+        self.assertEqual(second, {"notifications": []})
+
+    def test_already_queued_notifications_return_immediately(self):
+        import time
+        hub = self._hub_with_note()
+        start = time.monotonic()
+        result = hub.wait("worker", "forge_coding_jobs", 10)
+        elapsed = time.monotonic() - start
+        self.assertEqual(len(result["notifications"]), 1)
+        self.assertLess(elapsed, 5)
+
+    def test_wait_times_out_empty_when_nothing_arrives(self):
+        hub = proxy.NotificationHub(
+            {"host": "127.0.0.1", "port": 5432, "dbname": "forge_agent"},
+            channels=frozenset({"forge_coding_jobs"}))
+        self.assertEqual(hub.wait("worker", "forge_coding_jobs", 0),
+                         {"notifications": []})
+
+    def test_wait_rejects_an_unknown_channel(self):
+        hub = proxy.NotificationHub(
+            {"host": "127.0.0.1", "port": 5432, "dbname": "forge_agent"},
+            channels=frozenset({"forge_coding_jobs"}))
+        with self.assertRaises(proxy.Rejected) as caught:
+            hub.wait("worker", "nope", 1)
+        self.assertEqual(caught.exception.code, "unknown_operation")
+
+
 class ProxyHttpTest(unittest.TestCase):
     def setUp(self):
         self.instance, _ = make_proxy()
@@ -450,7 +630,7 @@ class ProxyHttpTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, {"notifications": []})
         self.hub.wait.assert_called_once_with(
-            "forge_external_agent_jobs", 1)
+            "muse", "forge_external_agent_jobs", 1)
 
 
 class ProxyCatalogTest(unittest.TestCase):
@@ -476,6 +656,51 @@ class ProxyCatalogTest(unittest.TestCase):
         for name, spec in proxy.CALLER_ALLOWLISTS.items():
             unknown = set(spec["fn"]) - catalog
             self.assertEqual(unknown, set(), name)
+
+    def test_config_allowlist_narrows_only_the_kinds_it_names(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            config = {"callers": {},
+                      "db": {"dbname": "forge_agent",
+                             "host": "127.0.0.1", "port": 5432}}
+            for name in ("coordinator", "gpu"):
+                path = os.path.join(tmp, f"{name}.token")
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(f"token-{name}")
+                spec = {"owner": "mission-control",
+                        "token_file": path}
+                if name == "gpu":
+                    # Narrow only fn: subscribe keeps its built-in
+                    # set instead of being silently denied.
+                    spec["allowlist"] = {
+                        "fn": ["forge_agent_worker_api.advertise"]}
+                config["callers"][name] = spec
+            instance, _ = proxy.build_proxy(config)
+            gpu = instance.callers["gpu"]
+            self.assertTrue(gpu.allows(
+                "fn.forge_agent_worker_api.advertise"))
+            self.assertFalse(gpu.allows(
+                "fn.forge_agent_worker_api.claim"))
+            self.assertTrue(gpu.allows("subscribe.forge_agent_jobs"))
+            self.assertFalse(gpu.allows("notify.forge_agent_jobs"))
+
+    def test_config_allowlist_cannot_widen(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "gpu.token")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("token-gpu")
+            config = {"callers": {
+                "gpu": {"owner": "mission-control",
+                        "token_file": path,
+                        "allowlist": {
+                            "fn": ["forge_agent_worker_api.lock_attempt"]}}},
+                      "db": {"dbname": "forge_agent",
+                             "host": "127.0.0.1", "port": 5432}}
+            with self.assertRaises(ValueError):
+                proxy.build_proxy(config)
 
     def test_argument_validation_rejects_wrong_types(self):
         with self.assertRaises(proxy.Rejected):

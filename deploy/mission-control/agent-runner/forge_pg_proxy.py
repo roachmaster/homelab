@@ -23,7 +23,10 @@ Operation names:
 
 Endpoints: GET /health, POST /v1/operation, POST /v1/notifications
 (long-poll). Callers fail fast with a clear error when the proxy is
-unavailable; no caller writes directly as a fallback.
+unavailable; no caller writes directly as a fallback. Subscribing to
+a channel (long-poll) and publishing on it (notify.<channel>) are
+separate permissions: a caller that only waits on a channel cannot
+emit on it.
 """
 
 import json
@@ -33,6 +36,7 @@ import secrets
 import select
 import signal
 import threading
+import time
 import uuid as uuid_mod
 from collections import deque
 from contextlib import closing
@@ -48,6 +52,9 @@ READ_LIMIT_DEFAULT = 100
 READ_LIMIT_MAX = 1000
 
 # Channels the proxy fans out (one LISTEN connection each).
+# "forge_coding_usage_refresh" is the real usage-refresh channel
+# (usage_store.USAGE_REFRESH_NOTIFY_CHANNEL); the earlier
+# "usage_refresh" name matched nothing any caller notifies.
 NOTIFY_CHANNELS = frozenset({
     "forge_agent_jobs",
     "forge_agent_events",
@@ -56,7 +63,7 @@ NOTIFY_CHANNELS = frozenset({
     "forge_jenkins_events",
     "forge_external_agent_jobs",
     "forge_external_delivery",
-    "usage_refresh",
+    "forge_coding_usage_refresh",
 })
 
 UUID_RE = re.compile(
@@ -319,67 +326,87 @@ ENTRY_POINTS = {
 }
 
 # ---------------------------------------------------------------------------
-# Read tables: table -> (key columns, order by). The proxy builds a fixed
-# SELECT with equality filters only on these columns; the table and the
-# column list never come from the request.
+# Read tables: table -> (key columns, order by, owner scope). The proxy
+# builds a fixed SELECT with equality filters only on these columns;
+# the table and the column list never come from the request. Every read
+# is also scoped to the authenticated caller (finding
+# review-cross-owner-reads): the owner scope is mandatory, never a
+# request filter. Owner scope kinds:
+# - ("owner",): the table has its own owner_id column.
+# - ("join", <JOIN clause>, <owner expr>): the owner comes from a
+#   joined owned table (t is the primary table's alias).
+# - ("role", <column>): the row belongs to the caller's DB role
+#   (gpu_worker_readiness has no owner column; its key is the worker
+#   role name, i.e. session_user).
 # ---------------------------------------------------------------------------
 READ_TABLES = {
-    "forge_agent.coding_tasks": (["owner_id", "project_alias", "id", "status", "workflow_id", "mode"], "created_at"),
-    "forge_agent.coding_workflows": (["workflow_id", "owner_id", "project_alias", "root_task_id", "phase"], "created_at"),
-    "forge_agent.coding_workflow_reviews": (["workflow_review_id", "workflow_id", "status"], "created_at"),
-    "forge_agent.coding_workflow_actions": (["action_id", "workflow_id", "status", "kind"], "created_at"),
-    "forge_agent.coding_events": (["owner_id", "project_alias", "task_id", "event_kind"], "sequence"),
-    "forge_agent.coding_control_receipts": (["owner_id", "project_alias", "task_id", "idempotency_key", "action"], "created_at"),
-    "forge_agent.coding_reviews": (["review_id", "task_id", "status"], "created_at"),
-    "forge_agent.coding_attempts": (["owner_id", "project_alias", "task_id", "attempt_id"], "started_at"),
-    "forge_agent.coding_publications": (["publication_id", "task_id", "status"], "created_at"),
-    "forge_agent.coding_result_chunks": (["owner_id", "project_alias", "task_id"], "created_at"),
-    "forge_agent.coding_reconciliation_receipts": (["owner_id", "project_alias", "task_id"], "created_at"),
-    "forge_agent.coding_plan_decisions": (["decision_id", "task_id"], "created_at"),
-    "forge_agent.coding_review_budget": (["owner_id", "project_alias", "root_task_id"], "root_task_id"),
-    "forge_agent.coding_review_policy": (["owner_id", "project_alias"], "owner_id"),
-    "forge_agent.coding_worker_grants": (["worker_role", "owner_id", "project_alias", "agent_profile", "mode"], "granted_at"),
-    "forge_agent.coding_usage_refresh_requests": (["refresh_id", "owner_id", "project_alias", "status"], "requested_at"),
-    "forge_agent.coding_worker_readiness": (["worker_role", "owner_id", "worker_id"], "observed_at"),
-    "forge_agent.gpu_worker_readiness": (["worker_name", "model_id"], "seen_at"),
-    "forge_agent.coding_retry_events": (["event_id", "scope_id", "status"], "created_at"),
-    "forge_agent.coding_feedback": (["feedback_id", "task_id", "review_id"], "created_at"),
-    "forge_agent.coding_hosted_checks": (["task_id", "observation_id"], "observed_at"),
-    "forge_agent.conversations": (["id", "owner_id"], "created_at"),
-    "forge_agent.runs": (["id", "conversation_id", "status", "request_id"], "created_at"),
-    "forge_agent.messages": (["conversation_id", "position", "run_id"], "position"),
-    "forge_agent.tool_calls": (["run_id", "call_id"], "created_at"),
-    "forge_agent.tool_results": (["run_id", "call_id"], "recorded_at"),
-    "forge_agent.run_events": (["run_id", "sequence"], "sequence"),
-    "forge_agent.ide_workspace_tabs": (["owner_id", "tab_id"], "touched_at"),
-    "forge_agent.ide_workspace_history": (["owner_id"], "revision"),
-    "forge_agent.ide_chats": (["owner_id", "id"], "updated_at"),
-    "forge_agent.jenkins_events": (["event_id", "owner_id", "project_alias", "job_name"], "sequence"),
-    "forge_agent.jenkins_event_deliveries": (["delivery_row_id", "event_id", "status", "consumer_name"], "created_at"),
-    "forge_agent.jenkins_observations": (["owner_id", "project_alias", "jenkins_instance", "job_name", "observation_key"], "updated_at"),
-    "forge_agent.inference_results": (["run_id"], "accepted_at"),
-    "forge_agent.mail_threads": (["owner_id", "id"], "updated_at"),
-    "forge_agent.mail_messages": (["owner_id", "thread_id", "sequence", "run_id"], "sequence"),
-    "forge_agent.coding_provider_usage": (["owner_id", "profile_alias"], "updated_at"),
-    "forge_agent.coding_retry_event_admissions": (["event_id", "event_key"], "created_at"),
-    "forge_agent.coding_retry_event_observations": (["owner_id", "project_alias", "scope_kind", "scope_id", "kind", "event_id"], "created_at"),
-    "forge_external_workflow.workflows": (["workflow_id", "owner_id", "project_alias", "phase"], "created_at"),
-    "forge_external_workflow.tasks": (["owner_id", "project_alias", "task_id", "workflow_id", "role"], "task_id"),
-    "forge_external_workflow.reviews": (["review_id", "workflow_id", "status"], "created_at"),
-    "forge_external_workflow.actions": (["action_id", "workflow_id", "status", "kind"], "created_at"),
-    "forge_external_workflow.contexts": (["assignment_id"], "assignment_id"),
-    "forge_external_workflow.plan_approve_overrides": (["override_id", "owner_id", "project_alias", "workflow_id", "root_task_id"], "created_at"),
-    "forge_external_agent.assignments": (["assignment_id", "external_role", "project_alias", "profile_alias", "status", "task_id"], "created_at"),
-    "forge_external_agent.artifacts": (["assignment_id"], "submitted_at"),
-    "forge_external_agent.readiness": (["external_role", "owner_id", "project_alias", "profile_alias"], "observed_at"),
-    "forge_external_agent.scope_grants": (["external_role", "owner_id", "project_alias", "profile_alias"], "external_role"),
+    "forge_agent.coding_tasks": (["owner_id", "project_alias", "id", "status", "workflow_id", "mode"], "created_at", ("owner",)),
+    "forge_agent.coding_workflows": (["workflow_id", "owner_id", "project_alias", "root_task_id", "phase"], "created_at", ("owner",)),
+    "forge_agent.coding_workflow_reviews": (["workflow_review_id", "workflow_id", "status"], "created_at", ("join", "JOIN forge_agent.coding_workflows wf ON wf.workflow_id = t.workflow_id", "wf.owner_id")),
+    "forge_agent.coding_workflow_actions": (["action_id", "workflow_id", "status", "kind"], "created_at", ("join", "JOIN forge_agent.coding_workflows wf ON wf.workflow_id = t.workflow_id", "wf.owner_id")),
+    "forge_agent.coding_events": (["owner_id", "project_alias", "task_id", "event_kind"], "sequence", ("owner",)),
+    "forge_agent.coding_control_receipts": (["owner_id", "project_alias", "task_id", "idempotency_key", "action"], "created_at", ("owner",)),
+    "forge_agent.coding_reviews": (["review_id", "task_id", "status"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_attempts": (["owner_id", "project_alias", "task_id", "attempt_id"], "started_at", ("owner",)),
+    "forge_agent.coding_publications": (["publication_id", "task_id", "status"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_result_chunks": (["owner_id", "project_alias", "task_id"], "created_at", ("owner",)),
+    "forge_agent.coding_reconciliation_receipts": (["owner_id", "project_alias", "task_id"], "created_at", ("owner",)),
+    "forge_agent.coding_plan_decisions": (["decision_id", "task_id"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_review_budget": (["owner_id", "project_alias", "root_task_id"], "root_task_id", ("owner",)),
+    "forge_agent.coding_review_policy": (["owner_id", "project_alias"], "owner_id", ("owner",)),
+    "forge_agent.coding_worker_grants": (["worker_role", "owner_id", "project_alias", "agent_profile", "mode"], "granted_at", ("owner",)),
+    "forge_agent.coding_usage_refresh_requests": (["refresh_id", "owner_id", "project_alias", "status"], "requested_at", ("owner",)),
+    "forge_agent.coding_worker_readiness": (["worker_role", "owner_id", "worker_id"], "observed_at", ("owner",)),
+    "forge_agent.gpu_worker_readiness": (["worker_name", "model_id"], "seen_at", ("role", "worker_name")),
+    "forge_agent.coding_retry_events": (["event_id", "scope_id", "status"], "created_at", ("owner",)),
+    "forge_agent.coding_feedback": (["feedback_id", "task_id", "review_id"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_hosted_checks": (["task_id", "observation_id"], "observed_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.conversations": (["id", "owner_id"], "created_at", ("owner",)),
+    "forge_agent.runs": (["id", "conversation_id", "status", "request_id"], "created_at", ("join", "JOIN forge_agent.conversations c ON c.id = t.conversation_id", "c.owner_id")),
+    "forge_agent.messages": (["conversation_id", "position", "run_id"], "position", ("join", "JOIN forge_agent.conversations c ON c.id = t.conversation_id", "c.owner_id")),
+    "forge_agent.tool_calls": (["run_id", "call_id"], "created_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
+    "forge_agent.tool_results": (["run_id", "call_id"], "recorded_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
+    "forge_agent.run_events": (["run_id", "sequence"], "sequence", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
+    "forge_agent.ide_workspace_tabs": (["owner_id", "tab_id"], "touched_at", ("owner",)),
+    "forge_agent.ide_workspace_history": (["owner_id"], "revision", ("owner",)),
+    "forge_agent.ide_chats": (["owner_id", "id"], "updated_at", ("owner",)),
+    "forge_agent.jenkins_events": (["event_id", "owner_id", "project_alias", "job_name"], "sequence", ("owner",)),
+    "forge_agent.jenkins_event_deliveries": (["delivery_row_id", "event_id", "status", "consumer_name"], "created_at", ("join", "JOIN forge_agent.jenkins_events je ON je.event_id = t.event_id", "je.owner_id")),
+    "forge_agent.jenkins_observations": (["owner_id", "project_alias", "jenkins_instance", "job_name", "observation_key"], "updated_at", ("owner",)),
+    "forge_agent.inference_results": (["run_id"], "accepted_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
+    "forge_agent.mail_threads": (["owner_id", "id"], "updated_at", ("owner",)),
+    "forge_agent.mail_messages": (["owner_id", "thread_id", "sequence", "run_id"], "sequence", ("owner",)),
+    "forge_agent.coding_provider_usage": (["owner_id", "profile_alias"], "updated_at", ("owner",)),
+    "forge_agent.coding_retry_event_admissions": (["event_id", "event_key"], "created_at", ("join", "JOIN forge_agent.coding_retry_events cre ON cre.event_id = t.event_id", "cre.owner_id")),
+    "forge_agent.coding_retry_event_observations": (["owner_id", "project_alias", "scope_kind", "scope_id", "kind", "event_id"], "created_at", ("owner",)),
+    "forge_external_workflow.workflows": (["workflow_id", "owner_id", "project_alias", "phase"], "created_at", ("owner",)),
+    "forge_external_workflow.tasks": (["owner_id", "project_alias", "task_id", "workflow_id", "role"], "task_id", ("owner",)),
+    "forge_external_workflow.reviews": (["review_id", "workflow_id", "status"], "created_at", ("join", "JOIN forge_external_workflow.workflows ew ON ew.workflow_id = t.workflow_id", "ew.owner_id")),
+    "forge_external_workflow.actions": (["action_id", "workflow_id", "status", "kind"], "created_at", ("join", "JOIN forge_external_workflow.workflows ew ON ew.workflow_id = t.workflow_id", "ew.owner_id")),
+    "forge_external_workflow.contexts": (["assignment_id"], "assignment_id", ("join", "JOIN forge_external_agent.assignments a ON a.assignment_id = t.assignment_id", "a.owner_id")),
+    "forge_external_workflow.plan_approve_overrides": (["override_id", "owner_id", "project_alias", "workflow_id", "root_task_id"], "created_at", ("owner",)),
+    "forge_external_agent.assignments": (["assignment_id", "external_role", "owner_id", "project_alias", "profile_alias", "status", "task_id"], "created_at", ("owner",)),
+    "forge_external_agent.artifacts": (["assignment_id"], "submitted_at", ("join", "JOIN forge_external_agent.assignments a ON a.assignment_id = t.assignment_id", "a.owner_id")),
+    "forge_external_agent.readiness": (["external_role", "owner_id", "project_alias", "profile_alias"], "observed_at", ("owner",)),
+    "forge_external_agent.scope_grants": (["external_role", "owner_id", "project_alias", "profile_alias"], "external_role", ("owner",)),
 }
 
 # Caller allowlists. "fn" is the set of fully qualified function
 # operations the caller may invoke; "op" the entry points; "read"
-# the tables (or "*" for all); "notify" the channels. A caller may
-# only use what is listed here, and the database grants enforce the
-# same boundary (defense in depth).
+# the tables (or "*" for all); "notify" the channels the caller may
+# PUBLISH to (pg_notify); "subscribe" the channels the caller may
+# long-poll (POST /v1/notifications). Subscription and publication
+# are separate permissions (finding review-gpu-allowlist-exceeds-plan):
+# a caller that only waits on a channel must not be able to emit on
+# it. Publication sets follow the caller's own pg_notify calls in
+# the pre-proxy code (queue_store, work_store, jenkins_store,
+# usage_store all run as the coordinator; the worker, reconciler,
+# GPU worker, Muse, and operator publish nothing — their channels
+# are notified by DB functions/triggers). Subscription sets follow
+# the caller's LISTEN usage. The GPU identity is exactly the five
+# approved worker API operations (advertise, next_model, claim,
+# renew, publish) plus forge_agent_jobs subscription: no
+# lock_attempt, no inference_result_delete, no table reads.
 CALLER_ALLOWLISTS = {
     # coordinator: workflow engine + external workflow + IDE + service API
     "coordinator": {
@@ -410,7 +437,8 @@ CALLER_ALLOWLISTS = {
         },
         "op": {"coding_task_insert", "coding_task_update", "coding_workflow_insert", "coding_workflow_update", "coding_workflow_review_insert", "coding_workflow_review_update", "coding_workflow_action_insert", "coding_workflow_action_update", "coding_event_insert", "coding_control_receipt_insert", "coding_review_insert", "coding_review_insert_copy", "coding_review_update", "coding_plan_decision_insert", "coding_review_policy_upsert", "coding_review_budget_insert", "coding_worker_grant_insert", "coding_usage_refresh_request_insert", "ide_conversation_insert", "ide_conversation_delete", "ide_run_insert", "ide_run_update", "ide_run_delete", "ide_message_insert", "ide_tool_call_insert", "ide_tool_call_update", "ide_tool_result_insert", "ide_run_event_insert", "ide_workspace_tab_insert", "ide_workspace_tab_update", "ide_workspace_tab_delete", "ide_workspace_history_insert", "ide_workspace_history_update", "ide_chat_insert", "ide_chat_update", "mail_thread_insert", "mail_thread_update", "mail_message_insert", "jenkins_event_insert", "jenkins_event_delivery_insert", "jenkins_event_delivery_update", "jenkins_observation_insert", "inference_result_delete", "ext_workflow_insert", "ext_workflow_update", "ext_task_insert", "ext_context_insert", "ext_review_insert", "ext_review_update", "ext_action_insert", "ext_action_update", "ext_plan_approve_override_insert", "ext_workflow_cancel", "coding_workflow_cancel", "workflow_action_lease"},
         "read": "*",
-        "notify": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_agent_results", "forge_jenkins_events", "forge_external_agent_jobs", "forge_external_delivery", "usage_refresh"},
+        "notify": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_external_delivery", "forge_jenkins_events", "forge_coding_usage_refresh"},
+        "subscribe": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_agent_results", "forge_jenkins_events"},
     },
     "worker": {
         "fn": {f"forge_coding_worker_api.{name}" for name in (
@@ -423,7 +451,8 @@ CALLER_ALLOWLISTS = {
         | {"forge_external_workflow_worker_api.read_context"},
         "op": {"coding_usage_refresh_request_insert", "coding_event_insert"},
         "read": {"forge_agent.coding_tasks", "forge_agent.coding_workflows", "forge_agent.coding_workflow_reviews", "forge_agent.coding_workflow_actions", "forge_agent.coding_events", "forge_agent.coding_reviews", "forge_agent.coding_attempts", "forge_agent.coding_result_chunks", "forge_agent.coding_reconciliation_receipts", "forge_agent.coding_plan_decisions", "forge_agent.coding_review_budget", "forge_agent.coding_review_policy", "forge_agent.coding_worker_grants", "forge_agent.coding_usage_refresh_requests", "forge_agent.coding_feedback", "forge_agent.coding_hosted_checks", "forge_agent.coding_retry_events"},
-        "notify": {"forge_coding_jobs", "usage_refresh"},
+        "notify": set(),
+        "subscribe": {"forge_coding_jobs", "forge_coding_usage_refresh"},
     },
     "reconciler": {
         "fn": {f"forge_coding_reconciler_api.{name}" for name in (
@@ -445,15 +474,22 @@ CALLER_ALLOWLISTS = {
             "review_finish", "review_renew")},
         "op": set(),
         "read": {"forge_agent.coding_tasks", "forge_agent.coding_workflows", "forge_agent.coding_workflow_reviews", "forge_agent.coding_workflow_actions", "forge_agent.coding_events", "forge_agent.coding_reviews", "forge_agent.coding_attempts", "forge_agent.coding_publications", "forge_agent.coding_result_chunks", "forge_agent.coding_reconciliation_receipts", "forge_agent.coding_plan_decisions", "forge_agent.coding_review_budget", "forge_agent.coding_feedback", "forge_agent.coding_hosted_checks"},
-        "notify": {"forge_coding_jobs"},
+        "notify": set(),
+        "subscribe": set(),
     },
     "gpu": {
+        # Exactly the approved five GPU operations (plan section 8):
+        # advertise, next_model, claim, renew, publish. lock_attempt
+        # is not a GPU operation and inference_result_delete is
+        # outside the approved GPU boundary; the worker reads nothing
+        # directly (claim/next_model return what it needs). It only
+        # subscribes to forge_agent_jobs; it publishes nothing.
         "fn": {f"forge_agent_worker_api.{name}" for name in (
-            "advertise", "next_model", "claim", "renew", "publish",
-            "lock_attempt")},
-        "op": {"inference_result_delete"},
-        "read": {"forge_agent.inference_results", "forge_agent.runs", "forge_agent.gpu_worker_readiness"},
-        "notify": {"forge_agent_jobs"},
+            "advertise", "next_model", "claim", "renew", "publish")},
+        "op": set(),
+        "read": set(),
+        "notify": set(),
+        "subscribe": {"forge_agent_jobs"},
     },
     "muse": {
         # Mutations only. The read-only API functions (artifact,
@@ -464,13 +500,15 @@ CALLER_ALLOWLISTS = {
             "advertise", "claim", "finish", "progress", "release", "renew")},
         "op": set(),
         "read": {"forge_external_agent.assignments", "forge_external_agent.artifacts", "forge_external_agent.readiness", "forge_external_agent.scope_grants", "forge_agent.coding_events", "forge_agent.coding_tasks"},
-        "notify": {"forge_external_agent_jobs"},
+        "notify": set(),
+        "subscribe": {"forge_external_agent_jobs"},
     },
     "operator": {
         "fn": set(),
         "op": {"ext_workflow_cancel", "ext_plan_approve_override_insert"},
         "read": "*",
         "notify": set(),
+        "subscribe": set(),
     },
 }
 
@@ -543,6 +581,8 @@ class Caller:
             return allowed == "*" or operation[5:] in allowed
         if operation.startswith("notify."):
             return operation[7:] in self.allowlist["notify"]
+        if operation.startswith("subscribe."):
+            return operation[10:] in self.allowlist["subscribe"]
         return False
 
 
@@ -704,21 +744,40 @@ class Proxy:
 
     def _execute_read(self, caller, table, args):
         args = args or {}
-        keys, order = READ_TABLES[table]
+        keys, order, owner = READ_TABLES[table]
         filters = args.get("filter", {})
         if not isinstance(filters, dict):
             raise Rejected(400, "invalid_argument")
         for key in filters:
             if key not in keys:
                 raise Rejected(400, "invalid_argument")
+        # A request may never select a scope other than the caller's
+        # own: a foreign owner_id (or worker_name) filter is refused,
+        # and the scope predicate below is mandatory in every read.
+        if "owner_id" in filters and filters["owner_id"] != caller.owner:
+            raise Rejected(403, "not_allowed")
         limit = args.get("limit", READ_LIMIT_DEFAULT)
         if not isinstance(limit, int) or isinstance(limit, bool) \
                 or not 1 <= limit <= READ_LIMIT_MAX:
             raise Rejected(400, "invalid_argument")
-        where = " AND ".join(f"{key} = %s" for key in filters) or "TRUE"
-        values = [filters[key] for key in filters]
-        sql = (f"SELECT * FROM {table} WHERE {where} "
-               f"ORDER BY {order} LIMIT %s")
+        if owner[0] == "owner":
+            owner_pred, owner_values = "t.owner_id = %s", [caller.owner]
+            join = ""
+        elif owner[0] == "join":
+            owner_pred, owner_values = f"{owner[2]} = %s", [caller.owner]
+            join = f" {owner[1]}"
+        else:  # role scope: the row belongs to the caller's DB role
+            if "worker_name" in filters \
+                    and filters["worker_name"] != caller.role:
+                raise Rejected(403, "not_allowed")
+            owner_pred = f"t.{owner[1]} = %s"
+            owner_values = [caller.role]
+            join = ""
+        where = " AND ".join([owner_pred]
+                             + [f"t.{key} = %s" for key in filters])
+        values = owner_values + [filters[key] for key in filters]
+        sql = (f"SELECT t.* FROM {table} t{join} WHERE {where} "
+               f"ORDER BY t.{order} LIMIT %s")
         values.append(limit)
         conn = self._checkout(caller.role)
         try:
@@ -777,22 +836,62 @@ class Proxy:
             return False
 
 
+_SAFE_AUDIT_STR = re.compile(r"^[A-Za-z0-9_.\-/:]{1,64}$")
+
+
+def _audit_scalar(value):
+    """A safe identifying value for the audit log, or None when the
+    value must be redacted: UUIDs, numbers, and short token-like
+    strings (statuses, digests, owner ids) are kept; free text and
+    structured payloads are not."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        if UUID_RE.match(value.lower()) or _SAFE_AUDIT_STR.match(value):
+            return value
+        return None
+    return None
+
+
+def _audit_value(value):
+    """One argument value for the audit log: safe identifiers are
+    preserved, payload content is redacted to its Python type."""
+    if isinstance(value, list):
+        kept = [_audit_scalar(item) for item in value]
+        if any(item is None for item in kept):
+            return "list"
+        return kept
+    kept = _audit_scalar(value)
+    if kept is not None or value is None:
+        return kept
+    return type(value).__name__
+
+
 def _audit_args(args):
-    """The audit target: operation keys only, values redacted to types
-    (no payload content in the audit log)."""
-    return {key: type(value).__name__ for key, value in args.items()}
+    """The audit target: operation keys with identifying values
+    preserved (so cancellation and renewal entries carry the actual
+    task/attempt id, per plan section 8) and payload content
+    redacted (no prompt, content, or jsonb values in the audit log)."""
+    return {key: _audit_value(value) for key, value in args.items()}
 
 
 class NotificationHub:
     """One LISTEN connection per channel; fans notifications out to
-    long-polling callers."""
+    long-polling callers. Each notification carries a per-channel
+    sequence number and each caller keeps its own cursor per channel,
+    so one waiter can never consume another caller's notifications
+    (the old shared-queue wait cleared the queue for everyone)."""
 
     def __init__(self, dsn, connect=None, channels=NOTIFY_CHANNELS):
         self.dsn = dsn
         self.connect = connect or psycopg2.connect
         self.channels = channels
-        self._queues = {channel: deque(maxlen=1000)
-                        for channel in channels}
+        self._notes = {channel: deque(maxlen=1000)
+                       for channel in channels}
+        self._seq = {channel: 0 for channel in channels}
+        self._cursors = {}  # (caller, channel) -> last delivered seq
         self._cond = threading.Condition()
         self._stop = threading.Event()
         self._threads = []
@@ -824,28 +923,44 @@ class NotificationHub:
                         while conn.notifies:
                             note = conn.notifies.pop(0)
                             with self._cond:
-                                self._queues[channel].append({
-                                    "channel": channel,
-                                    "payload": note.payload,
-                                    "pid": note.pid,
-                                })
+                                self._seq[channel] += 1
+                                self._notes[channel].append((
+                                    self._seq[channel], {
+                                        "channel": channel,
+                                        "payload": note.payload,
+                                        "pid": note.pid,
+                                    }))
                                 self._cond.notify_all()
                 conn.close()
             except Exception:
                 if not self._stop.is_set():
                     self._stop.wait(2.0)
 
-    def wait(self, channel, timeout_seconds):
-        """Return queued notifications for a channel (long-poll)."""
-        if channel not in self._queues:
+    def wait(self, caller, channel, timeout_seconds):
+        """Return notifications for one subscriber (long-poll).
+
+        Already-queued notifications return immediately instead of
+        waiting out the timeout; otherwise wait until a new
+        notification arrives or the timeout elapses."""
+        if channel not in self._notes:
             raise Rejected(400, "unknown_operation")
         timeout_seconds = max(0, min(timeout_seconds, MAX_NOTIFICATION_WAIT))
-        deadline = threading.Event()
+        key = (caller, channel)
+        deadline = time.monotonic() + timeout_seconds
         with self._cond:
-            self._cond.wait(timeout=timeout_seconds)
-            notes = list(self._queues[channel])
-            self._queues[channel].clear()
-        return {"notifications": notes}
+            while True:
+                cursor = self._cursors.get(key, 0)
+                delivered = [(seq, note)
+                             for seq, note in self._notes[channel]
+                             if seq > cursor]
+                if delivered:
+                    self._cursors[key] = delivered[-1][0]
+                    return {"notifications": [note for _, note
+                                             in delivered]}
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return {"notifications": []}
+                self._cond.wait(timeout=remaining)
 
 
 # ---------------------------------------------------------------------------
@@ -900,13 +1015,14 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(channel, str) \
                     or not isinstance(timeout, (int, float)):
                 raise Rejected(400, "invalid_request")
-            # A long-poll is a subscription: the caller's notify allowlist
-            # bounds it exactly like a publish (notify.<channel> op).
+            # A long-poll is a subscription: the caller's subscribe
+            # allowlist bounds it. Publication (notify.<channel>) is a
+            # separate permission, not implied by subscribing.
             if channel not in NOTIFY_CHANNELS:
                 raise Rejected(400, "unknown_operation")
-            if not caller.allows(f"notify.{channel}"):
+            if not caller.allows(f"subscribe.{channel}"):
                 raise Rejected(403, "not_allowed")
-            result = self.server.hub.wait(channel, timeout)
+            result = self.server.hub.wait(caller.name, channel, timeout)
             return self._respond(200, result)
         except Rejected as error:
             self._respond(error.status, {"error": error.code})
@@ -1002,11 +1118,15 @@ def build_proxy(config, connect=None):
         tokens[name] = f"Bearer {token}".encode("utf-8")
         allowlist = CALLER_ALLOWLISTS[name]
         if "allowlist" in spec:
-            # Config may only narrow the built-in allowlist, never widen.
-            narrowed = {}
-            for kind in ("fn", "op", "read", "notify"):
+            # Config may only narrow the built-in allowlist, never
+            # widen. A kind the config does not mention keeps its
+            # built-in set (it is not silently denied).
+            narrowed = dict(allowlist)
+            for kind in ("fn", "op", "read", "notify", "subscribe"):
+                if kind not in spec["allowlist"]:
+                    continue
                 base = allowlist[kind]
-                extra = set(spec["allowlist"].get(kind, []))
+                extra = set(spec["allowlist"][kind])
                 if base == "*":
                     narrowed[kind] = extra
                 elif not extra <= set(base):
@@ -1033,7 +1153,7 @@ def main(argv=None):
     hub.start()
     listen = config.get("listen", {})
     address = (args.host or listen.get("host", "127.0.0.1"),
-               args.port or listen.get("port", 18084))
+               args.port or listen.get("port", 18087))
     server = Server(address, proxy, hub, tokens)
     stopping = threading.Event()
 
