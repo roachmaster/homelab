@@ -200,6 +200,30 @@ other paths are rejected. Old SCRAM credentials for the
 write-capable roles are rotated at cutover. Non-proxy sessions are
 terminated at cutover.
 
+Files: the post-cutover HBA template is
+`deploy/mission-control/postgres-worker-hba-proxy.conf`
+(installed as `forge-worker-hba.conf` by `setup-postgres.sh`
+`install_auth_files()` when the cutover migration (version 40)
+exists; pre-cutover the original `postgres-worker-hba.conf` is
+installed). It lists, in order, one local peer rule with
+`map=forge-pg-proxy` per proxy role
+(`forge_agent`, `forge_coding_worker`, `forge_coding_reconciler`,
+`forge_gpu_worker`, `muse_proxy_writer`, `forge_pg_proxy`), then
+one local `reject` rule per the same six roles (so any other OS
+user is refused and the distribution local-peer fallback cannot
+admit them), then the retained `host forge_agent muse_events
+127.0.0.1/32 scram-sha-256`, `host all all reject`, and `host
+replication all reject`. The ident map lives in
+`deploy/mission-control/postgres-worker-ident.conf` (map
+`forge-pg-proxy`: OS user `forge-pg-proxy` maps to each of the
+six DB roles) and is appended once to the cluster `pg_ident.conf`
+(the cluster file keeps operator additions).
+`setup-postgres.sh` `check_cluster` asserts this state
+stage-aware on the migration-40 row (peer rule before the reject
+rule per role, exactly one of each, no host rule naming any
+proxy role, exactly six ident mappings); pre-cutover it asserts
+the original HBA rules unchanged.
+
 ## 7. What the proxy does NOT cover
 
 - Superuser / human DBA access (by policy, logged by procedure).

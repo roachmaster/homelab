@@ -157,3 +157,81 @@ for _ in range(40):
 else:
     sys.exit("Forge agent worker did not become ready")
 PY
+
+# --- forge-pg-proxy -------------------------------------------------------
+# Publish the proxy alongside the runner. The proxy is enabled
+# unconditionally but only started once the proxy HBA rules are
+# installed (post-cutover); before that it cannot reach Postgres and
+# would only serve 503 on /health.
+proxy_user=forge-pg-proxy
+proxy_config_directory=/etc/homelab-forge/forge-pg-proxy
+proxy_unit=/etc/systemd/system/forge-pg-proxy.service
+
+if ! getent passwd "$proxy_user" >/dev/null; then
+    useradd --system --user-group --no-create-home --home-dir /nonexistent \
+        --shell /usr/sbin/nologin "$proxy_user"
+fi
+install -d -o "$proxy_user" -g "$proxy_user" -m 0700 "$proxy_config_directory"
+install -d -o "$proxy_user" -g "$proxy_user" -m 0750 "$proxy_config_directory/tokens"
+# The agent-runner reads its caller tokens at rollout; membership in
+# the proxy group grants that read without widening the token files.
+if getent passwd forge_agent >/dev/null; then
+    usermod -a -G "$proxy_user" forge_agent
+fi
+for caller in coordinator worker reconciler gpu muse operator; do
+    token_file="$proxy_config_directory/tokens/$caller.token"
+    if [[ ! -s "$token_file" ]]; then
+        temporary="$(mktemp "$proxy_config_directory/tokens/.token-XXXXXXXX")"
+        trap 'rm -f -- "$temporary"' EXIT
+        /usr/bin/python3 -c 'import secrets; print(secrets.token_hex(32))' > "$temporary"
+        install -o "$proxy_user" -g "$proxy_user" -m 0640 "$temporary" "$token_file"
+        rm -f -- "$temporary"
+        trap - EXIT
+    fi
+done
+if [[ ! -s "$proxy_config_directory/config.json" ]]; then
+    install -o "$proxy_user" -g "$proxy_user" -m 0640 "$directory/forge-pg-proxy.json" "$proxy_config_directory/config.json"
+fi
+
+proxy_changed=false
+publish_proxy() {
+    if ! cmp -s "$1" "$2"; then
+        install -o root -g root -m 0644 "$1" "$2"
+        proxy_changed=true
+    fi
+}
+publish_proxy "$directory/forge_pg_proxy.py" "$target/forge_pg_proxy.py"
+publish_proxy "$directory/forge-pg-proxy.service" "$proxy_unit"
+systemctl daemon-reload
+systemctl enable forge-pg-proxy.service
+if grep -q 'map=forge-pg-proxy' /etc/postgresql/16/main/forge-worker-hba.conf 2>/dev/null; then
+    if [[ "$proxy_changed" == true ]] && systemctl is-active --quiet forge-pg-proxy.service; then
+        systemctl restart forge-pg-proxy.service
+    fi
+    systemctl start forge-pg-proxy.service
+
+    /usr/bin/python3 - <<'PY'
+import http.client
+import sys
+import time
+
+for _ in range(40):
+    connection = http.client.HTTPConnection("127.0.0.1", 18084, timeout=1)
+    try:
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        response.read()
+        if response.status == 200:
+            print("Forge Postgres proxy ready")
+            break
+    except (OSError, http.client.HTTPException):
+        pass
+    finally:
+        connection.close()
+    time.sleep(0.25)
+else:
+    sys.exit("Forge Postgres proxy did not become ready")
+PY
+else
+    printf '%s\n' 'Forge Postgres proxy published but not started: proxy HBA rules are not installed (pre-cutover).'
+fi

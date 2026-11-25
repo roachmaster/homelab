@@ -11,6 +11,76 @@ import test_delivery_retry_events as delivery_fixtures
 from test_work_policy_upgrade import historical_registry,PreUpgradeCluster
 
 
+# Migration 0040 (pg_proxy_cutover) revokes direct table writes
+# (INSERT/UPDATE/DELETE/TRUNCATE, ACL letters a/w/d/D) for the four
+# write-capable roles. Apply that revocation to a pg_class relacl value
+# so an upgrade test can pin exactly which privileges may disappear
+# and nothing else. psycopg2 returns aclitem[] as the array-literal
+# string '{role=privs/grantor,...}' (not a list); the value is returned
+# in the same shape it arrived in (a list stays a list). A privilege
+# letter's '*' (WITH GRANT OPTION) goes with the letter; an entry left
+# with no privileges is dropped, as REVOKE drops it.
+_CUTOVER_ROLES={'forge_agent','forge_coding_worker','forge_coding_reconciler','muse_events'}
+_CUTOVER_REVOKED=set('awdD')
+
+
+def _split_acl_array(relacl):
+    text=relacl.strip()
+    if text.startswith('{') and text.endswith('}'):
+        text=text[1:-1]
+    parts,current,quoted=[],[],False
+    for char in text:
+        if char=='"':
+            quoted=not quoted
+            current.append(char)
+        elif char==',' and not quoted:
+            parts.append(''.join(current))
+            current=[]
+        else:
+            current.append(char)
+    if current:
+        parts.append(''.join(current))
+    return parts
+
+
+def _normalize_null_acl(relacl, owner):
+    # A NULL relacl means "the owner holds every table privilege".
+    # REVOKE (as the M40 cutover does on all tables in the schemas)
+    # materializes that as an explicit owner entry,
+    # '{owner=arwdDxt/owner}', without changing effective privileges.
+    # Normalize the two spellings so the upgrade comparison is not
+    # tripped by the mechanical materialization.
+    if relacl is not None:
+        return relacl
+    return '{%s=arwdDxt/%s}' % (owner, owner)
+
+
+def _cutover_acl(relacl):
+    if relacl is None:
+        return None
+    as_list=isinstance(relacl,list)
+    entries=list(relacl) if as_list else _split_acl_array(relacl)
+    kept=[]
+    for entry in entries:
+        role,rest=entry.split('=',1)
+        privs,_,grantor=rest.partition('/')
+        out=[]
+        index=0
+        while index<len(privs):
+            letter=privs[index]
+            grant_option=index+1<len(privs) and privs[index+1]=='*'
+            if role in _CUTOVER_ROLES and letter in _CUTOVER_REVOKED:
+                index+=2 if grant_option else 1
+                continue
+            out.append(letter)
+            if grant_option:
+                out.append('*')
+            index+=2 if grant_option else 1
+        if out:
+            kept.append(role+'='+''.join(out)+'/'+grantor)
+    return kept if as_list else '{'+','.join(kept)+'}'
+
+
 @unittest.skipUnless(PG16_AVAILABLE,'Requires owned PostgreSQL16')
 class DeliveryLineageSchemaTest(unittest.TestCase):
     @staticmethod
@@ -35,20 +105,31 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 fixture.initial_failure('all-features-build')
                 self.assertTrue(fixture.service().workflow_worker._delivery_repair.run_once())
                 names=self.rows(cluster,"SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname<>'schema_migrations' ORDER BY 1,2")
+                owners=dict(self.rows(cluster,'SELECT oid, rolname FROM pg_authid'))
                 def snapshot():
                     return {
                         'rows':{schema+'.'+name:self.rows(cluster,"SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM "+schema+'.'+name+' t') for schema,name in names},
                         'migration_history':self.rows(cluster,'SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=31 ORDER BY version'),
                         'credentials':self.rows(cluster,'SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r'),
                         'defaults':self.rows(cluster,'SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
-                        'old_relation_acl':self.rows(cluster,"SELECT n.nspname,c.relname,c.relowner,c.relacl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname<>'delivery_lineage_handoffs' AND NOT(n.nspname='forge_external_workflow' AND c.relname='plan_approve_overrides') ORDER BY 1,2"),
+                        'old_relation_acl':[(schema,name,owner,_normalize_null_acl(relacl,owners.get(owner))) for schema,name,owner,relacl in self.rows(cluster,"SELECT n.nspname,c.relname,c.relowner,c.relacl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname<>'delivery_lineage_handoffs' AND NOT(n.nspname='forge_external_workflow' AND c.relname='plan_approve_overrides') ORDER BY 1,2")],
                         'hba':hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest(),
                     }
                 before=snapshot()
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(snapshot(),before)
-                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(38,)])
+                # Migration 0040 (pg_proxy_cutover) intentionally revokes
+                # direct table writes (INSERT/UPDATE/DELETE/TRUNCATE) for
+                # forge_agent, forge_coding_worker, forge_coding_reconciler
+                # and muse_events; everything else about the M31 history
+                # must survive the upgrade byte-identical.
+                expected=dict(before)
+                expected['old_relation_acl']=[
+                    (schema,name,owner,_cutover_acl(relacl))
+                    for schema,name,owner,relacl in before['old_relation_acl']
+                ]
+                self.assertEqual(snapshot(),expected)
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(40,)])
                 self.assertEqual(self.rows(cluster,'SELECT count(*) FROM forge_agent.delivery_lineage_handoffs'),[(0,)])
                 self.assertEqual(self.rows(cluster,"SELECT has_table_privilege('muse_events','forge_agent.delivery_lineage_handoffs','SELECT')"),[(False,)])
                 # verify.sql itself starts BEGIN READ ONLY and pins the exact
