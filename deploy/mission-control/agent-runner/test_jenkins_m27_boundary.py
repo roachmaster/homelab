@@ -750,7 +750,19 @@ JENKINS_PAGED_OBSERVER_CONTEXT_SHA256 = {
 }
 
 
+# Exact verification-only context registration; no SQL, gate contract,
+# existing mutation transport, or historical source pin is changed.
+NATIVE_CI_CONTEXT_RECOVERY_SHA256 = {
+    'AGENT_WORK.md': 'c826ecfe8352eb1143993002c9acb74db3ff73a29ee8134646908e4659f4753c',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'bc71e92930bc08907ad5be6598c17a312409232a653a0febcc1b0b267df076e9',
+    'deploy/mission-control/agent-runner/test_native_ci_reprepare.py': 'ad1e395a60ccb09a495a15e48573b58df99d1eedc81eb47b458a2ae41e7674f0',
+    'deploy/mission-control/agent-runner/work_native_ci_reprepare.py': '7a506685c0974e9cc29fe93416416538b79e71dfffe553bb2e8058cd08ca5db4',
+}
+
+
 def qualified_source(relative, expected):
+    if relative in NATIVE_CI_CONTEXT_RECOVERY_SHA256:
+        return NATIVE_CI_CONTEXT_RECOVERY_SHA256[relative]
     if relative in JENKINS_PAGED_OBSERVER_CONTEXT_SHA256:
         return JENKINS_PAGED_OBSERVER_CONTEXT_SHA256[relative]
     if relative in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256:
@@ -1048,6 +1060,18 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in JENKINS_PAGED_OBSERVER_CONTEXT_SHA256.items():
             with self.subTest(jenkins_paged_observer_source=relative):
                 self.assertNotIn('/sql/', relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_native_ci_context_recovery_is_scoped_and_exact(self):
+        self.assertEqual(set(NATIVE_CI_CONTEXT_RECOVERY_SHA256), {
+            'AGENT_WORK.md',
+            'deploy/mission-control/agent-runner/setup-runner.sh',
+            'deploy/mission-control/agent-runner/test_native_ci_reprepare.py',
+            'deploy/mission-control/agent-runner/work_native_ci_reprepare.py',
+        })
+        for relative, expected in NATIVE_CI_CONTEXT_RECOVERY_SHA256.items():
+            with self.subTest(native_ci_context_source=relative):
+                self.assertNotIn("/sql/", relative)
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
