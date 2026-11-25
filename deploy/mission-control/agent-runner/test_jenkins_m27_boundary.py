@@ -715,11 +715,14 @@ TASK_RECOVERY_GUARD_AST_SHA256 = {
 }
 
 
-# Already accepted on main57a0aca: exact M36 legacy-progress grandfathering
-# verifier bytes. This qualifies no applied migration or other SQL authority.
+# Accepted M36 legacy-progress grandfathering verifier bytes, as rebased onto
+# bf080e2c with the approved forge-pg-proxy (M39/M40) stage-aware checks.
+# The M36 grandfathering itself is unchanged; only the proxy's stage-aware
+# privilege/catalogue checks were added. This qualifies no applied migration
+# or other SQL authority.
 M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256 = {
-    'deploy/mission-control/sql/management/verify.sql': '2cdd7ea50a8b646d2a603548a49bd8445524426ad5c12ebb5bef215a0a2c1dbf',
-    'deploy/mission-control/sql/management/verify-task-events.sql': '942ab0db7b9f2e0cceaaf64d4d7c73fe16c9fa5cc306d4a7ba5b1f432b4510ed',
+    'deploy/mission-control/sql/management/verify.sql': '7f3e6e74cbc078da4acc753674ae6452e1a26d16d5824e2cf4ca3bb89b3dac3d',
+    'deploy/mission-control/sql/management/verify-task-events.sql': '8997861e0d82d273e700dfa98d237b7eef1fd24ae8311b572b288ceb35a9c491',
 }
 
 
