@@ -808,7 +808,21 @@ CONTENT_IDENTITY_CONTEXT_SHA256 = {
 }
 
 
+# Private matched-executor recovery; preserve every historical context and SQL.
+NATIVE_POSTFIX_CONTEXT_SHA256 = {
+    'AGENT_WORK.md': 'f52b28a670b00625efb786eece23440cfaff6610e15c5ac22ba4abbd4122999d',
+    'deploy/mission-control/agent-runner/setup-runner.sh': '149f3f31cf7ee57fd0a686661d01dc84b1bfdff0e24bfc04e1015894aae563f8',
+    'deploy/mission-control/agent-runner/test_native_ci_postfix.py': 'fe78df60156e544afd1f3ad89c10e677ec85da9a038faf20c68a2a1a2c045379',
+    'deploy/mission-control/agent-runner/test_native_ci_postfix_proof.py': 'cb3e1456e3528d9517ee16d9089e51138175b124a44cf1df10ad09ae8a5e1443',
+    'deploy/mission-control/agent-runner/work_identity_contract.py': '8f0184585d57d05a15c5f8aea574fa61be36846408ce572459c612c4e4f2d3de',
+    'deploy/mission-control/agent-runner/work_native_ci_postfix.py': 'a4f132955d40768fb2bd6e695addda8b190147c65facc11a153d391d59785a0d',
+    'deploy/mission-control/agent-runner/work_native_ci_postfix_proof.py': '9ca911005982d27abd974f5d16540a5cc105d7f69d1dbee3f505c416ccc503ad',
+}
+
+
 def qualified_source(relative, expected):
+    if relative in NATIVE_POSTFIX_CONTEXT_SHA256:
+        return NATIVE_POSTFIX_CONTEXT_SHA256[relative]
     if relative in CONTENT_IDENTITY_CONTEXT_SHA256:
         return CONTENT_IDENTITY_CONTEXT_SHA256[relative]
     if relative in NATIVE_CI_CONTEXT_RECOVERY_SHA256:
@@ -1173,10 +1187,25 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in CONTENT_IDENTITY_CONTEXT_SHA256.items():
             with self.subTest(content_identity_source=relative):
                 self.assertNotIn("/sql/", relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
         published={tuple(shlex.split(line,comments=True)) for line in (RUNNER / "setup-runner.sh").read_text().splitlines() if line.lstrip().startswith("publish ")}
         for name in ("work_artifact_identity.py","work_artifact_source.py","work_identity_contract.py","work_identity_store.py","work_native_identity.py","work_external_identity.py"):
             self.assertIn(("publish","$directory/"+name,"$target/"+name),published)
+
+    def test_native_postfix_context_is_scoped_and_exact(self):
+        self.assertEqual(set(NATIVE_POSTFIX_CONTEXT_SHA256), {
+            'AGENT_WORK.md',
+            'deploy/mission-control/agent-runner/setup-runner.sh',
+            'deploy/mission-control/agent-runner/test_native_ci_postfix.py',
+            'deploy/mission-control/agent-runner/test_native_ci_postfix_proof.py',
+            'deploy/mission-control/agent-runner/work_identity_contract.py',
+            'deploy/mission-control/agent-runner/work_native_ci_postfix.py',
+            'deploy/mission-control/agent-runner/work_native_ci_postfix_proof.py',
+        })
+        for relative,expected in NATIVE_POSTFIX_CONTEXT_SHA256.items():
+            with self.subTest(native_postfix_source=relative):
+                self.assertNotIn("/sql/",relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT/relative).read_bytes()).hexdigest(),expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
