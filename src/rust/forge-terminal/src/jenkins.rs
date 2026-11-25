@@ -184,6 +184,7 @@ pub(crate) fn is_jenkins(kind: CommandKind) -> bool {
             | CommandKind::JenkinsJobs
             | CommandKind::JenkinsQueueList
             | CommandKind::JenkinsRecentBuilds
+            | CommandKind::JenkinsBuildPage
             | CommandKind::JenkinsStopBuild
             | CommandKind::JenkinsBuild
             | CommandKind::JenkinsQueue
@@ -268,6 +269,30 @@ pub(crate) fn decode(kind: CommandKind, args: &[OsString]) -> Result<Command, St
             }
             JenkinsCommand::RecentBuilds {
                 job: words[0].to_owned(),
+                limit: limit as u8,
+            }
+        }
+        CommandKind::JenkinsBuildPage => {
+            if !(2..=3).contains(&words.len()) || words[0].starts_with('-') {
+                return Err("jenkins.build-page needs JOB OFFSET [LIMIT]".into());
+            }
+            if words[1].is_empty() || !words[1].bytes().all(|b| b.is_ascii_digit()) {
+                return Err("build offset must be a nonnegative decimal integer".into());
+            }
+            let offset = words[1]
+                .parse::<u32>()
+                .map_err(|_| "build offset exceeds u32")?;
+            let limit = if words.len() == 3 {
+                positive(words[2])?
+            } else {
+                50
+            };
+            if offset > forge_jenkins::MAX_BUILD_PAGE_OFFSET || !(1..=50).contains(&limit) {
+                return Err("build offset must be 0 through 100000 and limit 1 through 50".into());
+            }
+            JenkinsCommand::BuildPage {
+                job: words[0].to_owned(),
+                offset,
                 limit: limit as u8,
             }
         }
@@ -358,6 +383,10 @@ pub(crate) fn format_output(value: Response) -> String {
             serde_json::to_string(&list).expect("string-only JSON projection")
         ),
         Response::RecentBuilds(list) => format!(
+            "{}\n",
+            serde_json::to_string(&list).expect("string-only JSON projection")
+        ),
+        Response::BuildPage(list) => format!(
             "{}\n",
             serde_json::to_string(&list).expect("string-only JSON projection")
         ),

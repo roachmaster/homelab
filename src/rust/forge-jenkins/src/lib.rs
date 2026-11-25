@@ -19,4 +19,7 @@ pub use client::{
 };
 #[cfg(feature = "http")]
 pub use http::{register_http, HttpClient, HttpClientFactory};
-pub use observation::{BuildSummary, QueueListing, QueueSummary, RecentBuildListing};
+pub use observation::{
+    BuildPageListing, BuildSummary, QueueListing, QueueSummary, RecentBuildListing,
+    MAX_BUILD_PAGE_OFFSET,
+};

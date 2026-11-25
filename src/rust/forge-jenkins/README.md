@@ -86,6 +86,22 @@ not prove that a submitted action is absent. The host owns action identity,
 matching, subsequent observations and retry decisions; this adapter never
 resubmits or polls.
 
+`BuildPage { job, offset, limit }` is the additive read-only history operation.
+It accepts a zero-based offset from 0 through `MAX_BUILD_PAGE_OFFSET` (100000)
+and a limit of 1–50. One GET requests the selected interval and one extra
+sentinel using Jenkins's [inclusive/exclusive tree ranges](https://www.jenkins.io/doc/book/using/remote-access-api/).
+`BuildPageListing` returns `job`, `offset`, `builds`, `truncated` and `next_offset`.
+The next offset is present only when that sentinel proves more history exists;
+an empty or short terminal page returns `null`. Ordering must be strictly
+newest-first, including the sentinel; duplicate or reversed build IDs fail.
+Parameter privacy and transport/response budgets are unchanged.
+
+The host must bound the entire scan and reject page-budget exhaustion rather
+than interpreting it as absence. Offset pages are not a transaction: a host
+must also detect repeated IDs, changed history and incomplete queue observations
+before admitting or reconciling a submission. This client performs no automatic
+pagination, restart, polling or mutation. `RecentBuilds` remains unchanged.
+
 Snapshot `parameters` are empty by default. Select **public** correlation names
 using `Config::with_observed_parameters(["MY_ACTION_ID"])`; at most64 unique ASCII
 identifier names are accepted. Only selected string values of at most4096bytes,

@@ -1,4 +1,4 @@
-use crate::observation::{self, QueueListing, RecentBuildListing};
+use crate::observation::{self, BuildPageListing, QueueListing, RecentBuildListing};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use forge_core::bootstrap::{PreparedGroup, RegistrationError};
 use forge_core::io_client::IoClient;
@@ -22,6 +22,12 @@ pub enum Request {
     /// Bounded newest-build snapshot; `limit` must be between 1 and 50.
     RecentBuilds {
         job: String,
+        limit: u8,
+    },
+    /// One newest-first history page; no pagination or retries are automatic.
+    BuildPage {
+        job: String,
+        offset: u32,
         limit: u8,
     },
     /// Request graceful cancellation of one known build, without polling.
@@ -50,6 +56,7 @@ pub enum Response {
     Jobs(Vec<JobSummary>),
     QueueList(QueueListing),
     RecentBuilds(RecentBuildListing),
+    BuildPage(BuildPageListing),
     /// Jenkins accepted the request; the build may still be running.
     StopRequested,
     Queued(QueueReceipt),
@@ -477,6 +484,16 @@ impl Request {
                     &format!("builds[number,queueId,building,result,actions[parameters[_class,name,value]]]{{0,{}}}", u16::from(*limit) + 1),
                 ))
             }
+            Request::BuildPage { job, offset, limit } => {
+                if !(1..=50).contains(limit) || *offset > observation::MAX_BUILD_PAGE_OFFSET {
+                    return Err(Error::InvalidRequest);
+                }
+                let end = offset + u32::from(*limit) + 1;
+                (Method::Get, observation::tree_path(
+                    &(job_path(job)? + "api/json"),
+                    &format!("builds[number,queueId,building,result,actions[parameters[_class,name,value]]]{{{offset},{end}}}"),
+                ))
+            }
             Request::StopBuild { job, number } => (
                 Method::Post, format!("{}{}/stop", job_path(job)?, positive(*number)?),
             ),
@@ -705,6 +722,14 @@ where
                         &self.config.observed_parameters,
                     )
                     .map(Response::RecentBuilds),
+                    Request::BuildPage { job, offset, limit } => observation::build_page(
+                        &response.body,
+                        job,
+                        offset,
+                        limit,
+                        &self.config.observed_parameters,
+                    )
+                    .map(Response::BuildPage),
                     Request::Queue { id } => {
                         let queue: QueueItem = serde_json::from_slice(&response.body)
                             .map_err(|_| Error::InvalidResponse)?;

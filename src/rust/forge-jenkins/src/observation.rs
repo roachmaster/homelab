@@ -28,6 +28,19 @@ pub struct RecentBuildListing {
     pub builds: Vec<BuildSummary>,
     pub truncated: bool,
 }
+/// Largest admitted history offset. The host also bounds its page count/deadline.
+pub const MAX_BUILD_PAGE_OFFSET: u32 = 100_000;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BuildPageListing {
+    pub job: String,
+    pub offset: u32,
+    pub builds: Vec<BuildSummary>,
+    pub truncated: bool,
+    /// Present only when the extra sentinel establishes another page.
+    pub next_offset: Option<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct BuildSummary {
     pub number: u64,
@@ -271,5 +284,30 @@ pub(crate) fn recent_builds(
         job,
         builds,
         truncated,
+    })
+}
+
+pub(crate) fn build_page(
+    body: &[u8],
+    job: String,
+    offset: u32,
+    limit: u8,
+    selected: &BTreeSet<String>,
+) -> Result<BuildPageListing, Error> {
+    let raw: Builds = serde_json::from_slice(body).map_err(|_| Error::InvalidResponse)?;
+    if raw
+        .builds
+        .windows(2)
+        .any(|pair| pair[0].number <= pair[1].number)
+    {
+        return Err(Error::InvalidResponse);
+    }
+    let listing = recent_builds(body, job, limit, selected)?;
+    Ok(BuildPageListing {
+        job: listing.job,
+        offset,
+        next_offset: listing.truncated.then_some(offset + u32::from(limit)),
+        builds: listing.builds,
+        truncated: listing.truncated,
     })
 }

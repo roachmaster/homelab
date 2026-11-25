@@ -760,3 +760,171 @@ fn identical_request_sequences_produce_identical_wire_vectors_and_responses() {
         ]
     );
 }
+
+#[test]
+fn build_history_pages_cross_fifty_with_explicit_offsets_and_terminal_proof() {
+    let history: Vec<_> = (1..=103).rev().map(|number| serde_json::json!({
+        "number": number, "building": false, "result": "SUCCESS", "queueId": number + 500,
+        "actions": [{"parameters": [
+            {"name":"FORGE_ACTION_ID","value":if number == 43 { "older-action" } else { "other-action" }},
+            {"name":"TOKEN","value":"private-never-returned"}
+        ]}]
+    })).collect();
+    let bodies: Vec<_> = [0usize, 0, 50, 100]
+        .into_iter()
+        .map(|offset| {
+            serde_json::json!({"builds": &history[offset..history.len().min(offset + 51)]})
+                .to_string()
+        })
+        .collect();
+    let replies = bodies.iter().map(|body| reply(200, body, &[])).collect();
+    let (client, calls) = configured(
+        config()
+            .with_observed_parameters(["FORGE_ACTION_ID"])
+            .unwrap(),
+        replies,
+    );
+    let Response::RecentBuilds(recent) = client
+        .execute(Request::RecentBuilds {
+            job: "folder/suite".into(),
+            limit: 50,
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(recent.truncated);
+    assert!(!recent
+        .builds
+        .iter()
+        .any(|build| build.parameters["FORGE_ACTION_ID"] == "older-action"));
+    let mut all = vec![];
+    for (offset, expected_count, expected_next) in
+        [(0, 50, Some(50)), (50, 50, Some(100)), (100, 3, None)]
+    {
+        let Response::BuildPage(page) = client
+            .execute(Request::BuildPage {
+                job: "folder/suite".into(),
+                offset,
+                limit: 50,
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(page.offset, offset);
+        assert_eq!(page.job, "folder/suite");
+        assert_eq!(page.builds.len(), expected_count);
+        assert_eq!(page.next_offset, expected_next);
+        assert_eq!(page.truncated, expected_next.is_some());
+        assert!(!serde_json::to_string(&page)
+            .unwrap()
+            .contains("private-never-returned"));
+        all.extend(page.builds);
+    }
+    assert_eq!(all.len(), 103);
+    assert!(all.windows(2).all(|pair| pair[0].number > pair[1].number));
+    assert_eq!(
+        all.iter()
+            .filter(|build| build.parameters["FORGE_ACTION_ID"] == "older-action")
+            .count(),
+        1
+    );
+    assert_eq!(
+        calls.borrow().len(),
+        4,
+        "one GET per admitted request; never automatic paging"
+    );
+    for (call, expected_range) in
+        calls
+            .borrow()
+            .iter()
+            .zip(["{0,51}", "{0,51}", "{50,101}", "{100,151}"])
+    {
+        assert_eq!(call.method, Method::Get);
+        let url = url::Url::parse(&call.url).unwrap();
+        assert_eq!(url.path(), "/jenkins/job/folder/job/suite/api/json");
+        assert!(url
+            .query_pairs()
+            .next()
+            .unwrap()
+            .1
+            .ends_with(expected_range));
+    }
+}
+
+#[test]
+fn build_page_rejects_order_ambiguity_including_the_extra_sentinel() {
+    for numbers in [vec![80, 80], vec![80, 81], vec![0], vec![80, 79, 78]] {
+        let body=serde_json::json!({"builds":numbers.iter().map(|number|serde_json::json!({"number":number,"building":false,"actions":[]})).collect::<Vec<_>>()}).to_string();
+        let (client, _) = configured(config(), vec![reply(200, &body, &[])]);
+        assert_eq!(
+            client.execute(Request::BuildPage {
+                job: "suite".into(),
+                offset: 50,
+                limit: 1
+            }),
+            Err(Error::InvalidResponse)
+        );
+    }
+    let (client, calls) = configured(config(), vec![reply(200, r#"{"builds":[]}"#, &[])]);
+    let Response::BuildPage(page) = client
+        .execute(Request::BuildPage {
+            job: "suite".into(),
+            offset: 50,
+            limit: 50,
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(page.builds.is_empty());
+    assert!(!page.truncated);
+    assert_eq!(page.next_offset, None);
+    assert_eq!(calls.borrow().len(), 1);
+}
+
+#[test]
+fn build_page_bounds_reject_before_any_transport_and_keep_recent_api_unchanged() {
+    let (client, calls) = configured(config(), vec![]);
+    for request in [
+        Request::BuildPage {
+            job: "suite".into(),
+            offset: 0,
+            limit: 0,
+        },
+        Request::BuildPage {
+            job: "suite".into(),
+            offset: 0,
+            limit: 51,
+        },
+        Request::BuildPage {
+            job: "suite".into(),
+            offset: forge_jenkins::MAX_BUILD_PAGE_OFFSET + 1,
+            limit: 50,
+        },
+        Request::BuildPage {
+            job: "../bad".into(),
+            offset: 0,
+            limit: 50,
+        },
+        Request::RecentBuilds {
+            job: "suite".into(),
+            limit: 51,
+        },
+    ] {
+        assert_eq!(client.execute(request), Err(Error::InvalidRequest));
+    }
+    assert!(calls.borrow().is_empty());
+    for offset in [0, 50, forge_jenkins::MAX_BUILD_PAGE_OFFSET] {
+        assert_eq!(
+            Request::BuildPage {
+                job: "suite".into(),
+                offset,
+                limit: 50
+            }
+            .validate(),
+            Ok(())
+        );
+    }
+}

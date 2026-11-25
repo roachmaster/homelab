@@ -15,7 +15,7 @@ No background progress, production authentication or durable acceptance is claim
 ## Jenkins (optional)
 
 The `jenkins` feature adds application-owned `jenkins::JenkinsCommand` values and
-six registered Jenkins routes. `Application::bootstrap_with_jenkins(config,
+ten registered Jenkins routes. `Application::bootstrap_with_jenkins(config,
 client)` accepts a ready `IoClient<Request=forge_jenkins::Request,
 Response=forge_jenkins::Response,Error=forge_jenkins::Error>`.
 `bootstrap_with_jobs_and_jenkins` independently selects cooperative local jobs

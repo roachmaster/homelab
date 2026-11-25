@@ -58,6 +58,8 @@ publish "$directory/work_external_plan_override.py" "$target/work_external_plan_
 publish "$directory/work_external_review_context.py" "$target/work_external_review_context.py"
 publish "$directory/work_external_delivery_store.py" "$target/work_external_delivery_store.py"
 publish "$directory/work_external_delivery.py" "$target/work_external_delivery.py"
+publish "$directory/work_jenkins_observer.py" "$target/work_jenkins_observer.py"
+publish "$directory/work_native_ci_reprepare.py" "$target/work_native_ci_reprepare.py"
 publish "$directory/work_store.py" "$target/work_store.py"
 publish "$directory/work_events.py" "$target/work_events.py"
 publish "$directory/work_api.py" "$target/work_api.py"
