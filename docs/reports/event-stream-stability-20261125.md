@@ -152,3 +152,40 @@ regression reproduces the old defect. Thirty focused checks passed under Jenkins
 UID990 in its actual mount/PrivateTmp and isolated network environment, with an
 independent lifecycle audit. Application service modules remain unchanged; a fresh
 automatic main CI result is required for this CI-only follow-up.
+
+## Executor interruption and actual quota stop
+
+The complete local32588ab rerun passed1571tests, zero skips/failures. Jenkins88
+also passed the unchanged process cleanup assertion, its17 lifecycle tests,
+browser journeys and all45 preceding checks. At22:31:22 its executor service
+was explicitly stopped/restarted; remoting disconnected and the final backend
+check was killed. No exit for that check was observed and no complete root result
+was produced. This is an infrastructure interruption, not another reported test
+failure. Release remains gated on complete fresh main verification.
+
+An SSHAPT installation ofrclone overlapped that restart. Installed Ubuntu hooks
+run needrestart after package transactions and permit automatic service restarts;
+caller attribution was not recorded. The exact-unit override now defers automatic
+restart of`forge-jenkins-ci-agent.service`. It leaves package updates and other
+service selections unchanged. Planned maintenance must drain CI first, as described
+in[the Jenkins runbook](../../deploy/mission-control/jenkins/README.md).
+
+A private interruption cleanup must bind the old stopped service invocation,
+exact request/source/protected progress, idle executor and exclusive locks. It
+may preserve45observed passes and record a failed infrastructure interruption
+with actual process cleanup; it must never invent the missing final exit or a
+successful CI result. The normal cancellation consumer then closes that old action.
+
+AGY subsequently reported a real Opus quota stop. The implementation is enabled
+and retains its approved Plan, stopped workspace and released lease. The model
+wait is scheduled until**26November2026,01:53:09UTC**, with zero reset resumptions
+used. Opus admission is withheld while eligible Gemini jobs continue; no credits
+are enabled. Account percentages are still not fabricated from job token counts.
+
+The exact-unit restart deferral was installed as root0644 without any service
+restart. The independently audited private CI88 cleanup then archived the old
+records and performed actual stopped-process/workspace cleanup under exclusive
+locks. It emitted a **failed infrastructure** receipt with45observed checks and
+no invented exit for the unfinished check. The normal cancellation consumer
+closed the old operation as failed with verified cleanup. This does not grant
+a CI pass; fresh main verification remains mandatory.
