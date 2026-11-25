@@ -539,7 +539,7 @@ class StoppedBinaryPinRecovery:
                 "OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND(status IN('queued','running','cancelled','cancel_requested')OR cancelled_at IS NOT NULL)) "
                 "OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id)WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) "
                 "OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) "
-                "OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_reviews WHERE workflow_id=%s AND status='reviewing') "
+                "OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_reviews WHERE workflow_id=%s AND status IN('pending','reviewing')) "
                 "OR EXISTS(SELECT 1 FROM forge_agent.coding_plan_decisions WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND decision='resume') "
                 "OR EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id)WHERE t.workflow_id=%s AND e.event_kind IN('cancelled','cancel_requested')) AS busy",
                 (w['workflow_id'],task['id'],task['created_at'],w['workflow_id'],w['workflow_id'],w['workflow_id'],w['workflow_id'],store.owner,command.project_alias,task['id'],w['workflow_id']))

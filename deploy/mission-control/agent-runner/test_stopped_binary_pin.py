@@ -85,7 +85,7 @@ class StoppedBinaryPinPGTest(unittest.TestCase):
         self.assertEqual(self.frozen(original),frozen)
         self.assertEqual(self.rows("SELECT count(*)FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'stopped-binary-pin:%%'"),[(1,)])
     def test_wrong_source_stop_readiness_or_cancellation_cannot_resume(self):
-        for case in('summary','revision','receipt','incarnation','activation','cancel','stage','grant'):
+        for case in('summary','revision','receipt','incarnation','activation','cancel','stage','grant','pending_review'):
             with self.subTest(case=case):
                 self.setUp();original,command,evidence=self.stopped('Unrelated failure'if case=='summary'else BINARY_PIN_FAILURE)
                 if case=='revision':command=replace(command,expected_revision=command.expected_revision+1)
@@ -95,6 +95,9 @@ class StoppedBinaryPinPGTest(unittest.TestCase):
                 elif case=='cancel':self.cluster.admin_exec("UPDATE forge_agent.coding_tasks SET status='cancelled',cancelled_at=clock_timestamp()WHERE id='"+original.task_id+"'",owner=False)
                 elif case=='stage':self.cluster.admin_exec("UPDATE forge_agent.coding_workflows SET phase='code_review',enabled=true WHERE workflow_id='"+original.workflow_id+"'",owner=False)
                 elif case=='grant':self.cluster.admin_exec("DELETE FROM forge_agent.coding_worker_grants WHERE agent_profile='agy-v2'",owner=False)
+                elif case=='pending_review':
+                    self.cluster.admin_exec("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status) "
+                        "VALUES('"+original.workflow_id+"','mission-control','homelab','review','pending-peer-review-fixture','pending')",owner=False)
                 before=self.get(original.task_id);port,_=self.port(evidence)
                 with self.assertRaises(Rejected):port.recover(command)
                 self.assertEqual(self.get(original.task_id),before)
