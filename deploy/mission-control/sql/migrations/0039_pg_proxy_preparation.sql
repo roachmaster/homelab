@@ -1392,7 +1392,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_cancel(p_project_a
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE
-  t forge_agent.coding_tasks%ROWTYPE;
+  task_row forge_agent.coding_tasks%ROWTYPE;
   scope_rec RECORD;
   prior RECORD;
   digest text;
@@ -1426,7 +1426,7 @@ BEGIN
     FOR UPDATE;
   END IF;
   -- Lock the task.
-  SELECT * INTO t FROM forge_agent.coding_tasks
+  SELECT * INTO task_row FROM forge_agent.coding_tasks
   WHERE (owner_id, project_alias, id) =
         (current_setting('forge.coding_owner', true), p_project_alias, p_task_id)
   FOR UPDATE;
@@ -1445,12 +1445,12 @@ BEGIN
     END IF;
     RETURN prior.receipt_json;
   END IF;
-  IF t.workflow_required THEN
-    IF t.revision <> p_expected_revision THEN
+  IF task_row.workflow_required THEN
+    IF task_row.revision <> p_expected_revision THEN
       RETURN jsonb_build_object('error', 'revision_conflict');
     END IF;
     SELECT phase INTO wf_phase FROM forge_agent.coding_workflows
-    WHERE workflow_id = t.workflow_id FOR UPDATE;
+    WHERE workflow_id = task_row.workflow_id FOR UPDATE;
     IF NOT FOUND OR wf_phase IN ('completed', 'cancelled', 'merging') THEN
       RETURN jsonb_build_object('error', 'not_cancellable');
     END IF;
@@ -1467,14 +1467,14 @@ BEGIN
   END IF;
 
     actor := jsonb_build_object('kind', p_actor_kind, 'id', p_actor_id);
-    target := CASE WHEN t.status IN ('running', 'cancel_requested')
+    target := CASE WHEN task_row.status IN ('running', 'cancel_requested')
                    THEN 'cancel_requested' ELSE 'cancelled' END;
     -- Events first, using the pre-update revisions captured in the
     -- locked rows; the task/workflow/action updates follow. The final
     -- state is identical to the Python order (single transaction).
     FOR affected IN
       SELECT id, project_alias, status, revision FROM forge_agent.coding_tasks
-      WHERE workflow_id = t.workflow_id AND status NOT IN ('completed', 'cancelled')
+      WHERE workflow_id = task_row.workflow_id AND status NOT IN ('completed', 'cancelled')
       FOR UPDATE
     LOOP
       affected_target := CASE WHEN affected.status IN ('running', 'cancel_requested')
@@ -1487,7 +1487,7 @@ BEGIN
                COALESCE(MAX(sequence), 0) + 1, affected_target,
                jsonb_build_object('base_revision', affected.revision,
                                   'revision', affected.revision + 1,
-                                  'workflow_id', t.workflow_id::text,
+                                  'workflow_id', task_row.workflow_id::text,
                                   'actor', actor, 'cause', affected_cause)
         FROM forge_agent.coding_events
         WHERE owner_id = current_setting('forge.coding_owner', true)
@@ -1495,18 +1495,18 @@ BEGIN
     END LOOP;
     UPDATE forge_agent.coding_workflows
       SET phase = 'cancelled', enabled = false, updated_at = clock_timestamp()
-      WHERE workflow_id = t.workflow_id;
+      WHERE workflow_id = task_row.workflow_id;
     UPDATE forge_agent.coding_tasks
       SET cancelled_at = CASE WHEN status IN ('running', 'cancel_requested')
                               THEN NULL ELSE clock_timestamp() END,
           status = CASE WHEN status IN ('running', 'cancel_requested')
                         THEN 'cancel_requested' ELSE 'cancelled' END,
           revision = revision + 1, updated_at = clock_timestamp()
-      WHERE workflow_id = t.workflow_id AND status NOT IN ('completed', 'cancelled');
+      WHERE workflow_id = task_row.workflow_id AND status NOT IN ('completed', 'cancelled');
     UPDATE forge_agent.coding_workflow_actions
       SET status = 'cancelled', lease_token = NULL, lease_expires_at = NULL,
           updated_at = clock_timestamp()
-      WHERE workflow_id = t.workflow_id AND status IN ('pending', 'leased');
+      WHERE workflow_id = task_row.workflow_id AND status IN ('pending', 'leased');
     receipt := jsonb_build_object('project_alias', p_project_alias,
       'task_id', p_task_id::text, 'base_revision', p_expected_revision,
       'revision', p_expected_revision + 1, 'status', target, 'actor', actor);
@@ -1520,13 +1520,13 @@ BEGIN
     RETURN receipt;
   END IF;
   -- Single-task branch.
-  IF t.status NOT IN ('queued', 'running') THEN
+  IF task_row.status NOT IN ('queued', 'running') THEN
     RETURN jsonb_build_object('error', 'not_cancellable');
   END IF;
-  IF t.revision <> p_expected_revision OR p_expected_revision >= 9007199254740991 THEN
+  IF task_row.revision <> p_expected_revision OR p_expected_revision >= 9007199254740991 THEN
     RETURN jsonb_build_object('error', 'revision_conflict');
   END IF;
-  IF t.status = 'queued' THEN
+  IF task_row.status = 'queued' THEN
     target := 'cancelled';
     UPDATE forge_agent.coding_tasks
       SET status = 'cancelled', revision = revision + 1,
@@ -1561,7 +1561,7 @@ BEGIN
   END IF;
 
   actor := jsonb_build_object('kind', p_actor_kind, 'id', p_actor_id);
-  receipt := jsonb_build_object('project_alias', t.project_alias,
+  receipt := jsonb_build_object('project_alias', task_row.project_alias,
     'task_id', p_task_id::text, 'base_revision', p_expected_revision,
     'revision', new_revision, 'status', target, 'actor', actor);
   INSERT INTO forge_agent.coding_events

@@ -573,6 +573,21 @@ class CompositeCallTest(unittest.TestCase):
                          "op.ide_interrupt_conversation_runs")
         self.assertEqual(result.args, {"tools_only": False})
 
+    def test_workflow_cancel_binds_all_params(self):
+        result = self.op(
+            "SELECT forge_pg_proxy_api.coding_workflow_cancel"
+            "(%s, %s, %s, %s, %s, %s, %s)",
+            ("homelab", "00000000-0000-0000-0000-000000000001", 1,
+             "k1", "operator", "mission-control", "operator_request"))
+        self.assertEqual(result.operation, "op.coding_workflow_cancel")
+        self.assertEqual(result.args, {
+            "project_alias": "homelab",
+            "task_id": "00000000-0000-0000-0000-000000000001",
+            "expected_revision": 1, "idempotency_key": "k1",
+            "actor_kind": "operator", "actor_id": "mission-control",
+            "cause": "operator_request"})
+        self.assertEqual(result.columns, ["coding_workflow_cancel"])
+
     def test_optional_default_omitted(self):
         result = self.op(
             "SELECT forge_pg_proxy_api.ide_run_admit(%s, %s, %s, %s, %s, %s, "

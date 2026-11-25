@@ -269,6 +269,33 @@ def _read_query(cursor, name, params):
     return run_read_query(cursor, name, params)
 
 
+def _composite(cursor, owner, name, *args):
+    """Call one forge_pg_proxy_api composite; return its jsonb result.
+
+    Works on both transports: the direct connection executes the
+    SECURITY DEFINER function, and the proxy translates the call to
+    the op.<name> operation. Returns the decoded result (a dict, or
+    None when the function returned SQL NULL). The owner scope is set
+    here (a no-op through the proxy; a real SET LOCAL on direct).
+    """
+    cursor.execute("SELECT pg_catalog.set_config('forge.coding_owner', %s, true)", (owner,))
+    placeholders = ", ".join(["%s"] * len(args))
+    cursor.execute("SELECT forge_pg_proxy_api." + name + "(" + placeholders + ")", args)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return row[name] if isinstance(row, dict) else row[0]
+
+
+_CANCEL_ERROR_STATUS = {
+    "not_found": 404,
+    "idempotency_conflict": 409,
+    "revision_conflict": 409,
+    "not_cancellable": 409,
+    "invalid_request": 400,
+}
+
+
 class WorkStore:
     """Owner- and project-scoped durable store for coding jobs, results, and control receipts."""
 
@@ -1000,126 +1027,26 @@ class WorkStore:
                 or type(expected_revision) is not int
                 or not 1 <= expected_revision <= MAX_REVISION):
             raise Rejected(400, "invalid_request")
-        intent_digest = _cancel_intent_digest(
-            project_alias=project_alias,
-            task_id=task_id,
-            expected_revision=expected_revision,
-        )
+        # Actor/cause resolve up front: the composite re-validates them
+        # at the same points the inline flow did, so resolving here only
+        # changes which error wins when the input is invalid AND the
+        # state is bad (400 instead of 409); valid inputs behave
+        # identically. The advisory lock is dropped: the composite
+        # locks the task row FOR UPDATE, which serializes concurrent
+        # control operations on the task on both transports (the proxy
+        # write lock serializes the op itself).
+        actor = require_actor(actor, self._owner)
+        cause = require_cancel_cause(cause)
         with self._transaction() as cursor:
-            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",(self._owner+"\n"+project_alias,ADVISORY_LOCK_SALT))
-            rows = _read_query(cursor, "workflow_root_task",
-                               {"owner_id": self._owner, "project_alias": project_alias,
-                                "task_id": task_id})
-            scope = rows[0] if rows else None
-            if scope and scope['root_task_id']!=task_id:
-                cursor.execute("SELECT id FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self._owner,project_alias,scope['root_task_id']))
-            cursor.execute("""
-                SELECT id, project_alias, status, revision,workflow_required,workflow_id
-                FROM forge_agent.coding_tasks
-                WHERE owner_id = %s AND project_alias = %s AND id = %s
-                FOR UPDATE
-            """, (self._owner, project_alias, task_id))
-            task = cursor.fetchone()
-            if task is None:
-                raise Rejected(404, "not_found")
-
-            cursor.execute("""
-                SELECT action, intent_digest, receipt_json
-                FROM forge_agent.coding_control_receipts
-                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
-                  AND idempotency_key = %s
-            """, (self._owner, project_alias, task_id, idempotency_key))
-            existing = cursor.fetchone()
-            if existing is not None:
-                if existing["action"] != "cancel" or existing["intent_digest"] != intent_digest:
-                    raise Rejected(409, "idempotency_conflict")
-                return dict(existing["receipt_json"])
-
-            if task["workflow_required"]:
-                if task["revision"]!=expected_revision:raise Rejected(409,"revision_conflict")
-                cursor.execute("SELECT phase FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(task["workflow_id"],))
-                workflow=cursor.fetchone()
-                if not workflow or workflow["phase"] in {"completed","cancelled","merging"}:raise Rejected(409,"not_cancellable")
-                actor=require_actor(actor,self._owner);cause=require_cancel_cause(cause)
-                cursor.execute("SELECT id,project_alias,status,revision FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status NOT IN('completed','cancelled') FOR UPDATE",(task["workflow_id"],))
-                affected=cursor.fetchall()
-                cursor.execute("UPDATE forge_agent.coding_workflows SET phase='cancelled',enabled=false,updated_at=clock_timestamp() WHERE workflow_id=%s",(task["workflow_id"],))
-                cursor.execute("UPDATE forge_agent.coding_tasks SET cancelled_at=CASE WHEN status IN('running','cancel_requested') THEN NULL ELSE clock_timestamp() END,status=CASE WHEN status IN('running','cancel_requested') THEN 'cancel_requested' ELSE 'cancelled' END,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND status NOT IN('completed','cancelled')",(task["workflow_id"],))
-                cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='cancelled',lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('pending','leased')",(task["workflow_id"],))
-                target='cancel_requested' if task['status'] in {'running','cancel_requested'} else 'cancelled'
-                receipt={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,'status':target,'actor':actor}
-                for affected_task in affected:
-                    affected_target='cancel_requested' if affected_task['status'] in {'running','cancel_requested'} else 'cancelled'
-                    # The directly cancelled task carries the caller's cause;
-                    # sibling tasks are cancelled because the workflow was.
-                    affected_cause=cause if affected_task['id']==task_id else 'workflow_cancelled'
-                    insert_event(cursor,self._owner,affected_task['project_alias'],affected_task['id'],affected_target,
-                                 {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
-                                  'workflow_id':str(task["workflow_id"])},actor=actor,cause=affected_cause)
-                cursor.execute("INSERT INTO forge_agent.coding_control_receipts(owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json) VALUES(%s,%s,%s,'cancel',%s,%s,%s,%s,%s)",(self._owner,project_alias,task_id,idempotency_key,intent_digest,expected_revision,expected_revision+1,Json(receipt)))
-                cursor.execute("SELECT pg_notify(%s,'')",(NOTIFY_CHANNEL,))
-                return receipt
-
-            if task["status"] not in ("queued", "running"):
-                raise Rejected(409, "not_cancellable")
-            if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
-                raise Rejected(409, "revision_conflict")
-
-            if task["status"] == "queued":
-                target_status = "cancelled"
-                event_kind = "cancelled"
-                cursor.execute("""
-                    UPDATE forge_agent.coding_tasks
-                    SET status = 'cancelled',
-                        revision = revision + 1,
-                        cancelled_at = clock_timestamp(),
-                        updated_at = clock_timestamp()
-                    WHERE owner_id = %s AND project_alias = %s AND id = %s
-                      AND status = 'queued' AND revision = %s
-                    RETURNING revision
-                """, (self._owner, project_alias, task_id, expected_revision))
-            else:
-                target_status = "cancel_requested"
-                event_kind = "cancel_requested"
-                cursor.execute("""
-                    UPDATE forge_agent.coding_tasks
-                    SET status = 'cancel_requested',
-                        revision = revision + 1,
-                        updated_at = clock_timestamp()
-                    WHERE owner_id = %s AND project_alias = %s AND id = %s
-                      AND status = 'running' AND revision = %s
-                    RETURNING revision
-                """, (self._owner, project_alias, task_id, expected_revision))
-            updated = cursor.fetchone()
-            if updated is None:
-                raise Rejected(409, "revision_conflict")
-            new_revision = updated["revision"]
-
-            actor=require_actor(actor,self._owner);cause=require_cancel_cause(cause)
-            receipt = {
-                "project_alias": task["project_alias"],
-                "task_id": str(task["id"]),
-                "base_revision": expected_revision,
-                "revision": new_revision,
-                "status": target_status,
-                "actor": actor,
-            }
-            insert_event(cursor, self._owner, project_alias, task_id, event_kind,
-                         {"base_revision": expected_revision, "revision": new_revision},
-                         actor=actor, cause=cause)
-            cursor.execute("""
-                INSERT INTO forge_agent.coding_control_receipts (
-                    owner_id, project_alias, task_id, action, idempotency_key,
-                    intent_digest, base_revision, result_revision, receipt_json
-                )
-                VALUES (%s, %s, %s, 'cancel', %s, %s, %s, %s, %s)
-            """, (
-                self._owner, project_alias, task_id, idempotency_key,
-                intent_digest, expected_revision, new_revision, Json(receipt),
-            ))
-            if target_status == "cancel_requested":
-                cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
-            return receipt
+            result = _composite(cursor, self._owner, "coding_workflow_cancel",
+                                project_alias, task_id, expected_revision,
+                                idempotency_key, actor["kind"], actor["id"], cause)
+            if result is None:
+                raise Rejected(500, "unavailable")
+            error = result.get("error")
+            if error is not None:
+                raise Rejected(_CANCEL_ERROR_STATUS.get(error, 409), error)
+            return dict(result)
 
     def _approved_plan_implementation(self, cursor, task):
         if task.get("plan_decision_id") is None or task["mode"] != "implement":

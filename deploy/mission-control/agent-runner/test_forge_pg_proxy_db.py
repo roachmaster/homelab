@@ -1352,9 +1352,10 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
     """C3c1: the coordinator's pure reads and the workflow action lease
     operate through the live proxy end to end (WorkStore.get/events/
     list_tasks via the readq-backed reads; WorkflowStore.claim via the
-    workflow_action_lease composite). The locked flows (submit/cancel/
-    decide/repair/...) still use FOR UPDATE reads and are not covered
-    here; they need composites of their own (C3c2).
+    workflow_action_lease composite). C3c2: WorkStore.cancel goes
+    through the pre-existing coding_workflow_cancel composite, which
+    the original implement built but never wired; the remaining locked
+    flows (submit/decide/repair/...) still use FOR UPDATE reads.
     """
 
     def setUp(self):
@@ -1387,6 +1388,9 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
                 "DELETE FROM forge_agent.coding_workflows"
                 " WHERE workflow_id = %s", (workflow_id,))
         for task_id in self._task_ids:
+            self.fixture_sql(
+                "DELETE FROM forge_agent.coding_control_receipts"
+                " WHERE task_id = %s", (task_id,))
             self.fixture_sql(
                 "DELETE FROM forge_agent.coding_events"
                 " WHERE task_id = %s", (task_id,))
@@ -1507,6 +1511,160 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
         # second ran the composite again and found nothing to lease.
         # Both executions are audited.
         self.assertEqual(len(audit), 2)
+
+    def _insert_queued_event(self, task_id):
+        # The events table requires sequence 1 to be 'queued'; a
+        # submitted task always carries it, so insert it explicitly.
+        correlation = self.fixture_sql(
+            "SELECT correlation_id FROM forge_agent.coding_tasks"
+            " WHERE id = %s", (task_id,))[0][0]
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_events"
+            " (owner_id, project_alias, task_id, sequence, event_kind,"
+            " payload, correlation_id)"
+            " VALUES (%s, %s, %s, 1, 'queued', '{}', %s)",
+            ("mission-control", "homelab", task_id, correlation))
+
+    def test_cancel_single_task_through_the_proxy(self):
+        from uuid import UUID
+        from queue_store import Rejected
+        from work_store import _cancel_intent_digest
+        task_id = self.insert_task()
+        self._task_ids.append(task_id)
+        self._insert_queued_event(task_id)
+        revision = self.fixture_sql(
+            "SELECT revision FROM forge_agent.coding_tasks"
+            " WHERE id = %s", (task_id,))[0][0]
+        with self.assertRaises(Rejected) as ctx:
+            self.store.cancel(
+                project_alias="homelab", task_id=UUID(task_id),
+                expected_revision=revision + 1,
+                idempotency_key="cancel-proxy-wrong-rev")
+        self.assertEqual((ctx.exception.status, ctx.exception.code),
+                         (409, "revision_conflict"))
+        before = self.fixture_sql(
+            "SELECT operation FROM forge_pg_proxy.audit"
+            " WHERE db_role = 'forge_agent'"
+            " AND operation = 'entry.coding_workflow_cancel'")
+        receipt = self.store.cancel(
+            project_alias="homelab", task_id=UUID(task_id),
+            expected_revision=revision, idempotency_key="cancel-proxy-k1")
+        self.assertEqual(receipt, {
+            "project_alias": "homelab", "task_id": task_id,
+            "base_revision": revision, "revision": revision + 1,
+            "status": "cancelled",
+            "actor": {"kind": "operator", "id": "mission-control"},
+        })
+        after = self.fixture_sql(
+            "SELECT operation FROM forge_pg_proxy.audit"
+            " WHERE db_role = 'forge_agent'"
+            " AND operation = 'entry.coding_workflow_cancel'")
+        self.assertEqual(len(after) - len(before), 1)
+        # The receipt row carries the Python intent digest: the
+        # composite's SQL digest matches sha256_canonical exactly.
+        rows = self.fixture_sql(
+            "SELECT intent_digest, receipt_json"
+            " FROM forge_agent.coding_control_receipts"
+            " WHERE task_id = %s AND idempotency_key = %s",
+            (task_id, "cancel-proxy-k1"))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], _cancel_intent_digest(
+            project_alias="homelab", task_id=UUID(task_id),
+            expected_revision=revision))
+        self.assertEqual(dict(rows[0][1]), receipt)
+        events = self.fixture_sql(
+            "SELECT sequence, event_kind, payload"
+            " FROM forge_agent.coding_events WHERE task_id = %s"
+            " ORDER BY sequence", (task_id,))
+        self.assertEqual(
+            [(row[0], row[1]) for row in events],
+            [(1, "queued"), (2, "cancelled")])
+        self.assertEqual(events[1][2]["cause"], "operator_request")
+        # Same key + same intent replays the receipt; same key +
+        # changed revision conflicts; a new key on the cancelled task
+        # is not cancellable.
+        self.assertEqual(self.store.cancel(
+            project_alias="homelab", task_id=UUID(task_id),
+            expected_revision=revision, idempotency_key="cancel-proxy-k1"),
+            receipt)
+        with self.assertRaises(Rejected) as ctx:
+            self.store.cancel(
+                project_alias="homelab", task_id=UUID(task_id),
+                expected_revision=revision + 1,
+                idempotency_key="cancel-proxy-k1")
+        self.assertEqual((ctx.exception.status, ctx.exception.code),
+                         (409, "idempotency_conflict"))
+        with self.assertRaises(Rejected) as ctx:
+            self.store.cancel(
+                project_alias="homelab", task_id=UUID(task_id),
+                expected_revision=revision,
+                idempotency_key="cancel-proxy-k2")
+        self.assertEqual((ctx.exception.status, ctx.exception.code),
+                         (409, "not_cancellable"))
+
+    def test_cancel_workflow_through_the_proxy(self):
+        from uuid import UUID
+        from queue_store import Rejected
+        root_id = self.insert_task()
+        sibling_id = self.insert_task()
+        self._task_ids.extend([root_id, sibling_id])
+        self._insert_queued_event(root_id)
+        self._insert_queued_event(sibling_id)
+        workflow_id = self._insert_workflow(root_id)
+        self.fixture_sql(
+            "UPDATE forge_agent.coding_tasks SET workflow_required = true,"
+            " workflow_id = %s WHERE id IN (%s, %s)",
+            (workflow_id, root_id, sibling_id))
+        self.fixture_sql(
+            "UPDATE forge_agent.coding_tasks"
+            " SET status = 'running', revision = 2"
+            " WHERE id = %s", (sibling_id,))
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_workflow_actions"
+            " (workflow_id, owner_id, project_alias, kind, source_key,"
+            " status) VALUES (%s, %s, %s, 'decide', 'db-test-cancel',"
+            " 'pending')",
+            (workflow_id, "mission-control", "homelab"))
+        receipt = self.store.cancel(
+            project_alias="homelab", task_id=UUID(root_id),
+            expected_revision=1, idempotency_key="cancel-wf-k1")
+        self.assertEqual(receipt["status"], "cancelled")
+        self.assertEqual(receipt["revision"], 2)
+        states = {
+            str(row[0]): (row[1], row[2]) for row in self.fixture_sql(
+                "SELECT id, status, revision FROM forge_agent.coding_tasks"
+                " WHERE id IN (%s, %s)", (root_id, sibling_id))}
+        self.assertEqual(states[root_id], ("cancelled", 2))
+        self.assertEqual(states[sibling_id], ("cancel_requested", 3))
+        workflow = self.fixture_sql(
+            "SELECT phase, enabled FROM forge_agent.coding_workflows"
+            " WHERE workflow_id = %s", (workflow_id,))[0]
+        self.assertEqual(workflow, ("cancelled", False))
+        action = self.fixture_sql(
+            "SELECT status, lease_token FROM"
+            " forge_agent.coding_workflow_actions"
+            " WHERE workflow_id = %s", (workflow_id,))[0]
+        self.assertEqual(action, ("cancelled", None))
+        events = self.fixture_sql(
+            "SELECT task_id, event_kind, payload"
+            " FROM forge_agent.coding_events"
+            " WHERE task_id IN (%s, %s) AND sequence > 1"
+            " ORDER BY task_id, sequence",
+            (root_id, sibling_id))
+        self.assertEqual(
+            sorted((str(row[0]), row[1], row[2]["cause"]) for row in events),
+            sorted([(root_id, "cancelled", "operator_request"),
+                    (sibling_id, "cancel_requested", "workflow_cancelled")]))
+        self.assertEqual(self.store.cancel(
+            project_alias="homelab", task_id=UUID(root_id),
+            expected_revision=1, idempotency_key="cancel-wf-k1"),
+            receipt)
+        with self.assertRaises(Rejected) as ctx:
+            self.store.cancel(
+                project_alias="homelab", task_id=UUID(sibling_id),
+                expected_revision=3, idempotency_key="cancel-wf-k2")
+        self.assertEqual((ctx.exception.status, ctx.exception.code),
+                         (409, "not_cancellable"))
 
 
 class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
