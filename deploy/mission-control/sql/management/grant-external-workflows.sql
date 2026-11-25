@@ -15,11 +15,11 @@ BEGIN
 END;
 $grant_external_plan_override$;
 
--- M40 cutover: revoke the direct forge_agent table writes above; the
+-- M41 cutover: revoke the direct forge_agent table writes above; the
 -- proxy is the only writer from here on.
 DO $grant_external_workflows_cutover$
 BEGIN
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41 AND name='pg_proxy_cutover') THEN
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_workflow FROM forge_agent, forge_coding_worker, forge_coding_reconciler;
   IF EXISTS(SELECT FROM pg_roles WHERE rolname='muse_events') THEN
    REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_workflow FROM muse_events;

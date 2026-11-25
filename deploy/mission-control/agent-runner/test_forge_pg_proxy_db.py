@@ -56,7 +56,7 @@ def _free_port():
 def _parse_apply_sql():
     """(version, filename, name) triples from apply.sql, in order.
 
-    apply.sql stops at the preparation migration (39); cutover (40)
+    apply.sql stops at the preparation migration (40); cutover (41)
     applies only via apply-cutover.sql, so the count is not pinned
     to 40 — assert the files and values agree and the versions are
     contiguous from 1."""
@@ -82,7 +82,7 @@ def _normalize(sql):
 
 
 def _parse_cutover_sql():
-    """(version, filename, name) for the cutover migration (40) from
+    """(version, filename, name) for the cutover migration (41) from
     apply-cutover.sql: the only path that applies it."""
     with open(os.path.join(SQL_DIR, "apply-cutover.sql"),
                encoding="utf-8") as handle:
@@ -257,7 +257,7 @@ class ScratchCluster:
                   "GRANT CONNECT ON DATABASE forge_agent TO muse_events")
 
     def apply_cutover(self):
-        """Apply ONLY migration 40 via apply-cutover.sql's model, as
+        """Apply ONLY migration 41 via apply-cutover.sql's model, as
         forge_agent_owner, in one transaction: the cutover guard
         (39 applied) plus the migration and its schema_migrations
         row. The caller re-runs apply_grant_files() afterwards, the
@@ -273,9 +273,9 @@ class ScratchCluster:
                 "SELECT pg_catalog.pg_advisory_xact_lock(20261111, 1);",
                 "DO $cutover_guard$ BEGIN IF NOT EXISTS("
                 "SELECT 1 FROM forge_agent.schema_migrations"
-                " WHERE version = 39 AND name = 'pg_proxy_preparation'"
+                " WHERE version = 40 AND name = 'pg_proxy_preparation'"
                 ") THEN RAISE EXCEPTION 'cutover requires the"
-                " preparation migration (39) first'; END IF; END"
+                " preparation migration (40) first'; END IF; END"
                 " $cutover_guard$;",
                 f"\\ir {path}",
                 "INSERT INTO forge_agent.schema_migrations"
@@ -306,7 +306,7 @@ class ScratchCluster:
 
 
 class ProxyDbTestCase(unittest.TestCase):
-    """Base: one scratch cluster per test class, at M39 + grants."""
+    """Base: one scratch cluster per test class, at M40 + grants."""
 
     cluster = None
     proxy_port = None
@@ -318,7 +318,7 @@ class ProxyDbTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls.cluster = ScratchCluster()
         cls.cluster.start()
-        cls.cluster.apply_migrations(39)
+        cls.cluster.apply_migrations(40)
         cls.cluster.apply_grant_files()
         cls.proxy_port = _free_port()
         cls.tokens = {}
@@ -1837,7 +1837,7 @@ class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
         cluster = ScratchCluster()
         try:
             cluster.start()
-            cluster.apply_migrations(38)
+            cluster.apply_migrations(39)
             with self.assertRaises(AssertionError):
                 cluster.apply_cutover()
         finally:
@@ -1850,11 +1850,11 @@ class CutoverStageTest(ProxyDbTestCase, FixtureMixin):
 
     @classmethod
     def setUpClass(cls):
-        # Like ProxyDbTestCase but at M40: preparation, cutover,
+        # Like ProxyDbTestCase but at M41: preparation, cutover,
         # then the grant files again (the cutover re-revocation).
         cls.cluster = ScratchCluster()
         cls.cluster.start()
-        cls.cluster.apply_migrations(39)
+        cls.cluster.apply_migrations(40)
         cls.cluster.apply_grant_files()
         cls.cluster.apply_cutover()
         cls.cluster.apply_grant_files()
@@ -1969,7 +1969,7 @@ class AdmissionTest(unittest.TestCase):
         cls.cluster = ScratchCluster()
         cls.port = _free_port()
         cls.cluster.start(tcp_port=cls.port)
-        cls.cluster.apply_migrations(39)
+        cls.cluster.apply_migrations(40)
         cls.cluster.apply_grant_files()
         cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
         cls.cluster.install_hba("postgres-worker-hba.conf")
@@ -2044,7 +2044,7 @@ class PreparationAdmissionTest(unittest.TestCase):
         cls.cluster = ScratchCluster()
         cls.port = _free_port()
         cls.cluster.start(tcp_port=cls.port)
-        cls.cluster.apply_migrations(39)
+        cls.cluster.apply_migrations(40)
         cls.cluster.apply_grant_files()
         cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
         cls.cluster.set_password("muse_events", MUSE_EVENTS_PASSWORD)

@@ -20,11 +20,11 @@ BEGIN
 END;
 $external_grants$;
 
--- M40 cutover: muse_events keeps the read-only capabilities and
+-- M41 cutover: muse_events keeps the read-only capabilities and
 -- artifact functions; the proxy is the only writer from here on.
 DO $external_grants_cutover$
 BEGIN
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover')
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41 AND name='pg_proxy_cutover')
  AND EXISTS(SELECT FROM pg_roles WHERE rolname='muse_events') THEN
   REVOKE EXECUTE ON FUNCTION forge_external_agent_api.advertise(text,text,text) FROM muse_events;
   REVOKE EXECUTE ON FUNCTION forge_external_agent_api.claim(text,text) FROM muse_events;

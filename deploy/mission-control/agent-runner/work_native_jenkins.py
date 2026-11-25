@@ -609,7 +609,8 @@ class NativeJenkinsVerification:
         metadata.active_index = accounting.failed_index if accounting.failed_index is not None else 0
         summary = str(result.get('summary', ''))
         inferred_code = ('verification_process_unavailable' if any(x in summary for x in (
-            'cancelled_or_timed_out', 'verification_unavailable', 'deadline_exceeded', 'no trusted verification receipt'))
+            'cancelled_or_timed_out', 'verification_unavailable', 'deadline_exceeded',
+            'gate_manifest_mismatch', 'no trusted verification receipt'))
             else 'verification_failed')
         if not accounting.valid or result.get('status') == 'passed' and not passed:
             inferred_code = 'verification_receipt_invalid'

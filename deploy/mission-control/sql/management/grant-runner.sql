@@ -168,13 +168,21 @@ GRANT EXECUTE ON FUNCTION forge_agent.delivery_projection(text,uuid),forge_agent
  forge_agent.delivery_repair_claim(text),forge_agent.delivery_repair_renew(uuid,integer,uuid),forge_agent.delivery_repair_checkpoint(uuid,integer,uuid,jsonb),forge_agent.delivery_repair_finish(uuid,integer,uuid,text,jsonb,text) TO forge_agent;
 \endif
 
--- M40 cutover: the proxy is the only writer. Re-running this file
+-- M39: terminal-scope open retry settlement.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=39) AS has_terminal_retry_settlement
+\gset
+\if :has_terminal_retry_settlement
+GRANT EXECUTE ON FUNCTION forge_agent.retry_event_resolve_open_scope(text,text,uuid) TO forge_agent,forge_coding_reconciler;
+GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.retry_event_resolve_open_scope(text,text,uuid) TO forge_coding_reconciler;
+\endif
+
+-- M41 cutover: the proxy is the only writer. Re-running this file
 -- after cutover must not leave the direct writes above (or the
 -- muse_events mutating EXECUTE from grant-external-agent.sql) in
 -- place; re-apply the cutover revocation instead.
 DO $grant_runner_cutover$
 BEGIN
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41 AND name='pg_proxy_cutover') THEN
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_agent FROM forge_agent, forge_coding_worker, forge_coding_reconciler;
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_workflow FROM forge_agent, forge_coding_worker, forge_coding_reconciler;
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_agent FROM forge_agent, forge_coding_worker, forge_coding_reconciler;

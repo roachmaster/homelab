@@ -87,12 +87,16 @@ class ExternalWorkflowStore:
 
     def bind_retry_events(self,provider):
         if self._retry_events_bound:raise ValueError('Retry event provider already bound')
-        if provider is not None and not all(callable(getattr(provider,name,None)) for name in ('observe_failure','reserve','resolve_verified','project','get','adopt_legacy')):raise TypeError('Expected ready retry event port')
+        if provider is not None and not all(callable(getattr(provider,name,None)) for name in ('observe_failure','reserve','resolve_verified','resolve_open_scope','project','get','adopt_legacy')):raise TypeError('Expected ready retry event port')
         self._retry_events=provider;self._retry_events_bound=True
 
     def _retry_scope(self,w):
         from work_retry_events import RetryScope
         return RetryScope(self.owner,w['project_alias'],'external_workflow',w['workflow_id'])
+
+    def _resolve_open_retries(self,cursor,w):
+        if self._retry_events is not None:return self._retry_events.resolve_open_scope(cursor,self._retry_scope(w))
+        return 0
 
     def _project_retry_event(self,cursor,w):
         return self._retry_events.project(cursor,self._retry_scope(w)) if self._retry_events is not None else None
@@ -588,9 +592,11 @@ class ExternalWorkflowStore:
         w['state']['base_revision']=head;self._save(cursor,w,'Configured source revision selected for independent review.');return True
 
     def _step(self,cursor,w):
-        task=self._task(cursor,w)
-        if task['status'] in {'cancelled','cancel_requested'}:
-            return self._cancel_locked(cursor,w,'Author task cancellation observed.',actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
+        root=self._task(cursor,w,w['root_task_id'])
+        task=root if w['active_task_id']==w['root_task_id'] else self._task(cursor,w)
+        if w['phase']!='merging' and (root['status'] in {'cancelled','cancel_requested'} or task['status'] in {'cancelled','cancel_requested'}):
+            note='Root workflow task cancellation observed.' if root['status'] in {'cancelled','cancel_requested'} else 'Author task cancellation observed.'
+            return self._cancel_locked(cursor,w,note,actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
         if w['phase'] in {'plan','plan_revision','implement','repair'}:
             artifact=self._artifact(cursor,w,task)
             if artifact is None:
@@ -946,6 +952,10 @@ class ExternalWorkflowStore:
         return True
 
     def _escalate(self,cursor,w,reason):
+        root=self._task(cursor,w,w['root_task_id'])
+        if w['phase'] not in TERMINAL|{'merging'} and root['status'] in {'cancelled','cancel_requested'}:
+            self._cancel_locked(cursor,w,'Root workflow task was cancelled.',actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
+            return
         self._cancel_children(cursor,w,actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
 
         # The public workflow DTO caps this field in UTF-8 bytes, not characters.
@@ -954,6 +964,7 @@ class ExternalWorkflowStore:
         bounded=safe.encode('utf-8')[:2048].decode('utf-8',errors='ignore')
         w['enabled']=False;w['state']['escalation_reason']=bounded
         self._save(cursor,w,bounded,phase='escalated')
+        self._resolve_open_retries(cursor,w)
 
     def _cleanup_action(self,cursor,w,action):
         return self._action(cursor,w,'cancel',str(action['action_id']),{'target_action_id':str(action['action_id']),'target_kind':action['kind'],'target_request':action['intent'],'target_receipt':(action['result'] or {}).get('receipt',{})})
@@ -981,7 +992,9 @@ class ExternalWorkflowStore:
         if w['phase']=='merging':raise Rejected(409,'not_cancellable')
         if w['phase'] in TERMINAL:return False
         self._cancel_children(cursor,w,actor=actor,cause=cause)
-        w['enabled']=False;self._save(cursor,w,note,phase='cancelled');return True
+        w['enabled']=False;self._save(cursor,w,note,phase='cancelled')
+        self._resolve_open_retries(cursor,w)
+        return True
 
     def cancel(self,*,project_alias,task_id,expected_revision,idempotency_key,actor=None,cause=None):
         if not self.manages(project_alias):return None

@@ -9,19 +9,19 @@ BEGIN
 ('forge_external_agent._immutable()','0aca9d6f4d2fe2a6abc8a8f4be36c3be2ba21e0638c3085fba21a3085574ad39','owner'),
 ('forge_external_agent._intent(forge_agent.coding_tasks)','c3431a5f215b89cee8d7b3952ee0976411ab99d48e816b8684f19c00a4bb106f','owner'),
 ('forge_external_agent._event(forge_external_agent.assignments,text,jsonb)','352c952a22d22183db1dfcda2a208665d669865aa9b956d0d0f66d44bc59c690','owner'),
-('forge_external_agent._scope(text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN '516bd7bccfcae3a623a92fe0fedb14575b310c10966de89c8f17f0a962f54fe8' ELSE 'daa052a85d3a8e453d1955e03dff2851fe99539095f2cd75c0338f8e9511b856' END,'owner'),
-('forge_external_agent._locked(uuid)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN '70e2de3a216e4a5a99f70bfaad7b8b2bd89241aa8a3f765dabad90707d78716a' ELSE '9b2ce25433429f750a7bb7e25bb881dc513fea153e7db7abbe236508c115cddc' END,'owner'),
+('forge_external_agent._scope(text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN '516bd7bccfcae3a623a92fe0fedb14575b310c10966de89c8f17f0a962f54fe8' ELSE 'daa052a85d3a8e453d1955e03dff2851fe99539095f2cd75c0338f8e9511b856' END,'owner'),
+('forge_external_agent._locked(uuid)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN '70e2de3a216e4a5a99f70bfaad7b8b2bd89241aa8a3f765dabad90707d78716a' ELSE '9b2ce25433429f750a7bb7e25bb881dc513fea153e7db7abbe236508c115cddc' END,'owner'),
 ('forge_external_agent._active(uuid,integer,uuid)','4f64a8c58cfd863635db36eb6b6f2528aa33adcc9c399225a7606952936db7bf','owner'),
 ('forge_external_agent_api.capabilities()',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=22) THEN '837b3aaff1f0564222533f3d8d11f3659aa4c91d3a2b95ea6b860bac2376e3a8' ELSE '29f39bbe8c25e743328321b2583a38a8fde4d9152f00b81eae5f5a8a29676e70' END,'external'),
 ('forge_external_agent_api.advertise(text,text,text)','99f7b450071f3df31cbb787eccdd1b5db1e19ceb63ef9d12c46fb58f3abd26eb','external_writer'),
 ('forge_external_agent_api.enqueue(text,text,uuid)','4b404350b4e6be45072512d8732b866f2bfaf9f418c0cc5984d17110a86ff0b2','service'),
 ('forge_external_agent_api.catalogue(text)','c1fd78219edaee347b6b01c4120c772bd562171ba92203156241bc90196a10d6','service'),
-('forge_external_agent._housekeep(forge_external_agent.scope_grants,integer)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN 'e910dc1d03402e07e83d7c5ebef4e4aff5157b25bf7982ff68e7fae1641a048a' ELSE 'cf30d12f3410e93e3d008b6b448f0b0824141a362e2a0e61e18ad4c2bb5d3992' END,'owner'),
+('forge_external_agent._housekeep(forge_external_agent.scope_grants,integer)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN 'e910dc1d03402e07e83d7c5ebef4e4aff5157b25bf7982ff68e7fae1641a048a' ELSE 'cf30d12f3410e93e3d008b6b448f0b0824141a362e2a0e61e18ad4c2bb5d3992' END,'owner'),
 ('forge_external_agent_api.reconcile(text)','202bce21b8d500b4173409a997ce886c389c9cbde8ea7a1b6b98038d6a49d89c','service'),
 ('forge_external_agent_api.claim(text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=22) THEN '71bf496f1093265d61265fbc9171cc1e9f3f00c3f383508d8cba894aca9b8893' ELSE '9c028a7060095d201506e623e536f39d45e28432d29992485c5e75a2dc81b8b1' END,'external_writer'),
 ('forge_external_agent_api.renew(uuid,integer,uuid)','1a8f4d3e147ec4788069a7a326a30eaf5d8466b222d67b24584f9e3dbd6164cd','external_writer'),
 ('forge_external_agent_api.progress(uuid,integer,uuid,text)','81b76cbc125c3547613652c7d30aecad3882aa552ebb5c2d03569d8fb0938f60','external_writer'),
-('forge_external_agent_api.finish(uuid,integer,uuid,text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN 'd5d8127b3d21a609c4a57375911b8a5576d6c3f39f6dbc6e359b934b7b6a81ac' ELSE 'f1a6021104181e3ad54a100552aca86da51ace1df6caece3e3c66ed66916a8b7' END,'external_writer'),
+('forge_external_agent_api.finish(uuid,integer,uuid,text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN 'd5d8127b3d21a609c4a57375911b8a5576d6c3f39f6dbc6e359b934b7b6a81ac' ELSE 'f1a6021104181e3ad54a100552aca86da51ace1df6caece3e3c66ed66916a8b7' END,'external_writer'),
 ('forge_external_agent_api.release(uuid,integer,uuid)','d451c3028a608ebe4d207a2ede38003fe8cafc60f3f9f07195e0616e9fc799d6','external_writer'),
 ('forge_external_agent._artifact(uuid)','13730c4876efc64c5eaccc7d5d53c53c4743713c824961402a7b007a97fea72c','owner'),
 ('forge_external_agent_api.artifact(uuid)','d5f044d5aa5cfe4f9e62c9fa3336eb1d5b3f4a6ddc9e6ae5ac034f1af04880e4','external'),
@@ -37,8 +37,8 @@ BEGIN
  IF e.access='service' THEN expected:=expected||'forge_agent'::name;END IF;
  IF e.access='external' AND external_enabled THEN expected:=expected||'muse_events'::name;END IF;
  IF e.access='external_writer' THEN
-  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) AND external_enabled THEN expected:=expected||'muse_events'::name;END IF;
-  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN expected:=expected||'muse_proxy_writer'::name;END IF;
+  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41) AND external_enabled THEN expected:=expected||'muse_events'::name;END IF;
+  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN expected:=expected||'muse_proxy_writer'::name;END IF;
  END IF;
  SELECT array_agg(r.rolname ORDER BY r.rolname) INTO actual FROM aclexplode(p.proacl) a JOIN pg_roles r ON r.oid=a.grantee WHERE a.privilege_type='EXECUTE' AND NOT a.is_grantable;
  SELECT array_agg(x ORDER BY x) INTO expected FROM unnest(expected) x;
@@ -46,7 +46,7 @@ BEGIN
  END LOOP;
  SELECT count(*) INTO n FROM pg_proc WHERE pronamespace IN('forge_external_agent'::regnamespace,'forge_external_agent_api'::regnamespace);
  IF n<>(20+CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=21) THEN 1 ELSE 0 END) THEN RAISE EXCEPTION 'Unexpected external functions';END IF;
- FOR e IN SELECT * FROM(VALUES('forge_external_agent',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') THEN ARRAY['forge_agent_owner','forge_agent','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner']::name[] END),('forge_external_agent_api',CASE WHEN NOT external_enabled THEN CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN ARRAY['forge_agent_owner','forge_agent','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner','forge_agent']::name[] END WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN ARRAY['forge_agent_owner','forge_agent','muse_events','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner','forge_agent','muse_events']::name[] END)) AS schemas(name,roles) LOOP
+ FOR e IN SELECT * FROM(VALUES('forge_external_agent',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_preparation') THEN ARRAY['forge_agent_owner','forge_agent','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner']::name[] END),('forge_external_agent_api',CASE WHEN NOT external_enabled THEN CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN ARRAY['forge_agent_owner','forge_agent','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner','forge_agent']::name[] END WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN ARRAY['forge_agent_owner','forge_agent','muse_events','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner','forge_agent','muse_events']::name[] END)) AS schemas(name,roles) LOOP
  SELECT array_agg(r.rolname ORDER BY r.rolname) INTO actual FROM pg_namespace n,LATERAL aclexplode(n.nspacl) a JOIN pg_roles r ON r.oid=a.grantee WHERE n.nspname=e.name AND a.privilege_type='USAGE' AND NOT a.is_grantable;
  SELECT array_agg(x ORDER BY x) INTO expected FROM unnest(e.roles) x;
  IF actual IS DISTINCT FROM expected OR EXISTS(SELECT FROM pg_namespace n,LATERAL aclexplode(n.nspacl) a WHERE n.nspname=e.name AND (a.grantee=0 OR a.grantor<>'forge_agent_owner'::regrole OR (a.grantee<>'forge_agent_owner'::regrole AND(a.privilege_type<>'USAGE' OR a.is_grantable)))) THEN RAISE EXCEPTION 'External schema ACL drift: %',e.name;END IF;
@@ -67,7 +67,7 @@ BEGIN
  -- M39 grants the proxy read surface (forge_agent and muse_proxy_writer
  -- SELECT) on every external table; the pinned catalog expects exactly
  -- those entries from here on.
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_preparation') THEN
   catalogue.data:=jsonb_set(catalogue.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","muse_proxy_writer=r/forge_agent_owner"]'::jsonb);
  END IF;
  IF schema_actual IS DISTINCT FROM catalogue.data THEN RAISE EXCEPTION 'External table catalog drift: %',catalogue.name;END IF;

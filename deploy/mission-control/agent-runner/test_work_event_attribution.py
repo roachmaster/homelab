@@ -511,9 +511,9 @@ EXPECTED_SQL_EVENT_INSERTS = {
     ("0036_event_stream_actor_cause.sql", "forge_coding_reconciler_api.native_merge_failure"): 1,
     ("0036_event_stream_actor_cause.sql", "forge_agent.coding_schedule_repair"): 2,
     ("0036_event_stream_actor_cause.sql", "forge_agent.amend_agent_retry_policy"): 1,
-    ("0039_pg_proxy_preparation.sql", "forge_pg_proxy_api.coding_event_insert"): 1,
-    ("0039_pg_proxy_preparation.sql", "forge_pg_proxy_api.coding_workflow_cancel"): 2,
-    ("0039_pg_proxy_preparation.sql", "forge_pg_proxy_api.ext_workflow_cancel"): 3,
+    ("0040_pg_proxy_preparation.sql", "forge_pg_proxy_api.coding_event_insert"): 1,
+    ("0040_pg_proxy_preparation.sql", "forge_pg_proxy_api.coding_workflow_cancel"): 2,
+    ("0040_pg_proxy_preparation.sql", "forge_pg_proxy_api.ext_workflow_cancel"): 3,
 }
 
 

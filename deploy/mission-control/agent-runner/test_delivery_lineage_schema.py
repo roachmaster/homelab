@@ -11,7 +11,7 @@ import test_delivery_retry_events as delivery_fixtures
 from test_work_policy_upgrade import historical_registry,PreUpgradeCluster
 
 
-# Migration 0040 (pg_proxy_cutover) revokes direct table writes
+# Migration 0041 (pg_proxy_cutover) revokes direct table writes
 # (INSERT/UPDATE/DELETE/TRUNCATE, ACL letters a/w/d/D) for the four
 # write-capable roles. Apply that revocation to a pg_class relacl value
 # so an upgrade test can pin exactly which privileges may disappear
@@ -45,7 +45,7 @@ def _split_acl_array(relacl):
 
 def _normalize_null_acl(relacl, owner):
     # A NULL relacl means "the owner holds every table privilege".
-    # REVOKE (as the M40 cutover does on all tables in the schemas)
+    # REVOKE (as the M41 cutover does on all tables in the schemas)
     # materializes that as an explicit owner entry,
     # '{owner=arwdDxt/owner}', without changing effective privileges.
     # Normalize the two spellings so the upgrade comparison is not
@@ -55,9 +55,9 @@ def _normalize_null_acl(relacl, owner):
     return '{%s=arwdDxt/%s}' % (owner, owner)
 
 
-# Migration 0039 (pg_proxy_preparation) grants each caller role SELECT
+# Migration 0040 (pg_proxy_preparation) grants each caller role SELECT
 # on its allowlisted read tables, derived from the proxy registry (the
-# same source M39 was generated from, so the expected post-upgrade ACL
+# same source M40 was generated from, so the expected post-upgrade ACL
 # is exact). Coordinator/operator share forge_agent; a "*" read set
 # means every READ_TABLES entry. The grants run as forge_agent_owner.
 from forge_pg_proxy import CALLER_ALLOWLISTS as _PROXY_ALLOWLISTS, CALLER_ROLES as _PROXY_ROLES, READ_TABLES as _PROXY_READ_TABLES
@@ -73,7 +73,7 @@ def _with_proxy_reads(relacl,readers):
     # Append a `role=r/forge_agent_owner` entry for every proxy reader
     # role that had no entry before, in the generator's grant order
     # (roles sorted). A role that already held an entry is untouched:
-    # GRANT SELECT on an existing entry is a no-op, and the M40
+    # GRANT SELECT on an existing entry is a no-op, and the M41
     # revocation below only rewrites forge_agent's entry in place.
     if not readers:
         return relacl
@@ -148,11 +148,11 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 before=snapshot()
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                # Migration 0039 (pg_proxy_preparation) grants each caller
+                # Migration 0040 (pg_proxy_preparation) grants each caller
                 # role SELECT on its allowlisted read tables; the expected
                 # post-upgrade ACL adds those entries (in grant order) to
-                # the M31 ACL before the M40 revocation below rewrites
-                # forge_agent's entry in place. Migration 0040
+                # the M31 ACL before the M41 revocation below rewrites
+                # forge_agent's entry in place. Migration 0041
                 # (pg_proxy_cutover) intentionally revokes direct table
                 # writes (INSERT/UPDATE/DELETE/TRUNCATE) for forge_agent,
                 # forge_coding_worker, forge_coding_reconciler and
@@ -164,7 +164,7 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                     for schema,name,owner,relacl in before['old_relation_acl']
                 ]
                 self.assertEqual(snapshot(),expected)
-                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(40,)])
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(41,)])
                 self.assertEqual(self.rows(cluster,'SELECT count(*) FROM forge_agent.delivery_lineage_handoffs'),[(0,)])
                 self.assertEqual(self.rows(cluster,"SELECT has_table_privilege('muse_events','forge_agent.delivery_lineage_handoffs','SELECT')"),[(False,)])
                 # verify.sql itself starts BEGIN READ ONLY and pins the exact

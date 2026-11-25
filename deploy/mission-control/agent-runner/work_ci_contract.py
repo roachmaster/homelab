@@ -4,8 +4,9 @@ The privileged standalone verifier mirrors these closed data declarations;
 it never imports this source file from a candidate checkout.
 """
 from dataclasses import dataclass
+import ast
 import re
-from work_ci_phases import EVENT_PROFILE, event_phases_for_scope
+from work_ci_phases import EVENT_PROFILE, FEATURE_VARIANTS, event_phases_for_scope
 
 LEGACY_PROFILE = 'forge-sdlc-jenkins-v1'
 SCOPED_PROFILE = 'forge-sdlc-jenkins-v2'
@@ -82,14 +83,18 @@ V3_PROTECTED_PATHS = frozenset({
 })
 
 
+V3_PROTECTED_PREFIXES = (
+    'deploy/mission-control/sql/migrations/0031_',
+    'deploy/mission-control/sql/fragments/0031_',
+    'deploy/mission-control/sql/migrations/0032_',
+    'deploy/mission-control/sql/fragments/0032_',
+    'deploy/mission-control/sql/migrations/0033_',
+    'deploy/mission-control/sql/fragments/0033_',
+)
+
+
 def protected_event_policy_path(path):
-    return (path in V3_PROTECTED_PATHS
-        or path.startswith('deploy/mission-control/sql/migrations/0031_')
-        or path.startswith('deploy/mission-control/sql/fragments/0031_')
-        or path.startswith('deploy/mission-control/sql/migrations/0032_')
-        or path.startswith('deploy/mission-control/sql/fragments/0032_')
-        or path.startswith('deploy/mission-control/sql/migrations/0033_')
-        or path.startswith('deploy/mission-control/sql/fragments/0033_'))
+    return path in V3_PROTECTED_PATHS or path.startswith(V3_PROTECTED_PREFIXES)
 
 
 def scope_kind(scope):
@@ -186,3 +191,148 @@ class CiGateContractFactory:
 def contract_for_config(config):
     """Compatibility for old typed configs/fixtures which predate this field."""
     return CiGateContractFactory(getattr(config, 'verification_profile', LEGACY_PROFILE)).create()
+
+
+def _literal_str_set(node):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'frozenset':
+        if len(node.args) != 1 or node.keywords:
+            return None
+        node = node.args[0]
+    if not isinstance(node, (ast.Set, ast.Tuple, ast.List)):
+        return None
+    values = []
+    for element in node.elts:
+        if not isinstance(element, ast.Constant) or type(element.value) is not str:
+            return None
+        values.append(element.value)
+    return frozenset(values)
+
+
+def _literal_commands(node):
+    if not isinstance(node, ast.Tuple):
+        return None
+    commands = []
+    for item in node.elts:
+        if not isinstance(item, ast.Tuple):
+            return None
+        argv = []
+        for token in item.elts:
+            if not isinstance(token, ast.Constant) or type(token.value) is not str:
+                return None
+            argv.append(token.value)
+        commands.append(tuple(argv))
+    return tuple(commands)
+
+
+def _literal_feature_variants(node):
+    if not isinstance(node, ast.Tuple):
+        return None
+    variants = []
+    for item in node.elts:
+        if not isinstance(item, ast.Tuple) or len(item.elts) != 4:
+            return None
+        values = [elt.value if isinstance(elt, ast.Constant) else None for elt in item.elts]
+        if (any(type(v) is not str for v in values[:3]) or type(values[3]) is not bool):
+            return None
+        variants.append(tuple(values))
+    return tuple(variants)
+
+
+def extract_verifier_policy(source):
+    """Parse installed verifier policy declarations without executing verifier code."""
+    if not isinstance(source, (bytes, bytearray)):
+        raise ValueError('Installed verifier source must be raw bytes')
+    try:
+        tree = ast.parse(bytes(source).decode('utf-8'))
+    except (UnicodeDecodeError, SyntaxError) as error:
+        raise ValueError('Installed verifier source is not valid UTF-8 Python') from error
+    policy = {
+        'checks': None,
+        'scoped_branch_checks': None,
+        'scoped_main_checks': None,
+        'v2_protected_paths': None,
+        'v3_protected_paths': None,
+        'v3_protected_prefixes': frozenset(),
+        'feature_variants': None,
+    }
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name):
+            name = statement.targets[0].id
+            if name == 'CHECKS':
+                policy['checks'] = _literal_commands(statement.value)
+            elif name == 'SCOPED_BRANCH_CHECKS':
+                policy['scoped_branch_checks'] = _literal_commands(statement.value)
+            elif name == 'SCOPED_MAIN_CHECKS':
+                policy['scoped_main_checks'] = _literal_commands(statement.value)
+            elif name == 'V2_PROTECTED_PATHS':
+                policy['v2_protected_paths'] = _literal_str_set(statement.value)
+            elif name == 'V3_PROTECTED_PATHS':
+                policy['v3_protected_paths'] = _literal_str_set(statement.value)
+            elif name == 'FEATURE_VARIANTS':
+                policy['feature_variants'] = _literal_feature_variants(statement.value)
+        elif isinstance(statement, ast.FunctionDef) and statement.name == 'profile_protected_gate_path':
+            prefixes = set()
+            for node in ast.walk(statement):
+                if (isinstance(node, ast.Compare)
+                        and isinstance(node.left, ast.Name) and node.left.id == 'path'
+                        and len(node.ops) == 1 and isinstance(node.ops[0], ast.In)
+                        and len(node.comparators) == 1):
+                    extracted = _literal_str_set(node.comparators[0])
+                    if extracted is not None and policy['v3_protected_paths'] is None:
+                        policy['v3_protected_paths'] = extracted
+                elif (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and isinstance(node.func.value, ast.Name) and node.func.value.id == 'path'
+                        and node.func.attr == 'startswith'
+                        and len(node.args) == 1 and not node.keywords):
+                    arg = node.args[0]
+                    if isinstance(arg, ast.Constant) and type(arg.value) is str:
+                        prefixes.add(arg.value)
+                    else:
+                        extracted = _literal_str_set(arg)
+                        if extracted is not None:
+                            prefixes.update(extracted)
+            policy['v3_protected_prefixes'] = frozenset(prefixes)
+    return policy
+
+
+def _describe_set_drift(label, expected, actual):
+    if actual is None:
+        return [f'missing {label} declaration']
+    if actual == expected:
+        return []
+    parts = []
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing:
+        parts.append(f'missing {label}: ' + ', '.join(missing[:8]) + (' ...' if len(missing) > 8 else ''))
+    if extra:
+        parts.append(f'extra {label}: ' + ', '.join(extra[:8]) + (' ...' if len(extra) > 8 else ''))
+    return parts
+
+
+def verify_verifier_policy_parity(source, profile):
+    """Fail fast when installed verifier policy disagrees with the runner contract."""
+    contract = CiGateContractFactory(profile).create()
+    policy = extract_verifier_policy(source)
+    mismatches = []
+    if contract.profile == LEGACY_PROFILE:
+        if policy['checks'] != LEGACY_CHECKS:
+            mismatches.append('legacy CHECKS differ')
+    if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE}:
+        mismatches.extend(_describe_set_drift('V2 protected paths', V2_PROTECTED_PATHS, policy['v2_protected_paths']))
+    if contract.profile == SCOPED_PROFILE:
+        if policy['scoped_branch_checks'] != SCOPED_BRANCH_CHECKS:
+            mismatches.append('SCOPED_BRANCH_CHECKS differ')
+        if policy['scoped_main_checks'] != SCOPED_MAIN_CHECKS:
+            mismatches.append('SCOPED_MAIN_CHECKS differ')
+    if contract.profile == EVENT_PROFILE:
+        mismatches.extend(_describe_set_drift('V3 protected paths', V3_PROTECTED_PATHS, policy['v3_protected_paths']))
+        mismatches.extend(_describe_set_drift('V3 protected prefixes', frozenset(V3_PROTECTED_PREFIXES), policy['v3_protected_prefixes']))
+        if policy['feature_variants'] != FEATURE_VARIANTS:
+            mismatches.append('v3 FEATURE_VARIANTS differ')
+    if mismatches:
+        raise ValueError(
+            f'Runner/verifier policy skew for {contract.profile}: ' + '; '.join(mismatches)
+            + f'. Re-run deploy/mission-control/jenkins/setup-ci.py --native-only --execute --verification-profile {contract.profile}.'
+        )

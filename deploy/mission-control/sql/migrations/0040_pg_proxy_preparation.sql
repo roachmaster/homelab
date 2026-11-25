@@ -1,4 +1,4 @@
--- M39: Postgres proxy preparation (additive; changes no existing behavior).
+-- M40: Postgres proxy preparation (additive; changes no existing behavior).
 -- Creates the audit log and entry points, grants the
 -- writer principal the mutating external EXECUTE, grants
 -- each caller role SELECT on its allowlisted read tables
@@ -1403,6 +1403,7 @@ DECLARE
   affected_cause text;
   target text;
   new_revision bigint;
+  manual_root uuid;
   receipt jsonb;
 BEGIN
   IF p_expected_revision < 1 OR p_expected_revision > 9007199254740991 THEN
@@ -1507,6 +1508,11 @@ BEGIN
       SET status = 'cancelled', lease_token = NULL, lease_expires_at = NULL,
           updated_at = clock_timestamp()
       WHERE workflow_id = task_row.workflow_id AND status IN ('pending', 'leased');
+    -- M39 terminal settlement: the workflow is now cancelled, so its
+    -- open retry events resolve in the same transaction (the Python
+    -- path calls this through the retry-events port).
+    PERFORM forge_agent.retry_event_resolve_open_scope(
+      p_project_alias, 'native_workflow', task_row.workflow_id);
     receipt := jsonb_build_object('project_alias', p_project_alias,
       'task_id', p_task_id::text, 'base_revision', p_expected_revision,
       'revision', p_expected_revision + 1, 'status', target, 'actor', actor);
@@ -1574,6 +1580,24 @@ BEGIN
     FROM forge_agent.coding_events
     WHERE owner_id = current_setting('forge.coding_owner', true)
       AND project_alias = p_project_alias AND task_id = p_task_id;
+  -- M39 terminal settlement for the manual scope: on a cancelled
+  -- outcome, resolve the repair root's open retry events (the task
+  -- itself when it is the root; otherwise the root when it is already
+  -- terminal), mirroring the Python path.
+  IF target = 'cancelled' THEN
+    manual_root := COALESCE(task_row.repair_root_task_id, p_task_id);
+    IF manual_root = p_task_id THEN
+      PERFORM forge_agent.retry_event_resolve_open_scope(
+        p_project_alias, 'manual_task', manual_root);
+    ELSIF EXISTS(SELECT 1 FROM forge_agent.coding_tasks
+                 WHERE (owner_id, project_alias, id) =
+                       (current_setting('forge.coding_owner', true),
+                        p_project_alias, manual_root)
+                   AND status IN ('cancelled', 'completed')) THEN
+      PERFORM forge_agent.retry_event_resolve_open_scope(
+        p_project_alias, 'manual_task', manual_root);
+    END IF;
+  END IF;
   INSERT INTO forge_agent.coding_control_receipts
     (owner_id, project_alias, task_id, action, idempotency_key, intent_digest,
      base_revision, result_revision, receipt_json)

@@ -1039,6 +1039,153 @@ class WorkStore:
         actor = require_actor(actor, self._owner)
         cause = require_cancel_cause(cause)
         with self._transaction() as cursor:
+            cursor.execute("SELECT to_regclass('forge_external_workflow.workflows') IS NOT NULL AS available")
+            if cursor.fetchone()["available"]:
+                # Match ExternalWorkflowStore.{run_once,cancel} lock order: lock the
+                # external workflow before locking coding_tasks or retry settlement.
+                cursor.execute("""
+                    SELECT w.* FROM forge_external_workflow.workflows w
+                    JOIN forge_external_workflow.tasks x USING(workflow_id)
+                    WHERE (x.owner_id, x.project_alias, x.task_id) = (%s, %s, %s)
+                    FOR UPDATE OF w
+                """, (self._owner, project_alias, task_id))
+                ew = cursor.fetchone()
+                if ew is not None:
+                    if task_id != ew["root_task_id"]:
+                        raise Rejected(409, "not_cancellable")
+                    cursor.execute("""
+                        SELECT id, correlation_id, project_alias, status, revision, workflow_required, workflow_id, repair_root_task_id
+                        FROM forge_agent.coding_tasks
+                        WHERE owner_id = %s AND project_alias = %s AND id = %s
+                        FOR UPDATE
+                    """, (self._owner, project_alias, task_id))
+                    task = cursor.fetchone()
+                    if task is None:
+                        raise Rejected(404, "not_found")
+                    cursor.execute("""
+                        SELECT action, intent_digest, receipt_json
+                        FROM forge_agent.coding_control_receipts
+                        WHERE owner_id = %s AND project_alias = %s AND task_id = %s
+                          AND idempotency_key = %s
+                    """, (self._owner, project_alias, task_id, idempotency_key))
+                    existing = cursor.fetchone()
+                    if existing is not None:
+                        if existing["action"] != "cancel" or existing["intent_digest"] != intent_digest:
+                            raise Rejected(409, "idempotency_conflict")
+                        return dict(existing["receipt_json"])
+                    if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
+                        raise Rejected(409, "revision_conflict")
+                    if ew["phase"] in {"completed", "cancelled", "escalated", "merging"}:
+                        raise Rejected(409, "not_cancellable")
+                    actor = require_actor(actor, self._owner)
+                    cause = require_cancel_cause(cause)
+                    cursor.execute("""
+                        SELECT t.* FROM forge_agent.coding_tasks t
+                        JOIN forge_external_workflow.tasks x
+                          ON (x.owner_id, x.project_alias, x.task_id) = (t.owner_id, t.project_alias, t.id)
+                        WHERE x.workflow_id = %s
+                          AND t.status IN ('queued', 'running', 'awaiting_review', 'needs_reconcile',
+                                           'blocked_auth', 'blocked_permission', 'quota_blocked')
+                        ORDER BY t.created_at, t.id
+                        FOR UPDATE OF t
+                    """, (ew["workflow_id"],))
+                    for child in cursor.fetchall():
+                        cursor.execute("""
+                            SELECT EXISTS(
+                                SELECT FROM forge_agent.coding_attempts
+                                WHERE (owner_id, project_alias, task_id) = (%s, %s, %s)
+                                  AND (phase <> 'stopped' OR reservation_active OR lease_expires_at IS NOT NULL)
+                            ) AS active
+                        """, (self._owner, project_alias, child["id"]))
+                        child_status = "cancel_requested" if cursor.fetchone()["active"] else "cancelled"
+                        cursor.execute("""
+                            UPDATE forge_agent.coding_tasks
+                            SET status = %s,
+                                cancelled_at = CASE WHEN %s = 'cancelled' THEN clock_timestamp() ELSE NULL END,
+                                revision = revision + 1,
+                                updated_at = clock_timestamp()
+                            WHERE (owner_id, project_alias, id) = (%s, %s, %s)
+                        """, (child_status, child_status, self._owner, project_alias, child["id"]))
+                        child_cause = cause if child["id"] == task_id else "workflow_cancelled"
+                        insert_event(
+                            cursor, self._owner, project_alias, child["id"], child_status,
+                            {"base_revision": child["revision"], "revision": child["revision"] + 1,
+                             "workflow_id": str(ew["workflow_id"])},
+                            actor=actor, cause=child_cause,
+                        )
+                    cursor.execute("""
+                        SELECT * FROM forge_external_workflow.actions
+                        WHERE workflow_id = %s AND kind = 'verify' AND status IN ('queued', 'leased', 'failed')
+                    """, (ew["workflow_id"],))
+                    cleanup_actions = cursor.fetchall()
+                    cursor.execute("""
+                        UPDATE forge_external_workflow.actions
+                        SET status = 'failed', result = %s, lease_token = NULL, lease_role = NULL,
+                            lease_until = NULL, updated_at = clock_timestamp()
+                        WHERE workflow_id = %s AND status IN ('queued', 'leased')
+                    """, (Json({"status": "failed", "receipt": {}, "summary": "Workflow admission stopped before delivery completed."}), ew["workflow_id"]))
+                    for action in cleanup_actions:
+                        action_id = uuid4()
+                        intent = {
+                            "target_action_id": str(action["action_id"]),
+                            "target_kind": action["kind"],
+                            "target_request": action["intent"],
+                            "target_receipt": (action["result"] or {}).get("receipt", {}),
+                            "workflow_id": str(ew["workflow_id"]),
+                            "project_alias": project_alias,
+                            "correlation_id": str(task["correlation_id"]),
+                            "action_id": str(action_id),
+                        }
+                        cursor.execute("""
+                            INSERT INTO forge_external_workflow.actions(
+                                action_id, workflow_id, owner_id, project_alias, workflow_revision, kind, source_key, intent
+                            ) VALUES (%s, %s, %s, %s, %s, 'cancel', %s, %s)
+                            ON CONFLICT (workflow_id, kind, source_key) DO NOTHING
+                            RETURNING action_id
+                        """, (action_id, ew["workflow_id"], self._owner, project_alias, ew["revision"], str(action["action_id"]), Json(intent)))
+                        if cursor.fetchone() is not None:
+                            cursor.execute("SELECT pg_notify('forge_external_delivery', '')")
+                    cursor.execute("""
+                        UPDATE forge_external_workflow.workflows
+                        SET phase = 'cancelled', enabled = false, revision = revision + 1, updated_at = clock_timestamp()
+                        WHERE workflow_id = %s AND revision = %s
+                        RETURNING revision
+                    """, (ew["workflow_id"], ew["revision"]))
+                    if cursor.fetchone() is None:
+                        raise Rejected(409, "result_mismatch")
+                    from work_events import COORDINATOR_ACTOR
+                    insert_event(
+                        cursor, self._owner, project_alias, task_id, "checkpoint",
+                        {"workflow_id": str(ew["workflow_id"]), "phase": "cancelled",
+                         "summary": "User cancelled the complete external workflow."},
+                        actor=COORDINATOR_ACTOR,
+                    )
+                    self._resolve_open_retries(cursor, project_alias, "external_workflow", ew["workflow_id"])
+                    cursor.execute("""
+                        UPDATE forge_agent.coding_tasks
+                        SET revision = %s, updated_at = clock_timestamp()
+                        WHERE (owner_id, project_alias, id) = (%s, %s, %s)
+                    """, (expected_revision + 1, self._owner, project_alias, task_id))
+                    receipt = {
+                        "project_alias": project_alias,
+                        "task_id": str(task_id),
+                        "base_revision": expected_revision,
+                        "revision": expected_revision + 1,
+                        "status": "cancelled",
+                        "actor": actor,
+                    }
+                    cursor.execute("""
+                        INSERT INTO forge_agent.coding_control_receipts (
+                            owner_id, project_alias, task_id, action, idempotency_key,
+                            intent_digest, base_revision, result_revision, receipt_json
+                        ) VALUES (%s, %s, %s, 'cancel', %s, %s, %s, %s, %s)
+                    """, (
+                        self._owner, project_alias, task_id, idempotency_key,
+                        intent_digest, expected_revision, expected_revision + 1, Json(receipt),
+                    ))
+                    cursor.execute("SELECT pg_notify(%s, '')", (NOTIFY_CHANNEL,))
+                    return receipt
+
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",(self._owner+"\n"+project_alias,ADVISORY_LOCK_SALT))
             result = _composite(cursor, self._owner, "coding_workflow_cancel",
                                 project_alias, task_id, expected_revision,
@@ -1344,6 +1491,14 @@ class WorkStore:
             authority.validate(cursor,task,kind)
         elif task.get("workflow_required"):
             raise Rejected(409,"not_reviewable")
+
+    def _resolve_open_retries(self, cursor, project_alias, scope_kind, scope_id):
+        if self.retry_events is None:
+            return 0
+        from work_retry_events import RetryScope
+        return self.retry_events.resolve_open_scope(
+            cursor, RetryScope(self._owner, project_alias, scope_kind, UUID(str(scope_id)))
+        )
 
     def _retry_projection(self,cursor,task):
         if self.retry_events is None:return None

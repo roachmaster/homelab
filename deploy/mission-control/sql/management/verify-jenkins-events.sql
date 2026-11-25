@@ -5,7 +5,7 @@ BEGIN
  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=27 AND name='jenkins_events') THEN
   RAISE EXCEPTION 'Missing Jenkins events migration27';END IF;
  FOR expected IN SELECT * FROM(VALUES
-  ('jenkins_events',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN '440924670dbd706487f7f51fefe4093f2c4a8e4d1db9a321055bb21dfd59c895' ELSE 'd0838fc8f42db1a372e6f4b78d89ab2e8f7a5f5010a57c083afde39be10cc26d' END),('jenkins_event_deliveries',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN 'cac96d36d4366bd511c9fa4996a81449a21ed5d727b7c2546ff6d0233369f559' ELSE '29d75bf9cc955afc14dd7f7f74fe5bbf8a4fa680eb415b3e0ab1fe71b3bdc17d' END),('jenkins_observations',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN '1923a6147f635b1ff89e080b514c0b9691a96ccf219dca6224073a1c6f530589' ELSE '0e9f4900e964abbe1661720dba214fae0a1af4969df36d72dd795b11aa1e217f' END)
+  ('jenkins_events',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41) THEN '440924670dbd706487f7f51fefe4093f2c4a8e4d1db9a321055bb21dfd59c895' ELSE 'd0838fc8f42db1a372e6f4b78d89ab2e8f7a5f5010a57c083afde39be10cc26d' END),('jenkins_event_deliveries',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41) THEN 'cac96d36d4366bd511c9fa4996a81449a21ed5d727b7c2546ff6d0233369f559' ELSE '29d75bf9cc955afc14dd7f7f74fe5bbf8a4fa680eb415b3e0ab1fe71b3bdc17d' END),('jenkins_observations',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41) THEN '1923a6147f635b1ff89e080b514c0b9691a96ccf219dca6224073a1c6f530589' ELSE '0e9f4900e964abbe1661720dba214fae0a1af4969df36d72dd795b11aa1e217f' END)
  )x(name,sha256) LOOP
   relation:=to_regclass('forge_agent.'||expected.name);
   IF relation IS NULL THEN RAISE EXCEPTION 'Missing Jenkins relation %',expected.name;END IF;
@@ -26,7 +26,7 @@ BEGIN
   )::text,'UTF8')),'hex') INTO actual FROM pg_class c WHERE c.oid=relation;
   IF actual IS DISTINCT FROM expected.sha256 THEN
    RAISE EXCEPTION 'Jenkins relation catalog drift: %',expected.name;END IF;
-  runtime_allowed:=CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN ARRAY['SELECT'] WHEN expected.name='jenkins_events' THEN ARRAY['SELECT','INSERT'] ELSE ARRAY['SELECT','INSERT','UPDATE'] END;
+  runtime_allowed:=CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41) THEN ARRAY['SELECT'] WHEN expected.name='jenkins_events' THEN ARRAY['SELECT','INSERT'] ELSE ARRAY['SELECT','INSERT','UPDATE'] END;
   FOREACH runtime_privilege IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
    IF has_table_privilege('forge_agent',relation,runtime_privilege) IS DISTINCT FROM(runtime_privilege=ANY(runtime_allowed))
     OR(runtime_privilege IN('SELECT','INSERT','UPDATE','REFERENCES') AND NOT runtime_privilege=ANY(runtime_allowed)

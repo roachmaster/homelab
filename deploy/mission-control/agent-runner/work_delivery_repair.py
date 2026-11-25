@@ -96,6 +96,14 @@ class DeliveryRepairConsumer:
             if job.get('existing_receipt') is not None:
                 self.store.finish(job,'admitted',job['existing_receipt'],'Recovered the normal admitted repair without duplicate model work.')
                 return True
+            if job.get('request') is None and (job.get('verification_receipt') or {}).get('failure') == 'gate_manifest_mismatch':
+                self.store.finish(
+                    job,
+                    'needs_attention',
+                    {'reason': 'gate_manifest_mismatch'},
+                    'Main verification failed due to runner/verifier gate-manifest mismatch; operator host provisioning is required instead of automated code repair.',
+                )
+                return True
             intent=job.get('request') or self._intent(job)
             if not self.store.checkpoint(job,intent) or not self.store.renew(job):
                 return True

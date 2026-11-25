@@ -715,11 +715,24 @@ class WorkerDB:
             cursor.execute("SELECT forge_coding_reconciler_api.merge_intent(%s,%s,%s)",(_coerce_uuid(job['merge_id']),_coerce_uuid(job['lease_token']),Json(intent)))
             return dict(cursor.fetchone()[0])
 
+    @staticmethod
+    def _resolve_open_native_retries(cursor, project_alias, workflow_id):
+        if not project_alias or not workflow_id:
+            return
+        cursor.execute("SELECT to_regprocedure('forge_coding_reconciler_api.retry_event_resolve_open_scope(text,text,uuid)') IS NOT NULL")
+        if cursor.fetchone()[0]:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.retry_event_resolve_open_scope(%s, 'native_workflow', %s)",
+                (project_alias, _coerce_uuid(workflow_id, "workflow_id")),
+            )
+
     def merge_finish(self,job,status,receipt):
         if status not in {'merged','handoff','needs_reconcile'} or not isinstance(receipt,dict):raise ValueError("Invalid merge outcome")
         with self._reconcile_cursor() as cursor:
             cursor.execute("SELECT forge_coding_reconciler_api.merge_finish(%s,%s,%s,%s)",(_coerce_uuid(job['merge_id']),_coerce_uuid(job['lease_token']),status,Json(receipt)))
-            return dict(cursor.fetchone()[0])
+            result=dict(cursor.fetchone()[0])
+            self._resolve_open_native_retries(cursor, job.get('project_alias'), job.get('workflow_id'))
+            return result
 
     def _delivery_call(self, name, *args):
         allowed = {'delivery_available','delivery_claim','delivery_renew','delivery_start_allowed',
@@ -849,7 +862,12 @@ class WorkerDB:
         with self._reconcile_cursor() as cursor:
             cursor.execute("SELECT forge_coding_reconciler_api.native_merge_failure(%s,%s,%s)",
                 (_coerce_uuid(job["merge_id"]), _coerce_uuid(job["lease_token"]), Json(outcome)))
-            return dict(cursor.fetchone()[0])
+            result = dict(cursor.fetchone()[0])
+            if result.get("status") == "handoff":
+                self._resolve_open_native_retries(
+                    cursor, job.get("project_alias"), result.get("workflow_id") or job.get("workflow_id")
+                )
+            return result
 
     def native_branch_first_replay(self, review_id, expected_revision):
         """Once append a real pre-CI conflict retry, retaining its old evidence."""

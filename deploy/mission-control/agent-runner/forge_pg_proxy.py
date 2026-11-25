@@ -319,7 +319,7 @@ FUNC_CATALOG = {
 
 # ---------------------------------------------------------------------------
 # Entry points (schema forge_pg_proxy_api). Signatures must match
-# migration 0039 exactly. Insert/update functions take the columns the
+# migration 0040 exactly. Insert/update functions take the columns the
 # codebase writes; a column is set only when its argument is non-NULL.
 # ---------------------------------------------------------------------------
 # name -> (params [(name, kind, required)], write?)

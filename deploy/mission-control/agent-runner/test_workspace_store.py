@@ -115,7 +115,7 @@ class WorkspaceStoreTest(unittest.TestCase):
         self.assert_sql_verification(script, user="forge_agent")
         self.assert_sql_verification(script, error="Expected current_user forge_agent")
 
-        # Post-cutover (M40) forge_agent keeps SELECT only on these
+        # Post-cutover (M41) forge_agent keeps SELECT only on these
         # tables; the proxy is the only writer. The drift subtests
         # below revoke/grants each privilege against this matrix.
         allowed = {

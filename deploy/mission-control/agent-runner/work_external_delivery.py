@@ -25,7 +25,7 @@ from work_publication_clients import artifact_guard, command, PublicationError
 from work_review import protected_gate_path
 from work_external_delivery_store import ExternalDeliveryStoreFactory
 from work_ci_contract import (LEGACY_CHECKS, LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE,
-    CiGateContractFactory, contract_for_config)
+    CiGateContractFactory, contract_for_config, verify_verifier_policy_parity)
 from work_verification import protected_retry_observation
 from work_external_review_context import EXTERNAL_DIFF_FLAGS
 
@@ -981,6 +981,9 @@ class DeliveryProviderFactory:
             raise ValueError('Jenkins must explicitly expose the complete public correlation contract')
         if hashlib.sha256(read_private(self.config.jenkins_binary, maximum=64 * 1024 * 1024)).hexdigest() != self.config.jenkins_binary_sha256:
             raise ValueError('Pinned Jenkins executable changed')
+        if self.config.verification_profile in {SCOPED_PROFILE, EVENT_PROFILE} or self.config.verifier.exists():
+            verifier_bytes = read_private(self.config.verifier, owner=0, maximum=1024 * 1024)
+            verify_verifier_policy_parity(verifier_bytes, self.config.verification_profile)
         options = {}
         if self.observer is not None:
             self.observer.assert_scope(self.config.jenkins_job, selected['endpoint'], PARAMETERS)

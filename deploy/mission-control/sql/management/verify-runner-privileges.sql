@@ -7,15 +7,15 @@ DO $verify$
 DECLARE
   ok boolean;cutover boolean;
 BEGIN
-  -- M40 revokes every direct forge_agent table write; the proxy is the
+  -- M41 revokes every direct forge_agent table write; the proxy is the
   -- only writer, so forge_agent keeps SELECT only from here on.
   -- forge_agent cannot SELECT schema_migrations, so the stage signal
   -- is its own INSERT privilege on forge_external_workflow.workflows:
   -- granted pre-cutover, revoked at cutover, and outside this file's
   -- spec, so the probe cannot mask an assertion below. NULL (table
   -- absent pre-M22) degrades to the pre-cutover expectations.
-  -- Likewise the M39 probe below is forge_agent's SELECT on
-  -- coding_retry_events: granted by the M39 proxy read surface, kept
+  -- Likewise the M40 probe below is forge_agent's SELECT on
+  -- coding_retry_events: granted by the M40 proxy read surface, kept
   -- at cutover, and outside this file's spec, so it cannot mask the
   -- coding_worker_grants assertion it gates.
   SELECT NOT has_table_privilege(current_user, 'forge_external_workflow.workflows', 'INSERT') INTO cutover;
@@ -130,7 +130,7 @@ $verify$;
 DO $jenkins_runtime$
 DECLARE spec record;privilege_name text;cutover boolean;
 BEGIN
- -- M40 revokes every direct forge_agent table write; the proxy is the
+ -- M41 revokes every direct forge_agent table write; the proxy is the
  -- only writer, so forge_agent keeps SELECT only from here on.
  -- Same canary as above: forge_agent cannot SELECT schema_migrations,
  -- so the stage signal is its own INSERT privilege on
