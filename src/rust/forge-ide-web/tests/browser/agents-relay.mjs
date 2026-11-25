@@ -447,8 +447,12 @@ export async function startAgentsRelay() {
       selected.retry_event={event_id,kind,used,limit:20,status};selected.workflow.retry_event={...selected.retry_event};
       selected.workflow.code_revisions=total;selected.revision++;
     },
-    workflowPhase(taskId,phase){
+    workflowPhase(taskId,phase,{authorStopped=false}={}){
       const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
+      if(authorStopped){
+        if(phase!=='escalated')throw new Error('Only escalation can stop a fixture author');
+        selected.status='cancelled';event(selected,'cancelled');
+      }
       selected.workflow.phase=phase;selected.workflow.can_cancel=!['completed','cancelled','merging'].includes(phase);
       selected.workflow.plan_revisions=1;
       selected.workflow.reviewer_task_id=null;

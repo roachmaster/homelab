@@ -3505,7 +3505,8 @@ async function agentsJourney() {
     await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Autonomous workflow · Native');
     await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Plan review');
     const escalationTaskId=relay.latestWorkflowTaskId;
-    relay.workflowPhase(escalationTaskId,'escalated');await page.locator('#agents-refresh').click();
+    relay.workflowPhase(escalationTaskId,'escalated',{authorStopped:true});await page.locator('#agents-refresh').click();
+    assert.equal(relay.reviewSnapshot(escalationTaskId).status,'cancelled','coordinator cleanup stops the author without cancelling its workflow');
     await check(page.locator('#agents-workflow-phase')).toHaveText('Needs attention');
     await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-kind="exception"]')).toContainText('Needs attention');
     await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="merged"]')).toHaveAttribute('data-state','skipped');
@@ -3514,13 +3515,25 @@ async function agentsJourney() {
     await page.locator('#agents-back').click();
     await chooseTaskScope('attention');
     const escalationRow=page.locator(`#agents-tasks [data-row-id="${escalationTaskId}"]`);
-    await check(escalationRow).toContainText('Needs attention');
+    await check(escalationRow.locator('.fg-row-summary .fg-badge')).toHaveText('Needs attention');
+    await check(escalationRow.locator('.fg-row-summary .fg-badge')).toHaveAttribute('data-tone','warning');
+    for(const width of [320,390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'escalation badge remains readable without page overflow');
+    }
+    await page.setViewportSize({width:390,height:844});
     await escalationRow.locator('.fg-row-select').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Needs attention');
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Cancelled');
     await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-kind="exception"]')).toContainText('Cancelled');
     await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="merged"]')).toHaveAttribute('data-state','skipped');
+    await page.locator('#agents-back').click();
+    await chooseTaskScope('history');
+    const cancelledWorkflowRow=page.locator(`#agents-tasks [data-row-id="${escalationTaskId}"]`);
+    await check(cancelledWorkflowRow.locator('.fg-row-summary .fg-badge')).toHaveText('Cancelled');
+    await check(cancelledWorkflowRow.locator('.fg-row-summary .fg-badge')).toHaveAttribute('data-tone','neutral');
+    await cancelledWorkflowRow.locator('.fg-row-select').click();
     await oversizedDormantWorkspaceJourney(page, context, fixture, relay, traffic);
     relay.enableExternal();
     await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');

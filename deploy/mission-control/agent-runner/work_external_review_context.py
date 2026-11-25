@@ -4,6 +4,11 @@ import hashlib,json,re
 from uuid import UUID
 from work_feedback import validate_findings
 
+# Both producers and independent reviewers hash these exact patch bytes.
+# Abbreviated blob IDs depend on unrelated cache objects; full IDs do not.
+EXTERNAL_DIFF_FLAGS = ('--full-index', '--binary', '--no-ext-diff', '--no-textconv',
+                       '--no-color', '--diff-algorithm=myers', '--no-renames')
+
 MAX_CONTEXT_BYTES=1024*1024
 MAX_VERDICT_BYTES=65536
 HEX40=re.compile(r'[0-9a-f]{40}')
@@ -101,7 +106,7 @@ class ExternalReviewContextProvider:
         if target['target_kind']=='code':
             candidate=target['candidate']
             tree=self.git(workspace.path,'rev-parse','--verify','HEAD^{tree}').decode().strip()
-            diff=self.git(workspace.path,'diff','--binary','--no-ext-diff','--no-textconv','--no-color','--diff-algorithm=myers','--no-renames',candidate['integration_base'],candidate['candidate_commit'],'--')
+            diff=self.git(workspace.path,'diff',*EXTERNAL_DIFF_FLAGS,candidate['integration_base'],candidate['candidate_commit'],'--')
             if tree!=candidate['candidate_tree'] or hashlib.sha256(diff).hexdigest()!=candidate['diff_sha256']:
                 raise ValueError('External candidate differs from independent review target')
         return ExternalReviewContext(envelope['target_json'].encode(),envelope['target_sha256'],target['reviewer_task_id'],target['review_id'],target['workflow_id'],target['target_kind'])

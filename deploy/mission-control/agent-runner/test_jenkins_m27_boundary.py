@@ -777,9 +777,47 @@ CICD_STAGES_BRANCH_CONTEXT_SHA256 = {
 }
 
 
+# Audited task-recovery source. Prior maps remain historical provenance.
+# Applied SQL and other legacy ownership guards are never qualified here.
+TASK_RECOVERY_CONTEXT_SHA256 = {
+    'AGENT_WORK.md': '829b24154ed8dcb5b868cb590c0c23c4dd5a7eefd6f2e93cd9848783340722b5',
+    'deploy/mission-control/agent-runner/test_external_code_context_recovery.py': '3599f0dcd2b3e9c809cccc27e9de49b0b81529a6f59d751d625eba8f8cdb9825',
+    'deploy/mission-control/agent-runner/test_external_diff_contract.py': 'b17eac7a806cec6abb408540bb9e29482fd895bcb6218ef6133dd5b1406f4383',
+    'deploy/mission-control/agent-runner/test_native_deadline_events.py': '845725331ef2c9c298c069ba3d67b9aec1666bfb9d181589ecf47f50e81075bd',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '90a5cf86892903c552500c49cebd8d6eac6e66b03142b03ad4efdcae67d32053',
+    'deploy/mission-control/agent-runner/work_external_recovery.py': 'a51bce8d77e2ab0c8ca5680fe929ddac77237cbaf7377d9e5c0c5d1cfc3f4f4f',
+    'deploy/mission-control/agent-runner/work_external_review_context.py': 'ef5000e360adf2ce223878e0c04556f6fd7318f46dd3af5660a910b2262ba6ee',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': '303f6a97a1fc94d3718a45f08aedab27dacdbcf38303220ff2f51c4562542213',
+    'deploy/mission-control/agent-runner/work_workflow.py': '1af6d5e3ccdb0cc3c648065c28bffc0c00355424fcb5aee5350d88b3be131195',
+    'src/rust/forge-ide-ui/src/model/agents/tests/scopes.rs': '0550f4b84191c4a214338f3b04fa7abeec7dbb2300c82f1b3dd64874a87bc4d7',
+    'src/rust/forge-ide-ui/src/model/agents/workflow.rs': 'a38448c5ff0e2d7bce63d97dcbd0d234ef6b7f066511e32e0df4c9c1d646c8a3',
+    'src/rust/forge-ide-web/tests/browser/agents-relay.mjs': '75eedd257d3429d30021775eb56ded22642900c0739348f0e9064dbf597a4986',
+    'src/rust/forge-ide-web/tests/browser/journey.mjs': '8637cf0bde2a5adbbd2dfa37fe2e72797db823e2ad93e9e3b6bd58342662fc44',
+}
+
+TASK_RECOVERY_GUARD_AST_SHA256 = {
+    'work_workflow.py::WorkflowStore.retry_native_timeout': '1dd378b0024d8ee49493672edb2f0a2d78d0e819033b62802efcdd2ddb7aab11',
+}
+
+
+# Already accepted on main57a0aca: exact M36 legacy-progress grandfathering
+# verifier bytes. This qualifies no applied migration or other SQL authority.
+M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256 = {
+    'deploy/mission-control/sql/management/verify.sql': '2cdd7ea50a8b646d2a603548a49bd8445524426ad5c12ebb5bef215a0a2c1dbf',
+    'deploy/mission-control/sql/management/verify-task-events.sql': '942ab0db7b9f2e0cceaaf64d4d7c73fe16c9fa5cc306d4a7ba5b1f432b4510ed',
+}
+
+
 def qualified_source(relative, expected):
+<<<<<<< HEAD
     if relative in CICD_STAGES_BRANCH_CONTEXT_SHA256:
         return CICD_STAGES_BRANCH_CONTEXT_SHA256[relative]
+=======
+    if relative in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256:
+        return M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256[relative]
+    if relative in TASK_RECOVERY_CONTEXT_SHA256:
+        return TASK_RECOVERY_CONTEXT_SHA256[relative]
+>>>>>>> bf080e2ccff7058d5836c30a60a9e802483f401e
     if relative in PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256:
         return PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256[relative]
     if relative in MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256:
@@ -1006,8 +1044,12 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 )
                 if '/migrations/' in relative or '/fragments/' in relative:
                     self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql')
+<<<<<<< HEAD
                 actual = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
                 self.assertEqual(actual, expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected))
+=======
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected if '/migrations/' in relative or '/fragments/' in relative else qualified_source(relative, expected))
+>>>>>>> bf080e2ccff7058d5836c30a60a9e802483f401e
         published = {
             tuple(shlex.split(line, comments=True))
             for line in (RUNNER / 'setup-runner.sh').read_text().splitlines()
@@ -1015,6 +1057,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         self.assertIn(('publish', '$directory/work_external_plan_override.py', '$target/work_external_plan_override.py'), published)
 
+<<<<<<< HEAD
     def test_cicd_stages_and_persistent_branch_overlay_is_scoped_and_preserves_applied_migrations(self):
         self.assertIn('deploy/mission-control/agent-runner/work_agent_branch.py', CICD_STAGES_BRANCH_CONTEXT_SHA256)
         self.assertIn('deploy/mission-control/agent-runner/work_cicd_artifacts.py', CICD_STAGES_BRANCH_CONTEXT_SHA256)
@@ -1040,6 +1083,39 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         self.assertIn(('publish', '$directory/work_agent_branch.py', '$target/work_agent_branch.py'), published)
         self.assertIn(('publish', '$directory/work_cicd_artifacts.py', '$target/work_cicd_artifacts.py'), published)
+=======
+    def test_task_recovery_overlay_is_exact_and_keeps_other_guards(self):
+        self.assertEqual(set(TASK_RECOVERY_CONTEXT_SHA256), {
+            'AGENT_WORK.md',
+            'deploy/mission-control/agent-runner/test_external_code_context_recovery.py',
+            'deploy/mission-control/agent-runner/test_external_diff_contract.py',
+            'deploy/mission-control/agent-runner/test_native_deadline_events.py',
+            'deploy/mission-control/agent-runner/work_external_delivery.py',
+            'deploy/mission-control/agent-runner/work_external_recovery.py',
+            'deploy/mission-control/agent-runner/work_external_review_context.py',
+            'deploy/mission-control/agent-runner/work_external_workflow.py',
+            'deploy/mission-control/agent-runner/work_workflow.py',
+            'src/rust/forge-ide-ui/src/model/agents/tests/scopes.rs',
+            'src/rust/forge-ide-ui/src/model/agents/workflow.rs',
+            'src/rust/forge-ide-web/tests/browser/agents-relay.mjs',
+            'src/rust/forge-ide-web/tests/browser/journey.mjs',
+        })
+        self.assertEqual(set(TASK_RECOVERY_GUARD_AST_SHA256), {
+            'work_workflow.py::WorkflowStore.retry_native_timeout'})
+        for relative, expected in TASK_RECOVERY_CONTEXT_SHA256.items():
+            with self.subTest(task_recovery_source=relative):
+                self.assertNotIn('/sql/', relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_m36_legacy_progress_verifier_context_is_exact(self):
+        self.assertEqual(set(M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256), {
+            'deploy/mission-control/sql/management/verify.sql',
+            'deploy/mission-control/sql/management/verify-task-events.sql',
+        })
+        for relative, expected in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256.items():
+            with self.subTest(accepted_m36_verifier=relative):
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+>>>>>>> bf080e2ccff7058d5836c30a60a9e802483f401e
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
@@ -1050,6 +1126,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for identity, expected in UNCHANGED_LEGACY_GUARD_AST_SHA256.items():
             expected = AGENT_WIDE_RETRY_GUARD_AST_SHA256.get(identity, expected)
             expected = EVENT_RETRY_GUARD_AST_SHA256.get(identity, expected)
+            expected = TASK_RECOVERY_GUARD_AST_SHA256.get(identity, expected)
             filename, qualified = identity.split('::')
             node = ast.parse((RUNNER / filename).read_text())
             for name in qualified.split('.'):

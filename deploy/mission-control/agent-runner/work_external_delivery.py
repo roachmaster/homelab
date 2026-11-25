@@ -28,6 +28,7 @@ from work_external_delivery_store import ExternalDeliveryStoreFactory
 from work_ci_contract import (LEGACY_CHECKS, LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE,
     CiGateContractFactory, contract_for_config)
 from work_verification import protected_retry_observation
+from work_external_review_context import EXTERNAL_DIFF_FLAGS
 
 LOG = logging.getLogger('forge-external-delivery')
 SHA = re.compile('[0-9a-f]{40}')
@@ -39,8 +40,7 @@ BRANCH_SCOPE_RE = re.compile(r'branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
 EPHEMERAL_BRANCH_PREFIX = 'forge/external-candidate-'
 PROFILE = LEGACY_PROFILE
 CHECKS = LEGACY_CHECKS
-DIFF_FLAGS = ('--binary', '--no-ext-diff', '--no-textconv', '--no-color',
-              '--diff-algorithm=myers', '--no-renames')
+DIFF_FLAGS = EXTERNAL_DIFF_FLAGS
 PARAMETERS = ('FORGE_ACTION_ID', 'FORGE_WORKFLOW_ID', 'FORGE_CANDIDATE_COMMIT',
               'FORGE_CANDIDATE_TREE', 'FORGE_EXPECTED_MAIN', 'FORGE_GATE_MANIFEST',
               'FORGE_CORRELATION_ID')
