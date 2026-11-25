@@ -277,17 +277,14 @@ class WorkflowStore:
 
     def _amend_retry_allowance(self,cursor,project,root):
         # A concurrent grant revocation or historical orphan must not roll back
-        # unrelated amendments. Keep grants private to the narrow SQL port.
-        cursor.execute('SAVEPOINT retry_allowance_scope')
-        try:
-            cursor.execute('SELECT forge_agent.amend_agent_retry_policy(%s,%s,%s)',
-                (project,root,Json(dict(self.config.repair_policy))))
-        except psycopg2.Error as error:
-            cursor.execute('ROLLBACK TO SAVEPOINT retry_allowance_scope')
-            if error.pgcode not in {'P0009','P0006'}:
-                raise
-        finally:
-            cursor.execute('RELEASE SAVEPOINT retry_allowance_scope')
+        # unrelated amendments. The composite runs amend_agent_retry_policy
+        # in a server-side subtransaction and swallows P0009/P0006 (policy
+        # not found / already applied) exactly as the savepoint flow did;
+        # any other error propagates (as ProxyError through the proxy).
+        # The inline SAVEPOINT form cannot run through the proxy at all,
+        # and claim() calls this sweep first, so the wiring is load-bearing.
+        _composite(cursor, self.store.owner, "workflow_retry_allowance_amend",
+                   project, root, Json(dict(self.config.repair_policy)))
 
     def _grant(self,cursor,workflow,profile,mode):
         self._current_policy(workflow)

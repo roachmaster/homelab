@@ -1031,13 +1031,15 @@ class WorkStore:
         # at the same points the inline flow did, so resolving here only
         # changes which error wins when the input is invalid AND the
         # state is bad (400 instead of 409); valid inputs behave
-        # identically. The advisory lock is dropped: the composite
-        # locks the task row FOR UPDATE, which serializes concurrent
-        # control operations on the task on both transports (the proxy
-        # write lock serializes the op itself).
+        # identically. The advisory lock stays: the merge path
+        # serializes cancel through it (not through the task row), so
+        # dropping it lets a cancel slip past an in-flight merge on
+        # the direct path. Through the proxy the lock call is a no-op
+        # and the proxy write lock serializes the op itself.
         actor = require_actor(actor, self._owner)
         cause = require_cancel_cause(cause)
         with self._transaction() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",(self._owner+"\n"+project_alias,ADVISORY_LOCK_SALT))
             result = _composite(cursor, self._owner, "coding_workflow_cancel",
                                 project_alias, task_id, expected_revision,
                                 idempotency_key, actor["kind"], actor["id"], cause)

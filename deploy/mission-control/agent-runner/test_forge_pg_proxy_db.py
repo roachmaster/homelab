@@ -1389,6 +1389,9 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
                 " WHERE workflow_id = %s", (workflow_id,))
         for task_id in self._task_ids:
             self.fixture_sql(
+                "DELETE FROM forge_agent.coding_review_budget"
+                " WHERE root_task_id = %s", (task_id,))
+            self.fixture_sql(
                 "DELETE FROM forge_agent.coding_control_receipts"
                 " WHERE task_id = %s", (task_id,))
             self.fixture_sql(
@@ -1481,9 +1484,11 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
             " 'pending')",
             (workflow_id, "mission-control", "homelab"))
         config = SimpleNamespace(
-            repair_policy={"max_rounds": AGENT_RETRY_LIMIT,
+            repair_policy={"version": "forge-repair-v1",
+                           "max_rounds": AGENT_RETRY_LIMIT,
                            "max_stagnant_rounds": AGENT_RETRY_LIMIT,
-                           "max_infrastructure_retries": AGENT_RETRY_LIMIT},
+                           "max_infrastructure_retries": AGENT_RETRY_LIMIT,
+                           "required_hosted_checks": []},
             project_workflows={"homelab": _ClaimPolicy()},
             allowed_modes={"plan", "review", "implement"},
             profiles={})
@@ -1601,6 +1606,54 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
                 idempotency_key="cancel-proxy-k2")
         self.assertEqual((ctx.exception.status, ctx.exception.code),
                          (409, "not_cancellable"))
+
+    def test_amend_retry_allowance_through_the_proxy(self):
+        # The wired _amend_retry_allowance (used by claim()'s sweep)
+        # goes through the workflow_retry_allowance_amend composite:
+        # the inline SAVEPOINT form cannot run through the proxy at all.
+        import json
+        from types import SimpleNamespace
+        from work_retry_policy import AGENT_RETRY_LIMIT
+        from work_workflow import WorkflowStore
+
+        class _ClaimPolicy:
+            def snapshot(self, catalog, repair_policy):
+                return {"policy_digest": POLICY64}
+
+        task_id = self.insert_task()
+        self._task_ids.append(task_id)
+        self._insert_queued_event(task_id)
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_worker_grants"
+            " (worker_role, owner_id, project_alias, agent_profile, mode)"
+            " VALUES (%s, %s, %s, %s, %s)",
+            ("forge_agent", "mission-control", "homelab", "muse", "plan"))
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_review_budget"
+            " (owner_id, project_alias, root_task_id, policy)"
+            " VALUES (%s, %s, %s, %s)",
+            ("mission-control", "homelab", task_id, json.dumps(
+                {"version": "forge-repair-v1", "max_rounds": 3,
+                 "max_stagnant_rounds": 3, "max_infrastructure_retries": 3,
+                 "required_hosted_checks": ["check"]})))
+        # The amend only widens numeric limits: the non-limit keys of
+        # the new policy must equal the budget row's (version + checks).
+        config = SimpleNamespace(
+            repair_policy={"version": "forge-repair-v1",
+                           "max_rounds": AGENT_RETRY_LIMIT,
+                           "max_stagnant_rounds": AGENT_RETRY_LIMIT,
+                           "max_infrastructure_retries": AGENT_RETRY_LIMIT,
+                           "required_hosted_checks": ["check"]},
+            project_workflows={"homelab": _ClaimPolicy()},
+            allowed_modes={"plan", "review", "implement"},
+            profiles={})
+        flow = WorkflowStore(config, None, self.store)
+        with self.store._transaction() as cursor:
+            flow._amend_retry_allowance(cursor, "homelab", task_id)
+        rows = self.fixture_sql(
+            "SELECT policy FROM forge_agent.coding_review_budget"
+            " WHERE root_task_id = %s", (task_id,))
+        self.assertEqual(rows[0][0]["max_rounds"], AGENT_RETRY_LIMIT)
 
     def test_cancel_workflow_through_the_proxy(self):
         from uuid import UUID
