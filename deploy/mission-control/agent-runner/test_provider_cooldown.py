@@ -1,8 +1,14 @@
 """Durable finite worker-local admission without provider calls or model swaps."""
 from copy import deepcopy
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
+import json
+import fcntl
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Barrier,Event
+import time
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -79,6 +85,73 @@ class ProviderCooldownTest(unittest.TestCase):
             for value in ([{}],[[]],['x','x'],[True],['']):
                 changed=deepcopy(raw);changed['profiles']['agy']['backup_models']=value
                 with self.assertRaises(ValueError):parse_config(changed)
+    def test_shared_state_ignores_other_profiles_and_unconfigured_models_without_dropping_them(self):
+        with TemporaryDirectory()as root:
+            dedicated=self.config(root);general=parse_config(raw_config(root))
+            dedicated_port=ProviderCooldownFactory(dedicated,clock=lambda:1000).create()
+            general_port=ProviderCooldownFactory(general,clock=lambda:1000).create()
+            diagnostic=dict(version=1,code='provider_quota_exhausted',error_sha256='a'*64,retry_after_seconds=20)
+            general_port.record(dict(agent_profile='codex',attempt_id=str(uuid4()),recipe={'model':general.profiles['codex'].model}),diagnostic)
+            self.assertEqual(dedicated_port.selection()[0],('agy',))
+            dedicated_port.record(dict(agent_profile='agy',attempt_id=str(uuid4()),recipe={'model':BACKUP}),diagnostic)
+            self.assertEqual(general_port.selection()[0],('agy',),'Unconfigured Opus entry must not disable the general worker primary')
+            self.assertEqual([p['model']for p in dedicated_port.selection()[1]],[dedicated.profiles['agy'].model])
+            general_port.record(dict(agent_profile='agy',attempt_id=str(uuid4()),recipe={'model':general.profiles['agy'].model}),diagnostic)
+            self.assertEqual(dedicated_port.selection(),((),[]),'Shared AGY primary cooldown applies to both workers')
+            self.assertEqual(general_port.selection(),((),[]))
+            value=json.loads((general.state_root/'provider-cooldowns/state.json').read_text())
+            self.assertEqual({(x['profile'],x['model'])for x in value['entries']},
+                {('codex',general.profiles['codex'].model),('agy',general.profiles['agy'].model),('agy',BACKUP)})
+    def test_concurrent_workers_preserve_each_others_distinct_cooldowns(self):
+        with TemporaryDirectory()as root:
+            dedicated=self.config(root);general=parse_config(raw_config(root));barrier=Barrier(2)
+            dedicated_port=ProviderCooldownFactory(dedicated,clock=lambda:1000).create()
+            general_port=ProviderCooldownFactory(general,clock=lambda:1000).create()
+            diagnostic=dict(version=1,code='provider_quota_exhausted',error_sha256='a'*64,retry_after_seconds=20)
+            def record(port,profile,model):
+                barrier.wait(timeout=5)
+                port.record(dict(agent_profile=profile,attempt_id=str(uuid4()),recipe={'model':model}),diagnostic)
+            with ThreadPoolExecutor(max_workers=2)as executor:
+                first=executor.submit(record,general_port,'codex',general.profiles['codex'].model)
+                second=executor.submit(record,dedicated_port,'agy',BACKUP)
+                first.result(timeout=5);second.result(timeout=5)
+            self.assertEqual(general_port.selection()[0],('agy',))
+            self.assertEqual(dedicated_port.selection()[0],('agy',))
+            value=json.loads((general.state_root/'provider-cooldowns/state.json').read_text())
+            self.assertEqual(len(value['entries']),2)
+    def test_shared_lock_contention_waits_briefly_and_has_a_finite_deadline(self):
+        with TemporaryDirectory()as root:
+            config=self.config(root);provider=ProviderCooldownFactory(config).create();provider.selection()
+            descriptor=os.open(config.state_root/'provider-cooldowns/admission.lock',os.O_RDWR)
+            actual=fcntl.flock;blocked=Event()
+            def observed(fd,operation):
+                try:return actual(fd,operation)
+                except BlockingIOError:blocked.set();raise
+            try:
+                actual(descriptor,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                with patch('work_provider_cooldown.fcntl.flock',observed),ThreadPoolExecutor(max_workers=1)as executor:
+                    future=executor.submit(provider.selection)
+                    self.assertTrue(blocked.wait(timeout=2),'A real contending reader reached the held shared lock')
+                    actual(descriptor,fcntl.LOCK_UN)
+                    self.assertEqual(future.result(timeout=2)[0],('agy',))
+                actual(descriptor,fcntl.LOCK_EX|fcntl.LOCK_NB);started=time.monotonic()
+                with self.assertRaises(BlockingIOError):provider.selection()
+                elapsed=time.monotonic()-started
+                self.assertGreaterEqual(elapsed,0.2);self.assertLess(elapsed,2)
+            finally:os.close(descriptor)
+    def test_out_of_scope_entries_still_require_globally_valid_shape_and_digest(self):
+        for case in('identifier','model','hash','version_bool','duplicate'):
+            with self.subTest(case=case),TemporaryDirectory()as root:
+                config=self.config(root);provider=ProviderCooldownFactory(config,clock=lambda:1000).create();provider.selection()
+                diagnostic=dict(version=1,code='provider_quota_exhausted',error_sha256='a'*64,retry_after_seconds=20)
+                item=dict(profile='other-worker-profile',model='other-model',attempt_id=str(uuid4()),blocked_until=1020,diagnostic=diagnostic)
+                if case=='identifier':item['profile']='bad profile'
+                elif case=='model':item['model']={'not':'a model'}
+                elif case=='hash':diagnostic['error_sha256']='invalid'
+                elif case=='version_bool':diagnostic['version']=True
+                value=dict(version=1,entries=[item,item.copy()]if case=='duplicate'else[item])
+                path=config.state_root/'provider-cooldowns/state.json';path.write_text(json.dumps(value));path.chmod(0o600)
+                with self.assertRaises(ValueError):provider.selection()
 
 
 if __name__=='__main__':unittest.main()

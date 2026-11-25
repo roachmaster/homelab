@@ -94,11 +94,12 @@ class AgentsRuntimeIntegrationTest(unittest.TestCase):
         self.assertIs(worker.store, self.db)
         self.assertIs(worker.runner, self.runner)
         self.assertIs(worker.workspaces, self.workspaces)
-        self.assertFalse(config.state_root.exists(), 'Selected ready factories do not acquire cooldown state')
+        self.assertEqual(config.state_root.stat().st_mode&0o777,0o700,
+                         'Factory acquisition establishes private state before collaborator prepare')
         worker.advertise()
         return worker
 
-    def test_fresh_factory_advertisement_acquires_private_state_root(self):
+    def test_fresh_factory_acquires_private_state_root_before_advertisement(self):
         worker=self.make_worker()
         self.assertEqual(worker.config.state_root.stat().st_mode&0o777,0o700)
         self.assertEqual((worker.config.state_root/'provider-cooldowns').stat().st_mode&0o777,0o700)
