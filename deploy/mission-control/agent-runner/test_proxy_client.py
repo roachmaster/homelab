@@ -520,6 +520,168 @@ class TranslateTest(unittest.TestCase):
         self.assertTrue(result.args["on_conflict_do_nothing"])
 
 
+class CompositeCallTest(unittest.TestCase):
+    """forge_pg_proxy_api composite calls translate to op.<name>."""
+
+    def op(self, sql, params=()):
+        result = translate(sql, params)
+        self.assertIsInstance(result, Operation)
+        return result
+
+    def test_claim_next_binds_tools_only(self):
+        result = self.op(
+            "SELECT forge_pg_proxy_api.ide_run_claim_next(%s)", (True,))
+        self.assertEqual(result.operation, "op.ide_run_claim_next")
+        self.assertEqual(result.args, {"tools_only": True})
+        self.assertEqual(result.columns, ["ide_run_claim_next"])
+
+    def test_admit_binds_all_params_and_unwraps_json(self):
+        from psycopg2.extras import Json
+        from uuid import UUID
+        conversation = UUID("00000000-0000-0000-0000-000000000001")
+        result = self.op(
+            "SELECT forge_pg_proxy_api.ide_run_admit(%s, %s, %s, %s, %s, %s, "
+            "%s, %s, %s, %s, %s, %s, %s)",
+            (conversation, "req-1", "model", "fp",
+             Json([{"role": "user", "content": "hi"}]),
+             Json({"model": "model", "max_tokens": 8}),
+             True, None, None, None, None, False, False))
+        self.assertEqual(result.operation, "op.ide_run_admit")
+        self.assertEqual(result.args["conversation_id"],
+                         "00000000-0000-0000-0000-000000000001")
+        self.assertEqual(result.args["messages"],
+                         [{"role": "user", "content": "hi"}])
+        self.assertEqual(result.args["settings"],
+                         {"model": "model", "max_tokens": 8})
+        self.assertIsNone(result.args["chat_id"])
+        self.assertFalse(result.args["explicit_conversation"])
+
+    def test_tool_started_unwraps_arguments(self):
+        from psycopg2.extras import Json
+        result = self.op(
+            "SELECT forge_pg_proxy_api.ide_tool_started(%s, %s, %s, %s)",
+            ("00000000-0000-0000-0000-000000000001", "c1", "read",
+             Json({"path": "README.md"})))
+        self.assertEqual(result.operation, "op.ide_tool_started")
+        self.assertEqual(result.args["arguments"], {"path": "README.md"})
+
+    def test_interrupt_binds_tools_only(self):
+        result = self.op(
+            "SELECT forge_pg_proxy_api.ide_interrupt_conversation_runs(%s)",
+            (False,))
+        self.assertEqual(result.operation,
+                         "op.ide_interrupt_conversation_runs")
+        self.assertEqual(result.args, {"tools_only": False})
+
+    def test_optional_default_omitted(self):
+        result = self.op(
+            "SELECT forge_pg_proxy_api.ide_run_admit(%s, %s, %s, %s, %s, %s, "
+            "%s, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT)",
+            ("00000000-0000-0000-0000-000000000001", "req-1", "model", "fp",
+             [{"role": "user", "content": "hi"}], {"model": "model"}, True))
+        self.assertEqual(result.operation, "op.ide_run_admit")
+        self.assertNotIn("chat_id", result.args)
+        self.assertNotIn("distributed", result.args)
+
+    def test_unknown_composite_is_unsupported(self):
+        from proxy_statements import UnsupportedStatement
+        with self.assertRaises(UnsupportedStatement):
+            translate("SELECT forge_pg_proxy_api.nope(%s)", (1,))
+
+    def test_composite_result_shape(self):
+        transport = FakeTransport()
+        transport.caller = "coordinator"
+        transport.results["op.ide_run_claim_next"] = {
+            "run_id": "00000000-0000-0000-0000-000000000001",
+            "conversation_id": "00000000-0000-0000-0000-000000000002",
+            "model_id": "model", "settings": {"max_tokens": 8},
+            "messages": [{"role": "user", "content": "hi"}]}
+        connection = ProxyConnection(
+            ProxyClient("http://127.0.0.1:18087", "coordinator", token="fake"))
+        connection.client = transport
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT forge_pg_proxy_api.ide_run_claim_next(%s)", (False,))
+        row = cursor.fetchone()
+        self.assertEqual(row[0]["model_id"], "model")
+        self.assertEqual(cursor.description[0][0], "ide_run_claim_next")
+        self.assertEqual(cursor.rowcount, 1)
+
+
+class ReadQueryTest(unittest.TestCase):
+    """proxy_client.run_read_query on both transports."""
+
+    def test_proxy_path_runs_readq_operation(self):
+        transport = FakeTransport()
+        transport.caller = "coordinator"
+        transport.results["readq.run_fingerprint_by_mail"] = {
+            "rows": [{"id": "00000000-0000-0000-0000-000000000001",
+                      "fingerprint": "abc"}]}
+        connection = ProxyConnection(
+            ProxyClient("http://127.0.0.1:18087", "coordinator", token="fake"))
+        connection.client = transport
+        cursor = connection.cursor()
+        rows = proxy_client.run_read_query(
+            cursor, "run_fingerprint_by_mail",
+            {"mail_owner_id": "mission-control",
+             "mail_thread_id": "00000000-0000-0000-0000-000000000002",
+             "request_id": "req-1"})
+        self.assertEqual(rows, [{"id": "00000000-0000-0000-0000-000000000001",
+                                 "fingerprint": "abc"}])
+        self.assertEqual(transport.requests,
+                         [("readq.run_fingerprint_by_mail",
+                           {"mail_owner_id": "mission-control",
+                            "mail_thread_id": "00000000-0000-0000-0000-000000000002",
+                            "request_id": "req-1"})])
+
+    def test_proxy_path_json_encodes_uuid_params(self):
+        from uuid import UUID
+        transport = FakeTransport()
+        transport.caller = "coordinator"
+        transport.results["readq.run_detail"] = {"rows": []}
+        connection = ProxyConnection(
+            ProxyClient("http://127.0.0.1:18087", "coordinator", token="fake"))
+        connection.client = transport
+        rows = proxy_client.run_read_query(
+            connection.cursor(), "run_detail",
+            {"run_id": UUID("00000000-0000-0000-0000-000000000001"),
+             "owner_id": "mission-control", "distributed_chat": False})
+        self.assertEqual(rows, [])
+        self.assertEqual(
+            transport.requests[0][1]["run_id"],
+            "00000000-0000-0000-0000-000000000001")
+
+    def test_direct_path_executes_fixed_sql(self):
+        class StubCursor:
+            def __init__(self):
+                self.executed = []
+                self.description = (("id",), ("fingerprint",))
+            def execute(self, sql, params):
+                self.executed.append((sql, params))
+            def fetchall(self):
+                return [("00000000-0000-0000-0000-000000000001", "abc")]
+        cursor = StubCursor()
+        rows = proxy_client.run_read_query(
+            cursor, "run_fingerprint_by_mail",
+            {"mail_owner_id": "mission-control",
+             "mail_thread_id": "00000000-0000-0000-0000-000000000002",
+             "request_id": "req-1"})
+        self.assertEqual(rows, [{"id": "00000000-0000-0000-0000-000000000001",
+                                 "fingerprint": "abc"}])
+        self.assertIn("SELECT r.id", cursor.executed[0][0])
+        self.assertEqual(cursor.executed[0][1]["request_id"], "req-1")
+
+    def test_repeatable_read_only_is_a_noop(self):
+        result = translate(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", ())
+        self.assertIsInstance(result, StaticResult)
+
+    def test_savepoint_still_unsupported(self):
+        from proxy_statements import UnsupportedStatement
+        with self.assertRaises(UnsupportedStatement):
+            translate("SAVEPOINT sp1", ())
+
+
 class TransportSelectionTest(unittest.TestCase):
     """The proxy transport switch: env vars for the runner/GPU, the
     database.proxy section for the worker/publication configs."""

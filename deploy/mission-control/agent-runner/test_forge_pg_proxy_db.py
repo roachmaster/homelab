@@ -1186,6 +1186,168 @@ class CallerTransportDbTest(ProxyDbTestCase, FixtureMixin):
             connection.close()
 
 
+class MigratedQueueStoreDbTest(ProxyDbTestCase, FixtureMixin):
+    """C3b: queue_store's composite migrations operate through the live
+    proxy end to end (admit/claim/tool/recover + the readq-backed
+    reads). finish/cancel/restore_workspace still use the locked
+    flows and are not covered here; they need composites of their own.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import proxy_client
+        import queue_store
+        from unittest.mock import patch
+        factory = proxy_client.connect_factory(
+            f"http://127.0.0.1:{self.proxy_port}", "coordinator",
+            token_file=os.path.join(self.cluster.root, "coordinator.token"))
+        application = patch.object(queue_store, "connect", factory)
+        application.start()
+        self.addCleanup(application.stop)
+        self._run_ids = []
+
+    def tearDown(self):
+        # Runs before the parent tearDown closes the fixture cursor.
+        self._cleanup_runs()
+        super().tearDown()
+
+    def _cleanup_runs(self):
+        for run_id in self._run_ids:
+            self.fixture_sql(
+                "DELETE FROM forge_agent.tool_results WHERE run_id = %s",
+                (run_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.tool_calls WHERE run_id = %s",
+                (run_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.run_events WHERE run_id = %s",
+                (run_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.messages WHERE run_id = %s",
+                (run_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.runs WHERE id = %s", (run_id,))
+        self.fixture_sql(
+            "DELETE FROM forge_agent.conversations"
+            " WHERE id NOT IN (SELECT conversation_id"
+            " FROM forge_agent.runs)")
+        self._run_ids = []
+
+    def _admit(self, request_id=None):
+        import queue_store
+        request_id = request_id or ("req-" + _uuid()[:8])
+        accepted = queue_store.admit(queue_store.Submit(
+            "fixture-model", (queue_store.Message("user", "hello"),),
+            128, 0.7, None, request_id))
+        self._run_ids.append(accepted["run_id"])
+        return accepted
+
+    def test_admit_claim_tool_flow_through_the_proxy(self):
+        import queue_store
+        from agent_tools import ToolCall
+        accepted = self._admit()
+        run_id = accepted["run_id"]
+        self.assertEqual(accepted["status"], "queued")
+        rows = self.fixture_sql(
+            "SELECT status FROM forge_agent.runs WHERE id = %s", (run_id,))
+        self.assertEqual([row[0] for row in rows], ["queued"])
+        claimed_id, claimed = queue_store.claim()
+        self.assertEqual(claimed_id, run_id)
+        self.assertEqual(claimed.messages[0].content, "hello")
+        self.assertEqual(claimed.max_tokens, 128)
+        call = ToolCall("call-1", "read_file", {"path": "README.md"})
+        queue_store.tool_started(run_id, call)
+        rows = self.fixture_sql(
+            "SELECT status FROM forge_agent.tool_calls"
+            " WHERE run_id = %s AND call_id = %s", (run_id, "call-1"))
+        self.assertEqual([row[0] for row in rows], ["running"])
+        queue_store.tool_finished(
+            run_id, call, {"text": "fixed revision", "truncated": False})
+        rows = self.fixture_sql(
+            "SELECT outcome, stdout FROM forge_agent.tool_results"
+            " WHERE run_id = %s AND call_id = %s", (run_id, "call-1"))
+        self.assertEqual(rows, [("exited", "fixed revision")])
+        events = self.fixture_sql(
+            "SELECT event_type FROM forge_agent.run_events"
+            " WHERE run_id = %s ORDER BY sequence", (run_id,))
+        self.assertEqual([row[0] for row in events],
+                         ["queued", "model_started", "tool_started",
+                          "tool_finished"])
+        audit = self.fixture_sql(
+            "SELECT operation FROM forge_pg_proxy.audit"
+            " WHERE db_role = 'forge_agent'"
+            " AND operation IN ('entry.ide_run_admit',"
+            " 'entry.ide_run_claim_next', 'entry.ide_tool_started',"
+            " 'entry.ide_tool_finished')")
+        self.assertEqual({row[0] for row in audit},
+                         {"entry.ide_run_admit", "entry.ide_run_claim_next",
+                          "entry.ide_tool_started",
+                          "entry.ide_tool_finished"})
+
+    def test_admit_idempotent_and_conflict_through_the_proxy(self):
+        import queue_store
+        request_id = "req-" + _uuid()[:8]
+        first = self._admit(request_id)
+        second = queue_store.admit(queue_store.Submit(
+            "fixture-model", (queue_store.Message("user", "hello"),),
+            128, 0.7, None, request_id))
+        self.assertEqual(second["run_id"], first["run_id"])
+        self.assertEqual(second["status"], "queued")
+        with self.assertRaises(queue_store.Rejected) as caught:
+            queue_store.admit(queue_store.Submit(
+                "fixture-model",
+                (queue_store.Message("user", "different"),),
+                128, 0.7, None, request_id))
+        self.assertEqual((caught.exception.status, caught.exception.code),
+                         (409, "request_id_conflict"))
+
+    def test_recover_interrupts_running_run_through_the_proxy(self):
+        import queue_store
+        from agent_tools import ToolCall
+        accepted = self._admit()
+        run_id = accepted["run_id"]
+        claimed_id, _ = queue_store.claim()
+        self.assertEqual(claimed_id, run_id)
+        queue_store.tool_started(
+            run_id, ToolCall("call-1", "read_file", {"path": "README.md"}))
+        queue_store.recover()
+        rows = self.fixture_sql(
+            "SELECT status FROM forge_agent.runs WHERE id = %s", (run_id,))
+        self.assertEqual([row[0] for row in rows], ["interrupted"])
+        rows = self.fixture_sql(
+            "SELECT status FROM forge_agent.tool_calls"
+            " WHERE run_id = %s AND call_id = %s", (run_id, "call-1"))
+        self.assertEqual([row[0] for row in rows], ["outcome_unknown"])
+        events = self.fixture_sql(
+            "SELECT event_type FROM forge_agent.run_events"
+            " WHERE run_id = %s ORDER BY sequence", (run_id,))
+        self.assertEqual([row[0] for row in events],
+                         ["queued", "model_started", "tool_started",
+                          "interrupted"])
+
+    def test_get_run_and_events_through_the_proxy(self):
+        import queue_store
+        accepted = self._admit()
+        run_id = accepted["run_id"]
+        detail = queue_store.get_run(run_id)
+        self.assertEqual(detail["status"], "queued")
+        self.assertEqual(detail["model"], "fixture-model")
+        record = queue_store.get_events(run_id, 0)
+        self.assertEqual([event["type"] for event in record["events"]],
+                         ["queued"])
+        self.assertEqual(record["status"], "queued")
+        with self.assertRaises(queue_store.Rejected) as caught:
+            queue_store.get_run(_uuid())
+        self.assertEqual(caught.exception.code, "run_not_found")
+
+    def test_model_catalog_through_the_proxy(self):
+        import queue_store
+        catalog = queue_store.model_catalog(["gpt-oss-20b"])
+        self.assertEqual(catalog, [{"model_id": "gpt-oss-20b",
+                                    "label": "GPT-OSS 20B (MXFP4)",
+                                    "ready": False}])
+
+
 class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
     """Finding 11: preparation and cutover are separate, verifiable
     stages — an ordinary apply.sql run stops at preparation."""

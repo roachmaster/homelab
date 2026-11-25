@@ -1084,6 +1084,23 @@ class ProxyResultDecodingTest(unittest.TestCase):
         self.assertEqual(proxy._decode_result((None,)), {})
         self.assertEqual(proxy._decode_result((7,)), {"value": 7})
 
+    def test_encode_row_keeps_nested_lists_as_lists(self):
+        # Composite results carry nested lists (claim's messages,
+        # interrupt's run ids); encode_row used to str() them, so the
+        # client received a Python-repr string instead of a list.
+        import uuid
+        run_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        self.assertEqual(
+            proxy.encode_row({
+                "run_id": run_id,
+                "messages": [{"role": "user", "content": "hello"}],
+                "interrupted": [run_id],
+                "settings": {"max_tokens": 8}}),
+            {"run_id": "00000000-0000-0000-0000-000000000001",
+             "messages": [{"role": "user", "content": "hello"}],
+             "interrupted": ["00000000-0000-0000-0000-000000000001"],
+             "settings": {"max_tokens": 8}})
+
 
 if __name__ == "__main__":
     unittest.main()

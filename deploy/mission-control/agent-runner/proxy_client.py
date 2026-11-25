@@ -228,6 +228,31 @@ def caller_for_role(role):
         raise ValueError(f"No proxy caller for database role {role!r}") from None
 
 
+def run_read_query(cursor, name, params):
+    """Run a named fixed read query (``forge_pg_proxy.READ_QUERIES``).
+
+    On a proxy cursor, runs the ``readq.<name>`` operation; on a direct
+    cursor, executes the fixed SQL with the named params. Returns the
+    rows as a list of plain dicts (like a RealDictCursor fetchall).
+    Params are JSON-encoded for the proxy path (UUIDs become strings)
+    and passed through for the direct path.
+    """
+    from forge_pg_proxy import READ_QUERIES
+    proxy_client = getattr(getattr(cursor, "_connection", None), "client", None)
+    if proxy_client is not None and hasattr(proxy_client, "operation"):
+        args = {key: proxy_statements.to_json_value(value)
+                for key, value in params.items()}
+        result = proxy_client.operation(f"readq.{name}", args)
+        return [dict(row) for row in (result.get("rows") or [])]
+    sql = READ_QUERIES[name][0]
+    cursor.execute(sql, params)
+    if cursor.description is None:
+        return []
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(row) if isinstance(row, dict) else dict(zip(columns, row))
+            for row in cursor.fetchall()]
+
+
 def connect_factory(url, caller, *, token_file=None, token=None,
                     timeout=DEFAULT_TIMEOUT_SECONDS):
     """Return a zero-arg connection factory for ``caller`` at ``url``.

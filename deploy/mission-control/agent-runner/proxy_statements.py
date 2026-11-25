@@ -369,6 +369,16 @@ def _translate_special(sql, params, caller=None):
         return StaticResult([column], [(available,)], 1)
     if _TXN_NOOP_RE.match(sql):
         return StaticResult([], [], -1)
+    if re.match(r"^SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY$",
+                sql, re.IGNORECASE):
+        # Read-only snapshot request. The proxy runs each operation in
+        # its own transaction, so there is no cross-operation snapshot
+        # to preserve; the reads degrade to per-operation reads. Both
+        # callers (queue_store.get_events, usage_store overview) are
+        # read-only polling paths with no write depending on the
+        # snapshot, so the no-op is safe. A read-then-write flow must
+        # still use a composite (see _TXN_SEMANTIC_RE below).
+        return StaticResult([], [], -1)
     if _TXN_SEMANTIC_RE.match(sql):
         # SET TRANSACTION isolation and SAVEPOINT rollback carry
         # meaning the adapter cannot preserve across one-operation
@@ -426,9 +436,20 @@ def _translate_function(sql, params):
     if not match:
         return None
     name, arg_text = match.group(1), match.group(2).strip()
-    if name not in FUNC_CATALOG:
+    if name.startswith("forge_pg_proxy_api."):
+        # A composite (op.*) call: SELECT forge_pg_proxy_api.<name>(...).
+        # The entry point's params come from ENTRY_POINTS; the operation
+        # is op.<name> and the result is the function's jsonb return.
+        short = name.split(".")[-1]
+        if short not in ENTRY_POINTS:
+            return None
+        catalog = [[param[0], param[1]] for param in ENTRY_POINTS[short][0]]
+        operation = f"op.{short}"
+    elif name in FUNC_CATALOG:
+        catalog = FUNC_CATALOG[name]
+        operation = f"fn.{name}"
+    else:
         return None
-    catalog = FUNC_CATALOG[name]
     raw_args = split_top_level(arg_text) if arg_text else []
     if len(raw_args) > len(catalog):
         raise UnsupportedStatement(sql, "more arguments than the catalog lists")
@@ -457,7 +478,7 @@ def _translate_function(sql, params):
     if pidx != len(params or ()):
         raise UnsupportedStatement(sql, "parameter count mismatch")
     short = match.group(3) or name.split(".")[-1]
-    return Operation(f"fn.{name}", args, [short],
+    return Operation(operation, args, [short],
                      lambda result: _shape_single_value(result, short))
 
 

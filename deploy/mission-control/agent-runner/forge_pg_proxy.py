@@ -1503,27 +1503,30 @@ def _decode_result(row):
                       for item in row]}
 
 
-def encode_row(row):
-    """Encode one result row (dict) as JSON-safe values."""
+def _encode_value(value):
+    """One value as a JSON-safe value (recurses through dicts/lists)."""
     import datetime
     import decimal
-    out = {}
-    for key, value in row.items():
-        if value is None or isinstance(value, (str, int, float, bool)):
-            out[key] = value
-        elif isinstance(value, uuid_mod.UUID):
-            out[key] = str(value)
-        elif isinstance(value, (datetime.datetime, datetime.date)):
-            out[key] = value.isoformat()
-        elif isinstance(value, decimal.Decimal):
-            out[key] = float(value)
-        elif isinstance(value, (bytes, bytearray, memoryview)):
-            out[key] = bytes(value).hex()
-        elif isinstance(value, dict):
-            out[key] = value
-        else:
-            out[key] = str(value)
-    return out
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, uuid_mod.UUID):
+        return str(value)
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if isinstance(value, decimal.Decimal):
+        return float(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex()
+    if isinstance(value, dict):
+        return {key: _encode_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_encode_value(item) for item in value]
+    return str(value)
+
+
+def encode_row(row):
+    """Encode one result row (dict) as JSON-safe values."""
+    return {key: _encode_value(value) for key, value in row.items()}
 
 
 class Caller:

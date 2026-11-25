@@ -17,7 +17,7 @@ import chat_history_store
 from file_context import FileAttachment
 import mail_store
 from mail_tokenizer import PROFILE_ID, TokenizerUnavailable, model_profile, prompt_tokens
-from psycopg2.extras import Json, RealDictCursor, execute_values, register_uuid
+from psycopg2.extras import Json, RealDictCursor, register_uuid
 
 register_uuid()
 OWNER = "mission-control"
@@ -99,6 +99,48 @@ def transaction():
             yield cursor
     finally:
         connection.close()
+
+
+def _read_query(cursor, name, params):
+    """Run a named fixed read query on either transport (see proxy_client.run_read_query)."""
+    from proxy_client import run_read_query
+    return run_read_query(cursor, name, params)
+
+
+def _composite(cursor, name, *args):
+    """Call one forge_pg_proxy_api composite; return its jsonb result.
+
+    Works on both transports: the direct connection executes the
+    SECURITY DEFINER function, and the proxy translates the call to
+    the op.<name> operation. Returns the decoded result (a dict, or
+    None when the function returned SQL NULL).
+    The scope is set here, not in transaction(): some readers run
+    SET TRANSACTION first, which must precede any query in the
+    transaction. A no-op through the proxy (the server binds the
+    owner from the caller config); a real SET LOCAL on the direct
+    connection.
+    """
+    cursor.execute("SELECT pg_catalog.set_config('forge.coding_owner', %s, true)", (OWNER,))
+    placeholders = ", ".join(["%s"] * len(args))
+    cursor.execute("SELECT forge_pg_proxy_api." + name + "(" + placeholders + ")", args)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return row[name] if isinstance(row, dict) else row[0]
+
+
+# Composite error code -> HTTP status for ide_run_admit.
+_ADMIT_ERROR_STATUS = {
+    "conversation_not_found": 404,
+    "request_id_conflict": 409,
+    "invalid_request": 400,
+    "chat_not_found": 404,
+    "revision_conflict": 409,
+    "chat_busy": 409,
+    "conversation_busy": 409,
+    "queue_full": 503,
+    "conversation_limit": 422,
+}
 
 
 @contextmanager
@@ -185,12 +227,9 @@ def _mail_remaining(messages):
 
 
 def _mail_idempotent(cursor, thread_id, key, fingerprint):
-    cursor.execute("""
-        SELECT r.id, e.data->>'fingerprint' AS fingerprint
-        FROM forge_agent.runs r JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1
-        WHERE (r.mail_owner_id, r.mail_thread_id) = (%s, %s) AND r.request_id = %s
-    """, (OWNER, thread_id, key))
-    previous = cursor.fetchone()
+    rows = _read_query(cursor, "run_fingerprint_by_mail",
+                       {"mail_owner_id": OWNER, "mail_thread_id": thread_id, "request_id": key})
+    previous = rows[0] if rows else None
     if previous is None:
         return None
     if previous["fingerprint"] != fingerprint:
@@ -216,8 +255,9 @@ def _enqueue_mail(cursor, thread_id, messages, key, fingerprint, settings, sourc
     command = Submit(mail_store.MODEL_ID, tuple(Message(**item) for item in messages),
                      model_profile.completion_tokens, 0.7, None, key, allow_partial=True,
                      mail_thread_id=thread_id, mail_source_run_id=source_run_id)
+    # The ide_run_admit composite already records the mail accept_job
+    # update (latest_run_id, revision + 1); do not apply it twice.
     run = _admit(cursor, command, True, fingerprint=fingerprint, mail_profile=settings)
-    mail_store.accept_job(cursor, OWNER, thread_id, run["run_id"])
     return _mail_receipt(thread_id, run["run_id"])
 
 
@@ -266,13 +306,9 @@ def retry_mail(failed_run_id, idempotency_key):
     fingerprint = _fingerprint({"retry": str(failed_run_id)})
     with transaction() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(20261112, 2)")
-        cursor.execute("""
-            SELECT r.mail_thread_id, coalesce(r.mail_source_run_id, r.id) AS source_run_id,
-                   e.data->'mail_profile' AS profile
-            FROM forge_agent.runs r JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1
-            WHERE r.id = %s AND r.mail_owner_id = %s
-        """, (failed_run_id, OWNER))
-        failed = cursor.fetchone()
+        rows = _read_query(cursor, "run_mail_source",
+                           {"run_id": failed_run_id, "mail_owner_id": OWNER})
+        failed = rows[0] if rows else None
         if failed is None:
             raise Rejected(404, "not_found")
         thread_id = failed["mail_thread_id"]
@@ -321,83 +357,12 @@ def _admit(cursor, command, distributed, *, fingerprint=None, saved=None, model_
         cursor.execute("SELECT pg_advisory_xact_lock(20261112, 2)")
         if linked:
             saved = _lock_chat_for_admission(cursor, command.chat_id)
-    cursor.execute("""
-        INSERT INTO forge_agent.conversations (id, owner_id) VALUES (%s, %s)
-        ON CONFLICT (id) DO NOTHING
-    """, (conversation, OWNER))
-    cursor.execute("SELECT owner_id FROM forge_agent.conversations WHERE id = %s FOR UPDATE", (conversation,))
-    if cursor.fetchone()["owner_id"] != OWNER:
-        raise Rejected(404, "conversation_not_found")
-    if not linked and command.conversation_id is not None:
-        cursor.execute("""
-            SELECT 1 FROM forge_agent.runs WHERE conversation_id = %s
-                AND (ide_chat_id IS NOT NULL OR mail_thread_id IS NOT NULL) LIMIT 1
-        """, (conversation,))
-        if cursor.fetchone() is not None:
-            raise Rejected(404, "conversation_not_found")
-    cursor.execute("""
-        SELECT r.id, r.status, e.data->>'fingerprint' AS fingerprint
-        FROM forge_agent.runs r JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1
-        WHERE r.conversation_id = %s AND r.request_id = %s
-    """, (conversation, command.request_id))
-    previous = cursor.fetchone()
-    if previous:
-        if previous["fingerprint"] != fingerprint:
-            raise Rejected(409, "request_id_conflict")
-        existing = dict(run_id=previous["id"], conversation_id=conversation, status=previous["status"])
-        if distributed and linked:
-            existing["chat_id"] = command.chat_id
-        return existing
-    if not model_allowed:
-        raise Rejected(400, "invalid_request")
     if linked:
+        # Transcript shape stays caller-side; the composite does the
+        # revision, chat_busy, capacity and history-limit checks.
         submitted = payload["messages"]
         if not _valid_transcript(submitted + [{"role": "assistant", "content": "pending"}]):
             raise Rejected(422 if distributed else 400, "invalid_messages")
-        prior = submitted[:-1]
-        if (command.expected_revision != (saved["revision"] or None)
-                or (saved["revision"] > 0 and prior != saved["messages"])):
-            raise Rejected(409, "revision_conflict")
-        cursor.execute("""
-            SELECT 1 FROM forge_agent.runs WHERE ide_chat_owner_id = %s AND ide_chat_id = %s
-                AND status IN ('queued', 'running', 'waiting_for_tool', 'result_ready')
-        """, (OWNER, command.chat_id))
-        if cursor.fetchone() is not None:
-            raise Rejected(409, "chat_busy")
-    cursor.execute("""
-        SELECT count(*) AS total, coalesce(bool_or(r.conversation_id = %s), false) AS same_conversation
-        FROM forge_agent.runs r JOIN forge_agent.conversations c ON c.id = r.conversation_id
-        WHERE c.owner_id = %s AND r.status IN ('queued', 'running', 'waiting_for_tool', 'result_ready')
-    """, (conversation, OWNER))
-    pending = cursor.fetchone()
-    if pending["same_conversation"]:
-        raise Rejected(409, "conversation_busy")
-    if pending["total"] >= 64:
-        raise Rejected(503, "queue_full")
-    cursor.execute("""
-        SELECT count(*) AS count, coalesce(sum(octet_length(content)), 0) AS bytes,
-               coalesce(max(position), 0) AS last_position
-        FROM forge_agent.messages WHERE conversation_id = %s
-    """, (conversation,))
-    history = cursor.fetchone()
-    if (history["count"] + len(messages) > RUN_MAX_MESSAGES
-            or history["bytes"] + sum(len(m.content.encode()) for m in messages) > RUN_MAX_CONTENT_BYTES):
-        raise Rejected(422, "conversation_limit")
-    run_id = uuid4()
-    cursor.execute("""
-        INSERT INTO forge_agent.runs
-            (id, conversation_id, request_id, model_id, ide_chat_owner_id, ide_chat_id,
-             distributed, run_deadline, next_attempt_at, mail_owner_id, mail_thread_id, mail_source_run_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s,
-                CASE WHEN %s THEN clock_timestamp() + %s::interval END,
-                CASE WHEN %s THEN clock_timestamp() END, %s, %s, %s)
-    """, (run_id, conversation, command.request_id, command.model, OWNER if linked else None, command.chat_id,
-          distributed, distributed, "4 hours" if mail else "10 minutes", distributed,
-          OWNER if mail else None, command.mail_thread_id, command.mail_source_run_id))
-    execute_values(cursor, """
-        INSERT INTO forge_agent.messages (conversation_id, position, run_id, role, content) VALUES %s
-    """, [(conversation, history["last_position"] + i, run_id, m.role, m.content)
-          for i, m in enumerate(messages, 1)])
     settings = dict(model=command.model, max_tokens=command.max_tokens, temperature=command.temperature,
                     fingerprint=fingerprint, allow_partial=command.allow_partial)
     if command.tool_repository is not None:
@@ -407,44 +372,41 @@ def _admit(cursor, command, distributed, *, fingerprint=None, saved=None, model_
     if attachment is not None:
         settings.update(source_attachment=attachment.reference, source_message_position=len(messages),
                         source_prompt=command.messages[-1].content)
-    event(cursor, run_id, "queued", settings)
-    cursor.execute("SELECT pg_notify('forge_agent_jobs', '')")
-    accepted = dict(run_id=run_id, conversation_id=conversation, status="queued")
-    if distributed and linked:
-        accepted["chat_id"] = command.chat_id
+    result = _composite(
+        cursor, "ide_run_admit",
+        conversation, command.request_id, command.model, fingerprint,
+        Json([{"role": item.role, "content": item.content} for item in messages]),
+        Json(settings), model_allowed,
+        command.chat_id, command.expected_revision,
+        command.mail_thread_id, command.mail_source_run_id,
+        distributed, command.conversation_id is not None,
+    )
+    if result is None:
+        raise Rejected(404, "conversation_not_found")
+    if isinstance(result, dict) and "error" in result:
+        code = result["error"]
+        raise Rejected(_ADMIT_ERROR_STATUS.get(code, 409), code)
+    accepted = dict(run_id=UUID(result["run_id"]), conversation_id=UUID(result["conversation_id"]),
+                    status=result["status"])
+    if "chat_id" in result:
+        accepted["chat_id"] = UUID(result["chat_id"])
     return accepted
 
 
 def claim(*, tools_only=False):
     with transaction() as cursor:
-        cursor.execute("""
-            SELECT r.id, r.conversation_id, r.model_id, e.data
-            FROM forge_agent.runs r
-            JOIN forge_agent.conversations c ON c.id = r.conversation_id
-            JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1
-            LEFT JOIN forge_agent.ide_chats h ON (h.owner_id, h.id) = (r.ide_chat_owner_id, r.ide_chat_id)
-            WHERE c.owner_id = %s AND NOT r.distributed AND r.status = 'queued' AND e.event_type = 'queued'
-                AND (NOT %s OR e.data ? 'tool_repository')
-                AND (r.ide_chat_id IS NULL OR (h.removed_at IS NULL AND
-                    (h.expires_at IS NULL OR h.expires_at > clock_timestamp())))
-            ORDER BY r.created_at, r.id LIMIT 1 FOR UPDATE OF r SKIP LOCKED
-        """, (OWNER, tools_only))
-        job = cursor.fetchone()
-        if job is None:
+        result = _composite(cursor, "ide_run_claim_next", tools_only)
+        if result is None:
             return None
-        cursor.execute("UPDATE forge_agent.runs SET status = 'running' WHERE id = %s", (job["id"],))
-        event(cursor, job["id"], "model_started", {"model": job["model_id"]})
-        cursor.execute("""
-            SELECT role, content FROM forge_agent.messages
-            WHERE conversation_id = %s AND role IN ('system', 'user', 'assistant')
-            ORDER BY position
-        """, (job["conversation_id"],))
-        settings = job["data"]
-        return job["id"], Submit(job["model_id"], tuple(Message(**row) for row in cursor.fetchall()),
-                                 settings["max_tokens"], settings["temperature"], job["conversation_id"], "",
-                                 allow_partial=settings.get("allow_partial", False),
-                                 tool_repository=settings.get("tool_repository"),
-                                 tool_revision=settings.get("tool_revision"))
+        settings = result["settings"]
+        return (UUID(result["run_id"]),
+                Submit(result["model_id"],
+                       tuple(Message(item["role"], item["content"]) for item in result["messages"]),
+                       settings["max_tokens"], settings["temperature"],
+                       UUID(result["conversation_id"]), "",
+                       allow_partial=settings.get("allow_partial", False),
+                       tool_repository=settings.get("tool_repository"),
+                       tool_revision=settings.get("tool_revision")))
 
 
 def completion_content(answer, finish_reason):
@@ -484,39 +446,20 @@ def finish(run_id, answer=None, error=None, usage=None, finish_reason=None):
 
 def tool_started(run_id, call):
     with transaction() as cursor:
-        run, _ = _lock_owned_run(cursor, run_id)
-        if run is None or run["distributed"] or run["status"] != "running":
+        result = _composite(cursor, "ide_tool_started", run_id, call.id, call.name, Json(call.arguments))
+        if result is None or result.get("error") == "tool_run_inactive":
             raise Rejected(409, "tool_run_inactive")
-        cursor.execute("""
-            INSERT INTO forge_agent.tool_calls (run_id, call_id, tool_name, arguments, status)
-            VALUES (%s, %s, %s, %s, 'running')
-            ON CONFLICT (run_id, call_id) DO NOTHING
-        """, (run_id, call.id, call.name, Json(call.arguments)))
-        if cursor.rowcount != 1:
+        if result.get("error") == "tool_call_conflict":
             raise Rejected(409, "tool_call_conflict")
-        event(cursor, run_id, "tool_started", {"call_id": call.id, "name": call.name})
 
 
 def tool_finished(run_id, call, result):
     with transaction() as cursor:
-        run, _ = _lock_owned_run(cursor, run_id)
-        if run is None or run["distributed"] or run["status"] != "running":
+        outcome = _composite(cursor, "ide_tool_finished", run_id, call.id, call.name, Json(result))
+        if outcome is None or outcome.get("error") == "tool_run_inactive":
             raise Rejected(409, "tool_run_inactive")
-        cursor.execute("""
-            UPDATE forge_agent.tool_calls SET status = 'finished'
-            WHERE run_id = %s AND call_id = %s AND status = 'running'
-        """, (run_id, call.id))
-        if cursor.rowcount != 1:
+        if outcome.get("error") == "tool_call_conflict":
             raise Rejected(409, "tool_call_conflict")
-        error = result.get("error")
-        cursor.execute("""
-            INSERT INTO forge_agent.tool_results
-                (run_id, call_id, outcome, exit_code, stdout, stderr, output_truncated)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (run_id, call.id, "execution_error" if error else "exited", None if error else 0,
-              result.get("text", ""), error or "", result.get("truncated", False)))
-        event(cursor, run_id, "tool_finished", {"call_id": call.id, "name": call.name,
-                                              "outcome": "failed" if error else "completed"})
 
 
 def _finish_locked(cursor, run, saved, answer=None, error=None, usage=None, finish_reason=None):
@@ -526,15 +469,8 @@ def _finish_locked(cursor, run, saved, answer=None, error=None, usage=None, fini
         if saved["due"]:
             error, answer = "chat_not_found", None
         elif answer is not None and error is None:
-            cursor.execute("""
-                SELECT m.role, CASE
-                    WHEN m.position = (queued.data->>'source_message_position')::int
-                    THEN queued.data->>'source_prompt' ELSE m.content END AS content
-                FROM forge_agent.messages m
-                JOIN forge_agent.run_events queued ON queued.run_id = m.run_id AND queued.sequence = 1
-                WHERE m.run_id = %s ORDER BY m.position
-            """, (run_id,))
-            messages = [dict(row) for row in cursor.fetchall()]
+            rows = _read_query(cursor, "run_messages_with_source_prompt", {"run_id": run_id})
+            messages = [dict(row) for row in rows]
             messages.append({"role": "assistant", "content": completion_content(answer, finish_reason)})
             if _valid_transcript(messages):
                 revision = chat_history_store.dao.commit_transcript(cursor, chat_id, messages)
@@ -583,22 +519,7 @@ def _finish_mail(cursor, run, answer):
 
 def recover(*, tools_only=False):
     with transaction() as cursor:
-        cursor.execute("""
-            UPDATE forge_agent.runs r SET status = 'interrupted'
-            FROM forge_agent.conversations c
-            WHERE c.id = r.conversation_id AND c.owner_id = %s AND NOT r.distributed AND r.status = 'running'
-              AND (NOT %s OR EXISTS (
-                SELECT 1 FROM forge_agent.run_events e WHERE e.run_id = r.id
-                    AND e.sequence = 1 AND e.data ? 'tool_repository'
-              ))
-            RETURNING r.id
-        """, (OWNER, tools_only))
-        for row in cursor.fetchall():
-            cursor.execute("""
-                UPDATE forge_agent.tool_calls SET status = 'outcome_unknown'
-                WHERE run_id = %s AND status = 'running'
-            """, (row["id"],))
-            event(cursor, row["id"], "interrupted", {"error": "worker_restarted"})
+        _composite(cursor, "ide_interrupt_conversation_runs", tools_only)
 
 
 def cancel(run_id):
@@ -632,14 +553,9 @@ def _requeue(cursor, run, error):
 
 def finalize_ready(limit=20):
     with transaction() as cursor:
-        cursor.execute("""
-            SELECT result.run_id FROM forge_agent.inference_results result
-            JOIN forge_agent.runs r ON r.id = result.run_id
-            JOIN forge_agent.conversations c ON c.id = r.conversation_id
-            WHERE c.owner_id = %s AND r.distributed AND r.status = 'result_ready'
-            ORDER BY (r.mail_thread_id IS NOT NULL), result.accepted_at, result.run_id LIMIT %s
-        """, (OWNER, limit))
-        pending = [row["run_id"] for row in cursor.fetchall()]
+        rows = _read_query(cursor, "inference_ready_runs",
+                           {"owner_id": OWNER, "limit": limit})
+        pending = [row["run_id"] for row in rows]
     processed = 0
     for run_id in pending:
         try:
@@ -667,14 +583,9 @@ def finalize_ready(limit=20):
 
 def expire_runs(limit=20):
     with transaction() as cursor:
-        cursor.execute("""
-            SELECT r.id FROM forge_agent.runs r
-            JOIN forge_agent.conversations c ON c.id = r.conversation_id
-            WHERE c.owner_id = %s AND r.distributed AND r.status IN ('queued', 'running')
-              AND (r.run_deadline <= clock_timestamp() OR r.lease_until <= clock_timestamp())
-            ORDER BY least(r.run_deadline, r.lease_until), r.id LIMIT %s
-        """, (OWNER, limit))
-        pending = [row["id"] for row in cursor.fetchall()]
+        rows = _read_query(cursor, "stale_distributed_runs",
+                           {"owner_id": OWNER, "limit": limit})
+        pending = [row["id"] for row in rows]
     processed = 0
     for run_id in pending:
         with transaction() as cursor:
@@ -696,27 +607,9 @@ def expire_runs(limit=20):
 
 
 def _get_run(cursor, run_id, *, distributed_chat=False):
-    cursor.execute("""
-        SELECT r.id AS run_id, r.conversation_id, r.status, r.model_id AS model,
-               r.ide_chat_id AS chat_id, r.ide_chat_revision AS revision,
-               CASE WHEN r.status = 'completed' THEN (
-                   SELECT m.content FROM forge_agent.messages m
-                   WHERE m.conversation_id = r.conversation_id AND m.run_id = r.id AND m.role = 'assistant'
-                   ORDER BY m.position DESC LIMIT 1
-               ) END AS answer,
-               CASE WHEN r.status = 'completed' THEN (
-                   SELECT e.data->>'finish_reason' FROM forge_agent.run_events e
-                   WHERE e.run_id = r.id AND e.event_type = 'completed'
-                   ORDER BY e.sequence DESC LIMIT 1
-               ) END AS finish_reason
-        FROM forge_agent.runs r JOIN forge_agent.conversations c ON c.id = r.conversation_id
-        LEFT JOIN forge_agent.ide_chats h ON (h.owner_id, h.id) = (r.ide_chat_owner_id, r.ide_chat_id)
-        WHERE r.id = %s AND c.owner_id = %s AND r.mail_thread_id IS NULL
-            AND (NOT %s OR (r.distributed AND r.ide_chat_id IS NOT NULL))
-            AND (r.ide_chat_id IS NULL OR (h.removed_at IS NULL AND
-                (h.expires_at IS NULL OR h.expires_at > clock_timestamp())))
-    """, (run_id, OWNER, distributed_chat))
-    row = cursor.fetchone()
+    rows = _read_query(cursor, "run_detail",
+                       {"run_id": run_id, "owner_id": OWNER, "distributed_chat": distributed_chat})
+    row = rows[0] if rows else None
     if row is None:
         raise Rejected(404, "run_not_found")
     for optional in ("finish_reason", "chat_id", "revision"):
@@ -732,11 +625,9 @@ def get_run(run_id):
 
 def model_catalog(configured_models):
     with transaction() as cursor:
-        cursor.execute("""
-            SELECT DISTINCT model_id FROM forge_agent.gpu_worker_readiness
-            WHERE model_id = ANY(%s) AND ready AND seen_at > clock_timestamp() - interval '30 seconds'
-        """, (list(configured_models),))
-        ready = {row["model_id"] for row in cursor.fetchall()}
+        rows = _read_query(cursor, "gpu_ready_models",
+                           {"model_ids": list(configured_models)})
+        ready = {row["model_id"] for row in rows}
     return [
         {"model_id": model, "label": MODEL_LABELS[model], "ready": model in ready}
         for model in configured_models
@@ -747,20 +638,12 @@ def get_events(run_id, after, *, include_completion=False):
     with transaction() as cursor:
         cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         run = _get_run(cursor, run_id, distributed_chat=include_completion)
-        cursor.execute("""
-            SELECT sequence, event_type AS type, data - 'fingerprint' AS data, recorded_at
-            FROM forge_agent.run_events WHERE run_id = %s AND sequence > %s ORDER BY sequence LIMIT 100
-        """, (run_id, after))
-        events = cursor.fetchall()
+        events = _read_query(cursor, "run_events_after",
+                             {"run_id": run_id, "sequence": after})
         response = {"run_id": run_id, "status": run["status"], "events": events}
         if include_completion:
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT 1 FROM forge_agent.gpu_worker_readiness
-                    WHERE model_id = %s AND ready AND seen_at > clock_timestamp() - interval '30 seconds'
-                ) AS worker_ready
-            """, (run["model"],))
-            response.update(cursor.fetchone())
+            rows = _read_query(cursor, "gpu_worker_ready", {"model_id": run["model"]})
+            response.update(rows[0])
             response["next_sequence"] = events[-1]["sequence"] if events else after
             if "chat_id" in run:
                 response["chat_id"] = run["chat_id"]
