@@ -494,6 +494,86 @@ fn repeated_row_actions_preserve_distinct_stable_focus_identity() {
     assert!(main.contains("b.id+':'+key+':toggle:'+JSON.stringify(row.toggle)"));
 }
 
+fn list_detail_document(detail: &str, focus: &str, scroll: &str) -> Document {
+    Document {
+        title: "Records".into(),
+        subtitle: "Owned navigation fixture".into(),
+        children: vec![component!(screen "record-viewport", "Records", true; [
+            component!(list_detail_tree "record-list", "Saved <records>", detail, focus, scroll),
+            component!(region "record-reader"; [
+                component!(heading "record-title", "Record"),
+                component!(text "record-body", "Evidence"),
+            ]),
+        ])],
+    }
+}
+
+#[test]
+fn list_detail_navigation_is_a_reusable_typed_presentation_contract() {
+    let mut c = config();
+    c.document = list_detail_document("record-reader", "record-title", "record-viewport");
+    let assets = build(c);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    assert!(html.contains("aria-label=\"Saved &lt;records&gt;\""));
+    assert!(html.contains("data-list-detail=\"record-reader\""));
+    assert!(html.contains("data-detail-focus=\"record-title\""));
+    assert!(html.contains("data-list-scroll=\"record-viewport\""));
+    assert!(html.contains("id=\"record-title\" class=\"fg-selection-heading\" data-bind-text tabindex=\"-1\""));
+    assert!(!html.contains("onclick="));
+    let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
+    assert!(!main.contains("record-reader"));
+    assert!(!main.contains("record-viewport"));
+    assert_eq!(assets.files["main.js"], build(config()).files["main.js"]);
+}
+
+#[test]
+fn list_detail_navigation_rejects_missing_unsafe_and_non_heading_references() {
+    for (detail, focus, scroll) in [
+        ("missing-reader", "record-title", "record-viewport"),
+        ("record-reader", "missing-title", "record-viewport"),
+        ("record-reader", "record-title", "missing-viewport"),
+        ("record-reader", "record-body", "record-viewport"),
+        ("record-list", "record-title", "record-viewport"),
+        ("record-reader", "record-title", "record-reader"),
+        ("record-reader", "bad\" onfocus=\"code", "record-viewport"),
+    ] {
+        let mut c = config();
+        c.document = list_detail_document(detail, focus, scroll);
+        assert!(register_assets("assets", c).is_err());
+    }
+}
+
+#[test]
+fn agents_triage_discloses_evidence_behind_one_primary_summary() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let attention = html.find("id=\"agents-attention\"").unwrap();
+    let tasks = html.find("id=\"agents-tasks\"").unwrap();
+    assert!(attention < tasks, "attention scope is before the task list");
+    assert!(html.contains("id=\"agents-task-scope\""));
+    assert!(html.contains("data-list-detail=\"agents-reader\""));
+    assert!(html.contains("data-detail-focus=\"agents-task-title\""));
+    assert!(html.contains("data-list-scroll=\"agents\""));
+    let now = html.find("id=\"agents-triage-now\"").unwrap();
+    let why = html.find("id=\"agents-triage-why\"").unwrap();
+    let next = html.find("id=\"agents-triage-next\"").unwrap();
+    assert!(now < why && why < next);
+    assert!(next < html.find("id=\"agents-current-stage\"").unwrap());
+    for id in [
+        "agents-stage-evidence",
+        "agents-workflow",
+        "agents-task-technical",
+        "agents-history-panel",
+        "agents-assignment-details",
+    ] {
+        assert!(html.contains(&format!("<details id=\"{id}\" class=\"fg-disclosure\"><summary>")));
+    }
+    assert!(html.contains("id=\"agents-task-prompt\""));
+    assert!(html.contains("id=\"agents-task-correlation\""));
+    assert!(html.contains("id=\"agents-worker\""));
+    assert!(html.contains("id=\"agents-project-delivery\""));
+}
+
 #[test]
 fn focused_layout_and_disclosure_are_declarative_reusable_primitives() {
     let mut c = config();

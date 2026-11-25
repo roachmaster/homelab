@@ -2130,7 +2130,7 @@
       declarations:
         - ["min-height", "50px"]
 
-# Agents dashboard: task state, quota and project usage remain separate.
+# Agents triage: authoritative task state, worker readiness and delivery stay separate.
 - rules:
     - selector: "#agents:not([hidden])"
       declarations:
@@ -2183,6 +2183,79 @@
     - selector: "#agents .fg-selection-heading:not(#agents-heading)"
       declarations:
         - ["font-size", "1.05rem"]
+    - selector: "#agents #agents-task-title"
+      declarations:
+        - ["font-size", "clamp(1.2rem,2.5vw,1.6rem)"]
+        - ["line-height", "1.35"]
+        - ["overflow-wrap", "break-word"]
+        - ["margin", "4px 0"]
+    - selector: "#agents-triage"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "12px"]
+        - ["padding", "16px"]
+        - ["border-left", "3px solid var(--accent)"]
+        - ["background", "var(--surface)"]
+        - ["min-width", "0"]
+    - selector: "#agents-triage #agents-triage-kind"
+      declarations:
+        - ["font-size", ".8125rem"]
+        - ["font-weight", "650"]
+        - ["color", "var(--muted)"]
+        - ["margin", "0"]
+    - selector: "#agents-triage>.fg-region"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "3.25rem minmax(0,1fr)"]
+        - ["gap", "10px"]
+        - ["align-items", "start"]
+    - selector: "#agents #agents-triage .fg-selection-heading"
+      declarations:
+        - ["font-size", ".875rem"]
+        - ["line-height", "1.5"]
+        - ["margin", "0"]
+        - ["color", "var(--muted)"]
+    - selector: "#agents-triage p"
+      declarations:
+        - ["margin", "0"]
+        - ["font-size", ".9375rem"]
+        - ["line-height", "1.5"]
+        - ["min-width", "0"]
+        - ["overflow-wrap", "break-word"]
+    - selector: "#agents-triage #agents-triage-now"
+      declarations:
+        - ["min-height", "0"]
+        - ["border", "0"]
+        - ["padding", "0"]
+        - ["background", "transparent"]
+        - ["font-size", "1.05rem"]
+        - ["font-weight", "650"]
+        - ["white-space", "normal"]
+        - ["text-align", "left"]
+        - ["justify-content", "start"]
+    - selector: "#agents-triage #agents-retry-event"
+      declarations:
+        - ["font-size", ".8125rem"]
+        - ["color", "var(--muted)"]
+        - ["border-top", "1px solid var(--border)"]
+        - ["padding-top", "10px"]
+    - selector: "#agents-task-technical,#agents-history-panel,#agents-workflow"
+      declarations:
+        - ["min-width", "0"]
+    - selector: "#agents-reader .fg-disclosure>summary"
+      declarations:
+        - ["min-height", "44px"]
+        - ["font-size", ".875rem"]
+        - ["line-height", "1.5"]
+        - ["padding-block", "12px"]
+        - ["overflow-wrap", "break-word"]
+    - selector: "#agents-reader .fg-disclosure>summary:focus-visible,#agents-task-title:focus-visible,#agents-attention:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "3px"]
+    - selector: "#agents-task-technical .fg-disclosure-body,#agents-workflow .fg-disclosure-body"
+      declarations:
+        - ["overflow-wrap", "anywhere"]
     - selector: "#agents-tasks-heading,#agents-usage-heading,#agents-external-heading"
       declarations:
         - ["font-size", ".75rem"]
@@ -2210,10 +2283,21 @@
     - selector: "#agents-project-bar>.fg-row"
       declarations:
         - ["display", "grid"]
-        - ["grid-template-columns", "minmax(0,1fr) minmax(0,1.4fr)"]
+        - ["grid-template-columns", "minmax(0,1fr) minmax(0,1.4fr) auto"]
         - ["gap", "12px"]
-        - ["max-width", "32rem"]
+        - ["max-width", "48rem"]
         - ["align-items", "end"]
+    - selector: "#agents-attention"
+      declarations:
+        - ["min-height", "44px"]
+        - ["white-space", "normal"]
+        - ["border-color", "var(--warning)"]
+        - ["color", "var(--warning)"]
+        - ["background", "transparent"]
+    - selector: "#agents-attention[aria-pressed=true]"
+      declarations:
+        - ["background", "rgba(242,200,121,.13)"]
+        - ["box-shadow", "inset 0 -2px var(--warning)"]
     - selector: "#agents-task-scope-field"
       declarations:
         - ["min-width", "0"]
@@ -2278,26 +2362,43 @@
     - selector: "#agents-tasks .fg-row-select:hover:enabled"
       declarations:
         - ["background", "var(--surface)"]
+    - selector: "#agents-tasks [data-selected=true] .fg-row-select"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["box-shadow", "inset 3px 0 var(--accent)"]
     - selector: "#agents-tasks [data-summary=true] .fg-row-secondary"
+      declarations:
+        - ["grid-row", "3"]
+        - ["font-size", ".8125rem"]
+        - ["color", "var(--muted)"]
+        - ["line-height", "1.5"]
+    - selector: "#agents-tasks .fg-row-secondary:empty"
       declarations:
         - ["display", "none"]
     - selector: "#agents-tasks [data-summary=true] .fg-row-label"
       declarations:
-        - ["grid-row", "2"]
-        - ["display", "-webkit-box"]
-        - ["-webkit-line-clamp", "2"]
-        - ["-webkit-box-orient", "vertical"]
-        - ["overflow", "hidden"]
+        - ["grid-row", "1"]
+        - ["display", "block"]
+        - ["overflow", "visible"]
         - ["white-space", "normal"]
         - ["line-height", "1.45"]
-        - ["max-height", "2.9em"]
-        - ["font-size", ".9375rem"]
+        - ["max-height", "none"]
+        - ["font-size", "1rem"]
         - ["font-weight", "600"]
-        - ["overflow-wrap", "anywhere"]
+        - ["overflow-wrap", "break-word"]
     - selector: "#agents-tasks [data-summary=true] .fg-row-select::after"
       declarations:
-        - ["grid-row", "2"]
+        - ["grid-row", "1"]
         - ["align-self", "center"]
+    - selector: "#agents-tasks .fg-row-summary"
+      declarations:
+        - ["grid-row", "2"]
+    - selector: "#agents-tasks .fg-row-tag"
+      declarations:
+        - ["font", ".8125rem var(--font-family,system-ui)"]
+        - ["white-space", "normal"]
+        - ["overflow", "visible"]
+        - ["overflow-wrap", "break-word"]
     - selector: ".fg-row-summary"
       declarations:
         - ["display", "grid"]
@@ -2789,8 +2890,7 @@
 - rules:
     - selector: "#agents-workflow"
       declarations:
-        - ["padding", "12px 0"]
-        - ["border-bottom", "1px solid var(--border)"]
+        - ["padding", "0"]
     - selector: "#agents-workflow-roles,#agents-assignment-roles"
       declarations:
         - ["margin", "6px 0"]
@@ -3206,8 +3306,93 @@
         - ["overflow-wrap", "anywhere"]
         - ["flex", "1 1 160px"]
         - ["min-width", "0"]
+
+    # The current stage is always visible; its complete evidence path is disclosed.
+    # A deliberate vertical list avoids a nine-stage path breaking into stray rows.
+    - selector: "#agents-current-stage"
+      declarations:
+        - ["font-size", "1rem"]
+        - ["font-weight", "600"]
+        - ["line-height", "1.45"]
+        - ["margin", "0"]
+        - ["overflow-wrap", "break-word"]
+    - selector: "#agents-stage-panel"
+      declarations:
+        - ["margin-block", "0"]
+        - ["padding", "12px 14px"]
+        - ["gap", "6px"]
+    - selector: "#agents-stage-evidence"
+      declarations:
+        - ["margin-top", "4px"]
+    - selector: "#agents-stage-diagram .fg-flow-track"
+      declarations:
+        - ["flex-direction", "column"]
+        - ["flex-wrap", "nowrap"]
+        - ["align-items", "stretch"]
+        - ["gap", "0"]
+    - selector: "#agents-stage-diagram .fg-flow-step"
+      declarations:
+        - ["flex-direction", "column"]
+        - ["align-items", "stretch"]
+        - ["width", "100%"]
+    - selector: "#agents-stage-diagram .fg-flow-node"
+      declarations:
+        - ["grid-template-columns", "minmax(0,1fr) minmax(0,1fr)"]
+        - ["align-items", "center"]
+        - ["width", "100%"]
+        - ["min-width", "0"]
+        - ["max-width", "none"]
+        - ["padding", "9px 12px"]
+        - ["gap", "4px 12px"]
+    - selector: "#agents-stage-diagram .fg-flow-label"
+      declarations:
+        - ["font-size", ".875rem"]
+        - ["overflow-wrap", "break-word"]
+    - selector: "#agents-stage-diagram .fg-flow-connector"
+      declarations:
+        - ["width", "100%"]
+        - ["height", "18px"]
+        - ["padding", "0"]
+    - selector: "#agents-stage-diagram .fg-flow-connector svg"
+      declarations:
+        - ["transform", "rotate(90deg)"]
 - media: "(max-width:639px)"
   rules:
+    - selector: "#agents-project-bar>.fg-row"
+      declarations:
+        - ["grid-template-columns", "minmax(0,1fr) minmax(0,1.4fr)"]
+        - ["gap", "8px 12px"]
+    - selector: "#agents-attention"
+      declarations:
+        - ["grid-column", "1 / -1"]
+        - ["justify-self", "start"]
+    - selector: "#agents-tasks .fg-row-summary"
+      declarations:
+        - ["grid-template-columns", "minmax(0,1fr) max-content"]
+        - ["gap", "4px 8px"]
+    - selector: "#agents-tasks .fg-row-summary .fg-badge"
+      declarations:
+        - ["white-space", "normal"]
+        - ["justify-content", "start"]
+        - ["text-align", "left"]
+    - selector: "#agents-tasks .fg-row-tag"
+      declarations:
+        - ["grid-column", "1 / -1"]
+        - ["grid-row", "2"]
+    - selector: "#agents-tasks .fg-row-time"
+      declarations:
+        - ["grid-column", "2"]
+        - ["grid-row", "1"]
+    - selector: "#agents-triage"
+      declarations:
+        - ["padding", "12px"]
+    - selector: "#agents-triage>.fg-region"
+      declarations:
+        - ["grid-template-columns", "2.5rem minmax(0,1fr)"]
+        - ["gap", "8px"]
+    - selector: "#agents-stage-diagram .fg-flow-node"
+      declarations:
+        - ["grid-template-columns", "minmax(0,1fr)"]
     - selector: "#agents-stage-panel,#agents-verification-pipeline"
       declarations:
         - ["padding", "12px"]

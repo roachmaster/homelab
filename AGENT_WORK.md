@@ -1,4 +1,41 @@
-# Current: Stabilize the event stream and measure bottlenecks — 2026-11-25
+# Current: Forge IDE Agents triage (UI-01 / UI-02) — 2026-11-25
+
+Implement a focused review PR on `feat/forge-ide-agents-triage`, starting from
+fresh `origin/main` 32588ab5. Surface the existing authoritative Needs attention
+scope, readable assignment rows, and a single Now / Why / Next task summary.
+Keep retry budget separate from revision count and worker readiness separate
+from main verification. Preserve native/Muse semantics, review and merge gates,
+full evidence, selection, keyboard focus and list position.
+
+Root owns typed component/YAML declarations, reusable presentation primitives,
+integration, qualification and the PR. Model and owned-fixture work use separate
+worktrees with bounded ownership; readers may audit without edits. Apply Design
+Forge UI, Design Forge IDE UX, Design Modern UI and Test Forge UI. No handwritten
+application HTML/CSS/JS, workflow-policy changes, unrelated screen work, live
+assignment mutations, deployment, main push or merge are authorized.
+
+Extend Rust tests and the fixed `make ui-qa` fixture journey for native/Muse,
+automatic retry versus operator action, keyboard/focus/scroll and desktop plus
+320/390px layouts. Capture and inspect fixture before/after inbox/detail images.
+Local Rust/browser prerequisite availability and hosted CI are being checked;
+report actual checks, source identity, blocked steps and unverified live behavior.
+Only the named feature branch is to be committed/pushed and opened for review.
+
+Implementation checkpoint: the Rust triage projection and authoritative scope
+shortcut, retained list selection/context, typed list/detail navigation primitive,
+YAML layouts and owned-fixture coverage are integrated. No backend policy or
+action guard changed. Local `make ui-qa-check` passes 37 tests; the script suite
+passes 129. The exact MAIN emitter passes the existing and extended deterministic
+input-presentation suite (a Node diagnostic, not generated/WASM/browser evidence).
+`make ui-qa` stopped at prerequisites: Cargo is absent, as are the locked browser
+dependencies. `make portal-style-check` likewise stopped at Cargo/rustfmt.
+No dependencies were installed and no real assignments were used. Fixture PNG
+capture and actual browser acceptance remain unverified. Existing PR CI runs
+Rust gates and browser-harness checks but skips full browser journeys; the
+connected tools currently provide no authenticated workflow-dispatch path.
+Feature-branch publication and actual hosted results are the next checkpoint.
+
+# Previous: Stabilize the event stream and measure bottlenecks — 2026-11-25
 
 User requests fixing the live event stream and identifying its bottlenecks and
 errors. Root owns integration, scoped operational recovery, final qualification

@@ -10,6 +10,11 @@ pub(super) fn delivery_badge(d: &WorkDelivery) -> BadgeView {
     }) {
         return workflow::retry_badge(event);
     }
+    delivery_phase_badge(d)
+}
+
+/// Phase-only presentation. Retry allowance is independent evidence.
+pub(super) fn delivery_phase_badge(d: &WorkDelivery) -> BadgeView {
     match d.repair.status {
         WorkRepairStatus::Queued => return badge("Repair queued", BadgeTone::Accent),
         WorkRepairStatus::Running => return badge("Repairing main", BadgeTone::Accent),

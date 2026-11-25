@@ -138,7 +138,7 @@ fn authoritative_workflow_phase_overrides_cancelled_author_in_task_rows() {
                 badge("Needs attention", BadgeTone::Warning),
                 "{profile}: {status:?} is a stopped author, not a cancelled workflow"
             );
-            assert_eq!(row.summary.as_ref().unwrap().tag, profile);
+            assert_eq!(row.summary.as_ref().unwrap().tag, if profile == "agy-primary" { "Gemini" } else { profile });
             assert_eq!(agents.tasks[0].status, status);
         }
     }
@@ -165,10 +165,7 @@ fn authoritative_workflow_badges_preserve_cancellation_completion_and_retry_evid
     });
     assert_eq!(
         agents.task_summary_badge(&root),
-        badge(
-            "Plan review needs attention · Retry 20/20",
-            BadgeTone::Warning
-        )
+        badge("Needs attention", BadgeTone::Warning)
     );
     root.workflow_phase = Some(WorkWorkflowPhase::Cancelled);
     assert_eq!(
