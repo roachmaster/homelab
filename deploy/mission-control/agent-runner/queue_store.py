@@ -524,17 +524,12 @@ def recover(*, tools_only=False):
 
 def cancel(run_id):
     with transaction() as cursor:
-        run, saved = _lock_owned_run(cursor, run_id)
-        if run is None or not run["distributed"] or saved is None or saved["due"]:
+        result = _composite(cursor, "ide_run_cancel", run_id)
+        if result is None or result.get("error") == "run_not_found":
             raise Rejected(404, "run_not_found")
-        status = run["status"]
-        if status not in TERMINAL:
-            status = "cancelled"
-            cursor.execute("UPDATE forge_agent.runs SET status = %s, lease_until = NULL WHERE id = %s",
-                           (status, run_id))
-            cursor.execute("DELETE FROM forge_agent.inference_results WHERE run_id = %s", (run_id,))
-            event(cursor, run_id, status, {})
-        return {"run_id": run_id, "chat_id": run["ide_chat_id"], "status": status}
+        return {"run_id": run_id,
+                "chat_id": UUID(result["chat_id"]) if result.get("chat_id") else None,
+                "status": result["status"]}
 
 
 def _requeue(cursor, run, error):

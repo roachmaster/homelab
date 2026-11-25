@@ -588,6 +588,15 @@ class CompositeCallTest(unittest.TestCase):
             "cause": "operator_request"})
         self.assertEqual(result.columns, ["coding_workflow_cancel"])
 
+    def test_run_cancel_binds_run_id(self):
+        result = self.op(
+            "SELECT forge_pg_proxy_api.ide_run_cancel(%s)",
+            ("00000000-0000-0000-0000-000000000001",))
+        self.assertEqual(result.operation, "op.ide_run_cancel")
+        self.assertEqual(result.args, {
+            "run_id": "00000000-0000-0000-0000-000000000001"})
+        self.assertEqual(result.columns, ["ide_run_cancel"])
+
     def test_optional_default_omitted(self):
         result = self.op(
             "SELECT forge_pg_proxy_api.ide_run_admit(%s, %s, %s, %s, %s, %s, "

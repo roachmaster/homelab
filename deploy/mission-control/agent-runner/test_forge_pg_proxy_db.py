@@ -1189,8 +1189,9 @@ class CallerTransportDbTest(ProxyDbTestCase, FixtureMixin):
 class MigratedQueueStoreDbTest(ProxyDbTestCase, FixtureMixin):
     """C3b: queue_store's composite migrations operate through the live
     proxy end to end (admit/claim/tool/recover + the readq-backed
-    reads). finish/cancel/restore_workspace still use the locked
-    flows and are not covered here; they need composites of their own.
+    reads); cancel joined them via ide_run_cancel in C3c2.
+    finish/restore_workspace still use the locked flows and are not
+    covered here; they need composites of their own.
     """
 
     def setUp(self):
@@ -1205,6 +1206,7 @@ class MigratedQueueStoreDbTest(ProxyDbTestCase, FixtureMixin):
         application.start()
         self.addCleanup(application.stop)
         self._run_ids = []
+        self._chat_ids = []
 
     def tearDown(self):
         # Runs before the parent tearDown closes the fixture cursor.
@@ -1231,6 +1233,12 @@ class MigratedQueueStoreDbTest(ProxyDbTestCase, FixtureMixin):
             "DELETE FROM forge_agent.conversations"
             " WHERE id NOT IN (SELECT conversation_id"
             " FROM forge_agent.runs)")
+        for chat_id in self._chat_ids:
+            self.fixture_sql(
+                "DELETE FROM forge_agent.ide_chats"
+                " WHERE owner_id = 'mission-control' AND id = %s",
+                (chat_id,))
+        self._chat_ids = []
         self._run_ids = []
 
     def _admit(self, request_id=None):
@@ -1346,6 +1354,85 @@ class MigratedQueueStoreDbTest(ProxyDbTestCase, FixtureMixin):
         self.assertEqual(catalog, [{"model_id": "gpt-oss-20b",
                                     "label": "GPT-OSS 20B (MXFP4)",
                                     "ready": False}])
+
+    def _seed_distributed_chat_run(self, *, distributed=True,
+                                   status="queued"):
+        conversation_id, chat_id, run_id = _uuid(), _uuid(), _uuid()
+        self.fixture_sql(
+            "INSERT INTO forge_agent.ide_workspace_history (owner_id)"
+            " VALUES ('mission-control') ON CONFLICT DO NOTHING")
+        self.fixture_sql(
+            "INSERT INTO forge_agent.conversations (id, owner_id)"
+            " VALUES (%s, 'mission-control')", (conversation_id,))
+        self.fixture_sql(
+            "INSERT INTO forge_agent.ide_chats (owner_id, id)"
+            " VALUES ('mission-control', %s)", (chat_id,))
+        self.fixture_sql(
+            "INSERT INTO forge_agent.runs (id, conversation_id, request_id,"
+            " model_id, ide_chat_owner_id, ide_chat_id, distributed, status,"
+            " run_deadline, next_attempt_at) VALUES (%s, %s, %s,"
+            " 'fixture-model', 'mission-control', %s, %s, %s,"
+            " CASE WHEN %s THEN clock_timestamp() + interval '10 minutes'"
+            " END, CASE WHEN %s THEN clock_timestamp() END)",
+            (run_id, conversation_id, "req-" + run_id[:8], chat_id,
+             distributed, status, distributed, distributed))
+        self.fixture_sql(
+            "INSERT INTO forge_agent.run_events (run_id, event_type, data,"
+            " sequence) VALUES (%s, 'queued', '{}'::jsonb, 1)", (run_id,))
+        self._run_ids.append(run_id)
+        self._chat_ids.append(chat_id)
+        return run_id, chat_id
+
+    def test_cancel_distributed_run_through_the_proxy(self):
+        import queue_store
+        run_id, chat_id = self._seed_distributed_chat_run()
+        self.fixture_sql(
+            "INSERT INTO forge_agent.inference_results (run_id,"
+            " attempt_token, outcome) VALUES (%s, %s,"
+            " '{\"status\": \"pending\"}'::jsonb)",
+            (run_id, _uuid()))
+        result = queue_store.cancel(run_id)
+        self.assertEqual(result, {"run_id": run_id,
+                                  "chat_id": queue_store.UUID(chat_id),
+                                  "status": "cancelled"})
+        rows = self.fixture_sql(
+            "SELECT status, lease_until FROM forge_agent.runs"
+            " WHERE id = %s", (run_id,))
+        self.assertEqual(rows, [("cancelled", None)])
+        self.assertEqual(self.fixture_sql(
+            "SELECT run_id FROM forge_agent.inference_results"
+            " WHERE run_id = %s", (run_id,)), [])
+        events = self.fixture_sql(
+            "SELECT event_type, data FROM forge_agent.run_events"
+            " WHERE run_id = %s ORDER BY sequence", (run_id,))
+        self.assertEqual([row[0] for row in events], ["queued", "cancelled"])
+        self.assertEqual(events[1][1], {})
+        audit = self.fixture_sql(
+            "SELECT operation FROM forge_pg_proxy.audit"
+            " WHERE operation = 'entry.ide_run_cancel'")
+        self.assertEqual(len(audit), 1)
+        # A terminal run returns its status unchanged, with no new event.
+        again = queue_store.cancel(run_id)
+        self.assertEqual(again["status"], "cancelled")
+        events = self.fixture_sql(
+            "SELECT event_type FROM forge_agent.run_events"
+            " WHERE run_id = %s ORDER BY sequence", (run_id,))
+        self.assertEqual([row[0] for row in events], ["queued", "cancelled"])
+
+    def test_cancel_rejects_unknown_and_non_distributed_through_proxy(self):
+        import queue_store
+        with self.assertRaises(queue_store.Rejected) as caught:
+            queue_store.cancel(_uuid())
+        self.assertEqual((caught.exception.status, caught.exception.code),
+                         (404, "run_not_found"))
+        run_id, _chat_id = self._seed_distributed_chat_run(distributed=False)
+        with self.assertRaises(queue_store.Rejected) as caught:
+            queue_store.cancel(run_id)
+        self.assertEqual((caught.exception.status, caught.exception.code),
+                         (404, "run_not_found"))
+        rows = self.fixture_sql(
+            "SELECT status FROM forge_agent.runs WHERE id = %s", (run_id,))
+        self.assertEqual(rows, [("queued",)])
 
 
 class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):

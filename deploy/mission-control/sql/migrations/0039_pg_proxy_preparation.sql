@@ -1949,6 +1949,68 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_tool_calls_mark_outcome_unknown(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_tool_calls_mark_outcome_unknown TO forge_agent;
 
+CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_cancel(p_run_id uuid)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+  lock_chat_id uuid;
+  lock_mail_owner text;
+  lock_mail_thread uuid;
+  lock_chat_rec forge_agent.ide_chats%ROWTYPE;
+  lock_run_rec forge_agent.runs%ROWTYPE;
+  result_status text;
+BEGIN
+  SELECT r.ide_chat_id, r.mail_owner_id, r.mail_thread_id
+    INTO lock_chat_id, lock_mail_owner, lock_mail_thread
+    FROM forge_agent.runs r
+    JOIN forge_agent.conversations c ON c.id = r.conversation_id
+    WHERE r.id = p_run_id
+      AND c.owner_id = current_setting('forge.coding_owner', true);
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('error', 'run_not_found');
+  END IF;
+  IF lock_chat_id IS NOT NULL THEN
+    SELECT * INTO lock_chat_rec FROM forge_agent.ide_chats
+      WHERE owner_id = current_setting('forge.coding_owner', true)
+        AND id = lock_chat_id FOR UPDATE;
+    IF NOT FOUND OR lock_chat_rec.removed_at IS NOT NULL THEN
+      RETURN jsonb_build_object('error', 'run_not_found');
+    END IF;
+  END IF;
+  IF lock_mail_thread IS NOT NULL THEN
+    PERFORM 1 FROM forge_agent.mail_threads
+      WHERE owner_id = lock_mail_owner AND id = lock_mail_thread FOR UPDATE;
+  END IF;
+  SELECT * INTO lock_run_rec FROM forge_agent.runs WHERE id = p_run_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('error', 'run_not_found');
+  END IF;
+  IF NOT lock_run_rec.distributed OR lock_chat_id IS NULL THEN
+    RETURN jsonb_build_object('error', 'run_not_found');
+  END IF;
+  IF lock_chat_rec.expires_at IS NOT NULL
+      AND lock_chat_rec.expires_at <= clock_timestamp() THEN
+    RETURN jsonb_build_object('error', 'run_not_found');
+  END IF;
+  result_status := lock_run_rec.status;
+  IF result_status NOT IN ('completed', 'failed', 'interrupted', 'cancelled') THEN
+    result_status := 'cancelled';
+    UPDATE forge_agent.runs SET status = 'cancelled', lease_until = NULL
+      WHERE id = p_run_id;
+    DELETE FROM forge_agent.inference_results WHERE run_id = p_run_id;
+    INSERT INTO forge_agent.run_events (run_id, event_type, data, sequence)
+      VALUES (p_run_id, 'cancelled', '{}'::jsonb,
+              (SELECT COALESCE(MAX(sequence), 0) + 1 FROM forge_agent.run_events
+               WHERE run_id = p_run_id));
+    PERFORM pg_notify('forge_agent_events', '');
+  END IF;
+  RETURN jsonb_build_object('run_id', p_run_id, 'chat_id', lock_chat_id,
+                            'status', result_status);
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_pg_proxy_api.ide_run_cancel(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION forge_pg_proxy_api.ide_run_cancel TO forge_agent;
+
 CREATE OR REPLACE FUNCTION forge_pg_proxy_api.workflow_retry_allowance_amend(p_project text, p_root uuid, p_policy jsonb)
   RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp AS $fn$
