@@ -42,6 +42,27 @@ RUNNER_TOKEN_RE = re.compile(r'[a-fA-F0-9]{32,128}')
 # alone. The legacy rule is untouched.
 NATIVE_SUDOERS_RULE = (b'Defaults!/usr/local/libexec/forge-native-ci-check env_keep += "BUILD_NUMBER JOB_NAME"\n'
                        b'jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-native-ci-check *\n')
+AGENT_RESTART_DEFERRAL = Path('/etc/needrestart/conf.d/99-forge-ci-agent.conf')
+
+
+def render_agent_restart_deferral():
+    """Keep this executor running until an operator has drained its builds."""
+    return (b'# Forge CI: drain the node before its planned maintenance restart.\n'
+            b'# Package updates and other service restart policies are unchanged.\n'
+            b'$nrconf{override_rc}->{qr(^forge-jenkins-ci-agent\\.service$)} = 0;\n')
+
+
+def install_agent_restart_deferral():
+    """Install one service override; never invoke APT, Jenkins or systemctl."""
+    if os.geteuid() != 0:
+        raise ValueError('Provisioning requires root')
+    content = render_agent_restart_deferral()
+    directory(AGENT_RESTART_DEFERRAL.parent)
+    install(AGENT_RESTART_DEFERRAL, content, owner=0, group=0, mode=0o644)
+    return {'version': 1, 'path': str(AGENT_RESTART_DEFERRAL),
+            'sha256': hashlib.sha256(content).hexdigest(),
+            'service': 'forge-jenkins-ci-agent.service',
+            'service_restart_performed': False, 'package_update_policy_changed': False}
 
 
 def qualify_stage_token(systemd_path=RUNNER_TOKEN_SYSTEMD_PATH, copy_path=RUNNER_TOKEN_COPY_PATH):
@@ -320,6 +341,7 @@ def execute_native(client_path, operator, *, verification_profile=None):
     subprocess.run(['/usr/sbin/visudo', '-cf', str(staged)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     install(Path('/etc/sudoers.d/forge-native-ci-check'), rule, mode=0o440)
+    install_agent_restart_deferral()
     # Stage-event credential requalification: the install qualifies when
     # either token path holds a valid token, and fails closed otherwise.
     stage_token_source = qualify_stage_token()
@@ -426,6 +448,7 @@ def execute(client_path, operator, *, verification_profile='forge-sdlc-jenkins-v
     install(BASE / 'agent.jar', jar)
     qualify_remoting(BASE / 'agent.jar', hashlib.sha256(jar).hexdigest(), build)
     unit = render_agent_unit()
+    install_agent_restart_deferral()
     install(Path('/etc/systemd/system/forge-jenkins-ci-agent.service'), unit.encode())
     subprocess.run(['systemctl', 'daemon-reload'], check=True)
     subprocess.run(['systemctl', 'enable', '--now', 'forge-jenkins-ci-agent.service'],
@@ -441,20 +464,34 @@ def execute(client_path, operator, *, verification_profile='forge-sdlc-jenkins-v
     print(json.dumps(report))
 
 
-if __name__ == '__main__':
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute', action='store_true')
-    parser.add_argument('--client-config', type=Path, required=True)
+    parser.add_argument('--client-config', type=Path,
+                        help='Required for job provisioning; unused by the restart-deferral-only mode')
     parser.add_argument('--operator', default='lrocha')
-    parser.add_argument('--native-only', action='store_true',
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--native-only', action='store_true',
                         help='Add the separate branch-first job; preserve the installed legacy executor/job')
+    scope.add_argument('--agent-restart-deferral-only', action='store_true',
+                       help='Install only the CI agent needrestart override; do not restart services or access Jenkins')
     parser.add_argument('--verification-profile', choices=('forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'),
         help='Select a new version explicitly; native-only otherwise inherits its installed profile')
-    options = parser.parse_args()
+    options = parser.parse_args(argv)
     if not options.execute:
         parser.error('Explicit --execute is required')
-    if options.native_only:
+    if options.agent_restart_deferral_only:
+        if options.client_config is not None or options.verification_profile is not None:
+            parser.error('Restart deferral does not accept controller credentials or a verification profile')
+        print(json.dumps(install_agent_restart_deferral()))
+    elif options.client_config is None:
+        parser.error('--client-config is required for job provisioning')
+    elif options.native_only:
         execute_native(options.client_config, options.operator, verification_profile=options.verification_profile)
     else:
         execute(options.client_config, options.operator,
                 verification_profile=options.verification_profile or 'forge-sdlc-jenkins-v2')
+
+
+if __name__ == '__main__':
+    main()
