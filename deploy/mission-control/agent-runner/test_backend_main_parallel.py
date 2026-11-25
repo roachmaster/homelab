@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -119,6 +120,80 @@ class MainParallelTests(unittest.TestCase):
             status = Path('/proc') / (root / 'pid').read_text() / 'stat'
             # A grandchild can briefly await init's reap, but must not run.
             self.assertTrue(not status.exists() or status.read_text().split()[2] == 'Z')
+
+    def test_delayed_descendant_kill_is_confirmed_before_reaping_its_leader(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            child_code = ('import signal,time;from pathlib import Path;'
+                'signal.signal(signal.SIGTERM,signal.SIG_IGN);Path("ready").touch();time.sleep(30)')
+            self.write(root, 'test_owned.py', 'import unittest,os,subprocess,sys,time\nfrom pathlib import Path\n'
+                'class T(unittest.TestCase):\n def test_crash(self):\n'
+                '  child=subprocess.Popen([sys.executable,"-c",' + repr(child_code) + '])\n'
+                '  end=time.monotonic()+5\n'
+                '  while not Path("ready").exists() and time.monotonic()<end:time.sleep(.01)\n'
+                '  assert Path("ready").exists()\n'
+                '  Path("pid").write_text(str(child.pid));os._exit(0)\n')
+            provider = self.provider(stop_grace_seconds=2)
+            children, deferred, observed = {}, [], []
+            start, killpg, group_live = provider._start, os.killpg, provider._group_has_live_members
+            def remember(*args):
+                child = start(*args)
+                if args[2]['kind'] == 'group':children[child[0].pid] = child
+                return child
+            def defer_kill(pid, value):
+                if pid in children and value == backend.signal.SIGKILL and not deferred:
+                    deferred.append(pid)
+                    return  # Deterministic kernel-delivery delay, not a sleep.
+                return killpg(pid, value)
+            def confirm(pid, deadline):
+                live = group_live(pid, deadline)
+                if live and deferred == [pid] and not observed:
+                    self.assertIsNone(children[pid][0].returncode)
+                    self.assertIsNotNone(os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT))
+                    state = (Path('/proc') / (root / 'pid').read_text() / 'stat').read_text().split()[2]
+                    self.assertNotEqual(state, 'Z')
+                    observed.append(pid)
+                    killpg(pid, backend.signal.SIGKILL)
+                return live
+            try:
+                with patch.object(provider, '_start', side_effect=remember), \
+                        patch.object(backend.os, 'killpg', side_effect=defer_kill), \
+                        patch.object(provider, '_group_has_live_members', side_effect=confirm), \
+                        self.assertRaises(RuntimeError):
+                    self.run_owned(root, provider)
+                self.assertEqual(observed, deferred)
+                self.assertEqual(len(observed), 1)
+                status = Path('/proc') / (root / 'pid').read_text() / 'stat'
+                self.assertTrue(not status.exists() or status.read_text().split()[2] == 'Z')
+            finally:
+                if deferred and not observed:
+                    try:killpg(deferred[0], backend.signal.SIGKILL)
+                    except ProcessLookupError:pass
+
+    def test_group_observation_rejects_unreadable_or_malformed_state_instead_of_absence(self):
+        provider = self.provider()
+        for data in (None, b'malformed', b'123 (owned) Z 1 222 ' + b'0 ' * 3000):
+            with self.subTest(data=None if data is None else len(data)), \
+                    patch.object(backend.os, 'scandir', return_value=contextlib.nullcontext([SimpleNamespace(name='123')])), \
+                    patch('builtins.open', side_effect=PermissionError('owned proc denial') if data is None else
+                          lambda *args, **kwargs: io.BytesIO(data)):
+                with self.assertRaises((OSError, RuntimeError)):
+                    provider._group_has_live_members(222, backend.time.monotonic() + 1)
+        # Parentheses in a real Linux comm field do not change pgrp parsing.
+        for state in (b'S', b'Z'):
+            with self.subTest(state=state), \
+                    patch.object(backend.os, 'scandir', return_value=contextlib.nullcontext([SimpleNamespace(name='123')])), \
+                    patch('builtins.open', return_value=io.BytesIO(b'123 (odd ) name) ' + state + b' 1 222 0')):
+                self.assertEqual(provider._group_has_live_members(222, backend.time.monotonic() + 1), state == b'S')
+
+    def test_live_group_that_cannot_be_confirmed_stopped_fails_at_its_deadline(self):
+        provider = self.provider(stop_grace_seconds=.2)
+        with patch.object(provider, '_group_has_live_members', return_value=True), \
+                patch.object(backend.time, 'monotonic', side_effect=[0, .1, .3]), \
+                patch.object(backend.time, 'sleep'), patch.object(backend.os, 'killpg') as kill:
+            with self.assertRaisesRegex(RuntimeError, 'termination could not be confirmed'):
+                provider._wait_group_quiescent(123)
+        kill.assert_called_once_with(123, backend.signal.SIGKILL)
 
     def test_children_enforce_selected_address_space_and_output_limits(self):
         with tempfile.TemporaryDirectory() as temporary:
