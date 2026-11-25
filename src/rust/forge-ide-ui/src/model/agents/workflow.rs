@@ -3,8 +3,10 @@ use super::*;
 
 impl Agents {
     pub(super) fn task_summary_badge(&self, task: &WorkTaskSummary) -> BadgeView {
-        if task.status == WorkStatus::Cancelled
-            || task.workflow_phase == Some(WorkWorkflowPhase::Cancelled)
+        // An escalated workflow may stop its author task as cleanup. The
+        // authoritative workflow phase distinguishes that from user cancellation.
+        if task.workflow_phase == Some(WorkWorkflowPhase::Cancelled)
+            || task.workflow_phase.is_none() && task.status == WorkStatus::Cancelled
         {
             return task_badge(WorkStatus::Cancelled);
         }
