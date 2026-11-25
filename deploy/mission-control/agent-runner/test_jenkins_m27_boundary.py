@@ -700,7 +700,7 @@ CICD_STAGES_BRANCH_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/jenkins_api.py': 'ab8f339ecdcfad3bbdaabc2e249fbf9027265dd9f1ad906a56d33737bf193d54',
     'deploy/mission-control/agent-runner/jenkins_events.py': '8c3c16c60b97bca510ab1c5a3988e5ea36053a964757761c32b6574e98a3cd63',
     'deploy/mission-control/agent-runner/jenkins_store.py': '7e6992d6ffdbdeb83b6fcee5ff06b7179ab6f80899c74db99a3b369629475d72',
-    'deploy/mission-control/agent-runner/setup-runner.sh': '03a174a0ae932f7dae54f8f402920ca65671682d5923748a4088b1890dc24921',
+    'deploy/mission-control/agent-runner/setup-runner.sh': '2b214e04976b5a8dd4d6ef60fe242d1024b95864689fa29c87431f1664026171',
     'deploy/mission-control/agent-runner/test_agent_branch_ownership.py': 'cb7a9af3e39a7fe0637f566f2f3704511467fb9a5f718b0789f75287b4c8ee22',
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '98b968640a507f1ed803d3851965abb3a527e8566546e12858622fc3ee7ee6f2',
     'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': 'bd2b52a03c14e85e4dc4fcbb47500b2ab5d7de836a872471c1ac21b9f26483da',
@@ -715,7 +715,7 @@ CICD_STAGES_BRANCH_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_api.py': 'ef22c77e33dd9ce4cd57e79ee891848f46152f9bbe0bb2282b7fb60d9ffaa779',
     'deploy/mission-control/agent-runner/work_cicd_artifacts.py': 'f73dfe2752c50cbd9be1ea531e6f6836339b4a2b30afd999e266242da7d0758f',
     'deploy/mission-control/agent-runner/work_config.py': 'e1b1c6b966067a58eaf6c9fe1ad1aa80d7abb86e457b0216e791ba98f84f091d',
-    'deploy/mission-control/agent-runner/work_external_delivery.py': '45fc76b9afa38f58099f599f946156a298488c0e002b84aecf3a577194bc5289',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '94f1d61a504d3f12a5f1b19b3f3c152da134a71856e48782d82dd2833a16ec4a',
     'deploy/mission-control/agent-runner/work_external_delivery_store.py': '7bea3aeb4ccf731ea371195e6fd71d27f6d56f4f361db545217fc22972a2496c',
     'deploy/mission-control/agent-runner/work_external_workflow.py': '0db22d2d375743dde813f28e7a90fa96b1e372582820ed7b01a613379df49b67',
     'deploy/mission-control/agent-runner/work_jenkins_lifecycle.py': '63a435604469ef62a3ed400c003c3618f7d027c64229b24945c081da24b20f5f',
@@ -723,7 +723,7 @@ CICD_STAGES_BRANCH_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_native_jenkins.py': 'a9785fe205c69fc2b35dbbc5e915e156cc9962b0ac80a0e72cf706e85b06567b',
     'deploy/mission-control/agent-runner/work_pipeline_projection.py': '09eeb65e9f2723b5350bd739ee2a316806e66ecd19cae5811ff4b5a21f0b0dd0',
     'deploy/mission-control/agent-runner/work_post_merge.py': '599ce450d3ccb971f7b76b782d2c44bbb0ae59db7f9cc2904ad4b916d9e1eca6',
-    'deploy/mission-control/agent-runner/work_publication.py': '7055322d057b3db5aed6fbbd1d0c7a3db1d1e623d41df8e6c7415c29671b9b7d',
+    'deploy/mission-control/agent-runner/work_publication.py': 'd4042753205c54371617453f9ec7953ecf32415b3ba42381604bdad911c56223',
     'deploy/mission-control/agent-runner/work_publication_clients.py': '1da92fdb1efd79f9392bb9ee2f1e6e95ad239fba1a49840e8c5ec2cd27f1a96c',
     'deploy/mission-control/agent-runner/work_publication_config.py': '8199cbb4c1a5078d2fda32f7e29285b90eea33bb26abed9acce3cc2dd95c22a5',
     'deploy/mission-control/agent-runner/work_review.py': '961bcb631fcd3122b93a3839fb3577707d7145f479e1f1c1417dded0f11a4008',
@@ -844,15 +844,12 @@ NATIVE_CI_CONTEXT_RECOVERY_SHA256 = {
 
 
 def qualified_source(relative, expected):
-<<<<<<< HEAD
     if relative in CICD_STAGES_BRANCH_CONTEXT_SHA256:
         return CICD_STAGES_BRANCH_CONTEXT_SHA256[relative]
-=======
     if relative in NATIVE_CI_CONTEXT_RECOVERY_SHA256:
         return NATIVE_CI_CONTEXT_RECOVERY_SHA256[relative]
     if relative in JENKINS_PAGED_OBSERVER_CONTEXT_SHA256:
         return JENKINS_PAGED_OBSERVER_CONTEXT_SHA256[relative]
->>>>>>> fddc4aafca10bb7235f7557b1fa602a50fd3c946
     if relative in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256:
         return M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256[relative]
     if relative in TASK_RECOVERY_CONTEXT_SHA256:
@@ -1187,7 +1184,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in NATIVE_CI_CONTEXT_RECOVERY_SHA256.items():
             with self.subTest(native_ci_context_source=relative):
                 self.assertNotIn("/sql/", relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:

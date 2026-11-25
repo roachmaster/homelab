@@ -476,14 +476,10 @@ class PublicationWorkerFactory:
             if self.config.jenkins_events is not None:
                 emitter, event_lookup, jenkins_instance, drain_emitter = self._jenkins_events()
             native_ci = self.native_jenkins_factory(self.config, store, git, candidates, supervisor, client=pulls, stop=self.stop,
-<<<<<<< HEAD
-                                                    emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance)
-            if branch_provider is not None and hasattr(native_ci, "branch_provider"):
-                native_ci.branch_provider = branch_provider
-=======
                                                     emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance,
                                                     **delivery_options)
->>>>>>> fddc4aafca10bb7235f7557b1fa602a50fd3c946
+            if branch_provider is not None and hasattr(native_ci, "branch_provider"):
+                native_ci.branch_provider = branch_provider
             if drain_emitter is not None:
                 jenkins_drain = IntentDrain(native_ci.delivery.config.state_root / 'actions', drain_emitter)
             checks = hosted = native_ci
