@@ -49,7 +49,7 @@ SELECT jsonb_build_object('kind',c.relkind::text,'persistence',c.relpersistence:
 -- predate the actor field and are grandfathered untouched); the catalogue
 -- fingerprint below reflects convalidated=false and the ' NOT VALID'
 -- suffix on coding_events_progress_check.
- IF encode(sha256(convert_to(actual::text,'UTF8')),'hex')<>'cac034e808a03ffacc8e097e703e7731dcd5ae04e15d86a41d37d5b4c043ff81' THEN RAISE EXCEPTION 'Task event catalogue drift';END IF;
+ IF encode(sha256(convert_to(actual::text,'UTF8')),'hex')<>(CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN '3d32503f814088d07e0418a8d7a022e277dabb0d281d6bd099b151915ddc20f7' ELSE 'cac034e808a03ffacc8e097e703e7731dcd5ae04e15d86a41d37d5b4c043ff81' END) THEN RAISE EXCEPTION 'Task event catalogue drift';END IF;
  SELECT p0.*,l.lanname INTO p FROM pg_proc p0 JOIN pg_language l ON l.oid=p0.prolang WHERE p0.oid='forge_external_agent_api.event_binding(text,text,uuid)'::regprocedure;
  IF NOT FOUND OR p.proowner<>'forge_agent_owner'::regrole OR p.lanname<>'plpgsql' OR p.prokind<>'f' OR NOT p.prosecdef OR p.proisstrict OR p.proleakproof OR p.proretset
  OR p.prorettype<>'jsonb'::regtype OR p.pronargs<>3 OR p.pronargdefaults<>0 OR p.proallargtypes IS NOT NULL

@@ -5,8 +5,16 @@ SET LOCAL search_path = pg_catalog;
 
 DO $verify$
 DECLARE
-  ok boolean;
+  ok boolean;cutover boolean;
 BEGIN
+  -- M40 revokes every direct forge_agent table write; the proxy is the
+  -- only writer, so forge_agent keeps SELECT only from here on.
+  -- forge_agent cannot SELECT schema_migrations, so the stage signal
+  -- is its own INSERT privilege on forge_external_workflow.workflows:
+  -- granted pre-cutover, revoked at cutover, and outside this file's
+  -- spec, so the probe cannot mask an assertion below. NULL (table
+  -- absent pre-M22) degrades to the pre-cutover expectations.
+  SELECT NOT has_table_privilege(current_user, 'forge_external_workflow.workflows', 'INSERT') INTO cutover;
   IF current_user <> 'forge_agent' THEN
     RAISE EXCEPTION 'Expected current_user forge_agent, got %', current_user;
   END IF;
@@ -20,12 +28,12 @@ BEGIN
         'conversations', 'runs', 'messages', 'tool_calls',
         'tool_results', 'run_events', 'ide_workspace_tabs'
       ]) AS relation
-      CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) AS privilege
+      CROSS JOIN unnest(CASE WHEN cutover THEN ARRAY['SELECT'] ELSE ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] END) AS privilege
     )
     AND (
       SELECT bool_and(has_table_privilege(current_user, 'forge_agent.' || relation, privilege))
       FROM unnest(ARRAY['ide_workspace_history', 'ide_chats']) AS relation
-      CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE']) AS privilege
+      CROSS JOIN unnest(CASE WHEN cutover THEN ARRAY['SELECT'] ELSE ARRAY['SELECT', 'INSERT', 'UPDATE'] END) AS privilege
     )
     AND (
       SELECT bool_and(
@@ -42,7 +50,9 @@ BEGIN
           ELSE true
         END
       )
-      FROM (
+      FROM (SELECT v.relation,
+              CASE WHEN cutover AND v.allowed <> ARRAY[]::text[] THEN ARRAY['SELECT'] ELSE v.allowed END AS allowed
+             FROM (
         VALUES
           ('mail_threads',            ARRAY['SELECT', 'INSERT', 'UPDATE']),
           ('mail_messages',           ARRAY['SELECT', 'INSERT']),
@@ -69,7 +79,7 @@ BEGIN
           ('coding_provider_usage',           ARRAY['SELECT']),
           ('coding_provider_usage_identities', ARRAY[]::text[]),
           ('coding_usage_refresh_requests',   ARRAY['SELECT', 'INSERT'])
-      ) AS spec(relation, allowed)
+      ) AS v(relation, allowed)) AS spec(relation, allowed)
       CROSS JOIN unnest(ARRAY[
         'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
       ]) AS privilege
@@ -88,14 +98,21 @@ $verify$;
 
 -- M27 is optional for a pre-upgrade backup check; exact privileges after admission.
 DO $jenkins_runtime$
-DECLARE spec record;privilege_name text;
+DECLARE spec record;privilege_name text;cutover boolean;
 BEGIN
+ -- M40 revokes every direct forge_agent table write; the proxy is the
+ -- only writer, so forge_agent keeps SELECT only from here on.
+ -- Same canary as above: forge_agent cannot SELECT schema_migrations,
+ -- so the stage signal is its own INSERT privilege on
+ -- forge_external_workflow.workflows (outside this file's spec).
+ SELECT NOT has_table_privilege(current_user, 'forge_external_workflow.workflows', 'INSERT') INTO cutover;
  IF to_regclass('forge_agent.jenkins_events') IS NULL THEN RETURN;END IF;
  FOR spec IN SELECT * FROM(VALUES
   ('jenkins_events',ARRAY['SELECT','INSERT']),
   ('jenkins_event_deliveries',ARRAY['SELECT','INSERT','UPDATE']),
   ('jenkins_observations',ARRAY['SELECT','INSERT','UPDATE'])
  )x(name,allowed) LOOP
+  IF cutover THEN spec.allowed:=ARRAY['SELECT']; END IF;
   FOREACH privilege_name IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
    IF has_table_privilege(current_user,'forge_agent.'||spec.name,privilege_name) IS DISTINCT FROM(privilege_name=ANY(spec.allowed))
     OR(privilege_name IN('SELECT','INSERT','UPDATE','REFERENCES') AND NOT privilege_name=ANY(spec.allowed)

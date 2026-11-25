@@ -338,4 +338,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=39)
 \ir migrations/0039_pg_proxy_preparation.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(39,'pg_proxy_preparation');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=40) AS apply_0040
+\gset
+\if :apply_0040
+\ir migrations/0040_pg_proxy_cutover.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(40,'pg_proxy_cutover');
+\endif
 COMMIT;
