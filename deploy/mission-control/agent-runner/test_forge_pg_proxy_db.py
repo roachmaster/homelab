@@ -13,6 +13,7 @@ disposable-Postgres flag does not affect it (this suite owns its
 cluster, it does not use the shared fixture).
 """
 
+import http.client
 import json
 import os
 import re
@@ -21,6 +22,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 
 import psycopg2
@@ -107,14 +109,55 @@ class ScratchCluster:
                 f"{' '.join(args)} failed:\n{result.stdout}\n{result.stderr}")
         return result
 
-    def start(self):
+    def start(self, tcp_port=None):
         self._run([_psql_bin("initdb"), "-D", self.data,
                    "--username=postgres", "--auth=trust",
                    "--no-locale", "--encoding=UTF8"])
+        if tcp_port is None:
+            options = f"-k {self.sockdir} -c listen_addresses="
+        else:
+            options = (f"-k {self.sockdir} -c listen_addresses=127.0.0.1"
+                       f" -p {tcp_port}")
+        self.port = tcp_port
         self._run([_psql_bin("pg_ctl"), "-D", self.data, "-l", self.log,
-                   "-o", f"-k {self.sockdir} -c listen_addresses=",
-                   "-w", "start"])
+                   "-o", options, "-w", "start"])
         self._started = True
+
+    def reload(self):
+        self._run([_psql_bin("pg_ctl"), "-D", self.data, "reload"])
+
+    def set_password(self, role, password):
+        self.psql("postgres",
+                  f"ALTER ROLE {role} PASSWORD '{password}'")
+
+    def install_hba(self, template_name, ident_name=None):
+        """Install a real HBA template (the file setup-postgres.sh
+        installs), with local trust appended for the superuser, and
+        reload. The template's rules precede the fallback, so the
+        named roles are still admitted or refused by the template."""
+        with open(os.path.join(REPO, "deploy", "mission-control",
+                               template_name), encoding="utf-8") as handle:
+            template = handle.read()
+        with open(os.path.join(self.data, "pg_hba.conf"), "w",
+                   encoding="utf-8") as handle:
+            handle.write(template)
+            handle.write(
+                "\n# Test fixture: local trust for the superuser only;\n"
+                "# the template above decides the named roles.\n"
+                "local all all trust\n")
+        if ident_name is not None:
+            with open(os.path.join(REPO, "deploy", "mission-control",
+                                   ident_name), encoding="utf-8") as handle:
+                ident = handle.read()
+            with open(os.path.join(self.data, "pg_ident.conf"), "a",
+                       encoding="utf-8") as handle:
+                handle.write("\n" + ident)
+        self.reload()
+
+    def connect_tcp(self, user, password, database="forge_agent"):
+        return psycopg2.connect(host="127.0.0.1", port=self.port,
+                                dbname=database, user=user,
+                                password=password)
 
     def stop(self):
         if self._started:
@@ -125,11 +168,13 @@ class ScratchCluster:
 
     def psql(self, database, sql, role=None, extra_args=(), set_role=None):
         """Run one SQL statement via psql; return (stdout, stderr)."""
-        args = [_psql_bin("psql"), "-h", self.sockdir, "-U",
+        args = [_psql_bin("psql"), "-h", self.sockdir, "-p",
+                str(self.port or 5432), "-U",
                 role or "postgres", "-X", "-v", "ON_ERROR_STOP=1",
                 "-d", database, "-Atc", sql]
         if set_role:
-            args = [_psql_bin("psql"), "-h", self.sockdir, "-U",
+            args = [_psql_bin("psql"), "-h", self.sockdir, "-p",
+                    str(self.port or 5432), "-U",
                     role or "postgres", "-X", "-v", "ON_ERROR_STOP=1",
                     "-d", database, "-c", f"SET ROLE {set_role}",
                     "-Atc", sql]
@@ -143,7 +188,8 @@ class ScratchCluster:
 
     def psql_file(self, database, path, role=None, set_role=None):
         """Apply a SQL file via psql; -f with ON_ERROR_STOP."""
-        args = [_psql_bin("psql"), "-h", self.sockdir, "-U",
+        args = [_psql_bin("psql"), "-h", self.sockdir, "-p",
+                str(self.port or 5432), "-U",
                 role or "postgres", "-X", "-v", "ON_ERROR_STOP=1",
                 "-d", database]
         if set_role:
@@ -156,8 +202,9 @@ class ScratchCluster:
         return result.stdout
 
     def connect(self, database, user, password=None):
-        return psycopg2.connect(host=self.sockdir, dbname=database,
-                                user=user, password=password)
+        return psycopg2.connect(host=self.sockdir, port=self.port or 5432,
+                                dbname=database, user=user,
+                                password=password)
 
     def apply_migrations(self, upto):
         """provision.sql + migrations 1..upto (as forge_agent_owner),
@@ -241,7 +288,8 @@ class ScratchCluster:
 
     def run_verifier(self, path, role="postgres", set_role=None):
         """Run a verifier file; return (ok, output)."""
-        args = [_psql_bin("psql"), "-h", self.sockdir, "-U", role,
+        args = [_psql_bin("psql"), "-h", self.sockdir, "-p",
+                str(self.port or 5432), "-U", role,
                 "-X", "-v", "ON_ERROR_STOP=1", "-d", "forge_agent"]
         if set_role:
             args += ["-c", f"SET ROLE {set_role}"]
@@ -280,7 +328,8 @@ class ProxyDbTestCase(unittest.TestCase):
                            cls.cluster.root, f"{name}.token")}
                 for name in cls.tokens},
             "db": {"dbname": "forge_agent",
-                   "host": cls.cluster.sockdir, "port": 5432},
+                   "host": cls.cluster.sockdir,
+                   "port": cls.cluster.port or 5432},
             "listen": {"host": "127.0.0.1", "port": cls.proxy_port},
         }
         instance, _ = proxy.build_proxy(config, connect=psycopg2.connect)
@@ -410,6 +459,19 @@ class ProxyDbTestCase(unittest.TestCase):
         if self.cur.description is None:
             return None
         return self.cur.fetchall()
+
+    def http_post(self, token_name, path, body, timeout=15):
+        """POST JSON to the live proxy server; (status, payload)."""
+        conn = http.client.HTTPConnection(
+            "127.0.0.1", self.proxy_port, timeout=timeout)
+        try:
+            conn.request("POST", path, body=json.dumps(body), headers={
+                "Content-Type": "application/json",
+                "Authorization": self.tokens[token_name].decode()})
+            response = conn.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            conn.close()
 
 
 import uuid
@@ -690,6 +752,584 @@ class EntryPointSqlTest(ProxyDbTestCase, FixtureMixin):
         self.assertEqual(result["workflow_review_id"], own_review)
         self.assertEqual(result["workflow_id"], workflow)
         self.assertEqual(result["kind"], "decide")
+
+
+class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
+    """Finding 11: preparation and cutover are separate, verifiable
+    stages — an ordinary apply.sql run stops at preparation."""
+
+    def test_apply_sql_stops_at_preparation(self):
+        rows = self.fixture_sql(
+            "SELECT version FROM forge_agent.schema_migrations"
+            " ORDER BY version")
+        versions = [row[0] for row in rows]
+        self.assertEqual(versions[-1], 39)
+        self.assertNotIn(40, versions)
+        version, _, name = _parse_cutover_sql()
+        self.assertEqual((version, name), (40, "pg_proxy_cutover"))
+
+    def test_verify_sql_passes_at_preparation(self):
+        ok, output = self.cluster.run_verifier(
+            os.path.join(SQL_DIR, "management", "verify.sql"))
+        self.assertTrue(ok, output)
+
+    def test_runner_verifier_passes_at_preparation(self):
+        ok, output = self.cluster.run_verifier(
+            os.path.join(SQL_DIR, "management",
+                         "verify-runner-privileges.sql"),
+            set_role="forge_agent")
+        self.assertTrue(ok, output)
+
+    def test_cutover_guard_refuses_without_preparation(self):
+        cluster = ScratchCluster()
+        try:
+            cluster.start()
+            cluster.apply_migrations(38)
+            with self.assertRaises(AssertionError):
+                cluster.apply_cutover()
+        finally:
+            cluster.stop()
+
+
+class CutoverStageTest(ProxyDbTestCase, FixtureMixin):
+    """Findings 11 + 12: the cutover stage verifies, and the
+    verifiers catch restored writes (negatives)."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Like ProxyDbTestCase but at M40: preparation, cutover,
+        # then the grant files again (the cutover re-revocation).
+        cls.cluster = ScratchCluster()
+        cls.cluster.start()
+        cls.cluster.apply_migrations(39)
+        cls.cluster.apply_grant_files()
+        cls.cluster.apply_cutover()
+        cls.cluster.apply_grant_files()
+        # No proxy server in this class; the inherited tearDownClass
+        # checks these attributes, so bind them explicitly.
+        cls.proxy_port = None
+        cls.server = None
+        cls.server_thread = None
+        cls.hub = None
+        cls.instance = None
+        cls.tokens = None
+
+    def _verify(self, name, set_role=None):
+        return self.cluster.run_verifier(
+            os.path.join(SQL_DIR, "management", name),
+            set_role=set_role)
+
+    def test_verify_sql_passes_post_cutover(self):
+        ok, output = self._verify("verify.sql")
+        self.assertTrue(ok, output)
+
+    def test_runner_verifier_passes_post_cutover(self):
+        ok, output = self._verify("verify-runner-privileges.sql",
+                                  set_role="forge_agent")
+        self.assertTrue(ok, output)
+
+    def test_verify_sql_fails_when_direct_write_restored(self):
+        self.fixture_sql(
+            "GRANT INSERT ON forge_agent.coding_tasks TO forge_agent")
+        try:
+            ok, output = self._verify("verify.sql")
+            self.assertFalse(ok, output)
+        finally:
+            self.fixture_sql(
+                "REVOKE INSERT ON forge_agent.coding_tasks"
+                " FROM forge_agent")
+        ok, output = self._verify("verify.sql")
+        self.assertTrue(ok, output)
+
+    def test_runner_verifier_fails_when_ide_write_restored(self):
+        # Finding 12 negative: a restored INSERT on an IDE table
+        # must fail the runner verifier, not just be absent.
+        self.fixture_sql(
+            "GRANT INSERT ON forge_agent.conversations TO forge_agent")
+        try:
+            ok, output = self._verify("verify-runner-privileges.sql",
+                                      set_role="forge_agent")
+            self.assertFalse(ok, output)
+        finally:
+            self.fixture_sql(
+                "REVOKE INSERT ON forge_agent.conversations"
+                " FROM forge_agent")
+        ok, output = self._verify("verify-runner-privileges.sql",
+                                  set_role="forge_agent")
+        self.assertTrue(ok, output)
+
+    def test_runner_verifier_fails_on_column_grant(self):
+        # A column-only INSERT grant is invisible to a table-level
+        # check; the exact matrix must catch it too.
+        self.fixture_sql(
+            "GRANT INSERT (title) ON forge_agent.ide_chats"
+            " TO forge_agent")
+        try:
+            ok, output = self._verify("verify-runner-privileges.sql",
+                                      set_role="forge_agent")
+            self.assertFalse(ok, output)
+        finally:
+            self.fixture_sql(
+                "REVOKE INSERT (title) ON forge_agent.ide_chats"
+                " FROM forge_agent")
+        ok, output = self._verify("verify-runner-privileges.sql",
+                                  set_role="forge_agent")
+        self.assertTrue(ok, output)
+
+    def test_external_agent_verifier_fails_when_muse_events_regains_mutation(self):
+        self.fixture_sql(
+            "GRANT EXECUTE ON FUNCTION"
+            " forge_external_agent_api.finish(uuid, integer, uuid,"
+            " text, text) TO muse_events")
+        try:
+            ok, output = self._verify("verify-external-agent.sql")
+            self.assertFalse(ok, output)
+        finally:
+            self.fixture_sql(
+                "REVOKE EXECUTE ON FUNCTION"
+                " forge_external_agent_api.finish(uuid, integer, uuid,"
+                " text, text) FROM muse_events")
+        ok, output = self._verify("verify-external-agent.sql")
+        self.assertTrue(ok, output)
+
+    def test_verify_sql_fails_on_catalog_drift(self):
+        self.fixture_sql(
+            "ALTER TABLE forge_agent.coding_events"
+            " ADD COLUMN probe_col text")
+        try:
+            ok, output = self._verify("verify.sql")
+            self.assertFalse(ok, output)
+        finally:
+            self.fixture_sql(
+                "ALTER TABLE forge_agent.coding_events"
+                " DROP COLUMN probe_col")
+        ok, output = self._verify("verify.sql")
+        self.assertTrue(ok, output)
+
+
+class AdmissionTest(unittest.TestCase):
+    """Finding 11: the real HBA templates admit and refuse on real
+    TCP (SCRAM) and local (peer) connections."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cluster = ScratchCluster()
+        cls.port = _free_port()
+        cls.cluster.start(tcp_port=cls.port)
+        cls.cluster.apply_migrations(39)
+        cls.cluster.apply_grant_files()
+        cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
+        cls.cluster.install_hba("postgres-worker-hba.conf")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.cluster.stop()
+
+    def test_a_pre_cutover_tcp_admission(self):
+        for user, password in (("forge_gpu_worker", GPU_PASSWORD),
+                               ("muse_events", MUSE_EVENTS_PASSWORD)):
+            conn = self.cluster.connect_tcp(user, password)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                self.assertEqual(cur.fetchone()[0], 1)
+            finally:
+                conn.close()
+
+    def test_b_post_cutover_tcp_refused_and_password_rotation(self):
+        self.cluster.apply_cutover()
+        self.cluster.apply_grant_files()
+        self.cluster.install_hba("postgres-worker-hba-proxy.conf",
+                                 ident_name="postgres-worker-ident.conf")
+        # The GPU worker's old SCRAM credential no longer admits it.
+        with self.assertRaises(psycopg2.OperationalError):
+            self.cluster.connect_tcp("forge_gpu_worker", GPU_PASSWORD)
+        # muse_events keeps its SCRAM host path, but only with the
+        # rotated password; the old one is refused.
+        rotated = "scratch-muse-events-rotated"
+        self.cluster.set_password("muse_events", rotated)
+        with self.assertRaises(psycopg2.OperationalError):
+            self.cluster.connect_tcp("muse_events",
+                                     MUSE_EVENTS_PASSWORD)
+        conn = self.cluster.connect_tcp("muse_events", rotated)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            self.assertEqual(cur.fetchone()[0], 1)
+            # ... and the mutating EXECUTE is gone with the cutover.
+            with self.assertRaises(psycopg2.Error):
+                cur.execute("SELECT forge_external_agent_api.finish("
+                            "gen_random_uuid(), 1, gen_random_uuid(),"
+                            " 'x', 'y')")
+        finally:
+            conn.close()
+
+    def test_c_post_cutover_peer_refused_for_other_os_user(self):
+        # The proxy OS user is the only peer identity; this test
+        # runs as another OS user, so the local rules refuse it.
+        for user in ("forge_gpu_worker", "forge_agent",
+                     "muse_proxy_writer"):
+            with self.assertRaises(psycopg2.OperationalError):
+                self.cluster.connect("forge_agent", user)
+
+
+class QuiescenceTest(ProxyDbTestCase, FixtureMixin):
+    """Finding 11: the cutover quiescence queries (the same SQL
+    proxy-cutover.sh runs) see live sessions and leases."""
+
+    SESSION_SQL = (
+        "SELECT count(*) FROM pg_stat_activity"
+        " WHERE pid <> pg_backend_pid() AND usename IN"
+        " ('forge_agent', 'forge_coding_worker',"
+        " 'forge_coding_reconciler', 'forge_gpu_worker',"
+        " 'forge_pg_proxy', 'muse_events', 'muse_proxy_writer')")
+    ASSIGNMENT_SQL = (
+        "SELECT count(*) FROM forge_external_agent.assignments"
+        " WHERE status = 'leased'"
+        " AND lease_until > clock_timestamp()")
+    RUN_SQL = (
+        "SELECT count(*) FROM forge_agent.runs"
+        " WHERE lease_owner IS NOT NULL AND lease_until IS NOT NULL"
+        " AND lease_until > clock_timestamp()")
+
+    def test_session_count_sees_caller_sessions(self):
+        baseline = self.fixture_sql(self.SESSION_SQL)[0][0]
+        worker = self.cluster.connect("forge_agent",
+                                      "forge_coding_worker")
+        try:
+            worker.autocommit = True
+            self.assertEqual(
+                self.fixture_sql(self.SESSION_SQL)[0][0], baseline + 1)
+        finally:
+            worker.close()
+        self.assertEqual(
+            self.fixture_sql(self.SESSION_SQL)[0][0], baseline)
+
+    def _leased_assignment(self):
+        self.fixture_sql(
+            "INSERT INTO forge_external_agent.scope_grants"
+            " (external_role, owner_id, project_alias, profile_alias,"
+            " enabled) VALUES ('muse_events', 'mission-control',"
+            " 'homelab', 'muse-db-primary', true)")
+        task = self.insert_task()
+        intent = self.fixture_sql(
+            "SELECT forge_external_agent._intent(t)"
+            " FROM forge_agent.coding_tasks t"
+            " WHERE t.owner_id = 'mission-control'"
+            " AND t.project_alias = 'homelab' AND t.id = %s",
+            (task,))[0][0]
+        self.fixture_sql(
+            "INSERT INTO forge_external_agent.assignments"
+            " (external_role, owner_id, project_alias, profile_alias,"
+            " task_id, intent, intent_digest, status, task_revision,"
+            " lease_token, lease_until)"
+            " VALUES ('muse_events', 'mission-control', 'homelab',"
+            " 'muse-db-primary', %s, %s, %s, 'leased', 1, %s,"
+            " clock_timestamp() + interval '5 minutes')",
+            (task, json.dumps(intent), DIGEST64, _uuid()))
+        return task
+
+    def test_leased_assignment_blocks_quiescence(self):
+        task = self._leased_assignment()
+        self.assertEqual(
+            self.fixture_sql(self.ASSIGNMENT_SQL)[0][0], 1)
+        self.fixture_sql(
+            "UPDATE forge_external_agent.assignments"
+            " SET lease_until = clock_timestamp() - interval '1 minute'"
+            " WHERE task_id = %s", (task,))
+        self.assertEqual(
+            self.fixture_sql(self.ASSIGNMENT_SQL)[0][0], 0)
+
+    def test_leased_run_blocks_quiescence(self):
+        conversation = _uuid()
+        run = _uuid()
+        self.fixture_sql(
+            "INSERT INTO forge_agent.conversations (id, owner_id)"
+            " VALUES (%s, 'mission-control')", (conversation,))
+        self.fixture_sql(
+            "INSERT INTO forge_agent.runs (id, conversation_id,"
+            " request_id, model_id, status, lease_owner, lease_until,"
+            " run_deadline, attempt_token, distributed, next_attempt_at)"
+            " VALUES (%s, %s, 'req', 'model', 'running',"
+            " 'forge_gpu_worker',"
+            " clock_timestamp() + interval '5 minutes',"
+            " clock_timestamp() + interval '1 hour', %s, true,"
+            " clock_timestamp())",
+            (run, conversation, _uuid()))
+        self.assertEqual(self.fixture_sql(self.RUN_SQL)[0][0], 1)
+        self.fixture_sql(
+            "UPDATE forge_agent.runs SET lease_until ="
+            " clock_timestamp() - interval '1 minute' WHERE id = %s",
+            (run,))
+        self.assertEqual(self.fixture_sql(self.RUN_SQL)[0][0], 0)
+
+
+class ProxyHttpDbTest(ProxyDbTestCase, FixtureMixin):
+    """Findings 4, 8, 9, 10 through the live proxy (HTTP)."""
+
+    def test_reads_return_only_the_callers_owner_rows(self):
+        own = self.insert_task()
+        other = self.insert_task(owner="other-owner")
+        status, body = self.http_post(
+            "worker", "/v1/operation",
+            {"operation": "read.forge_agent.coding_tasks", "args": {}})
+        self.assertEqual(status, 200, body)
+        ids = {row["id"] for row in body["result"]["rows"]}
+        self.assertIn(own, ids)
+        self.assertNotIn(other, ids)
+        status, body = self.http_post(
+            "worker", "/v1/operation",
+            {"operation": "read.forge_agent.coding_tasks",
+             "args": {"filter": {"owner_id": "other-owner"}}})
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error"], "not_allowed")
+
+    def test_reads_scope_joined_tables_to_the_owner(self):
+        own_task = self.insert_task()
+        own_attempt = self.insert_attempt("mission-control", own_task)
+        own_workflow = self.insert_workflow("mission-control", own_task)
+        self.insert_workflow_review(own_workflow, "mission-control",
+                                    own_task, own_attempt)
+        other_task = self.insert_task(owner="other-owner")
+        other_attempt = self.insert_attempt("other-owner", other_task)
+        other_workflow = self.insert_workflow("other-owner", other_task)
+        self.insert_workflow_review(other_workflow, "other-owner",
+                                    other_task, other_attempt)
+        status, body = self.http_post(
+            "worker", "/v1/operation",
+            {"operation": "read.forge_agent.coding_workflow_reviews",
+             "args": {}})
+        self.assertEqual(status, 200, body)
+        owners = {row["owner_id"] for row in body["result"]["rows"]}
+        self.assertEqual(owners, {"mission-control"})
+
+    def _task_insert_args(self, task, prompt):
+        return {
+            "owner_id": "mission-control", "project_alias": "homelab",
+            "id": task, "idempotency_key": f"key-{task}",
+            "intent_digest": DIGEST64, "base_revision": BASE40,
+            "mode": "plan", "agent_profile": "muse",
+            "prompt": prompt, "acceptance_criteria": "ac",
+            "pinned_recipe": json.loads(RECIPE_JSON),
+            "recipe_digest": DIGEST64}
+
+    def test_audit_records_real_target_ids(self):
+        task = _uuid()
+        prompt = "audit-probe-prompt-" + _uuid()
+        status, body = self.http_post(
+            "coordinator", "/v1/operation",
+            {"operation": "op.coding_task_insert",
+             "args": self._task_insert_args(task, prompt)})
+        self.assertEqual(status, 200, body)
+        rows = self.fixture_sql(
+            "SELECT target FROM forge_pg_proxy.audit"
+            " WHERE operation = 'entry.coding_task_insert'"
+            " ORDER BY recorded_at DESC LIMIT 1")
+        self.assertEqual(len(rows), 1)
+        target = json.dumps(rows[0][0])
+        self.assertIn(task, target)
+        self.assertNotIn(prompt, target)
+
+    def test_audit_failure_rolls_back_the_mutation(self):
+        definition = self.fixture_sql(
+            "SELECT pg_get_functiondef("
+            "'forge_pg_proxy_api.audit(text, text, text, jsonb)'"
+            "::regprocedure)")[0][0]
+        self.fixture_sql(
+            "CREATE OR REPLACE FUNCTION forge_pg_proxy_api.audit("
+            "p_actor_kind text, p_actor_id text, p_operation text,"
+            " p_target jsonb) RETURNS uuid LANGUAGE plpgsql"
+            " SECURITY DEFINER SET search_path = pg_catalog, pg_temp"
+            " AS $stub$ BEGIN RAISE EXCEPTION 'audit unavailable'"
+            " USING ERRCODE = 'P0001'; END; $stub$")
+        task = _uuid()
+        try:
+            status, body = self.http_post(
+                "coordinator", "/v1/operation",
+                {"operation": "op.coding_task_insert",
+                 "args": self._task_insert_args(task, "rollback-probe")})
+            self.assertEqual(status, 503, body)
+            self.assertEqual(body["error"], "database_error")
+            rows = self.fixture_sql(
+                "SELECT count(*) FROM forge_agent.coding_tasks"
+                " WHERE id = %s", (task,))
+            self.assertEqual(rows[0][0], 0)
+        finally:
+            self.fixture_sql(definition)
+        status, body = self.http_post(
+            "coordinator", "/v1/operation",
+            {"operation": "op.coding_task_insert",
+             "args": self._task_insert_args(task, "rollback-probe")})
+        self.assertEqual(status, 200, body)
+        rows = self.fixture_sql(
+            "SELECT count(*) FROM forge_agent.coding_tasks"
+            " WHERE id = %s", (task,))
+        self.assertEqual(rows[0][0], 1)
+
+    def test_hub_fans_out_to_two_subscribers(self):
+        results = {}
+
+        def wait(name):
+            status, body = self.http_post(
+                name, "/v1/notifications",
+                {"channel": "forge_coding_jobs", "timeout_seconds": 10},
+                timeout=15)
+            results[name] = (status, body)
+
+        threads = [threading.Thread(target=wait, args=(name,))
+                   for name in ("worker", "coordinator")]
+        for thread in threads:
+            thread.start()
+        time.sleep(2)
+        status, body = self.http_post(
+            "coordinator", "/v1/operation",
+            {"operation": "notify.forge_coding_jobs", "args": {}})
+        self.assertEqual(status, 200, body)
+        for thread in threads:
+            thread.join(timeout=15)
+        for name in ("worker", "coordinator"):
+            status, body = results[name]
+            self.assertEqual(status, 200, body)
+            notes = body.get("notifications", [])
+            self.assertTrue(
+                any(note.get("channel") == "forge_coding_jobs"
+                    for note in notes), body)
+
+    def test_gpu_allowlist_is_exactly_the_five_ops(self):
+        status, body = self.http_post(
+            "gpu", "/v1/operation",
+            {"operation": "fn.forge_agent_worker_api.advertise",
+             "args": {"p_model": "test-model", "p_ready": True}})
+        self.assertEqual(status, 200, body)
+        for operation in (
+                "fn.forge_agent_worker_api.lock_attempt",
+                "op.inference_result_delete",
+                "read.forge_agent.coding_tasks",
+                "notify.forge_agent_jobs"):
+            status, body = self.http_post(
+                "gpu", "/v1/operation",
+                {"operation": operation, "args": {}})
+            self.assertEqual(status, 403, (operation, body))
+            self.assertEqual(body["error"], "not_allowed")
+        status, body = self.http_post(
+            "gpu", "/v1/notifications",
+            {"channel": "forge_coding_jobs", "timeout_seconds": 1})
+        self.assertEqual(status, 403, body)
+        self.assertEqual(body["error"], "not_allowed")
+
+
+class TransportTest(ProxyDbTestCase, FixtureMixin):
+    """Finding 11 (plan SS8): a pre-cutover finish replays under
+    the writer with the same hash, and the direct path closes at
+    cutover."""
+
+    def test_pre_cutover_finish_replays_after_cutover(self):
+        self.fixture_sql(
+            "INSERT INTO forge_external_agent.scope_grants"
+            " (external_role, owner_id, project_alias, profile_alias,"
+            " enabled) VALUES ('muse_events', 'mission-control',"
+            " 'homelab', 'muse-db-primary', true)")
+        task = self.insert_task()
+        # Production emits the sequence-1 'queued' event at dispatch,
+        # before any external claim; without it the claim's 'started'
+        # event would land at sequence 1 and violate
+        # coding_events_sequence_kind_check.
+        self.fixture_sql(
+            "INSERT INTO forge_agent.coding_events"
+            " (owner_id, project_alias, task_id, sequence, event_kind)"
+            " VALUES ('mission-control', 'homelab', %s, 1, 'queued')",
+            (task,))
+        intent = self.fixture_sql(
+            "SELECT forge_external_agent._intent(t)"
+            " FROM forge_agent.coding_tasks t"
+            " WHERE t.owner_id = 'mission-control'"
+            " AND t.project_alias = 'homelab' AND t.id = %s",
+            (task,))[0][0]
+        self.fixture_sql(
+            "INSERT INTO forge_external_agent.assignments"
+            " (external_role, owner_id, project_alias, profile_alias,"
+            " task_id, intent, intent_digest, status, task_revision)"
+            " VALUES ('muse_events', 'mission-control', 'homelab',"
+            " 'muse-db-primary', %s, %s, %s, 'queued', 1)",
+            (task, json.dumps(intent), DIGEST64))
+        assignment = self.fixture_sql(
+            "SELECT assignment_id FROM forge_external_agent.assignments"
+            " WHERE task_id = %s", (task,))[0][0]
+        status, body = self.http_post(
+            "muse", "/v1/operation",
+            {"operation": "fn.forge_external_agent_api.advertise",
+             "args": {"p_project": "homelab",
+                      "p_profile": "muse-db-primary",
+                      "p_runner": "db-test-runner"}})
+        self.assertEqual(status, 200, body)
+        status, body = self.http_post(
+            "muse", "/v1/operation",
+            {"operation": "fn.forge_external_agent_api.claim",
+             "args": {"p_project": "homelab",
+                      "p_profile": "muse-db-primary"}})
+        self.assertEqual(status, 200, body)
+        claim = body["result"]
+        self.assertEqual(claim["assignment_id"], str(assignment))
+        self.assertEqual(claim["generation"], 1)
+        finish_args = {"p_id": claim["assignment_id"],
+                       "p_gen": claim["generation"],
+                       "p_token": claim["token"],
+                       "p_content": '{"candidate_commit": "db-test"}',
+                       "p_summary": "transport test finish"}
+        status, body = self.http_post(
+            "muse", "/v1/operation",
+            {"operation": "fn.forge_external_agent_api.finish",
+             "args": finish_args})
+        self.assertEqual(status, 200, body)
+        receipt = body["result"]
+        # A replay of the same finish returns the same receipt.
+        status, body = self.http_post(
+            "muse", "/v1/operation",
+            {"operation": "fn.forge_external_agent_api.finish",
+             "args": finish_args})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["result"], receipt)
+        # Cutover: the same replay still returns the same receipt
+        # under the writer, with the principal muse_events.
+        self.cluster.apply_cutover()
+        self.cluster.apply_grant_files()
+        status, body = self.http_post(
+            "muse", "/v1/operation",
+            {"operation": "fn.forge_external_agent_api.finish",
+             "args": finish_args})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["result"], receipt)
+        rows = self.fixture_sql(
+            "SELECT principal FROM forge_external_agent.artifacts"
+            " WHERE assignment_id = %s", (assignment,))
+        self.assertEqual(rows[0][0], "muse_events")
+        ok, output = self.cluster.run_verifier(
+            os.path.join(SQL_DIR, "management", "verify.sql"))
+        self.assertTrue(ok, output)
+        # Direct muse_events reads still work through the read-only
+        # API functions (capabilities, artifact); muse_events never
+        # had direct SELECT on the forge_external_agent tables, and
+        # the mutating EXECUTE is gone.
+        conn = self.cluster.connect("forge_agent", "muse_events",
+                                    password=MUSE_EVENTS_PASSWORD)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT forge_external_agent_api.capabilities()")
+            capabilities = cur.fetchone()[0]
+            self.assertEqual(len(capabilities), 1)
+            self.assertEqual(capabilities[0]["profile_alias"],
+                             "muse-db-primary")
+            cur.execute("SELECT forge_external_agent_api.artifact(%s)",
+                        (assignment,))
+            artifact = cur.fetchone()[0]
+            self.assertIsNotNone(artifact)
+            self.assertEqual(artifact["sha256"], receipt["sha256"])
+            with self.assertRaises(psycopg2.Error):
+                cur.execute("SELECT forge_external_agent_api.finish("
+                            "gen_random_uuid(), 1, gen_random_uuid(),"
+                            " 'x', 'y')")
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

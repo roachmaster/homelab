@@ -869,12 +869,25 @@ def _audit_value(value):
     return type(value).__name__
 
 
+# Argument keys that always carry payload content: their values are
+# redacted to the type name even when they happen to look like a safe
+# token (a short prompt must never land in the audit log verbatim).
+# The "p_" forms are the function-catalog spellings of the same keys.
+_PAYLOAD_AUDIT_KEYS = frozenset({
+    "prompt", "p_prompt", "acceptance_criteria", "p_acceptance_criteria",
+    "content", "p_content", "summary", "p_summary",
+})
+
+
 def _audit_args(args):
     """The audit target: operation keys with identifying values
     preserved (so cancellation and renewal entries carry the actual
     task/attempt id, per plan section 8) and payload content
     redacted (no prompt, content, or jsonb values in the audit log)."""
-    return {key: _audit_value(value) for key, value in args.items()}
+    return {key: (type(value).__name__
+                  if key in _PAYLOAD_AUDIT_KEYS and value is not None
+                  else _audit_value(value))
+            for key, value in args.items()}
 
 
 class NotificationHub:

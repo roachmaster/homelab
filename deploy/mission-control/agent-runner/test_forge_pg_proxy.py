@@ -311,6 +311,10 @@ class ProxyAuditTest(unittest.TestCase):
         self.assertEqual(kept["prompt"], "str")
         self.assertEqual(kept["content"], "str")
         self.assertEqual(kept["payload"], "dict")
+        # A token-like prompt (no spaces, under the safe length) must
+        # still be redacted: redaction is by key, not by value shape.
+        kept = proxy._audit_args({"prompt": "short-token-prompt"})
+        self.assertEqual(kept["prompt"], "str")
 
     def test_a_failed_audit_rolls_the_mutation_back(self):
         instance, created = make_proxy(fail_audit=True)
