@@ -12,6 +12,28 @@ MAX_RESET_SECONDS = 86400
 _QUOTA_CODES = ('usage_limit_reached', 'insufficient_quota', 'quota_exhausted', 'quota_exceeded')
 _ACCOUNT_QUOTA = re.compile(r'\bindividual\s+quota\s+(?:reached|exhausted)\b', re.IGNORECASE)
 _RESET = re.compile(r'\bresets?\s+in\s+((?:[0-9]{1,5}\s*[hms]\s*){1,3})(?=[.\s\]]|$)', re.IGNORECASE)
+_SUMMARY=re.compile(r'Provider quota exhausted; waiting for allowance\. \[forge-provider-quota-v1 reset=(none|[1-9][0-9]{0,4}) error=([0-9a-f]{64})\]')
+
+
+def quota_summary(diagnostic):
+    if (not isinstance(diagnostic,dict) or set(diagnostic)!={'version','code','error_sha256','retry_after_seconds'}
+        or diagnostic['version']!=1 or diagnostic['code']!='provider_quota_exhausted'
+        or not isinstance(diagnostic['error_sha256'],str) or not re.fullmatch('[0-9a-f]{64}',diagnostic['error_sha256'])
+        or diagnostic['retry_after_seconds'] is not None and(type(diagnostic['retry_after_seconds'])is not int
+            or not 1<=diagnostic['retry_after_seconds']<=MAX_RESET_SECONDS)):
+        raise ValueError('Invalid safe quota diagnostic')
+    reset='none' if diagnostic['retry_after_seconds']is None else str(diagnostic['retry_after_seconds'])
+    return f"Provider quota exhausted; waiting for allowance. [forge-provider-quota-v1 reset={reset} error={diagnostic['error_sha256']}]"
+
+
+def parse_quota_summary(summary):
+    match=_SUMMARY.fullmatch(summary) if isinstance(summary,str) else None
+    if not match:return None
+    reset=None if match[1]=='none' else int(match[1])
+    diagnostic=dict(version=1,code='provider_quota_exhausted',error_sha256=match[2],retry_after_seconds=reset)
+    try:quota_summary(diagnostic)
+    except ValueError:return None
+    return diagnostic
 
 
 def quota_diagnostic(message):

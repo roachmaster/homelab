@@ -34,7 +34,7 @@ DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
 CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects", "identity_protocol"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
-PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled"}
+PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled", "backup_models"}
 
 
 def canonical_json_bytes(value):
@@ -124,12 +124,20 @@ class WorkProfile:
     resource_profile: str
     label: str | None = None
     execution_enabled: bool | None = None
+    backup_models: tuple[str, ...] = ()
 
     def __post_init__(self):
         validate_identifier(self.alias, "profile alias")
         if not isinstance(self.backend, str) or self.backend not in VALID_BACKENDS:
             raise ValueError("Invalid work profile backend")
         validate_model(self.model)
+        if (not isinstance(self.backup_models, (list, tuple)) or len(self.backup_models)>4
+            or any(not isinstance(x,str) for x in self.backup_models)
+            or len(set(self.backup_models))!=len(self.backup_models)
+            or self.model in self.backup_models or self.backup_models and self.backend!='antigravity'):
+            raise ValueError('Invalid provider backup models')
+        for model in self.backup_models:validate_model(model)
+        object.__setattr__(self,'backup_models',tuple(self.backup_models))
         validate_identifier(self.resource_profile, "resource profile")
         if self.resource_profile == AGY_POLICY_ID:
             native_policy_digest(self.resource_profile, self.backend)
@@ -232,6 +240,15 @@ class WorkCatalog:
 
     def has_profile(self, alias):
         return isinstance(alias, str) and alias in self._profiles
+
+    def resolve_backup(self, profile_alias, mode, model):
+        """Pin an explicitly configured backup without changing default selection."""
+        from dataclasses import replace
+        profile = self.profile(profile_alias)
+        if profile is None or model not in profile.backup_models:
+            raise KeyError('Unavailable provider backup')
+        selected = replace(profile, model=model, backup_models=())
+        return WorkCatalog({profile_alias: selected}).resolve(profile_alias, mode)
 
     def profile(self, alias):
         return self._profiles.get(alias) if isinstance(alias, str) else None
@@ -494,6 +511,7 @@ def parse_work_config(raw):
             resource_profile=spec["resource_profile"],
             label=spec.get("label"),
             execution_enabled=spec.get("execution_enabled"),
+            backup_models=spec.get("backup_models", ()),
         )
     raw_project_labels = raw.get("project_labels", {})
     if not isinstance(raw_project_labels, dict):
