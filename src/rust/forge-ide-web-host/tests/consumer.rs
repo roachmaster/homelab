@@ -2734,6 +2734,70 @@ mod manual_mail_archive_boundary {
 }
 
 #[test]
+fn content_identity_reader_exposes_frozen_protocol_and_only_fixed_diagrams() {
+    let files = Files::new();
+    let (host, _) = host(&files);
+    let address = host.local_addr().unwrap();
+    let request = |method: &str, target: &str| {
+        exchange(
+            &host,
+            format!("{method} {target} HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        )
+    };
+    let index = request("GET", "/design");
+    assert!(index.contains("href=\"/design/content-identity\""));
+    assert!(!index.contains("<img"));
+    for path in ["/design/content-identity", "/design/content-identity/"] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert_eq!(response.matches("<h1").count(), 1);
+        assert!(response.contains("<h1>Source content and verification identity</h1>"));
+        for marker in [
+            "native_identity_protocol=content-v2",
+            "native_identity_after",
+            "legacy-v1",
+            "ArtifactManifest.artifact_id",
+            "NativeVerificationIdentityFactory",
+            "ExternalCandidateIdentityProvider",
+            "workflow",
+            "exact Git candidate",
+        ] {
+            assert!(response.contains(marker), "{path}: {marker}");
+        }
+        assert!(response.contains("aria-label=\"Forge views\""));
+        assert!(response.contains("href=\"/design#forge-foundations\" aria-current=\"location\""));
+        assert!(response.contains("class=\"docs-breadcrumb\""));
+        assert!(response.contains("role=\"region\" aria-label=\"Scrollable report table\""));
+        assert!(response.contains("class=\"wireframe wireframe-stage\""));
+        assert!(!response.contains("<script"));
+        assert!(!response.contains("target=\"_blank\""));
+        for name in ["data", "components", "native", "external"] {
+            let diagram = format!("/design/content-identity/{name}.svg");
+            assert!(response.contains(&format!("src=\"{diagram}\"")));
+            assert!(response.contains(&format!("href=\"{diagram}\"")));
+        }
+        let head = request("HEAD", path);
+        assert!(head.starts_with("HTTP/1.1 200 OK"));
+        assert!(head.ends_with("\r\n\r\n"));
+        assert!(request("POST", path).starts_with("HTTP/1.1 405 Method Not Allowed"));
+    }
+    for name in ["data", "components", "native", "external"] {
+        let response = request("GET", &format!("/design/content-identity/{name}.svg"));
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: image/svg+xml"));
+        assert!(response.contains("<svg"));
+        assert!(!response.contains("<script"));
+    }
+    for path in [
+        "/design/content-identity/unknown.svg",
+        "/design/content-identity/data.mmd",
+        "/design/content-identity/work_native_identity.py",
+    ] {
+        assert!(request("GET", path).starts_with("HTTP/1.1 404 Not Found"));
+    }
+}
+
+#[test]
 fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
     let files = Files::new();
     let (host, _) = host(&files);

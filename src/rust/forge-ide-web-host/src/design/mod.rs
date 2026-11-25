@@ -70,6 +70,7 @@ macro_rules! element {
 mod agent_autonomy;
 mod characters;
 mod coding_agents;
+mod content_identity;
 mod dispatch;
 mod docs;
 mod feedback_loop;
@@ -185,6 +186,7 @@ pub enum DesignPage {
     AgentUsage,
     AgentFeedback,
     AgentAutonomy,
+    ContentIdentity,
     Playtest,
     Studio,
 }
@@ -200,6 +202,7 @@ impl DesignPage {
             | Self::CodingAgents
             | Self::AgentUsage
             | Self::AgentFeedback
+            | Self::ContentIdentity
             | Self::AgentAutonomy => Some("forge-foundations"),
             Self::PreviousChats | Self::ChatHistory | Self::ChatDispatch | Self::Mail => {
                 Some("chat-and-mail")
@@ -330,6 +333,12 @@ impl DesignPage {
                 "/design#forge-foundations",
                 "Back to Design",
                 coding_agents::USAGE,
+            ),
+            Self::ContentIdentity => (
+                "Source content and verification identity · Forge IDE",
+                "/design#forge-foundations",
+                "Back to Design",
+                content_identity::BODY,
             ),
             Self::Playtest => (
                 "Room One · Forge Playtest",

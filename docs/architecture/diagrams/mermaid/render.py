@@ -24,6 +24,8 @@ SOURCES = [ROOT / f"{name}.mmd" for name in (
     "forge-worker-ownership", "forge-game-worker-handoff", "forge-studio-worker-lease",
     "coding-agent-ownership", "coding-agent-lifecycle", "coding-agent-completion", "coding-agent-takeover",
     "agent-usage-providers", "agent-usage-collection",
+    "content-identity-data", "content-identity-components",
+    "content-identity-native", "content-identity-external",
 )]
 MANIFEST = ROOT / "render-manifest.json"
 
