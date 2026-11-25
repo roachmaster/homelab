@@ -18,12 +18,13 @@ from uuid import UUID, uuid5
 from work_executor import unit_name
 from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory, contract_for_config
 from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFactory,
-    LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
+    LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, protected_delivery_gate, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
 from work_jenkins_lifecycle import LifecycleTracker
 from work_publication_checks import VerificationFailure
 from work_publication_clients import PublicationError, branch_name
-from work_review import gate_source_digest
+from work_review import gate_source_digest,protected_gate_path
+from work_identity_contract import content_policy_path
 from work_verification import (VerificationMetadata, check_id, gate_manifest_sha256,
     project_verification, protected_retry_observation)
 
@@ -71,9 +72,13 @@ def native_check_accounting(commands, receipt):
 class NativeJenkinsVerification:
     def __init__(self, config, store, git, candidates, delivery, supervisor, *, client=None, stop=None,
                  clock=time.monotonic, wait=None, timeout=3600, cleanup_timeout=45,
-                 emitter=None, event_lookup=None, jenkins_instance=None):
+                 emitter=None, event_lookup=None, jenkins_instance=None,identity_provider=None):
         self.config, self.store, self.git, self.candidates = config, store, git, candidates
         self.delivery, self.supervisor = delivery, supervisor
+        if (getattr(config,'native_identity_protocol','legacy-v1')=='content-v2'
+                and any(not callable(getattr(identity_provider,method,None))for method in ('selected','read','acquire','freeze','reference','plan'))):
+            raise TypeError('Selected content identity provider is unavailable')
+        self.identities=identity_provider
         self.client = client
         # The lifecycle emitter is injected by the publication worker factory
         # from validated configuration. A verification constructed WITHOUT an
@@ -149,6 +154,13 @@ class NativeJenkinsVerification:
         profile = request.get('verification_profile', LEGACY_PROFILE)
         if binding.get('version') != binding_version(profile):
             raise PublicationError('native_ci_profile_changed')
+        if 'content_identity' in binding:
+            if self.identities is None:raise PublicationError('native_identity_provider_required')
+            reference=binding['content_identity'];snapshot=self.identities.read(reference['generation'])
+            if (self.identities.reference(snapshot)!=reference or snapshot['scope']!=binding['scope']
+                    or snapshot['provenance']['native_gate_manifest_sha256']!=binding['native_gate_manifest_sha256']):
+                raise PublicationError('native_identity_source_changed')
+            return self.identities.plan(snapshot)
         plan = CiGateContractFactory(profile).create().plan(request.get('branch_scope', 'detached'))
         if profile in {SCOPED_PROFILE, EVENT_PROFILE} and (binding.get('logical_checks') != list(plan.logical_checks)
                 or binding.get('policy_required_hosted_checks') != list(plan.logical_checks)):
@@ -368,7 +380,7 @@ class NativeJenkinsVerification:
             files[path] = [mode, blob]
         return files
 
-    def _source(self, job, repository, branch_scope=None):
+    def _legacy_source(self, job, repository, branch_scope=None):
         head = sha(self.git._git(repository, 'rev-parse', 'HEAD').decode().strip())
         if head != job['candidate_commit']:
             raise PublicationError('native_ci_candidate_changed')
@@ -381,6 +393,60 @@ class NativeJenkinsVerification:
         source, helper, gate = (jenkins_gate_manifest(self.delivery.config, files, branch_scope)
             if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} else jenkins_gate_manifest(self.delivery.config, files))
         return head, tree, native_gate, source, helper, gate
+
+    def _frozen_executor(self,snapshot):
+        """A new executable cannot reinterpret an older generation's checks."""
+        plan=self.identities.plan(snapshot);p=snapshot['provenance']
+        if (plan.profile!=self.contract.profile or plan.checks!=self.config.checks
+                or plan.required_hosted_checks!=self.config.required_hosted_checks
+                or hashlib.sha256(read_private(self.delivery.config.verifier,owner=0,maximum=1024*1024)).hexdigest()!=p['verifier_sha256']
+                or self._transport_digest()!=p['transport_sha256']):
+            raise PublicationError('native_identity_new_generation_required')
+        # Frozen phases may be reported, but an unsupported current receipt
+        # projector must never admit an effect under a different phase graph.
+        if self.contract.plan(p['branch_scope'])!=plan:
+            raise PublicationError('native_identity_executor_unsupported')
+        return snapshot
+
+    def prepare_identity(self,job,repository):
+        """Freeze/load before branch publication or CI submission, never migrate v1."""
+        if self.identities is None or not self.identities.selected(job):return None
+        if sha(self.git._git(repository,'rev-parse','HEAD').decode().strip())!=job['candidate_commit']:
+            raise PublicationError('native_ci_candidate_changed')
+        path=self.identities._path(job['review_id'])
+        if path.exists():return self._frozen_executor(self.identities.acquire(job,repository))
+        context=self.store.native_ci_acquire_context(job);scope=self._scope(context,job)
+        if context.get('active')is not True:raise PublicationError('native_ci_scope_inactive')
+        head=sha(job['candidate_commit']);main=sha(job['integration_base'])
+        branch=(branch_name({**job,'branch_publication_id':scope['review_id']})
+            if getattr(self.config,'native_delivery_mode','integrate-first-v1')=='branch-first-v1' else
+            'main' if head==main else None)
+        branch_scope=derive_branch_scope(candidate_commit=head,expected_main=main,source_branch=branch)
+        plan=self.contract.plan(branch_scope)
+        gate_source=gate_source_digest(self.git,repository,head,profile=self.contract.profile)
+        gate=gate_manifest_sha256(self.config.checks,self.config.required_hosted_checks,gate_source)
+        selected={**job,'gate_manifest_sha256':gate}
+        observed=self._legacy_source(selected,repository,branch_scope)
+        changed=self.git._git(repository,'diff','--name-only','-z',job.get('base_revision',main),head).split(b'\0')
+        provenance={'candidate_commit':observed[0],'candidate_tree':observed[1],'integration_base':main,
+            'branch_scope':branch_scope,'native_gate_source_sha256':gate_source,'native_gate_manifest_sha256':observed[2],
+            'jenkins_gate_source_sha256':observed[3],'verifier_sha256':observed[4],'jenkins_gate_manifest_sha256':observed[5],
+            'transport_sha256':self._transport_digest(),'gate_changes_require_review':any(
+                content_policy_path(p.decode('utf-8'),lambda path:protected_gate_path(path,profile=self.contract.profile))for p in changed if p)}
+        snapshot=self.identities.freeze(selected,repository,scope,plan,provenance,
+            native_protects=lambda path:content_policy_path(path,lambda selected:protected_gate_path(selected,profile=self.contract.profile)),
+            delivery_protects=lambda path:content_policy_path(path,lambda selected:protected_delivery_gate(selected,self.contract.profile)))
+        return self._frozen_executor(snapshot)
+
+    def _source(self,job,repository,branch_scope=None):
+        if self.identities is not None and self.identities._path(job['review_id']).exists():
+            if sha(self.git._git(repository,'rev-parse','HEAD').decode().strip())!=job['candidate_commit']:
+                raise PublicationError('native_ci_candidate_changed')
+            snapshot=self._frozen_executor(self.identities.acquire(job,repository));p=snapshot['provenance']
+            if branch_scope is not None and branch_scope!=p['branch_scope']:raise PublicationError('native_identity_source_changed')
+            return (p['candidate_commit'],p['candidate_tree'],p['native_gate_manifest_sha256'],
+                p['jenkins_gate_source_sha256'],p['verifier_sha256'],p['jenkins_gate_manifest_sha256'])
+        return self._legacy_source(job,repository,branch_scope)
 
     def _prepare(self, job, repository):
         context = self.store.native_ci_acquire_context(job)
@@ -405,7 +471,9 @@ class NativeJenkinsVerification:
         branch_scope = derive_branch_scope(
             candidate_commit=head, expected_main=expected_main, source_branch=source_branch,
         )
-        plan = self.contract.plan(branch_scope)
+        snapshot=(self.identities.acquire(job,repository)if self.identities is not None
+            and self.identities._path(job['review_id']).exists()else None)
+        plan = self.identities.plan(snapshot)if snapshot is not None else self.contract.plan(branch_scope)
         if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} and tuple(job.get('policy', {}).get('required_hosted_checks', ())) != plan.logical_checks:
             raise PublicationError('native_ci_policy_scope_changed')
         if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} and (plan.checks != self.config.checks
@@ -426,6 +494,7 @@ class NativeJenkinsVerification:
         binding = {'version': self.version, 'scope': scope, 'request': request,
             'native_gate_manifest_sha256': native_gate, 'jenkins_gate_source_sha256': source,
             'verifier_sha256': helper, 'transport_sha256': self._transport_digest()}
+        if snapshot is not None:binding['content_identity']=self.identities.reference(snapshot)
         if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE}:
             binding['logical_checks'] = list(plan.logical_checks)
             binding['policy_required_hosted_checks'] = list(job['policy']['required_hosted_checks'])
@@ -596,6 +665,7 @@ class NativeJenkinsVerification:
                         binding['request']['action_id'])
 
     def run(self, job, repository, stop):
+        self.prepare_identity(job,repository)
         if getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1':
             self.publish_source(job, repository, stop)
         binding = self._prepare(job, repository)
@@ -792,7 +862,7 @@ class NativeJenkinsVerification:
 
 def create_native_jenkins(config, store, git, candidates, supervisor, *, client=None, stop=None,
                           delivery_factory=DeliveryProviderFactory, emitter=None, event_lookup=None,
-                          jenkins_instance=None):
+                          jenkins_instance=None,identity_provider=None):
     raw = json.loads(read_private(config.jenkins_delivery_config))
     selected = DeliveryConfig.parse(raw)
     contract = contract_for_config(selected)
@@ -815,4 +885,5 @@ def create_native_jenkins(config, store, git, candidates, supervisor, *, client=
     selected = replace(selected, state_root=config.state_root / 'native-ci')
     delivery = delivery_factory(selected).create()
     return NativeJenkinsVerification(config, store, git, candidates, delivery, supervisor, client=client, stop=stop,
-                                     emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance)
+                                     emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance,
+                                     identity_provider=identity_provider)

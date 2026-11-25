@@ -263,9 +263,19 @@ class PublicationWorkerFactory:
                  post_merge_worker_factory=PostMergeWorker,
                  source_observer_factory=SourceObserverFactory,
                  release_provider_factory=ReleaseProviderFactory,
-                 release_worker_factory=ReleaseWorker, stop=None, jenkins_read_observer_factory=None):
+                 release_worker_factory=ReleaseWorker, stop=None, jenkins_read_observer_factory=None,
+                 artifact_provider_factory=None,native_identity_factory=None):
         if not isinstance(config, PublicationConfig) or not callable(store_factory):
             raise TypeError("Publication requires frozen config and a store factory")
+        from work_native_identity import NativeIdentityConfig
+        NativeIdentityConfig(config.state_root,config.native_identity_protocol,config.native_identity_after)
+        if config.native_identity_protocol!='legacy-v1'and config.hosted_provider!='jenkins':
+            raise ValueError('Content identity requires native Jenkins')
+        if config.native_identity_protocol=='content-v2'and hosted_factory is not None:
+            raise ValueError('Content identity requires the selected native verification port')
+        if any(value is not None and not callable(value)for value in (artifact_provider_factory,native_identity_factory)):
+            raise TypeError('Identity factories must be selected before construction')
+        self.artifact_provider_factory,self.native_identity_factory=artifact_provider_factory,native_identity_factory
         if (type(config.merge_enabled) is not bool or config.merge_method != "merge"
                 or config.merge_enabled and not config.repositories.keys() & config.worker.autonomous_projects):
             raise ValueError("Trusted merge requires explicit verified project source selection")
@@ -363,7 +373,17 @@ class PublicationWorkerFactory:
         supervisor = self.supervisor_factory(self.config.worker)
         store, snapshots = self.store_factory(self.config), self.snapshot_factory(workspaces)
         git = self.git_factory(self.config)
-        candidates = self.candidate_factory(self.config, git)
+        identities=None
+        if self.config.hosted_provider=='jenkins'and self.config.native_identity_protocol=='content-v2':
+            from work_artifact_source import GitArtifactProviderFactory
+            from work_native_identity import NativeIdentityConfig,NativeVerificationIdentityFactory
+            artifacts=(self.artifact_provider_factory or GitArtifactProviderFactory)(git).create()
+            identities=(self.native_identity_factory or NativeVerificationIdentityFactory)(NativeIdentityConfig(self.config.state_root,
+                self.config.native_identity_protocol,self.config.native_identity_after),artifacts).create()
+            if any(not callable(getattr(identities,method,None))for method in ('selected','read','acquire','freeze','reference','plan')):
+                raise TypeError('Selected content identity provider is unavailable')
+        identity_options={'identity_provider':identities}if identities is not None else {}
+        candidates = self.candidate_factory(self.config, git,**identity_options)
         pulls = self.pull_request_factory(self.config)
         native_ci = None
         jenkins_drain = None
@@ -373,7 +393,7 @@ class PublicationWorkerFactory:
                 emitter, event_lookup, jenkins_instance, drain_emitter = self._jenkins_events()
             native_ci = self.native_jenkins_factory(self.config, store, git, candidates, supervisor, client=pulls, stop=self.stop,
                                                     emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance,
-                                                    **delivery_options)
+                                                    **delivery_options,**identity_options)
             if drain_emitter is not None:
                 jenkins_drain = IntentDrain(native_ci.delivery.config.state_root / 'actions', drain_emitter)
             checks = hosted = native_ci
