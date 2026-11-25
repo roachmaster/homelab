@@ -13,13 +13,19 @@ import time
 from uuid import UUID,uuid4
 
 from work_policy import AGY_POLICY_ID
+from work_config import validate_identifier,validate_model
 from work_quota_diagnostics import quota_summary
 
 MAX_BYTES=262144
+MAX_ENTRIES=320
+LOCK_SECONDS=0.25
 
 
 class ProviderCooldown:
     def __init__(self,config,*,clock=time.time):self.config,self.clock=config,clock
+    def prepare(self):
+        """Acquire private worker state before other ready ports create children."""
+        os.close(self._state_directory())
     def _state_directory(self):
         """Acquire the selected state root without following untrusted parents.
 
@@ -71,7 +77,13 @@ class ProviderCooldown:
             info=os.fstat(lock)
             if not stat.S_ISREG(info.st_mode)or info.st_uid!=os.geteuid()or stat.S_IMODE(info.st_mode)!=0o600 or info.st_nlink!=1:
                 raise ValueError('Unsafe provider cooldown lock')
-            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            deadline=time.monotonic()+LOCK_SECONDS
+            while True:
+                try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+                except BlockingIOError:
+                    remaining=deadline-time.monotonic()
+                    if remaining<=0:raise
+                    time.sleep(min(0.01,remaining))
             try:
                 fd=os.open('state.json',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
             except FileNotFoundError:value={'version':1,'entries':[]}
@@ -83,14 +95,18 @@ class ProviderCooldown:
                     from work_external_review_context import strict_json
                     value=strict_json(stream.read(MAX_BYTES+1))
             if(not isinstance(value,dict)or set(value)!={'version','entries'}or type(value['version'])is not int or value['version']!=1
-                or not isinstance(value['entries'],list)or len(value['entries'])>320):raise ValueError('Invalid provider cooldown state')
+                or not isinstance(value['entries'],list)or len(value['entries'])>MAX_ENTRIES):raise ValueError('Invalid provider cooldown state')
+            scopes=set();attempts=set()
             for item in value['entries']:
                 if(not isinstance(item,dict)or set(item)!={'profile','model','attempt_id','blocked_until','diagnostic'}
-                    or not isinstance(item['profile'],str)or item['profile']not in self.config.profiles
-                    or item['model']not in (self.config.profiles[item['profile']].model,*self.config.profiles[item['profile']].backup_models)
                     or type(item['blocked_until'])not in (int,float)or not 0<item['blocked_until']<2**53
+                    or not isinstance(item['attempt_id'],str)
                     or str(UUID(item['attempt_id']))!=item['attempt_id']):raise ValueError('Invalid provider cooldown entry')
+                validate_identifier(item['profile'],'cooldown profile');validate_model(item['model'])
                 quota_summary(item['diagnostic'])
+                scope=(item['profile'],item['model'])
+                if scope in scopes or item['attempt_id']in attempts:raise ValueError('Duplicate provider cooldown entry')
+                scopes.add(scope);attempts.add(item['attempt_id'])
             yield directory,value
         finally:
             if lock is not None:os.close(lock)
@@ -104,6 +120,7 @@ class ProviderCooldown:
             if any(x['attempt_id']==attempt for x in value['entries']):return
             now=self.clock();entries=[x for x in value['entries']if x['blocked_until']>now and(x['profile'],x['model'])!=(profile,model)]
             entries.append(dict(profile=profile,model=model,attempt_id=attempt,blocked_until=now+(diagnostic['retry_after_seconds']or 900),diagnostic=diagnostic))
+            if len(entries)>MAX_ENTRIES:raise ValueError('Cooldown state exceeds entry bound')
             payload=json.dumps(dict(version=1,entries=entries),sort_keys=True,allow_nan=False,separators=(',',':')).encode()
             if len(payload)>MAX_BYTES:raise ValueError('Cooldown state exceeds bound')
             name='state.'+uuid4().hex+'.new'
@@ -115,8 +132,13 @@ class ProviderCooldown:
                 try:os.unlink(name,dir_fd=directory)
                 except FileNotFoundError:pass
     def selection(self):
+        configured={(alias,model)for alias,profile in self.config.profiles.items()for model in(profile.model,*profile.backup_models)}
         with self._locked()as(_directory,value):
-            blocked={(x['profile'],x['model'])for x in value['entries']if x['blocked_until']>self.clock()}
+            # The state root may be shared by workers with different selected
+            # profile/model sets. Validate every retained record, but only its
+            # matching execution scope may withhold this worker's admission.
+            blocked={(x['profile'],x['model'])for x in value['entries']if x['blocked_until']>self.clock()
+                and(x['profile'],x['model'])in configured}
         advertised=[x for x in self.config.advertised_profiles()if(x['alias'],x['model'])not in blocked]
         aliases={x['alias']for x in advertised}
         # Existing unattended AGY SQL claim checks exact advertised model. Older

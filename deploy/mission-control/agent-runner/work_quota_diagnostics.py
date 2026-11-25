@@ -17,7 +17,7 @@ _SUMMARY=re.compile(r'Provider quota exhausted; waiting for allowance\. \[forge-
 
 def quota_summary(diagnostic):
     if (not isinstance(diagnostic,dict) or set(diagnostic)!={'version','code','error_sha256','retry_after_seconds'}
-        or diagnostic['version']!=1 or diagnostic['code']!='provider_quota_exhausted'
+        or type(diagnostic['version'])is not int or diagnostic['version']!=1 or diagnostic['code']!='provider_quota_exhausted'
         or not isinstance(diagnostic['error_sha256'],str) or not re.fullmatch('[0-9a-f]{64}',diagnostic['error_sha256'])
         or diagnostic['retry_after_seconds'] is not None and(type(diagnostic['retry_after_seconds'])is not int
             or not 1<=diagnostic['retry_after_seconds']<=MAX_RESET_SECONDS)):

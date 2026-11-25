@@ -520,14 +520,18 @@ class CodingWorkerFactory:
             WorkspaceProvider(self.config, candidate_source_provider=ReviewCandidateSourceProvider(self.config, _workspace_git),
                               source_revision_provider=self.source_revision_factory(self.config, store, _workspace_git)))
         runner = self.runner_factory(self.config, supervisor)
+        cooldowns=(self.cooldown_factory or ProviderCooldownFactory)(self.config).create()
+        if not all(callable(getattr(cooldowns,name,None))for name in('prepare','record','selection')):
+            raise TypeError('Quota admission requires a ready cooldown port')
+        # Acquire the selected private root before another port creates its
+        # children with mkdir(parents=True), whose intermediate mode follows
+        # the service umask rather than the requested child's private mode.
+        cooldowns.prepare()
         workspaces.prepare()
         runner.prepare()
         collector = self.collector_factory(self.config, store) if self.collector_factory else None
         review_contexts = self.review_context_factory(store)
         peer_contexts = self.peer_context_factory(store)
-        cooldowns=(self.cooldown_factory or ProviderCooldownFactory)(self.config).create()
-        if not all(callable(getattr(cooldowns,name,None))for name in('record','selection')):
-            raise TypeError('Quota admission requires a ready cooldown port')
         return CodingWorker(self.config, store, runner, workspaces, supervisor, collector=collector,
                             clock=self.clock, stop=self.stop, usage_normalizer=self.usage_normalizer,
                             review_context_provider=review_contexts, peer_context_provider=peer_contexts,
