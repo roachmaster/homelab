@@ -11,6 +11,29 @@ secrets_directory=/etc/homelab-forge/agent-runner
 unit=/etc/systemd/system/forge-agent-runner.service
 
 "$directory/../setup-postgres.sh" --check
+/usr/bin/python3 -B - "$directory" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from work_ci_contract import verify_verifier_policy_parity
+
+pairs = (
+    (Path('/etc/forge-ci/native-pipeline.json'), Path('/usr/local/libexec/forge-native-ci-check')),
+    (Path('/etc/forge-ci/pipeline.json'), Path('/usr/local/libexec/forge-ci-check')),
+)
+for config_path, verifier_path in pairs:
+    if not config_path.exists() and not verifier_path.exists():
+        continue
+    if not config_path.is_file() or not verifier_path.is_file():
+        sys.exit(f'Incomplete installed Forge CI verifier pair: {config_path} / {verifier_path}')
+    pipeline = json.loads(config_path.read_text(encoding='utf-8'))
+    try:
+        verify_verifier_policy_parity(verifier_path.read_bytes(), pipeline.get('verification_profile'))
+    except ValueError as error:
+        sys.exit(f'{verifier_path}: {error}')
+PY
 test -s /etc/homelab-forge/web/llama.token
 if ! /usr/bin/python3 -c 'import psycopg2'; then
     DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l \

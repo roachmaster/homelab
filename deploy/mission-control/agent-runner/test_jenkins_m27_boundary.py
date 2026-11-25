@@ -820,7 +820,24 @@ NATIVE_POSTFIX_CONTEXT_SHA256 = {
 }
 
 
+# Scoped runner/verifier policy-parity and gate-manifest mismatch diagnostics;
+# preserves all applied SQL, protected gate paths, and legacy authority AST pins.
+VERIFIER_POLICY_PARITY_CONTEXT_SHA256 = {
+    'deploy/mission-control/agent-runner/setup-runner.sh': '1dd6682cd033625c96efc97f598f9620e0a445019418cab5df479c5a67f6c7c7',
+    'deploy/mission-control/agent-runner/test_verifier_policy_parity.py': '1ca1c28b6b1ccd10b1c4edb99d875014e79d250c0a91dd4245d3046734af9ec0',
+    'deploy/mission-control/agent-runner/test_work_artifact_identity.py': 'fe2066e23a7eb505c38de3d68da8846036ba55ada85710ab3477315784f77a99',
+    'deploy/mission-control/agent-runner/work_ci_contract.py': '9746eb0484cc42677c05d8999c661d707ce62ee1d6c8c2e9a93bdfb1ea82a3c9',
+    'deploy/mission-control/agent-runner/work_ci_phases.py': '5b1704aaf4580183db26a4d6dabfb3b0517529325c150eda2e04094bf62add68',
+    'deploy/mission-control/agent-runner/work_delivery_repair.py': '193859469ddda803936086966aa0ede657ecae06636dabfb7dc5ae4516496160',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '886615442806819fd9e4bba7b72bd0ffbd074e1f4137e8317e659e32866d40ce',
+    'deploy/mission-control/agent-runner/work_native_jenkins.py': '9e2c73c569d21f28b506d0a63a633794f4e9bc4071232ed9cf174e4f1eae9ff3',
+    'deploy/mission-control/jenkins/verify-candidate.py': 'ec9ddf29f8e6a6abe6bc7abf275abd6024218d1d2a2ab5fe318cfe7ea4d4e7f8',
+}
+
+
 def qualified_source(relative, expected):
+    if relative in VERIFIER_POLICY_PARITY_CONTEXT_SHA256:
+        return VERIFIER_POLICY_PARITY_CONTEXT_SHA256[relative]
     if relative in NATIVE_POSTFIX_CONTEXT_SHA256:
         return NATIVE_POSTFIX_CONTEXT_SHA256[relative]
     if relative in CONTENT_IDENTITY_CONTEXT_SHA256:
@@ -1202,10 +1219,27 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             'deploy/mission-control/agent-runner/work_native_ci_postfix.py',
             'deploy/mission-control/agent-runner/work_native_ci_postfix_proof.py',
         })
-        for relative,expected in NATIVE_POSTFIX_CONTEXT_SHA256.items():
+        for relative, expected in NATIVE_POSTFIX_CONTEXT_SHA256.items():
             with self.subTest(native_postfix_source=relative):
-                self.assertNotIn("/sql/",relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT/relative).read_bytes()).hexdigest(),expected)
+                self.assertNotIn("/sql/", relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_verifier_policy_parity_overlay_is_scoped_and_preserves_applied_sql(self):
+        self.assertEqual(set(VERIFIER_POLICY_PARITY_CONTEXT_SHA256), {
+            'deploy/mission-control/agent-runner/setup-runner.sh',
+            'deploy/mission-control/agent-runner/test_verifier_policy_parity.py',
+            'deploy/mission-control/agent-runner/test_work_artifact_identity.py',
+            'deploy/mission-control/agent-runner/work_ci_contract.py',
+            'deploy/mission-control/agent-runner/work_ci_phases.py',
+            'deploy/mission-control/agent-runner/work_delivery_repair.py',
+            'deploy/mission-control/agent-runner/work_external_delivery.py',
+            'deploy/mission-control/agent-runner/work_native_jenkins.py',
+            'deploy/mission-control/jenkins/verify-candidate.py',
+        })
+        for relative, expected in VERIFIER_POLICY_PARITY_CONTEXT_SHA256.items():
+            with self.subTest(verifier_policy_parity_source=relative):
+                self.assertNotIn('/sql/', relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
