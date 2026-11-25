@@ -1501,8 +1501,9 @@ class WorkStore:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
-            from work_provider_model_route import BoundProviderModelAuthority
-            transition_kind=('provider_model_route' if isinstance(_authority,BoundProviderModelAuthority)
+            from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
+            transition_kind=('stopped_binary_pin' if isinstance(_authority,BoundBinaryPinAuthority)
+                             else 'provider_model_route' if isinstance(_authority,BoundProviderModelAuthority)
                              else 'reviewer_correction' if task['mode']=='review' else 'native_timeout')
             self._require_transition_authority(cursor,task,_authority,transition_kind)
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
@@ -1619,8 +1620,8 @@ class WorkStore:
         else:
             from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority
             from work_reviewer_correction import BoundReviewerCorrectionAuthority
-            from work_provider_model_route import BoundProviderModelAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority)) or authority.store is not self:
+            from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 
