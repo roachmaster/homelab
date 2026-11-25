@@ -431,6 +431,27 @@ class ProxyHttpTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(body, {"error": "unknown_operation"})
 
+    def test_notifications_reject_a_channel_outside_the_callers_allowlist(self):
+        # muse may only subscribe to forge_external_agent_jobs; polling the
+        # coordinator's channel is a cross-caller subscription.
+        status, body = self._post(
+            "/v1/notifications",
+            {"channel": "forge_coding_jobs", "timeout_seconds": 1},
+            token="Bearer test-token-muse")
+        self.assertEqual(status, 403)
+        self.assertEqual(body, {"error": "not_allowed"})
+        self.hub.wait.assert_not_called()
+
+    def test_notifications_allow_the_callers_own_channel(self):
+        status, body = self._post(
+            "/v1/notifications",
+            {"channel": "forge_external_agent_jobs", "timeout_seconds": 1},
+            token="Bearer test-token-muse")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {"notifications": []})
+        self.hub.wait.assert_called_once_with(
+            "forge_external_agent_jobs", 1)
+
 
 class ProxyCatalogTest(unittest.TestCase):
     def test_every_registered_function_is_in_the_catalog(self):

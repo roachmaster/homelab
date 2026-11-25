@@ -458,7 +458,7 @@ EVENT_RETRY_CONTEXT_SHA256 = {
     "deploy/mission-control/agent-runner/fixtures/peer-target-351b8c41.json": "11d3542aafe789669496eb6bb667955f51e19f747dbd1c928f19f9361b87dfda",
     "deploy/mission-control/agent-runner/fixtures/peer-verdict-719aa2b2.json": "6091f0640084b193335e67accc030e477e03be53aa90baa94982705ba1e2bfef",
     "deploy/mission-control/sql/management/verify-autonomy.sql": "3780ff5f6185c023e719add87b5fcc6619e32f40c9ec00f2ddd636d482f752e3",
-    "deploy/mission-control/sql/management/verify-external-agent.sql": "f0062bfa738a9761d44ce23a285c6c0f3348e59841c96a2ac2ef83d77f860b1c",
+    "deploy/mission-control/sql/management/verify-external-agent.sql": "5d95ea29faa3afd4a80a2c2b7ae54cb3ee75e854d389bca90b43a6a5ad3f5f70",
     "deploy/mission-control/sql/management/verify-external-workflows.sql": "adeca1e1c7ddec60a29496c5c7b45b00c880dc6f90318891a841f71e855e3e6d",
     "deploy/mission-control/sql/management/verify-jenkins-events.sql": "693b551e708138663c75fc274b2b7bc55e0cd70f10358081878b0be49074a0a4",
     "deploy/mission-control/sql/management/verify-task-events.sql": "8997861e0d82d273e700dfa98d237b7eef1fd24ae8311b572b288ceb35a9c491",

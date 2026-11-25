@@ -16,7 +16,7 @@ BEGIN
 ('forge_external_agent_api.advertise(text,text,text)','99f7b450071f3df31cbb787eccdd1b5db1e19ceb63ef9d12c46fb58f3abd26eb','external_writer'),
 ('forge_external_agent_api.enqueue(text,text,uuid)','4b404350b4e6be45072512d8732b866f2bfaf9f418c0cc5984d17110a86ff0b2','service'),
 ('forge_external_agent_api.catalogue(text)','c1fd78219edaee347b6b01c4120c772bd562171ba92203156241bc90196a10d6','service'),
-('forge_external_agent._housekeep(forge_external_agent.scope_grants,integer)','cf30d12f3410e93e3d008b6b448f0b0824141a362e2a0e61e18ad4c2bb5d3992','owner'),
+('forge_external_agent._housekeep(forge_external_agent.scope_grants,integer)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39) THEN 'e910dc1d03402e07e83d7c5ebef4e4aff5157b25bf7982ff68e7fae1641a048a' ELSE 'cf30d12f3410e93e3d008b6b448f0b0824141a362e2a0e61e18ad4c2bb5d3992' END,'owner'),
 ('forge_external_agent_api.reconcile(text)','202bce21b8d500b4173409a997ce886c389c9cbde8ea7a1b6b98038d6a49d89c','service'),
 ('forge_external_agent_api.claim(text,text)',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=22) THEN '71bf496f1093265d61265fbc9171cc1e9f3f00c3f383508d8cba894aca9b8893' ELSE '9c028a7060095d201506e623e536f39d45e28432d29992485c5e75a2dc81b8b1' END,'external_writer'),
 ('forge_external_agent_api.renew(uuid,integer,uuid)','1a8f4d3e147ec4788069a7a326a30eaf5d8466b222d67b24584f9e3dbd6164cd','external_writer'),

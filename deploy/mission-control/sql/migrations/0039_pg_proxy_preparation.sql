@@ -3,7 +3,7 @@
 -- writer principal the mutating external EXECUTE, grants
 -- each caller role SELECT on its allowlisted read tables
 -- (plus schema USAGE), and resolves the
--- writer identity to the muse_events grant in _scope/_locked/finish.
+-- writer identity to the muse_events grant in _scope/_locked/finish/_housekeep.
 -- The forge_pg_proxy and muse_proxy_writer roles are created by
 -- provision.sql (run before apply.sql; forge_agent_owner has no
 -- CREATEROLE, so the migration cannot create them itself).
@@ -49,7 +49,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_task_insert(p_owner_id text
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_tasks%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_tasks (owner_id, project_alias, id, idempotency_key, intent_digest, base_revision, mode, agent_profile, prompt, acceptance_criteria, pinned_recipe, recipe_digest, title, auto_repair, review_required, workflow_required, workflow_id, workflow_review_id, review_target_sha256, parent_task_id, repair_source_review_id, repair_candidate_commit, scope_plan_decision_id, repair_root_task_id)
@@ -71,7 +71,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_insert(p_owner_id 
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_workflows%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_workflows (owner_id, project_alias, root_task_id, policy_digest, snapshot)
@@ -93,7 +93,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_event_insert(p_owner_id tex
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_events%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_events (owner_id, project_alias, task_id, event_kind, payload, sequence, progress_attempt_id, progress_sequence, correlation_id)
@@ -115,7 +115,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_control_receipt_insert(p_ow
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_control_receipts%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_control_receipts (owner_id, project_alias, task_id, action, idempotency_key, intent_digest, base_revision, result_revision, receipt_json)
@@ -137,7 +137,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_insert(p_owner_id te
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_reviews%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_reviews (owner_id, project_alias, task_id, attempt_id, reconciliation_receipt_id, base_revision, workspace_digest, parent_result_sha256, source_revision, review_no, round, plan_decision_id, scope_plan_decision_id, previous_review_id, candidate_commit, summary, phase, owner_decision, findings, verification, target_publication_id, source_publication_id, gate_manifest_sha256)
@@ -159,7 +159,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_plan_decision_insert(p_deci
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_plan_decisions%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_plan_decisions (decision_id, owner_id, project_alias, task_id, plan_attempt_id, plan_sha256, source_revision, base_revision, decision, agent_profile, note, idempotency_key, receipt_json)
@@ -181,7 +181,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_policy_upsert(p_owne
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_review_policy%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_review_policy (owner_id, project_alias, version, max_rounds, max_stagnant_rounds, max_infrastructure_retries, required_hosted_checks)
@@ -204,7 +204,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_review_budget_insert(p_owne
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_review_budget%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_review_budget (owner_id, project_alias, root_task_id, policy)
@@ -227,7 +227,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_worker_grant_insert(p_worke
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_worker_grants%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_worker_grants (worker_role, owner_id, project_alias, agent_profile, mode)
@@ -249,7 +249,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_usage_refresh_request_inser
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_usage_refresh_requests%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.coding_usage_refresh_requests (owner_id, profile_alias, project_alias, status, refresh_id)
@@ -271,7 +271,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_conversation_insert(p_id uuid,
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.conversations%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.conversations (id, owner_id, title)
@@ -294,7 +294,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_insert(p_id uuid, p_conver
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.runs%ROWTYPE;
 BEGIN
-  IF p_ide_chat_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_ide_chat_owner_id IS NOT NULL AND p_ide_chat_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM forge_agent.conversations
@@ -303,7 +303,7 @@ BEGIN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.runs (id, conversation_id, request_id, model_id, status, ide_chat_owner_id, ide_chat_id, ide_chat_revision, distributed, run_deadline, next_attempt_at, mail_owner_id, mail_thread_id, mail_source_run_id)
-    VALUES (p_id, p_conversation_id, p_request_id, p_model_id, COALESCE(p_status, 'queued'::text), p_ide_chat_owner_id, p_ide_chat_id, p_ide_chat_revision, COALESCE(p_distributed, false), p_run_deadline, p_next_attempt_at, p_mail_owner_id, p_mail_thread_id, p_mail_source_run_id)
+    VALUES (p_id, p_conversation_id, p_request_id, p_model_id, COALESCE(p_status, 'queued'::text), p_ide_chat_owner_id, p_ide_chat_id, p_ide_chat_revision, COALESCE(p_distributed, false), p_run_deadline::timestamptz, p_next_attempt_at::timestamptz, p_mail_owner_id, p_mail_thread_id, p_mail_source_run_id)
     RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
@@ -345,9 +345,9 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_call_insert(p_run_id uuid
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.tool_calls%ROWTYPE;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM forge_agent.runs r
-    JOIN forge_agent.conversations c ON c.id = r.conversation_id
-    WHERE r.id = p_run_id
+  IF NOT EXISTS (SELECT 1 FROM forge_agent.runs rr
+    JOIN forge_agent.conversations c ON c.id = rr.conversation_id
+    WHERE rr.id = p_run_id
       AND c.owner_id = current_setting('forge.coding_owner', true)) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
@@ -371,9 +371,9 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_tool_result_insert(p_run_id uu
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.tool_results%ROWTYPE;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM forge_agent.runs r
-    JOIN forge_agent.conversations c ON c.id = r.conversation_id
-    WHERE r.id = p_run_id
+  IF NOT EXISTS (SELECT 1 FROM forge_agent.runs rr
+    JOIN forge_agent.conversations c ON c.id = rr.conversation_id
+    WHERE rr.id = p_run_id
       AND c.owner_id = current_setting('forge.coding_owner', true)) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
@@ -396,9 +396,9 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_event_insert(p_run_id uuid
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.run_events%ROWTYPE;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM forge_agent.runs r
-    JOIN forge_agent.conversations c ON c.id = r.conversation_id
-    WHERE r.id = p_run_id
+  IF NOT EXISTS (SELECT 1 FROM forge_agent.runs rr
+    JOIN forge_agent.conversations c ON c.id = rr.conversation_id
+    WHERE rr.id = p_run_id
       AND c.owner_id = current_setting('forge.coding_owner', true)) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
@@ -421,7 +421,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_tab_insert(p_owner_i
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.ide_workspace_tabs%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.ide_workspace_tabs (owner_id, tab_id, lease, base_history_revision, base_history_fingerprint, revision, snapshot, chat_history_enabled)
@@ -444,7 +444,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_history_insert(p_own
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.ide_workspace_history%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.ide_workspace_history (owner_id, revision, transcripts, chat_history_active)
@@ -467,11 +467,11 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_chat_insert(p_owner_id text, p
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.ide_chats%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.ide_chats (owner_id, id, title, messages, revision, expires_on, time_zone, expires_at)
-    VALUES (p_owner_id, p_id, p_title, COALESCE(p_messages, '[]'::jsonb), COALESCE(p_revision, 0), p_expires_on, p_time_zone, p_expires_at)
+    VALUES (p_owner_id, p_id, p_title, COALESCE(p_messages, '[]'::jsonb), COALESCE(p_revision, 0), p_expires_on, p_time_zone, p_expires_at::timestamptz)
   ON CONFLICT (owner_id, id) DO NOTHING
     RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
@@ -490,7 +490,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.mail_thread_insert(p_owner_id text
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.mail_threads%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.mail_threads (owner_id, id, subject, profile_id, context_remaining_tokens)
@@ -512,7 +512,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.mail_message_insert(p_owner_id tex
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.mail_messages%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.mail_messages (owner_id, thread_id, run_id, role, content, sequence)
@@ -534,11 +534,11 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.jenkins_event_insert(p_owner_id te
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.jenkins_events%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.jenkins_events (owner_id, project_alias, sequence, jenkins_instance, job_name, delivery_id, event_kind, summary, occurred_at, payload_sha256, build_number, queue_id, commit_sha, branch, build_result, stage_name, stage_status, duration_ms, build_url, correlation_id, actor, backfilled, reconciled, completion_time_estimated, started_at)
-    VALUES (p_owner_id, p_project_alias, p_sequence, p_jenkins_instance, p_job_name, p_delivery_id, p_event_kind, p_summary, p_occurred_at, p_payload_sha256, p_build_number, p_queue_id, p_commit_sha, p_branch, p_build_result, p_stage_name, p_stage_status, p_duration_ms, p_build_url, p_correlation_id, p_actor, COALESCE(p_backfilled, false), COALESCE(p_reconciled, false), COALESCE(p_completion_time_estimated, false), p_started_at)
+    VALUES (p_owner_id, p_project_alias, p_sequence, p_jenkins_instance, p_job_name, p_delivery_id, p_event_kind, p_summary, p_occurred_at::timestamptz, p_payload_sha256, p_build_number, p_queue_id, p_commit_sha, p_branch, p_build_result, p_stage_name, p_stage_status, p_duration_ms, p_build_url, p_correlation_id, p_actor, COALESCE(p_backfilled, false), COALESCE(p_reconciled, false), COALESCE(p_completion_time_estimated, false), p_started_at::timestamptz)
     RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
   RETURN to_jsonb(r);
@@ -556,7 +556,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.jenkins_event_delivery_insert(p_ev
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.jenkins_event_deliveries%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.jenkins_event_deliveries (event_id, owner_id, project_alias, event_sequence, consumer_name, status, max_attempts)
@@ -578,7 +578,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_workflow_insert(p_owner_id tex
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_external_workflow.workflows%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_external_workflow.workflows (owner_id, project_alias, root_task_id, author_profile, reviewer_profile, policy_digest, snapshot, active_task_id, phase)
@@ -601,7 +601,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_task_insert(p_owner_id text, p
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_external_workflow.tasks%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_external_workflow.tasks (owner_id, project_alias, task_id, workflow_id, role)
@@ -647,7 +647,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_review_insert(p_review_id uuid
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_external_workflow.reviews%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_external_workflow.reviews (review_id, workflow_id, owner_id, project_alias, source_task_id, source_assignment_id, source_sha256, target_kind, reviewer_task_id, target_json, target_sha256)
@@ -669,7 +669,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_action_insert(p_action_id uuid
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_external_workflow.actions%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_external_workflow.actions (workflow_id, owner_id, project_alias, kind, source_key, action_id, workflow_revision, intent)
@@ -691,7 +691,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ext_plan_approve_override_insert(p
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_external_workflow.plan_approve_overrides%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_external_workflow.plan_approve_overrides (owner_id, project_alias, workflow_id, root_task_id, actor_kind, actor_id, reason, acceptance_ref, plan_task_id, plan_assignment_id, plan_sha256, prior_workflow_revision, prior_root_revision, prior_phase, prior_plan_revisions, prior_review_id, prior_escalation_reason, idempotency_key, intent_digest, implement_task_id, implement_assignment_id, receipt, retry_event_id)
@@ -713,7 +713,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_task_update(p_owner_id text
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_tasks%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   UPDATE forge_agent.coding_tasks AS t SET
@@ -878,9 +878,9 @@ BEGIN
     attempt_no = COALESCE(p_attempt_no, attempt_no),
     next_attempt_at = CASE WHEN COALESCE(p_requeue, false) THEN clock_timestamp() + attempt_no * interval '5 seconds' WHEN p_next_attempt_at IS NOT NULL THEN p_next_attempt_at::timestamptz ELSE next_attempt_at END,
     accepted_result_hash = CASE WHEN COALESCE(p_requeue, false) THEN NULL WHEN COALESCE(p_clear_accepted_result_hash, false) THEN NULL WHEN p_accepted_result_hash IS NOT NULL THEN decode(p_accepted_result_hash, 'hex') ELSE accepted_result_hash END
-  WHERE t.id = p_id AND NOT COALESCE(p_requeue, false) OR (attempt_no < 3 AND run_deadline > clock_timestamp() + attempt_no * interval '5 seconds') AND EXISTS (SELECT 1 FROM forge_agent.runs r
-  JOIN forge_agent.conversations c ON c.id = r.conversation_id
-  WHERE r.id = t.run_id
+  WHERE t.id = p_id AND NOT COALESCE(p_requeue, false) OR (attempt_no < 3 AND run_deadline > clock_timestamp() + attempt_no * interval '5 seconds') AND EXISTS (SELECT 1 FROM forge_agent.runs rr
+  JOIN forge_agent.conversations c ON c.id = rr.conversation_id
+  WHERE rr.id = t.run_id
     AND c.owner_id = current_setting('forge.coding_owner', true))
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
@@ -901,9 +901,9 @@ DECLARE r forge_agent.tool_calls%ROWTYPE;
 BEGIN
   UPDATE forge_agent.tool_calls AS t SET
     status = p_status
-  WHERE t.run_id = p_run_id AND t.call_id = p_call_id AND t.status = 'running' AND EXISTS (SELECT 1 FROM forge_agent.runs r
-  JOIN forge_agent.conversations c ON c.id = r.conversation_id
-  WHERE r.id = t.run_id
+  WHERE t.run_id = p_run_id AND t.call_id = p_call_id AND t.status = 'running' AND EXISTS (SELECT 1 FROM forge_agent.runs rr
+  JOIN forge_agent.conversations c ON c.id = rr.conversation_id
+  WHERE rr.id = t.run_id
     AND c.owner_id = current_setting('forge.coding_owner', true))
   RETURNING * INTO r;
   IF NOT FOUND THEN RETURN NULL; END IF;
@@ -922,7 +922,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_tab_update(p_owner_i
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.ide_workspace_tabs%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   UPDATE forge_agent.ide_workspace_tabs AS t SET
@@ -949,7 +949,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_history_update(p_own
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.ide_workspace_history%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   UPDATE forge_agent.ide_workspace_history AS t SET
@@ -974,7 +974,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_chat_update(p_owner_id text, p
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.ide_chats%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   UPDATE forge_agent.ide_chats AS t SET
@@ -1005,7 +1005,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.mail_thread_update(p_owner_id text
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.mail_threads%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   IF COALESCE(p_manual_archive, false) AND p_archive_base_revision IS NULL THEN
@@ -1143,7 +1143,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_conversation_delete(p_owner_id
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE deleted jsonb;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   WITH d AS (
@@ -1164,7 +1164,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_run_delete(p_ide_chat_owner_id
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE deleted jsonb;
 BEGIN
-  IF p_ide_chat_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_ide_chat_owner_id IS NOT NULL AND p_ide_chat_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   WITH d AS (
@@ -1185,7 +1185,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.ide_workspace_tab_delete(p_owner_i
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE deleted jsonb;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   WITH d AS (
@@ -1207,9 +1207,9 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.inference_result_delete(p_run_id u
 DECLARE deleted jsonb;
 BEGIN
   WITH d AS (
-    DELETE FROM forge_agent.inference_results WHERE run_id = p_run_id AND EXISTS (SELECT 1 FROM forge_agent.runs r
-  JOIN forge_agent.conversations c ON c.id = r.conversation_id
-  WHERE r.id = inference_results.run_id
+    DELETE FROM forge_agent.inference_results WHERE run_id = p_run_id AND EXISTS (SELECT 1 FROM forge_agent.runs rr
+  JOIN forge_agent.conversations c ON c.id = rr.conversation_id
+  WHERE rr.id = inference_results.run_id
     AND c.owner_id = current_setting('forge.coding_owner', true)) RETURNING *
   ) SELECT COALESCE(jsonb_agg(to_jsonb(d)), '[]'::jsonb) INTO deleted FROM d;
   RETURN jsonb_build_object('deleted', deleted);
@@ -1227,7 +1227,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_review_insert(p_wo
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_workflow_reviews%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   IF COALESCE(p_on_conflict_do_nothing, false) THEN
@@ -1253,7 +1253,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.coding_workflow_action_insert(p_wo
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.coding_workflow_actions%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   IF COALESCE(p_only_if_reviewing, false) THEN
@@ -1305,7 +1305,7 @@ CREATE OR REPLACE FUNCTION forge_pg_proxy_api.jenkins_observation_insert(p_owner
   SET search_path = pg_catalog, pg_temp AS $fn$
 DECLARE r forge_agent.jenkins_observations%ROWTYPE;
 BEGIN
-  IF p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
+  IF p_owner_id IS NOT NULL AND p_owner_id IS DISTINCT FROM current_setting('forge.coding_owner', true) THEN
     RAISE EXCEPTION 'Owner scope mismatch' USING ERRCODE = '42501';
   END IF;
   INSERT INTO forge_agent.jenkins_observations (owner_id, project_alias, jenkins_instance, job_name, observation_key, build_number, queue_id, last_event_id, last_event_sequence, last_event_kind, commit_sha, branch, build_result, stage_name, stage_status, duration_ms, build_url, summary, occurred_at, updated_at)
@@ -1833,6 +1833,48 @@ BEGIN
 END;
 $fn$;
 REVOKE ALL ON FUNCTION forge_external_agent_api.finish(uuid,integer,uuid,text,text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION forge_external_agent._housekeep(p_g forge_external_agent.scope_grants,p_budget integer) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
+DECLARE a forge_external_agent.assignments%ROWTYPE;t forge_agent.coding_tasks%ROWTYPE;s text;ev text;n integer:=0;
+ actor jsonb;entry_point text;cancel_cause text;originator jsonb;cancel_receipt jsonb;effective name;
+BEGIN
+ -- The actor is derived from the authenticated entry-point context (plan 4.3,
+ -- round 10): the reconciler service calls _housekeep under its service role,
+ -- and an agent claim calls it under its external role. Any other caller fails
+ -- closed instead of emitting an event with an unidentifiable initiator.
+ -- A claim via the proxy runs as muse_proxy_writer, which resolves to
+ -- the external role (same identity resolution as _scope/_locked/finish).
+ effective:=CASE WHEN session_user='muse_proxy_writer' THEN 'muse_events'::name ELSE session_user END;
+ IF effective=p_g.service_role THEN actor:=jsonb_build_object('kind','service','id','forge-external-reconciler');entry_point:='reconcile';
+ ELSIF effective=p_g.external_role THEN actor:=jsonb_build_object('kind','agent','id',p_g.profile_alias);entry_point:='claim';
+ ELSE RAISE EXCEPTION 'External housekeeping has no attributable entry point' USING ERRCODE='42501';END IF;
+ FOR a IN SELECT x.* FROM forge_external_agent.assignments x JOIN forge_agent.coding_tasks q ON(q.owner_id,q.project_alias,q.id)=(x.owner_id,x.project_alias,x.task_id)
+ WHERE(x.external_role,x.owner_id,x.project_alias,x.profile_alias)=(p_g.external_role,p_g.owner_id,p_g.project_alias,p_g.profile_alias)
+ AND x.status IN('queued','leased') AND q.latest_attempt_id IS NULL AND q.status IN('queued','running','cancel_requested','cancelled')
+ AND(NOT p_g.enabled OR q.status IN('cancelled','cancel_requested') OR x.deadline_at<=clock_timestamp() OR(x.status='leased' AND x.lease_until<=clock_timestamp())) ORDER BY x.created_at,x.assignment_id FOR UPDATE OF q,x SKIP LOCKED LIMIT least(64,greatest(0,p_budget)) LOOP
+ n:=n+1;
+ SELECT * INTO t FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(a.owner_id,a.project_alias,a.task_id);
+ s:=CASE WHEN t.status IN('cancelled','cancel_requested') THEN 'cancelled' WHEN NOT p_g.enabled THEN 'blocked_permission' WHEN a.deadline_at<=clock_timestamp() OR a.generation>=3 OR forge_external_agent._intent(t) IS DISTINCT FROM a.intent THEN 'failed' ELSE 'queued' END;
+ UPDATE forge_agent.coding_tasks SET status=s,cancelled_at=CASE WHEN s='cancelled' THEN coalesce(cancelled_at,clock_timestamp()) ELSE NULL END,revision=revision+1,updated_at=clock_timestamp() WHERE(owner_id,project_alias,id)=(a.owner_id,a.project_alias,a.task_id) RETURNING revision INTO a.task_revision;
+ UPDATE forge_external_agent.assignments SET status=CASE WHEN s='blocked_permission' THEN 'failed' ELSE s END,task_revision=a.task_revision,lease_token=NULL,lease_until=NULL,updated_at=clock_timestamp() WHERE assignment_id=a.assignment_id;
+ ev:=CASE WHEN s='queued' THEN 'resumed' ELSE s END;
+ cancel_cause:=NULL;originator:=NULL;
+ IF ev='cancelled' THEN
+  -- Cancellation propagation: the cause comes from the cancellation's control
+  -- receipt where one names it, else from the workflow binding; the
+  -- originating actor is preserved where the receipt carries one. A
+  -- cancellation the system propagates is never recorded as the agent's act.
+  SELECT receipt_json INTO cancel_receipt FROM forge_agent.coding_control_receipts WHERE owner_id=a.owner_id AND project_alias=a.project_alias AND task_id=a.task_id
+   AND(action='cancel' OR(action IN('plan_decide','review_decide') AND receipt_json->>'status'='cancelled')) ORDER BY created_at DESC LIMIT 1;
+  IF cancel_receipt IS NOT NULL THEN originator:=cancel_receipt->'actor';cancel_cause:=cancel_receipt->>'cause';END IF;
+  IF cancel_cause IS NULL THEN cancel_cause:=CASE WHEN t.workflow_id IS NOT NULL THEN 'workflow_cancelled' ELSE 'operator_request' END;END IF;
+ END IF;
+ PERFORM forge_external_agent._event(a,ev,jsonb_strip_nulls(jsonb_build_object('provider','muse-db','assignment_id',a.assignment_id,'reason','external_lease_reconciled','actor',actor,'entry_point',entry_point,'subject',jsonb_build_object('profile',a.profile_alias,'assignment_id',a.assignment_id,'external_role',a.external_role),'cause',cancel_cause,'originator',originator)));
+ END LOOP;
+ IF n>0 THEN PERFORM pg_notify('forge_external_agent_jobs','');END IF;RETURN n;
+END;
+$fn$;
+REVOKE ALL ON FUNCTION forge_external_agent._housekeep(forge_external_agent.scope_grants,integer) FROM PUBLIC;
 
 -- Writer principal: the proxy's muse identity for mutations.
 GRANT USAGE ON SCHEMA forge_external_agent_api TO muse_proxy_writer;

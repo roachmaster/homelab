@@ -456,9 +456,12 @@ CALLER_ALLOWLISTS = {
         "notify": {"forge_agent_jobs"},
     },
     "muse": {
+        # Mutations only. The read-only API functions (artifact,
+        # capabilities) stay on the direct muse_events path per the
+        # inventory §2 (muse_proxy_writer holds no EXECUTE on them);
+        # artifacts are readable through the proxy's read API.
         "fn": {f"forge_external_agent_api.{name}" for name in (
-            "advertise", "claim", "finish", "progress", "release", "renew",
-            "artifact", "capabilities")},
+            "advertise", "claim", "finish", "progress", "release", "renew")},
         "op": set(),
         "read": {"forge_external_agent.assignments", "forge_external_agent.artifacts", "forge_external_agent.readiness", "forge_external_agent.scope_grants", "forge_agent.coding_events", "forge_agent.coding_tasks"},
         "notify": {"forge_external_agent_jobs"},
@@ -897,6 +900,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(channel, str) \
                     or not isinstance(timeout, (int, float)):
                 raise Rejected(400, "invalid_request")
+            # A long-poll is a subscription: the caller's notify allowlist
+            # bounds it exactly like a publish (notify.<channel> op).
+            if channel not in NOTIFY_CHANNELS:
+                raise Rejected(400, "unknown_operation")
+            if not caller.allows(f"notify.{channel}"):
+                raise Rejected(403, "not_allowed")
             result = self.server.hub.wait(channel, timeout)
             return self._respond(200, result)
         except Rejected as error:
