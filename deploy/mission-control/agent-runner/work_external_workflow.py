@@ -11,7 +11,7 @@ from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
-from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64
+from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64,ExternalSourceIntegration
 from work_retry_policy import AGENT_RETRY_LIMIT,AGENT_RETRY_POLICY_ID,effective_limit
 from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause
 
@@ -559,7 +559,7 @@ class ExternalWorkflowStore:
         from work_external_plan_override import approve_plan_override
         return approve_plan_override(self,command)
 
-    def _source_key(self,w):return str(w['active_task_id'])+':'+str(w['plan_revisions'])+':'+str(w['code_revisions'])+(':'+w['state']['operator_source_epoch'] if w['state'].get('operator_source_epoch') else '')
+    def _source_key(self,w):return str(w['active_task_id'])+':'+str(w['plan_revisions'])+':'+str(w['code_revisions'])+(':'+w['state']['operator_source_epoch'] if w['state'].get('operator_source_epoch') else '')+(':'+w['state']['prepare_refresh_epoch'] if w['state'].get('prepare_refresh_epoch') else '')
 
     def _action(self,cursor,w,kind,key,request):
         cursor.execute('SELECT * FROM forge_external_workflow.actions WHERE workflow_id=%s AND kind=%s AND source_key=%s',(w['workflow_id'],kind,key))
@@ -615,9 +615,9 @@ class ExternalWorkflowStore:
             try:manifest=self._candidate_manifest(artifact['content'])
             except ValueError:
                 return self._revise(cursor,w,'code',{'summary':'Return the exact candidate JSON manifest with version,candidate_commit,candidate_tree,base_revision,summary (and optional source_branch). Preserve your existing branch and completed work.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
-            if manifest['base_revision']!=w['state']['base_revision']:
-                return self._revise(cursor,w,'code',{'summary':'Rebase the existing implementation onto the configured base '+w['state']['base_revision']+' and return its exact candidate manifest.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
-            request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':w['state']['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
+            if manifest['base_revision']!=task['base_revision']:
+                return self._revise(cursor,w,'code',{'summary':'Return the exact candidate manifest at the originally supplied base '+task['base_revision']+'. Preserve the existing implementation.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
+            request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':manifest['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
             identity_protocol=w['state'].get('identity_protocol','legacy-v1')
             if identity_protocol not in ('legacy-v1','content-v2'):raise ValueError('Invalid frozen identity protocol')
             if identity_protocol=='content-v2':request['identity_protocol']=identity_protocol
@@ -626,15 +626,34 @@ class ExternalWorkflowStore:
             prepare_key=artifact['sha256']
             if w['state'].get('operator_rescue_pending'):
                 prepare_key+=':'+w['state']['operator_source_epoch']
+            if w['state'].get('prepare_refresh_epoch'):
+                prepare_key+=':'+w['state']['prepare_refresh_epoch']
             a=self._action(cursor,w,'prepare',prepare_key,request)
             if a['status']=='failed':
-                if a['result']['status']=='main_changed':return self._request_rebase(cursor,w,a['result']['summary'],action=a)
+                if a['result']['status']=='main_changed':
+                    if a['result'].get('receipt',{}).get('reason')=='source_conflict':
+                        return self._request_rebase(cursor,w,'Trusted preparation found an actual source conflict. Rebase the preserved implementation onto the new trusted base and return its exact manifest.',action=a)
+                    # Old runtimes recorded plain main drift as a failure. Keep
+                    # that immutable receipt and try a fresh trusted generation.
+                    return self._request_integration_refresh(cursor,w,a)
                 return self._revise(cursor,w,'code',{'summary':a['result']['summary'],'findings':[]},artifact,retry_kind='verification',source_id='delivery:'+str(a['action_id']),evidence_digest=hashlib.sha256(canonical(a['result'])).hexdigest())
             if a['status']!='completed':return False
             candidate=a['result']['receipt']
             for key in ('candidate_commit','candidate_tree','integration_base'):
                 if not isinstance(candidate.get(key),str) or not HEX40.fullmatch(candidate[key]):raise ValueError('Unverified delivery candidate')
-            if candidate['candidate_tree']!=manifest['candidate_tree'] or candidate['integration_base']!=w['state']['base_revision']:raise ValueError('Prepared source differs from author candidate or trusted base')
+            if 'source_integration' in candidate:
+                integration=ExternalSourceIntegration.from_dict(candidate['source_integration'])
+                if (integration.prepare_action_id!=str(a['action_id']) or candidate.get('prepare_action_id')!=str(a['action_id'])
+                        or integration.source_base_revision!=manifest['base_revision']
+                        or integration.source_candidate_commit!=manifest['candidate_commit']
+                        or integration.source_candidate_tree!=manifest['candidate_tree']
+                        or candidate.get('author_candidate_commit')!=manifest['candidate_commit']
+                        or integration.integration_base!=candidate['integration_base']
+                        or integration.candidate_tree!=candidate['candidate_tree']
+                        or integration.integration_base==integration.source_base_revision):
+                    raise ValueError('Prepared integration differs from its immutable author source')
+            elif candidate['candidate_tree']!=manifest['candidate_tree'] or candidate['integration_base']!=manifest['base_revision']:
+                raise ValueError('Prepared source differs from author candidate or trusted base')
             if any(not isinstance(candidate.get(key),str) or not HEX64.fullmatch(candidate[key]) for key in ('diff_sha256','gate_source_sha256','gate_manifest_sha256')):raise ValueError('Candidate lacks exact gate/diff digests')
             if identity_protocol=='content-v2':
                 from work_external_identity import validate_content_identity
@@ -647,6 +666,7 @@ class ExternalWorkflowStore:
             changes=candidate.get('protected_gate_changes')
             if not isinstance(changes,list) or len(changes)>256 or any(not isinstance(change,dict) or not isinstance(change.get('finding_id'),str) for change in changes):raise ValueError('Invalid protected gate change manifest')
             self._resolve_retry(cursor,w,'feedback_delivery','artifact:'+artifact['assignment_id'],artifact['sha256'])
+            w['state']['base_revision']=candidate['integration_base']
             w['state']['candidate']=candidate
             w['state']['candidate_source']={'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256']}
             retry=w['state'].get('review_retries',0) if w['state'].get('operator_rescue_pending') else 0
@@ -922,7 +942,7 @@ class ExternalWorkflowStore:
         if a['status'] not in {'completed','failed'}:return False
         result=a['result'];receipt=result['receipt']
         if result['status']=='main_changed':
-            return self._request_rebase(cursor,w,'Main changed before merge. Rebase the preserved implementation onto the new trusted base and repeat independent review/checks.',action=a)
+            return self._request_integration_refresh(cursor,w,a)
         candidate=w['state']['candidate']
         if result['status']!='merged' or receipt.get('merge_commit')!=candidate['candidate_commit'] or receipt.get('candidate_tree')!=candidate['candidate_tree'] or receipt.get('expected_main')!=candidate['integration_base']:
             self._escalate(cursor,w,'Trusted merge could not be verified: '+result['summary']);return True
@@ -943,10 +963,29 @@ class ExternalWorkflowStore:
         insert_event(cursor,self.owner,w['project_alias'],w['root_task_id'],'completed',evidence,actor=COORDINATOR_ACTOR)
         return True
 
+    def _request_integration_refresh(self,cursor,w,action):
+        """Main drift invalidates checked source, not the author's completed work."""
+        if self._retry_events is not None:
+            event=self._reserve_retry(cursor,w,'merge','delivery:'+str(action['action_id']),
+                hashlib.sha256(canonical(action['result'])).hexdigest(),'prepare-refresh:'+str(action['action_id']))
+            if event is None:return True
+        else:
+            used=w['state'].get('trusted_main_refreshes',0)
+            if used+w['code_revisions']>=self._retry_limit(w,'max_code_revisions'):
+                self._escalate(cursor,w,'The bounded main integration budget is exhausted.');return True
+            w['state']['trusted_main_refreshes']=used+1
+        w['state']['prepare_refresh_epoch']=str(action['action_id'])
+        for key in ('candidate','candidate_source','code_review','verification','active_review_id'):
+            w['state'].pop(key,None)
+        self._save(cursor,w,'Main advanced; trusted preparation will integrate the preserved author artifact and repeat independent review and exact-source CI.',phase='repair')
+        return True
+
     def _request_rebase(self,cursor,w,summary,*,action=None):
         if self._retry_events is None and w['code_revisions']>=self._retry_limit(w,'max_code_revisions'):
             self._escalate(cursor,w,'The bounded source/revision budget is exhausted. '+summary);return True
-        if action is not None:w['state']['pending_rebase_cause']={'source_id':'delivery:'+str(action['action_id']),'digest':hashlib.sha256(canonical(action['result'])).hexdigest()}
+        if action is not None:
+            w['state']['pending_rebase_cause']={'source_id':'delivery:'+str(action['action_id']),'digest':hashlib.sha256(canonical(action['result'])).hexdigest()}
+            w['state']['prepare_refresh_epoch']=str(action['action_id'])
         w['state'].pop('base_revision',None);w['state']['pending_rebase']=summary[:2048]
         self._save(cursor,w,'Main changed; selecting the new trusted source before bounded rebase.',phase='repair')
         return True

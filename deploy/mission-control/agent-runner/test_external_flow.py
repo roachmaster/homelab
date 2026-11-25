@@ -11,7 +11,7 @@ from work_pg_fixture import DisposablePostgresCluster,PG16_AVAILABLE,SQL_DIR
 from work_api import WorkServiceFactory,WorkCancel,WorkAccept,WorkGet
 from work_config import WorkProfile,sha256_canonical
 from work_external_policy import V2_POLICY_ID,V2_POLICY_DIGEST
-from work_external_review_context import canonical,validate_target,parse_verdict,ExternalReviewContextProvider
+from work_external_review_context import canonical,validate_target,parse_verdict,ExternalReviewContextProvider,ExternalSourceIntegration
 from test_work_execution_and_usage import make_v2_config,make_submit,make_stop_proof
 from work_worker_store import WorkerDB,WorkerAccessError
 from work_external_delivery_store import ExternalDeliveryStoreFactory
@@ -221,18 +221,95 @@ class ExternalFlowPGTest(unittest.TestCase):
   native=self.rows('SELECT latest_attempt_id,workflow_required,workflow_id FROM forge_agent.coding_tasks WHERE id=%s',(receipt['task_id'],))[0]
   self.assertEqual(native,{'latest_attempt_id':None,'workflow_required':False,'workflow_id':None})
   self.assertEqual(self.db.project_revisions(),{})
- def test_main_changed_selects_new_source_before_author_rebase(self):
+ def test_main_drift_queues_fresh_preparation_before_actual_conflict_returns_to_owner(self):
   service,root,flow,_=self.submit_plan();candidate=self.implementation(flow);self.review(flow);flow.run_once();verify=self.delivery.claim('owned-delivery')
   self.delivery.checkpoint(verify,{'status':'passed','receipt':{**{k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256','branch_scope')},'result':'SUCCESS'},'summary':'Passed'})
   flow.run_once();flow.run_once();merge=self.delivery.claim('owned-delivery')
   self.delivery.checkpoint(merge,{'status':'main_changed','receipt':{},'summary':'Trusted main changed'})
   self.assertTrue(flow.run_once());self.assertIsNone(self.call('claim','homelab',ALIAS))
-  flow.run_once();source=self.delivery.claim('owned-delivery');self.assertEqual(source.kind,'source')
+  flow.run_once();prepare=self.delivery.claim('owned-delivery');self.assertEqual(prepare.kind,'prepare')
+  self.assertEqual(prepare.request['source_assignment_id'],merge.request['source_assignment_id'])
+  self.assertEqual(prepare.request['base_revision'],'a'*40)
+  self.delivery.checkpoint(prepare,{'status':'main_changed','receipt':{'expected_main':'f'*40,'reason':'source_conflict'},'summary':'Actual source conflict'})
+  flow.run_once();flow.run_once();source=self.delivery.claim('owned-delivery');self.assertEqual(source.kind,'source')
   self.delivery.checkpoint(source,{'status':'passed','receipt':{'base_revision':'f'*40},'summary':'New trusted main source'})
   flow.run_once();job=self.call('claim','homelab',ALIAS)
   self.assertEqual(job['external_context']['base_revision'],'f'*40)
   self.assertEqual(job['external_context']['previous_artifact']['sha256'],merge.request['source_sha256'])
   self.assertEqual(self.rows('SELECT code_revisions FROM forge_external_workflow.workflows')[0]['code_revisions'],1)
+
+ def test_clean_main_drift_keeps_source_owner_and_requires_new_review_and_exact_ci(self):
+  _,root,flow,_=self.submit_plan();candidate=self.implementation(flow);old_target=self.review(flow)
+  flow.run_once();verify=self.delivery.claim('owned-delivery')
+  self.delivery.checkpoint(verify,{'status':'passed','receipt':{**{k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256','branch_scope')},'result':'SUCCESS'},'summary':'Old exact source passed'})
+  flow.run_once();flow.run_once();merge=self.delivery.claim('owned-delivery')
+  self.delivery.checkpoint(merge,{'status':'main_changed','receipt':{},'summary':'Trusted main advanced'})
+  before=self.rows('SELECT assignment_id FROM forge_external_agent.assignments ORDER BY assignment_id')
+  flow.run_once();flow.run_once();prepare=self.delivery.claim('owned-delivery')
+  self.assertEqual(prepare.kind,'prepare');self.assertNotEqual(str(prepare.action_id),candidate.get('prepare_action_id'))
+  refreshed={**candidate,'candidate_commit':'f'*40,'candidate_tree':'e'*40,'integration_base':'9'*40,'prepare_action_id':str(prepare.action_id)}
+  refreshed['source_integration']=ExternalSourceIntegration(str(prepare.action_id),'a'*40,'b'*40,'d'*40,'9'*40,'e'*40).to_dict()
+  self.delivery.checkpoint(prepare,{'status':'passed','receipt':refreshed,'summary':'Clean main integration'})
+  flow.run_once()
+  w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
+  self.assertEqual((w['phase'],w['code_revisions']),('code_review',0))
+  self.assertEqual(w['state']['base_revision'],'9'*40)
+  self.assertNotIn('verification',w['state']);self.assertNotIn('code_review',w['state'])
+  self.assertEqual(self.rows('SELECT assignment_id FROM forge_external_agent.assignments ORDER BY assignment_id'),before)
+  self.assertIsNone(self.call('claim','homelab',ALIAS));self.assertIsNone(self.delivery.claim('owned-delivery'))
+  target=self.review(flow)
+  self.assertNotEqual(target['review_id'],old_target['review_id'])
+  self.assertEqual(target['source_assignment_id'],old_target['source_assignment_id'])
+  self.assertEqual(target['source_sha256'],old_target['source_sha256'])
+  self.assertEqual(target['approved_plan'],old_target['approved_plan'])
+  self.assertEqual((target['source_base_revision'],target['review_base_revision']),('a'*40,'f'*40))
+  self.assertEqual(target['candidate'],refreshed)
+  flow.run_once();new_verify=self.delivery.claim('owned-delivery')
+  self.assertEqual(new_verify.kind,'verify');self.assertNotEqual(new_verify.action_id,verify.action_id)
+  self.assertEqual(new_verify.request['candidate'],refreshed)
+  self.assertNotEqual(new_verify.request['code_review']['review_id'],merge.request['code_review']['review_id'])
+  self.delivery.checkpoint(new_verify,{'status':'passed','receipt':{**{k:refreshed[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256','branch_scope')},'result':'SUCCESS'},'summary':'New exact source passed'})
+  flow.run_once();flow.run_once();new_merge=self.delivery.claim('owned-delivery')
+  self.assertEqual(new_merge.kind,'merge');self.assertEqual(new_merge.request['candidate_tree'],'e'*40)
+  self.delivery.checkpoint(new_merge,{'status':'merged','receipt':{'merge_commit':'f'*40,'candidate_tree':'e'*40,'expected_main':'9'*40},'summary':'Fresh checked integration merged'})
+  flow.run_once();self.assertEqual(self.rows('SELECT phase FROM forge_external_workflow.workflows')[0]['phase'],'completed')
+
+ def test_main_refresh_reserves_existing_event_once_without_another_author_task(self):
+  from test_external_retry_events import apply_retry_event_migration
+  apply_retry_event_migration(self.pg)
+  _,_,legacy,_=self.submit_plan();candidate=self.implementation(legacy);self.review(legacy)
+  legacy.run_once();verify=self.delivery.claim('owned-delivery')
+  self.delivery.checkpoint(verify,{'status':'passed','receipt':{**{k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256','branch_scope')},'result':'SUCCESS'},'summary':'Old source passed'})
+  legacy.run_once();legacy.run_once();merge=self.delivery.claim('owned-delivery')
+  self.delivery.checkpoint(merge,{'status':'main_changed','receipt':{},'summary':'New trusted main'})
+  current=WorkServiceFactory(cfg(),self.connect).create()._store._external.workflow
+  with current._transaction() as cursor:
+   cursor.execute('SELECT * FROM forge_external_workflow.workflows FOR UPDATE');w=cursor.fetchone()
+   for n in range(3):
+    existing=current._reserve_retry(cursor,w,'merge','prior-main-drift:'+str(n),hashlib.sha256(str(n).encode()).hexdigest(),'prior-refresh:'+str(n))
+  before=self.rows('SELECT assignment_id FROM forge_external_agent.assignments ORDER BY assignment_id')
+  current.run_once();current.run_once()
+  for _ in range(3):current.run_once()
+  events=self.rows("SELECT event_id,used,attempt_limit,status FROM forge_agent.coding_retry_events WHERE kind='merge'")
+  self.assertEqual(len(events),1);self.assertEqual(str(events[0]['event_id']),existing['event_id'])
+  self.assertEqual((events[0]['used'],events[0]['attempt_limit'],events[0]['status']),(4,20,'open'))
+  self.assertEqual(self.rows('SELECT count(*) AS n FROM forge_agent.coding_retry_event_admissions')[0]['n'],4)
+  self.assertEqual(self.rows('SELECT assignment_id FROM forge_external_agent.assignments ORDER BY assignment_id'),before)
+  queued=self.rows("SELECT action_id FROM forge_external_workflow.actions WHERE status='queued' AND kind='prepare'")
+  self.assertEqual(len(queued),1)
+
+ def test_pre_upgrade_main_changed_receipt_gets_new_preparation_without_author_restart(self):
+  _,_,flow,_=self.submit_plan();self.review(flow)
+  manifest=canonical({'version':1,'candidate_commit':'b'*40,'candidate_tree':'d'*40,'base_revision':'a'*40,'summary':'Preserved implementation'}).decode()
+  source=self.author(flow,manifest);old=self.delivery.claim('owned-delivery')
+  self.delivery.checkpoint(old,{'status':'main_changed','receipt':{'expected_main':'f'*40},'summary':'Old runtime rejected base drift'})
+  self.assertTrue(flow.run_once());flow.run_once()
+  fresh=self.delivery.claim('owned-delivery')
+  self.assertEqual(fresh.kind,'prepare');self.assertNotEqual(fresh.action_id,old.action_id)
+  self.assertEqual((fresh.request['source_assignment_id'],fresh.request['base_revision']),(source['assignment_id'],'a'*40))
+  self.assertIsNone(self.call('claim','homelab',ALIAS))
+  self.assertEqual(self.rows('SELECT code_revisions FROM forge_external_workflow.workflows')[0]['code_revisions'],0)
+  self.assertEqual(self.rows('SELECT status FROM forge_external_workflow.actions WHERE action_id=%s',(old.action_id,))[0]['status'],'failed')
  def test_real_worker_factory_stages_complete_readonly_review_context(self):
   from tempfile import TemporaryDirectory
   from test_work_executor import raw_config

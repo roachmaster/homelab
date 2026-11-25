@@ -79,6 +79,31 @@ class ExternalContentIdentityTest(unittest.TestCase):
         target['candidate']['content_identity']={**candidate['content_identity'],'artifact_id':'0'*64}
         with self.assertRaises(ValueError):provider.acquire(lease,workspace)
 
+    def test_refreshed_content_has_independent_review_of_the_actual_integrated_tree(self):
+        self.helper.git(self.author,'checkout','--quiet','main')
+        (self.author/'main.txt').write_text('Independent main advance\n')
+        self.helper.git(self.author,'add','.');self.helper.git(self.author,'commit','--quiet','-m','Main advance')
+        current=self.helper.git(self.author,'rev-parse','HEAD').decode().strip()
+        self.helper.git(self.author,'push','--quiet',str(self.remote),'HEAD:refs/heads/main')
+        self.port.source_head=Mock(return_value=current)
+        candidate=self.prepare()
+        self.assertNotEqual(candidate['candidate_tree'],self.tree)
+        target,envelope,provider,lease,workspace=self.target(candidate)
+        self.assertEqual(provider.acquire(lease,workspace).reviewer_task_id,lease['task_id'])
+        self.assertEqual(target['source_base_revision'],self.base)
+        self.assertEqual(target['candidate']['integration_base'],current)
+        original=dict(candidate['source_integration'])
+        for key in ('source_base_revision','source_candidate_commit','source_candidate_tree','integration_base','candidate_tree'):
+            with self.subTest(key=key):
+                candidate['source_integration']={**original,key:'0'*40}
+                raw=envelope()
+                with self.assertRaisesRegex(ValueError,'immutable author source'):
+                    validate_target(raw['target_json'],raw['target_sha256'])
+        candidate['source_integration']={**original,'prepare_action_id':str(uuid4())}
+        raw=envelope()
+        with self.assertRaisesRegex(ValueError,'immutable author source'):
+            validate_target(raw['target_json'],raw['target_sha256'])
+
     def test_restart_uses_saved_policy_and_path_selection_without_rehashing_runtime_rules(self):
         original=self.port.git
         def interrupted(root,*args,**kwargs):
