@@ -55,6 +55,36 @@ def _normalize_null_acl(relacl, owner):
     return '{%s=arwdDxt/%s}' % (owner, owner)
 
 
+# Migration 0039 (pg_proxy_preparation) grants each caller role SELECT
+# on its allowlisted read tables, derived from the proxy registry (the
+# same source M39 was generated from, so the expected post-upgrade ACL
+# is exact). Coordinator/operator share forge_agent; a "*" read set
+# means every READ_TABLES entry. The grants run as forge_agent_owner.
+from forge_pg_proxy import CALLER_ALLOWLISTS as _PROXY_ALLOWLISTS, CALLER_ROLES as _PROXY_ROLES, READ_TABLES as _PROXY_READ_TABLES
+_PROXY_READERS={}
+for _caller,_allow in _PROXY_ALLOWLISTS.items():
+    _read=_allow['read']
+    _tables=sorted(_PROXY_READ_TABLES) if _read=='*' else sorted(_read)
+    for _table in _tables:
+        _PROXY_READERS.setdefault(_table,set()).add(_PROXY_ROLES[_caller])
+
+
+def _with_proxy_reads(relacl,readers):
+    # Append a `role=r/forge_agent_owner` entry for every proxy reader
+    # role that had no entry before, in the generator's grant order
+    # (roles sorted). A role that already held an entry is untouched:
+    # GRANT SELECT on an existing entry is a no-op, and the M40
+    # revocation below only rewrites forge_agent's entry in place.
+    if not readers:
+        return relacl
+    entries=_split_acl_array(relacl)
+    have={entry.split('=',1)[0] for entry in entries}
+    for role in sorted(readers):
+        if role not in have:
+            entries.append(role+'=r/forge_agent_owner')
+    return '{'+','.join(entries)+'}'
+
+
 def _cutover_acl(relacl):
     if relacl is None:
         return None
@@ -118,14 +148,19 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 before=snapshot()
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                # Migration 0040 (pg_proxy_cutover) intentionally revokes
-                # direct table writes (INSERT/UPDATE/DELETE/TRUNCATE) for
-                # forge_agent, forge_coding_worker, forge_coding_reconciler
-                # and muse_events; everything else about the M31 history
-                # must survive the upgrade byte-identical.
+                # Migration 0039 (pg_proxy_preparation) grants each caller
+                # role SELECT on its allowlisted read tables; the expected
+                # post-upgrade ACL adds those entries (in grant order) to
+                # the M31 ACL before the M40 revocation below rewrites
+                # forge_agent's entry in place. Migration 0040
+                # (pg_proxy_cutover) intentionally revokes direct table
+                # writes (INSERT/UPDATE/DELETE/TRUNCATE) for forge_agent,
+                # forge_coding_worker, forge_coding_reconciler and
+                # muse_events; everything else about the M31 history must
+                # survive the upgrade byte-identical.
                 expected=dict(before)
                 expected['old_relation_acl']=[
-                    (schema,name,owner,_cutover_acl(relacl))
+                    (schema,name,owner,_cutover_acl(_with_proxy_reads(relacl,_PROXY_READERS.get(schema+'.'+name,set()))))
                     for schema,name,owner,relacl in before['old_relation_acl']
                 ]
                 self.assertEqual(snapshot(),expected)

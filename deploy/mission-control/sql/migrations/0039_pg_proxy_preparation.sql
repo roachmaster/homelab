@@ -1,6 +1,8 @@
 -- M39: Postgres proxy preparation (additive; changes no existing behavior).
 -- Creates the audit log and entry points, grants the
--- writer principal the mutating external EXECUTE, and resolves the
+-- writer principal the mutating external EXECUTE, grants
+-- each caller role SELECT on its allowlisted read tables
+-- (plus schema USAGE), and resolves the
 -- writer identity to the muse_events grant in _scope/_locked/finish.
 -- The forge_pg_proxy and muse_proxy_writer roles are created by
 -- provision.sql (run before apply.sql; forge_agent_owner has no
@@ -1840,3 +1842,104 @@ GRANT EXECUTE ON FUNCTION forge_external_agent_api.renew(uuid,integer,uuid) TO m
 GRANT EXECUTE ON FUNCTION forge_external_agent_api.progress(uuid,integer,uuid,text) TO muse_proxy_writer;
 GRANT EXECUTE ON FUNCTION forge_external_agent_api.finish(uuid,integer,uuid,text,text) TO muse_proxy_writer;
 GRANT EXECUTE ON FUNCTION forge_external_agent_api.release(uuid,integer,uuid) TO muse_proxy_writer;
+
+-- Proxy read surface (§8: every inventoried read works
+-- through the proxy's read API, as the caller's role).
+-- SELECT on each allowlisted table; USAGE on its schema.
+GRANT USAGE ON SCHEMA forge_agent TO forge_agent;
+GRANT USAGE ON SCHEMA forge_external_agent TO forge_agent;
+GRANT USAGE ON SCHEMA forge_external_workflow TO forge_agent;
+GRANT SELECT ON forge_agent.coding_attempts TO forge_agent;
+GRANT SELECT ON forge_agent.coding_control_receipts TO forge_agent;
+GRANT SELECT ON forge_agent.coding_events TO forge_agent;
+GRANT SELECT ON forge_agent.coding_feedback TO forge_agent;
+GRANT SELECT ON forge_agent.coding_hosted_checks TO forge_agent;
+GRANT SELECT ON forge_agent.coding_plan_decisions TO forge_agent;
+GRANT SELECT ON forge_agent.coding_provider_usage TO forge_agent;
+GRANT SELECT ON forge_agent.coding_publications TO forge_agent;
+GRANT SELECT ON forge_agent.coding_reconciliation_receipts TO forge_agent;
+GRANT SELECT ON forge_agent.coding_result_chunks TO forge_agent;
+GRANT SELECT ON forge_agent.coding_retry_event_admissions TO forge_agent;
+GRANT SELECT ON forge_agent.coding_retry_event_observations TO forge_agent;
+GRANT SELECT ON forge_agent.coding_retry_events TO forge_agent;
+GRANT SELECT ON forge_agent.coding_review_budget TO forge_agent;
+GRANT SELECT ON forge_agent.coding_review_policy TO forge_agent;
+GRANT SELECT ON forge_agent.coding_reviews TO forge_agent;
+GRANT SELECT ON forge_agent.coding_tasks TO forge_agent;
+GRANT SELECT ON forge_agent.coding_usage_refresh_requests TO forge_agent;
+GRANT SELECT ON forge_agent.coding_worker_grants TO forge_agent;
+GRANT SELECT ON forge_agent.coding_worker_readiness TO forge_agent;
+GRANT SELECT ON forge_agent.coding_workflow_actions TO forge_agent;
+GRANT SELECT ON forge_agent.coding_workflow_reviews TO forge_agent;
+GRANT SELECT ON forge_agent.coding_workflows TO forge_agent;
+GRANT SELECT ON forge_agent.conversations TO forge_agent;
+GRANT SELECT ON forge_agent.gpu_worker_readiness TO forge_agent;
+GRANT SELECT ON forge_agent.ide_chats TO forge_agent;
+GRANT SELECT ON forge_agent.ide_workspace_history TO forge_agent;
+GRANT SELECT ON forge_agent.ide_workspace_tabs TO forge_agent;
+GRANT SELECT ON forge_agent.inference_results TO forge_agent;
+GRANT SELECT ON forge_agent.jenkins_event_deliveries TO forge_agent;
+GRANT SELECT ON forge_agent.jenkins_events TO forge_agent;
+GRANT SELECT ON forge_agent.jenkins_observations TO forge_agent;
+GRANT SELECT ON forge_agent.mail_messages TO forge_agent;
+GRANT SELECT ON forge_agent.mail_threads TO forge_agent;
+GRANT SELECT ON forge_agent.messages TO forge_agent;
+GRANT SELECT ON forge_agent.run_events TO forge_agent;
+GRANT SELECT ON forge_agent.runs TO forge_agent;
+GRANT SELECT ON forge_agent.tool_calls TO forge_agent;
+GRANT SELECT ON forge_agent.tool_results TO forge_agent;
+GRANT SELECT ON forge_external_agent.artifacts TO forge_agent;
+GRANT SELECT ON forge_external_agent.assignments TO forge_agent;
+GRANT SELECT ON forge_external_agent.readiness TO forge_agent;
+GRANT SELECT ON forge_external_agent.scope_grants TO forge_agent;
+GRANT SELECT ON forge_external_workflow.actions TO forge_agent;
+GRANT SELECT ON forge_external_workflow.contexts TO forge_agent;
+GRANT SELECT ON forge_external_workflow.plan_approve_overrides TO forge_agent;
+GRANT SELECT ON forge_external_workflow.reviews TO forge_agent;
+GRANT SELECT ON forge_external_workflow.tasks TO forge_agent;
+GRANT SELECT ON forge_external_workflow.workflows TO forge_agent;
+GRANT USAGE ON SCHEMA forge_agent TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_attempts TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_events TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_feedback TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_hosted_checks TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_plan_decisions TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_publications TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_reconciliation_receipts TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_result_chunks TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_review_budget TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_reviews TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_tasks TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_workflow_actions TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_workflow_reviews TO forge_coding_reconciler;
+GRANT SELECT ON forge_agent.coding_workflows TO forge_coding_reconciler;
+GRANT USAGE ON SCHEMA forge_agent TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_attempts TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_events TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_feedback TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_hosted_checks TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_plan_decisions TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_reconciliation_receipts TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_result_chunks TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_retry_events TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_review_budget TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_review_policy TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_reviews TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_tasks TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_usage_refresh_requests TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_worker_grants TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_workflow_actions TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_workflow_reviews TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_workflows TO forge_coding_worker;
+GRANT USAGE ON SCHEMA forge_agent TO forge_gpu_worker;
+GRANT SELECT ON forge_agent.gpu_worker_readiness TO forge_gpu_worker;
+GRANT SELECT ON forge_agent.inference_results TO forge_gpu_worker;
+GRANT SELECT ON forge_agent.runs TO forge_gpu_worker;
+GRANT USAGE ON SCHEMA forge_agent TO muse_proxy_writer;
+GRANT USAGE ON SCHEMA forge_external_agent TO muse_proxy_writer;
+GRANT SELECT ON forge_agent.coding_events TO muse_proxy_writer;
+GRANT SELECT ON forge_agent.coding_tasks TO muse_proxy_writer;
+GRANT SELECT ON forge_external_agent.artifacts TO muse_proxy_writer;
+GRANT SELECT ON forge_external_agent.assignments TO muse_proxy_writer;
+GRANT SELECT ON forge_external_agent.readiness TO muse_proxy_writer;
+GRANT SELECT ON forge_external_agent.scope_grants TO muse_proxy_writer;

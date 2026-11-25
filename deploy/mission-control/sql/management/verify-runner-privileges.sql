@@ -14,6 +14,10 @@ BEGIN
   -- granted pre-cutover, revoked at cutover, and outside this file's
   -- spec, so the probe cannot mask an assertion below. NULL (table
   -- absent pre-M22) degrades to the pre-cutover expectations.
+  -- Likewise the M39 probe below is forge_agent's SELECT on
+  -- coding_retry_events: granted by the M39 proxy read surface, kept
+  -- at cutover, and outside this file's spec, so it cannot mask the
+  -- coding_worker_grants assertion it gates.
   SELECT NOT has_table_privilege(current_user, 'forge_external_workflow.workflows', 'INSERT') INTO cutover;
   IF current_user <> 'forge_agent' THEN
     RAISE EXCEPTION 'Expected current_user forge_agent, got %', current_user;
@@ -51,7 +55,8 @@ BEGIN
         END
       )
       FROM (SELECT v.relation,
-              CASE WHEN cutover AND v.allowed <> ARRAY[]::text[] THEN ARRAY['SELECT'] ELSE v.allowed END AS allowed
+              CASE WHEN v.relation='coding_worker_grants' AND has_table_privilege(current_user, 'forge_agent.coding_retry_events', 'SELECT') THEN ARRAY['SELECT']
+                   WHEN cutover AND v.allowed <> ARRAY[]::text[] THEN ARRAY['SELECT'] ELSE v.allowed END AS allowed
              FROM (
         VALUES
           ('mail_threads',            ARRAY['SELECT', 'INSERT', 'UPDATE']),

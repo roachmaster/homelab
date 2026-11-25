@@ -2,7 +2,7 @@
 \ir verify-superseding-reviews.sql
 -- Exact M16 catalog, immutable artifact and narrow-role verification. Included in readonly verify.sql.
 DO $autonomy_verify$
-DECLARE expected record;actual jsonb;role_name text;privilege_name text;allowed text[];fn jsonb;
+DECLARE expected record;actual jsonb;role_name text;privilege_name text;allowed text[];fn jsonb;want boolean;
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=16 AND name='coding_autonomous_workflows') THEN RAISE EXCEPTION 'Missing M16 feedback migration';END IF;
  FOR expected IN SELECT 'coding_workflows'::text AS name,$catalog0${"acl":["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner"],"columns":[["workflow_id","uuid",true,"gen_random_uuid()"],["owner_id","text",true,null],["project_alias","text",true,null],["root_task_id","uuid",true,null],["policy_digest","text",true,null],["snapshot","jsonb",true,null],["phase","text",true,"'plan'::text"],["plan_revisions","integer",true,"0"],["escalation_reason","text",true,"''::text"],["enabled","boolean",true,"true"],["created_at","timestamp with time zone",true,"clock_timestamp()"],["updated_at","timestamp with time zone",true,"clock_timestamp()"]],"indexes":[["coding_workflows_owner_id_project_alias_root_task_id_key","CREATE UNIQUE INDEX coding_workflows_owner_id_project_alias_root_task_id_key ON forge_agent.coding_workflows USING btree (owner_id, project_alias, root_task_id)",true,true],["coding_workflows_owner_id_project_alias_workflow_id_key","CREATE UNIQUE INDEX coding_workflows_owner_id_project_alias_workflow_id_key ON forge_agent.coding_workflows USING btree (owner_id, project_alias, workflow_id)",true,true],["coding_workflows_pkey","CREATE UNIQUE INDEX coding_workflows_pkey ON forge_agent.coding_workflows USING btree (workflow_id)",true,true]],"triggers":[["coding_workflows_evidence_guard","CREATE TRIGGER coding_workflows_evidence_guard BEFORE UPDATE ON forge_agent.coding_workflows FOR EACH ROW EXECUTE FUNCTION forge_agent.coding_workflow_evidence_guard()","O"]],"constraints":[["coding_workflows_escalation_reason_check","c","CHECK ((octet_length(escalation_reason) <= 4096))",true,false,false],["coding_workflows_owner_id_project_alias_root_task_id_fkey","f","FOREIGN KEY (owner_id, project_alias, root_task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)",true,false,false],["coding_workflows_owner_id_project_alias_root_task_id_key","u","UNIQUE (owner_id, project_alias, root_task_id)",true,false,false],["coding_workflows_owner_id_project_alias_workflow_id_key","u","UNIQUE (owner_id, project_alias, workflow_id)",true,false,false],["coding_workflows_phase_check","c","CHECK ((phase = ANY (ARRAY['plan'::text, 'plan_review'::text, 'plan_revision'::text, 'implement'::text, 'checks'::text, 'code_review'::text, 'repair'::text, 'publishing'::text, 'hosted'::text, 'merging'::text, 'completed'::text, 'cancelled'::text, 'escalated'::text])))",true,false,false],["coding_workflows_pkey","p","PRIMARY KEY (workflow_id)",true,false,false],["coding_workflows_plan_revisions_check","c","CHECK (((plan_revisions >= 0) AND (plan_revisions <= 3)))",true,false,false],["coding_workflows_policy_digest_check","c","CHECK ((policy_digest ~ '^[0-9a-f]{64}$'::text))",true,false,false],["coding_workflows_snapshot_check","c","CHECK ((jsonb_typeof(snapshot) = 'object'::text))",true,false,false]]}$catalog0$::jsonb AS data LOOP
@@ -37,8 +37,24 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
   actual:=jsonb_set(actual,'{indexes}',(SELECT jsonb_agg(CASE WHEN item->>0='coding_workflow_reviews_workflow_id_target_kind_source_atte_key' THEN jsonb_set(item,'{1}',(SELECT old->1 FROM jsonb_array_elements(expected.data->'indexes') old WHERE old->>0=item->>0)) ELSE item END ORDER BY n) FROM jsonb_array_elements(actual->'indexes') WITH ORDINALITY a(item,n) WHERE item->>0 NOT IN('coding_workflow_reviews_supersedes_review_id_key','coding_workflow_reviews_one_live_source')));
   actual:=jsonb_set(actual,'{triggers}',(SELECT jsonb_agg(item ORDER BY n) FROM jsonb_array_elements(actual->'triggers') WITH ORDINALITY a(item,n) WHERE item->>0<>'coding_workflow_reviews_supersession_guard'));
  END IF;
- -- M40 revokes every direct forge_agent table write; the proxy is the
- -- only writer, so the pinned catalog expects SELECT only from here on.
+ -- M39 grants the proxy read surface (worker/reconciler SELECT, plus
+ -- muse_proxy_writer SELECT on coding_tasks); the pinned catalog expects
+ -- exactly those entries from here on.
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') THEN
+  expected.data:=CASE expected.name
+   WHEN 'coding_review_policy' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_feedback' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=ar/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_hosted_checks' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_review_budget' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=ar/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_tasks' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner","muse_proxy_writer=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_attempts' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_publications' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflows' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflow_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflow_actions' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   ELSE expected.data END;
+ END IF;
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover') THEN
   expected.data:=jsonb_set(expected.data,'{acl}',coalesce((SELECT jsonb_agg(CASE WHEN entry::text LIKE '"forge_agent=%' THEN to_jsonb('forge_agent=r/forge_agent_owner'::text) ELSE entry END ORDER BY ord)
    FROM jsonb_array_elements(expected.data->'acl') WITH ORDINALITY AS acl(entry,ord)),'[]'::jsonb));
@@ -77,8 +93,24 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
   actual:=jsonb_set(actual,'{indexes}',(SELECT jsonb_agg(CASE WHEN item->>0='coding_workflow_reviews_workflow_id_target_kind_source_atte_key' THEN jsonb_set(item,'{1}',(SELECT old->1 FROM jsonb_array_elements(expected.data->'indexes') old WHERE old->>0=item->>0)) ELSE item END ORDER BY n) FROM jsonb_array_elements(actual->'indexes') WITH ORDINALITY a(item,n) WHERE item->>0 NOT IN('coding_workflow_reviews_supersedes_review_id_key','coding_workflow_reviews_one_live_source')));
   actual:=jsonb_set(actual,'{triggers}',(SELECT jsonb_agg(item ORDER BY n) FROM jsonb_array_elements(actual->'triggers') WITH ORDINALITY a(item,n) WHERE item->>0<>'coding_workflow_reviews_supersession_guard'));
  END IF;
- -- M40 revokes every direct forge_agent table write; the proxy is the
- -- only writer, so the pinned catalog expects SELECT only from here on.
+ -- M39 grants the proxy read surface (worker/reconciler SELECT, plus
+ -- muse_proxy_writer SELECT on coding_tasks); the pinned catalog expects
+ -- exactly those entries from here on.
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') THEN
+  expected.data:=CASE expected.name
+   WHEN 'coding_review_policy' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_feedback' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=ar/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_hosted_checks' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_review_budget' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=ar/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_tasks' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner","muse_proxy_writer=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_attempts' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_publications' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflows' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflow_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflow_actions' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   ELSE expected.data END;
+ END IF;
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover') THEN
   expected.data:=jsonb_set(expected.data,'{acl}',coalesce((SELECT jsonb_agg(CASE WHEN entry::text LIKE '"forge_agent=%' THEN to_jsonb('forge_agent=r/forge_agent_owner'::text) ELSE entry END ORDER BY ord)
    FROM jsonb_array_elements(expected.data->'acl') WITH ORDINALITY AS acl(entry,ord)),'[]'::jsonb));
@@ -117,8 +149,24 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
   actual:=jsonb_set(actual,'{indexes}',(SELECT jsonb_agg(CASE WHEN item->>0='coding_workflow_reviews_workflow_id_target_kind_source_atte_key' THEN jsonb_set(item,'{1}',(SELECT old->1 FROM jsonb_array_elements(expected.data->'indexes') old WHERE old->>0=item->>0)) ELSE item END ORDER BY n) FROM jsonb_array_elements(actual->'indexes') WITH ORDINALITY a(item,n) WHERE item->>0 NOT IN('coding_workflow_reviews_supersedes_review_id_key','coding_workflow_reviews_one_live_source')));
   actual:=jsonb_set(actual,'{triggers}',(SELECT jsonb_agg(item ORDER BY n) FROM jsonb_array_elements(actual->'triggers') WITH ORDINALITY a(item,n) WHERE item->>0<>'coding_workflow_reviews_supersession_guard'));
  END IF;
- -- M40 revokes every direct forge_agent table write; the proxy is the
- -- only writer, so the pinned catalog expects SELECT only from here on.
+ -- M39 grants the proxy read surface (worker/reconciler SELECT, plus
+ -- muse_proxy_writer SELECT on coding_tasks); the pinned catalog expects
+ -- exactly those entries from here on.
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') THEN
+  expected.data:=CASE expected.name
+   WHEN 'coding_review_policy' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_feedback' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=ar/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_hosted_checks' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_review_budget' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=ar/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_tasks' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner","muse_proxy_writer=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_attempts' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_publications' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflows' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflow_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   WHEN 'coding_workflow_actions' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
+   ELSE expected.data END;
+ END IF;
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover') THEN
   expected.data:=jsonb_set(expected.data,'{acl}',coalesce((SELECT jsonb_agg(CASE WHEN entry::text LIKE '"forge_agent=%' THEN to_jsonb('forge_agent=r/forge_agent_owner'::text) ELSE entry END ORDER BY ord)
    FROM jsonb_array_elements(expected.data->'acl') WITH ORDINALITY AS acl(entry,ord)),'[]'::jsonb));
@@ -259,7 +307,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  SELECT jsonb_build_array(p.prosrc,p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.project_revisions()'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  END IF;
  IF actual IS DISTINCT FROM $function17$["\n SELECT coalesce(jsonb_object_agg(head.project_alias,head.merge_commit),'{}'::jsonb) FROM(\n SELECT DISTINCT ON(a.project_alias) a.project_alias,a.finish_receipt->'receipt'->>'merge_commit' AS merge_commit\n FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w USING(workflow_id)\n WHERE a.owner_id=current_setting('forge.coding_owner',true) AND a.kind='merge' AND a.status='completed' AND a.finish_receipt->>'status'='merged'\n AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'\n AND EXISTS(SELECT 1 FROM forge_agent.coding_worker_grants g WHERE g.worker_role=session_user AND g.owner_id=a.owner_id AND g.project_alias=a.project_alias)\n ORDER BY a.project_alias,a.updated_at DESC,a.action_id DESC)head\n",true,["search_path=pg_catalog, pg_temp"],"s",["forge_agent_owner=X/forge_agent_owner","forge_coding_worker=X/forge_agent_owner"]]$function17$::jsonb THEN RAISE EXCEPTION 'Autonomy function drift: forge_coding_worker_api.project_revisions()';END IF;
- FOR expected IN SELECT * FROM(VALUES ('coding_workflows',ARRAY['SELECT','INSERT','UPDATE']),('coding_workflow_reviews',ARRAY['SELECT','INSERT','UPDATE']),('coding_workflow_actions',ARRAY['SELECT','INSERT','UPDATE'])) s(name,grants) LOOP
+ FOR expected IN SELECT * FROM(VALUES ('coding_workflows',ARRAY['SELECT','INSERT','UPDATE'],ARRAY['forge_coding_worker','forge_coding_reconciler']),('coding_workflow_reviews',ARRAY['SELECT','INSERT','UPDATE'],ARRAY['forge_coding_worker','forge_coding_reconciler']),('coding_workflow_actions',ARRAY['SELECT','INSERT','UPDATE'],ARRAY['forge_coding_worker','forge_coding_reconciler'])) s(name,grants,readers) LOOP
  -- M40 revokes every direct forge_agent table write; the proxy is the
  -- only writer, so forge_agent keeps SELECT only on these tables.
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40 AND name='pg_proxy_cutover') THEN
@@ -267,7 +315,8 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  END IF;
  FOREACH role_name IN ARRAY ARRAY['public','forge_agent','forge_gpu_worker','forge_coding_worker','forge_coding_reconciler'] LOOP
  FOREACH privilege_name IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
- IF has_table_privilege(role_name,'forge_agent.'||expected.name,privilege_name) IS DISTINCT FROM (role_name='forge_agent' AND privilege_name=ANY(expected.grants)) OR (privilege_name IN('SELECT','INSERT','UPDATE','REFERENCES') AND NOT(role_name='forge_agent' AND privilege_name=ANY(expected.grants)) AND has_any_column_privilege(role_name,'forge_agent.'||expected.name,privilege_name)) THEN RAISE EXCEPTION 'Autonomy privilege drift: % % %',role_name,expected.name,privilege_name;END IF;
+ want:=(role_name='forge_agent' AND privilege_name=ANY(expected.grants)) OR (EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') AND privilege_name='SELECT' AND role_name=ANY(expected.readers));
+ IF has_table_privilege(role_name,'forge_agent.'||expected.name,privilege_name) IS DISTINCT FROM want OR (privilege_name IN('SELECT','INSERT','UPDATE','REFERENCES') AND NOT want AND has_any_column_privilege(role_name,'forge_agent.'||expected.name,privilege_name)) THEN RAISE EXCEPTION 'Autonomy privilege drift: % % %',role_name,expected.name,privilege_name;END IF;
  END LOOP;END LOOP;END LOOP;
 END;
 $autonomy_verify$;

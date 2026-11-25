@@ -41,8 +41,8 @@ def snapshot(*conversations, selected=0, bookmark=None):
     ]}, "workbench": bookmark, "workbench_open": bookmark is not None}
 
 
-@unittest.skipUnless(os.geteuid() != 0 and (POSTGRES_BIN / "initdb").is_file(),
-                     "Disposable PostgreSQL 16 integration requires its binaries and a non-root user")
+@unittest.skipUnless(os.environ.get("FORGE_DISABLE_DISPOSABLE_POSTGRES") != "1" and os.geteuid() != 0 and (POSTGRES_BIN / "initdb").is_file(),
+                     "Disposable PostgreSQL 16 integration requires its binaries and a non-root user; DB tests run only on main")
 class WorkspaceStoreTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -115,10 +115,13 @@ class WorkspaceStoreTest(unittest.TestCase):
         self.assert_sql_verification(script, user="forge_agent")
         self.assert_sql_verification(script, error="Expected current_user forge_agent")
 
+        # Post-cutover (M40) forge_agent keeps SELECT only on these
+        # tables; the proxy is the only writer. The drift subtests
+        # below revoke/grants each privilege against this matrix.
         allowed = {
-            "mail_threads": {"SELECT", "INSERT", "UPDATE"},
-            "mail_messages": {"SELECT", "INSERT"},
-            "inference_results": {"SELECT", "DELETE"},
+            "mail_threads": {"SELECT"},
+            "mail_messages": {"SELECT"},
+            "inference_results": {"SELECT"},
             "gpu_worker_readiness": {"SELECT"},
         }
         for table, privileges in allowed.items():

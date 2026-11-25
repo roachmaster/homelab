@@ -594,7 +594,7 @@ BEGIN
         RAISE EXCEPTION 'Unexpected PUBLIC privileges on Forge coding admission tables';
     END IF;
 
-    IF has_schema_privilege('forge_gpu_worker', 'forge_agent', 'USAGE, CREATE')
+    IF (CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') THEN has_schema_privilege('forge_gpu_worker', 'forge_agent', 'CREATE') ELSE has_schema_privilege('forge_gpu_worker', 'forge_agent', 'USAGE, CREATE') END)
        OR has_schema_privilege('forge_gpu_worker', 'forge_agent_worker_api', 'CREATE')
        OR has_schema_privilege('forge_gpu_worker', 'forge_coding_worker_api', 'USAGE, CREATE')
        OR has_schema_privilege('forge_gpu_worker', 'forge_coding_reconciler_api', 'USAGE, CREATE')
@@ -609,8 +609,12 @@ BEGIN
        OR EXISTS (
            SELECT FROM pg_catalog.pg_class rel
            WHERE rel.relnamespace = 'forge_agent'::regnamespace AND rel.relkind IN ('r', 'p')
-             AND (has_table_privilege('forge_gpu_worker', rel.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
-                  OR has_any_column_privilege('forge_gpu_worker', rel.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+             AND (has_table_privilege('forge_gpu_worker', rel.oid, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                  OR has_any_column_privilege('forge_gpu_worker', rel.oid, 'INSERT, UPDATE, REFERENCES')
+                  OR ((has_table_privilege('forge_gpu_worker', rel.oid, 'SELECT')
+                       OR has_any_column_privilege('forge_gpu_worker', rel.oid, 'SELECT'))
+                      AND NOT (EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation')
+                               AND rel.relname IN ('gpu_worker_readiness','inference_results','runs'))))
        )
        OR EXISTS (
            SELECT 1
@@ -625,7 +629,7 @@ BEGIN
         RAISE EXCEPTION 'Unexpected Forge GPU worker privileges';
     END IF;
 
-    IF has_schema_privilege('forge_coding_worker', 'forge_agent', 'USAGE, CREATE')
+    IF (CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') THEN has_schema_privilege('forge_coding_worker', 'forge_agent', 'CREATE') ELSE has_schema_privilege('forge_coding_worker', 'forge_agent', 'USAGE, CREATE') END)
        OR has_schema_privilege('forge_coding_worker', 'forge_agent_worker_api', 'USAGE, CREATE')
        OR has_schema_privilege('forge_coding_worker', 'forge_coding_reconciler_api', 'USAGE, CREATE')
        OR has_schema_privilege('forge_coding_worker', 'forge_coding_worker_api', 'CREATE')
@@ -655,8 +659,12 @@ BEGIN
        OR EXISTS (
            SELECT FROM pg_catalog.pg_class rel
            WHERE rel.relnamespace = 'forge_agent'::regnamespace AND rel.relkind IN ('r', 'p')
-             AND (has_table_privilege('forge_coding_worker', rel.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
-                  OR has_any_column_privilege('forge_coding_worker', rel.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+             AND (has_table_privilege('forge_coding_worker', rel.oid, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                  OR has_any_column_privilege('forge_coding_worker', rel.oid, 'INSERT, UPDATE, REFERENCES')
+                  OR ((has_table_privilege('forge_coding_worker', rel.oid, 'SELECT')
+                       OR has_any_column_privilege('forge_coding_worker', rel.oid, 'SELECT'))
+                      AND NOT (EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation')
+                               AND rel.relname IN ('coding_attempts','coding_events','coding_feedback','coding_hosted_checks','coding_plan_decisions','coding_reconciliation_receipts','coding_result_chunks','coding_retry_events','coding_review_budget','coding_review_policy','coding_reviews','coding_tasks','coding_usage_refresh_requests','coding_worker_grants','coding_workflow_actions','coding_workflow_reviews','coding_workflows'))))
        )
        OR EXISTS (
            SELECT 1
@@ -671,7 +679,7 @@ BEGIN
         RAISE EXCEPTION 'Unexpected Forge coding worker privileges';
     END IF;
 
-    IF has_schema_privilege('forge_coding_reconciler', 'forge_agent', 'USAGE, CREATE')
+    IF (CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation') THEN has_schema_privilege('forge_coding_reconciler', 'forge_agent', 'CREATE') ELSE has_schema_privilege('forge_coding_reconciler', 'forge_agent', 'USAGE, CREATE') END)
        OR has_schema_privilege('forge_coding_reconciler', 'forge_agent_worker_api', 'USAGE, CREATE')
        OR has_schema_privilege('forge_coding_reconciler', 'forge_coding_worker_api', 'USAGE, CREATE')
        OR has_schema_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api', 'CREATE')
@@ -688,8 +696,12 @@ BEGIN
        OR EXISTS (
            SELECT FROM pg_catalog.pg_class rel
            WHERE rel.relnamespace = 'forge_agent'::regnamespace AND rel.relkind IN ('r', 'p')
-             AND (has_table_privilege('forge_coding_reconciler', rel.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
-                  OR has_any_column_privilege('forge_coding_reconciler', rel.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+             AND (has_table_privilege('forge_coding_reconciler', rel.oid, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                  OR has_any_column_privilege('forge_coding_reconciler', rel.oid, 'INSERT, UPDATE, REFERENCES')
+                  OR ((has_table_privilege('forge_coding_reconciler', rel.oid, 'SELECT')
+                       OR has_any_column_privilege('forge_coding_reconciler', rel.oid, 'SELECT'))
+                      AND NOT (EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='pg_proxy_preparation')
+                               AND rel.relname IN ('coding_attempts','coding_events','coding_feedback','coding_hosted_checks','coding_plan_decisions','coding_publications','coding_reconciliation_receipts','coding_result_chunks','coding_review_budget','coding_reviews','coding_tasks','coding_workflow_actions','coding_workflow_reviews','coding_workflows'))))
        )
        OR EXISTS (
            SELECT 1
