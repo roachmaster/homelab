@@ -96,7 +96,7 @@ def event_stage_evidence(branch_scope: str, checks: list, failure: str | None) -
             for index,item in enumerate(phases) if item.kind==phase.kind)})
     if failure=='source_changed_during_checks':
         return dict(failure_kind='verification',passed_kinds=[],phase_results=records)
-    if failure in {'cancelled_or_timed_out','verification_unavailable','deadline_exceeded'}:
+    if failure in {'cancelled_or_timed_out','verification_unavailable','deadline_exceeded','gate_manifest_mismatch'}:
         kind='infrastructure'
     elif failed is not None:
         kind='infrastructure' if failed['returncode']==124 or failed['returncode']<0 else failed['kind']

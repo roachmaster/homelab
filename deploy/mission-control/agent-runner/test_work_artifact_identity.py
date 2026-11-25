@@ -175,12 +175,32 @@ class ArtifactSourceTest(unittest.TestCase):
         with self.assertRaises(ValueError):GitSourceConfig(self.root, '--upload-pack=bad')
 
     def test_directory_rejects_symlinks_special_modes_and_byte_count_limits(self):
+        import stat
         export = self.root / 'export';self.write_files(export)
         (export / 'link').symlink_to(export / 'README.md')
         with self.assertRaises(ValueError):ArtifactSourceFactory(DirectorySourceConfig(export)).create().acquire()
-        (export / 'link').unlink();(export / 'README.md').chmod(0o4644)
+        (export / 'link').unlink();(export / 'README.md').chmod(0o1644)
         with self.assertRaises(ValueError):ArtifactSourceFactory(DirectorySourceConfig(export)).create().acquire()
         (export / 'README.md').chmod(0o644)
+        try:
+            (export / 'README.md').chmod(0o4644)
+        except PermissionError:
+            real_stat = os.stat
+            for special_bit in (stat.S_ISUID, stat.S_ISGID):
+                def with_special_bit(path, *args, _bit=special_bit, **kwargs):
+                    info = real_stat(path, *args, **kwargs)
+                    if path == 'README.md':
+                        values = list(info)
+                        values[0] = info.st_mode | _bit
+                        return os.stat_result(values)
+                    return info
+                with self.subTest(special_bit=oct(special_bit)), patch('work_artifact_source.os.stat', side_effect=with_special_bit):
+                    with self.assertRaises(ValueError):ArtifactSourceFactory(DirectorySourceConfig(export)).create().acquire()
+        else:
+            try:
+                with self.assertRaises(ValueError):ArtifactSourceFactory(DirectorySourceConfig(export)).create().acquire()
+            finally:
+                (export / 'README.md').chmod(0o644)
         for limits in (SourceLimits(max_files=2), SourceLimits(max_file_bytes=2), SourceLimits(max_total_bytes=2)):
             with self.subTest(limits=limits), self.assertRaises(ValueError):
                 ArtifactSourceFactory(DirectorySourceConfig(export, limits)).create().acquire()

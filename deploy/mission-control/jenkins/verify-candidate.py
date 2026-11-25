@@ -215,7 +215,7 @@ def event_stage_evidence(branch_scope: str, checks: list, failure: str | None) -
             for index,item in enumerate(phases) if item.kind==phase.kind)})
     if failure=='source_changed_during_checks':
         return dict(failure_kind='verification',passed_kinds=[],phase_results=records)
-    if failure in {'cancelled_or_timed_out','verification_unavailable','deadline_exceeded'}:
+    if failure in {'cancelled_or_timed_out','verification_unavailable','deadline_exceeded','gate_manifest_mismatch'}:
         kind='infrastructure'
     elif failed is not None:
         kind='infrastructure' if failed['returncode']==124 or failed['returncode']<0 else failed['kind']
@@ -525,6 +525,10 @@ class CorruptSnapshotError(ValueError):
 
 class MainAncestorRequired(ValueError):
     """The pushed source does not yet contain its observed main baseline."""
+
+
+class GateManifestMismatch(ValueError):
+    """Submitted gate manifest disagrees with installed verifier policy and source."""
 
 
 def main_ancestor_preflight(source, request, env):
@@ -3346,7 +3350,14 @@ def _execute_locked(action, config, *, cache_port):
                 raise ValueError('Installed verification policy changed')
             manifest = profile_gate_manifest(config['verification_profile'], branch_scope, protected, helper_digest)
             if manifest != request['gate_manifest_sha256']:
-                raise ValueError('Gate manifest does not match the installed policy and source')
+                os.write(fd, (
+                    'FORGE_GATE_MANIFEST_MISMATCH profile=' + config['verification_profile']
+                    + ' branch_scope=' + branch_scope
+                    + ' verifier_sha256=' + helper_digest
+                    + ' expected_manifest=' + manifest
+                    + ' request_manifest=' + request['gate_manifest_sha256'] + '\n'
+                ).encode('utf-8'))
+                raise GateManifestMismatch('Gate manifest does not match the installed policy and source')
             if require_main:
                 try:
                     main_ancestor_preflight(source, request, safe_env)
@@ -3580,6 +3591,10 @@ def _execute_locked(action, config, *, cache_port):
                     f'evicted={publish_outcome.evicted_entries}\n'
                 ).encode('utf-8'))
                 log.flush()
+        except GateManifestMismatch:
+            failure = 'gate_manifest_mismatch'
+            if cache_port.enabled and publish_outcome.status == 'not_run':
+                publish_outcome = CachePublishOutcome(status='skipped_failed', reason='gate_manifest_mismatch')
         except MainAncestorRequired:
             failure = 'main_ancestor_required'
             if cache_port.enabled and publish_outcome.status == 'not_run':
