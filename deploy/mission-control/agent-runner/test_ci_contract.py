@@ -150,6 +150,78 @@ class CiContractTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_verifier_policy_parity(CiGateContractFactory(EVENT_PROFILE).create(), skewed_prefix_bytes)
 
+        # Complete v3 phase-plan skew cases (command/argv, ordering, kind/logical_gate,
+        # scope predicates, dynamic loop expressions, CiPhase defaults, opaque AST).
+        aligned_text = aligned_bytes.decode('utf-8')
+        def mutate_once(old, new):
+            self.assertIn(old, aligned_text)
+            return aligned_text.replace(old, new, 1).encode('utf-8')
+
+        skewed_argv_bytes = mutate_once(
+            "'-s','src/rust/scripts/tests','-v')),",
+            "'-s','src/rust/scripts/tests','-q')),",
+        )
+        phase_skew_cases = {
+            'script_tests_argv': skewed_argv_bytes,
+            'dynamic_loop_argv': mutate_once(
+                "phases.append(CiPhase(identity+'-tests','tests',('/usr/bin/make','test',*flags)))",
+                "phases.append(CiPhase(identity+'-tests','tests',('/usr/bin/make','check',*flags)))",
+            ),
+            'static_phase_order': mutate_once(
+                "        CiPhase('formatting', 'formatting', ('/usr/bin/make','fmt-check','PACKAGE=','CHANGED_ONLY=0')),\n"
+                "        CiPhase('imports', 'verification', ('/usr/bin/make','check-imports')),",
+                "        CiPhase('imports', 'verification', ('/usr/bin/make','check-imports')),\n"
+                "        CiPhase('formatting', 'formatting', ('/usr/bin/make','fmt-check','PACKAGE=','CHANGED_ONLY=0')),",
+            ),
+            'main_phase_order': mutate_once(
+                "            CiPhase('browser-journeys','browser',('/usr/bin/make','ui-qa'),'real-browser'),\n"
+                "            CiPhase('backend-main','tests',('/usr/bin/python3','-B','deploy/mission-control/backend-suites.py','--scope','main'),'backend-suites'),",
+                "            CiPhase('backend-main','tests',('/usr/bin/python3','-B','deploy/mission-control/backend-suites.py','--scope','main'),'backend-suites'),\n"
+                "            CiPhase('browser-journeys','browser',('/usr/bin/make','ui-qa'),'real-browser'),",
+            ),
+            'phase_kind': mutate_once(
+                "CiPhase('formatting', 'formatting', ('/usr/bin/make','fmt-check','PACKAGE=','CHANGED_ONLY=0'))",
+                "CiPhase('formatting', 'lint', ('/usr/bin/make','fmt-check','PACKAGE=','CHANGED_ONLY=0'))",
+            ),
+            'logical_gate': mutate_once(
+                "CiPhase('browser-journeys','browser',('/usr/bin/make','ui-qa'),'real-browser')",
+                "CiPhase('browser-journeys','browser',('/usr/bin/make','ui-qa'),'check')",
+            ),
+            'ci_phase_default_gate': mutate_once(
+                "    logical_gate: str = 'check'\n",
+                "    logical_gate: str = 'other'\n",
+            ),
+            'preflight_scope_gate': mutate_once(
+                "'check' if branch_scope == 'main' else 'source-preflight'",
+                "'check'",
+            ),
+            'inverted_scope_branch': mutate_once(
+                "    if branch_scope == 'main':\n",
+                "    if branch_scope != 'main':\n",
+            ),
+            'hidden_branch_scope_predicate': mutate_once(
+                "    if branch_scope == 'main':\n",
+                "    if branch_scope == 'branch/special':\n        return ()\n    if branch_scope == 'main':\n",
+            ),
+            'dynamic_loop_phase_id': mutate_once(
+                "phases.append(CiPhase(identity+'-test-compile','compilation',('/usr/bin/make','test-compile',*flags)))",
+                "phases.append(CiPhase(identity+'-compile','compilation',('/usr/bin/make','test-compile',*flags)))",
+            ),
+            'omitted_dynamic_lint_phase': mutate_once(
+                "        if lint:\n            phases.append(CiPhase(identity+'-lint','lint',('/usr/bin/make','lint',*flags)))\n",
+                "",
+            ),
+            'opaque_dynamic_call': mutate_once(
+                "    return tuple(phases)\n",
+                "    return tuple(__import__('os').listdir('.'))\n",
+            ),
+        }
+        v3_contract = CiGateContractFactory(EVENT_PROFILE).create()
+        for label, mutated in phase_skew_cases.items():
+            with self.subTest(phase_skew=label):
+                with self.assertRaises(ValueError):
+                    verify_verifier_policy_parity(v3_contract, mutated)
+
         for corrupt in (b'', b'def broken(:\n', b'CHECKS = ()\n'):
             for profile in (LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE):
                 with self.assertRaises(ValueError):
@@ -197,9 +269,8 @@ class CiContractTest(unittest.TestCase):
             jenkins_factory.assert_not_called()
             self.assertFalse(config.state_root.exists())
 
-            # Skewed installed v3 verifier fails closed in DeliveryProviderFactory and PostMergeProviderFactory.
-            verifier.write_bytes(skewed_v3_bytes)
-            verifier.chmod(0o600)
+            # Skewed installed v3 verifier (protected-path or phase-command skew) fails
+            # closed in DeliveryProviderFactory and PostMergeProviderFactory before effects.
             pm_delivery_cfg = root / 'post-merge-delivery.json'
             delivery.durable_json(pm_delivery_cfg, raw_delivery)
             pm_config = SimpleNamespace(
@@ -211,14 +282,17 @@ class CiContractTest(unittest.TestCase):
             )
             pm_factory = PostMergeProviderFactory(pm_config)
             self.assertFalse((pm_config.state_root / 'post-merge-ci').exists())
-            with patch.object(delivery, 'read_private', side_effect=owned_read):
-                with self.assertRaises(ValueError):
-                    delivery_factory.create()
-                with self.assertRaises(ValueError):
-                    pm_factory.create()
-            jenkins_factory.assert_not_called()
-            self.assertFalse(config.state_root.exists())
-            self.assertFalse((pm_config.state_root / 'post-merge-ci').exists())
+            for skewed_bytes in (skewed_v3_bytes, skewed_argv_bytes):
+                verifier.write_bytes(skewed_bytes)
+                verifier.chmod(0o600)
+                with patch.object(delivery, 'read_private', side_effect=owned_read):
+                    with self.assertRaises(ValueError):
+                        delivery_factory.create()
+                    with self.assertRaises(ValueError):
+                        pm_factory.create()
+                jenkins_factory.assert_not_called()
+                self.assertFalse(config.state_root.exists())
+                self.assertFalse((pm_config.state_root / 'post-merge-ci').exists())
 
             # Aligned installed v3 verifier passes both factories and preserves frozen bindings.
             verifier.write_bytes(aligned_bytes)

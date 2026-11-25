@@ -808,16 +808,6 @@ CONTENT_IDENTITY_CONTEXT_SHA256 = {
 }
 
 
-<<<<<<< HEAD
-# Scoped diagnostic and bootstrap verifier-policy parity context; no SQL,
-# existing mutation transport, frozen bindings, or historical pins change.
-PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256 = {
-    'deploy/mission-control/agent-runner/test_ci_contract.py': '730426822c7ba6550dc135eeaee82dc1448ad965f3c45d820811045095d3e5e7',
-    'deploy/mission-control/agent-runner/test_ci_supervision.py': '117b068c06f87dac869de05cc9226ad131eec5dbcba70ebdc4b8c475fccbc712',
-    'deploy/mission-control/agent-runner/work_ci_contract.py': '26cd1f4bf88b4eba127f8847283e2b6294569cc4083ef6b2456c89e98f57dcc8',
-    'deploy/mission-control/agent-runner/work_external_delivery.py': '0be17cbeb3d2b300514d8a93db9778852aaaacad44746b8b0e1581a105be30b5',
-    'deploy/mission-control/jenkins/verify-candidate.py': '299e69337ba0a0844414d39c04e388f2159420499222418f2a15b74583cb17af',
-=======
 # Private matched-executor recovery; preserve every historical context and SQL.
 NATIVE_POSTFIX_CONTEXT_SHA256 = {
     'AGENT_WORK.md': 'f52b28a670b00625efb786eece23440cfaff6610e15c5ac22ba4abbd4122999d',
@@ -827,18 +817,25 @@ NATIVE_POSTFIX_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_identity_contract.py': '8f0184585d57d05a15c5f8aea574fa61be36846408ce572459c612c4e4f2d3de',
     'deploy/mission-control/agent-runner/work_native_ci_postfix.py': 'a4f132955d40768fb2bd6e695addda8b190147c65facc11a153d391d59785a0d',
     'deploy/mission-control/agent-runner/work_native_ci_postfix_proof.py': '9ca911005982d27abd974f5d16540a5cc105d7f69d1dbee3f505c416ccc503ad',
->>>>>>> 2ae4baebf2d7cf93a53c16f1c078b4056d31a43c
+}
+
+
+# Scoped diagnostic and bootstrap verifier-policy parity context; no SQL,
+# existing mutation transport, frozen bindings, or historical pins change.
+PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256 = {
+    'deploy/mission-control/agent-runner/test_ci_contract.py': '417aaec4ca9c920e1baf130464cb4c85e2f43666cf9535523cdc7f400d46b760',
+    'deploy/mission-control/agent-runner/test_ci_supervision.py': '117b068c06f87dac869de05cc9226ad131eec5dbcba70ebdc4b8c475fccbc712',
+    'deploy/mission-control/agent-runner/work_ci_contract.py': '4d4572a98df57e4332b88feebac3e82b13a641f7b7fbd88f9ca59ee55e598587',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '0be17cbeb3d2b300514d8a93db9778852aaaacad44746b8b0e1581a105be30b5',
+    'deploy/mission-control/jenkins/verify-candidate.py': '299e69337ba0a0844414d39c04e388f2159420499222418f2a15b74583cb17af',
 }
 
 
 def qualified_source(relative, expected):
-<<<<<<< HEAD
     if relative in PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256:
         return PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256[relative]
-=======
     if relative in NATIVE_POSTFIX_CONTEXT_SHA256:
         return NATIVE_POSTFIX_CONTEXT_SHA256[relative]
->>>>>>> 2ae4baebf2d7cf93a53c16f1c078b4056d31a43c
     if relative in CONTENT_IDENTITY_CONTEXT_SHA256:
         return CONTENT_IDENTITY_CONTEXT_SHA256[relative]
     if relative in NATIVE_CI_CONTEXT_RECOVERY_SHA256:
@@ -1208,20 +1205,6 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for name in ("work_artifact_identity.py","work_artifact_source.py","work_identity_contract.py","work_identity_store.py","work_native_identity.py","work_external_identity.py"):
             self.assertIn(("publish","$directory/"+name,"$target/"+name),published)
 
-<<<<<<< HEAD
-    def test_prepare_source_diagnostic_and_parity_context_is_scoped_and_exact(self):
-        self.assertEqual(set(PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256), {
-            'deploy/mission-control/agent-runner/test_ci_contract.py',
-            'deploy/mission-control/agent-runner/test_ci_supervision.py',
-            'deploy/mission-control/agent-runner/work_ci_contract.py',
-            'deploy/mission-control/agent-runner/work_external_delivery.py',
-            'deploy/mission-control/jenkins/verify-candidate.py',
-        })
-        for relative, expected in PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256.items():
-            with self.subTest(diagnostic_parity_source=relative):
-                self.assertNotIn('/sql/', relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
-=======
     def test_native_postfix_context_is_scoped_and_exact(self):
         self.assertEqual(set(NATIVE_POSTFIX_CONTEXT_SHA256), {
             'AGENT_WORK.md',
@@ -1235,8 +1218,20 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative,expected in NATIVE_POSTFIX_CONTEXT_SHA256.items():
             with self.subTest(native_postfix_source=relative):
                 self.assertNotIn("/sql/",relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT/relative).read_bytes()).hexdigest(),expected)
->>>>>>> 2ae4baebf2d7cf93a53c16f1c078b4056d31a43c
+                self.assertEqual(hashlib.sha256((REPO_ROOT/relative).read_bytes()).hexdigest(),qualified_source(relative,expected))
+
+    def test_prepare_source_diagnostic_and_parity_context_is_scoped_and_exact(self):
+        self.assertEqual(set(PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256), {
+            'deploy/mission-control/agent-runner/test_ci_contract.py',
+            'deploy/mission-control/agent-runner/test_ci_supervision.py',
+            'deploy/mission-control/agent-runner/work_ci_contract.py',
+            'deploy/mission-control/agent-runner/work_external_delivery.py',
+            'deploy/mission-control/jenkins/verify-candidate.py',
+        })
+        for relative, expected in PREPARE_SOURCE_DIAGNOSTIC_PARITY_SHA256.items():
+            with self.subTest(diagnostic_parity_source=relative):
+                self.assertNotIn('/sql/', relative)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
