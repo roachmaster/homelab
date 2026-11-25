@@ -110,6 +110,10 @@ class NativeDeadlineEventTest(unittest.TestCase):
             self.assertEqual([(r[1], r[2]) for r in self.event_rows(current)], [(ordinal, 'open')])
             current = self.claim('agy-v2')
             self.assertIsNotNone(current)
+        # While the workflow is still live across all 20 deadline retries, the
+        # unrelated infrastructure event stays open with its original count.
+        self.assertEqual(self.rows('SELECT used,status FROM forge_agent.coding_retry_events WHERE event_id=%s',
+            (unrelated,)), [(1, 'open')])
         receipt, detail = self.stop_at_deadline(current)
         refused = self.retry(current, receipt, detail, 'twenty-first-deadline')
         self.assertEqual(refused['status'], 'needs_attention')
@@ -118,8 +122,10 @@ class NativeDeadlineEventTest(unittest.TestCase):
         self.coordinator.store._recover_native_timeouts()
         self.assertIsNone(self.claim('agy-v2'))
         self.assertEqual(self.get(current.task_id)['status'], 'needs_reconcile')
+        # Terminal escalation settles open retry events on the scope while
+        # preserving the exhausted 20/20 deadline event and original used count.
         self.assertEqual(self.rows('SELECT used,status FROM forge_agent.coding_retry_events WHERE event_id=%s',
-            (unrelated,)), [(1, 'open')])
+            (unrelated,)), [(1, 'resolved')])
 
     def test_actual_stopped_publication_resolves_only_the_deadline_episode(self):
         self.enable_events()
