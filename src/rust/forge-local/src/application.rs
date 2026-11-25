@@ -48,6 +48,8 @@ pub enum CommandKind {
     #[cfg(feature = "jenkins")]
     JenkinsRecentBuilds,
     #[cfg(feature = "jenkins")]
+    JenkinsBuildPage,
+    #[cfg(feature = "jenkins")]
     JenkinsStopBuild,
     #[cfg(feature = "jenkins")]
     JenkinsBuild,

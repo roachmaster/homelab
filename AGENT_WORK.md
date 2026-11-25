@@ -22,6 +22,50 @@ assets; genuine user cancellation remains cancellation. Preserve each source
 artifact, reconciliation, Plan, owner, receipt, and protected CI requirement.
 No direct SQL status resets, stale-context approvals or fake completion.
 
+The portal release also exposed a pre-existing Jenkins observation ceiling:
+the old verifier cancellation kept retrying because a fifty-build snapshot was
+truncated. Add typed bounded build pages and an explicitly selected, pinned
+read-only observer. Preserve every frozen mutation executable/configuration and
+its journal binding; the new observer may read complete stable history but may
+never POST or infer absence from incomplete/changed pages. A real read-only
+probe has covered both live pages and established the old action is absent.
+Normal coordinator cancellation and main verification must supply actual proof.
+
+The task-recovery source is published on main at bf080e2c; the paged Jenkins
+observer is published at 41bb8ea5. The complete 1,423-test runner inventory
+passed on bf080e2c with no omissions or skips. The Jenkins addition passed
+146 Rust tests and 120 focused Python integration tests, formatting and Clippy.
+Current-main CI remains a separate required verification, not inferred from
+those earlier results. Backend recovery and the read-only observer are active;
+frozen Jenkins mutation executables/configurations remain unchanged.
+
+Muse's reviewed post-fix rescue retained the twenty failed review admissions
+and queued revision37c70ee3 under the same owner and approved Plan. Muse has
+claimed that revision; workflow b3a05d8a is Repair/enabled. The explicit handoff
+is to run this retry, without approve-override. Gemini completed its recovered
+attempt and its first automatic merge-conflict repair. Switching the publisher
+runtime interrupted verification9a671d6c: the updated gate contract produced a
+different action identity for an already indexed review. Preserve that index,
+the pushed candidate and the confirmed unstarted/cancelled old action. A narrow
+typed, source-bound recovery must append a new review and consume the existing
+infrastructure allowance; it must not overwrite the index or restart the author.
+
+The user's Git-agnostic identity direction separates stable task UUIDs, canonical
+content SHA-256 manifests, and versioned verification policy/generations. Git
+branches/commits remain checkout and merge provenance. Hash exact sorted paths,
+modes and file bytes for artifact identity; presentation patches and runtime
+enumeration must not silently redefine an existing identity. The current
+full-index patch correction preserves the existing external-review protocol;
+a complete content-manifest protocol transition is distinct work, not claimed
+by this verification-only recovery.
+
+Verification-context recovery is a private CLI with a factory-injected workflow
+store and read-only stopped-action proof port. It appends through the existing
+bounded preparation authority and clears only the successor's candidate/checks.
+Confirmed registration resolves only its own infrastructure event; the receipt
+explicitly retains verification_pending=true and approval_granted=false. No
+service restart or gate-contract change is required for this operator recovery.
+
 # Previous: Reconcile feature/muse review-schema compatibility — 2026-11-24
 
 Fix the remaining py-agent-runner failures on feature/muse at e41db88, based on

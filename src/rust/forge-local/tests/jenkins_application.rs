@@ -35,6 +35,15 @@ impl IoClient for Selected {
                     truncated: false,
                 })
             }
+            Request::BuildPage { job, offset, .. } if !self.wrong_response => {
+                Response::BuildPage(forge_jenkins::BuildPageListing {
+                    job,
+                    offset,
+                    builds: vec![],
+                    truncated: false,
+                    next_offset: None,
+                })
+            }
             Request::StopBuild { .. } if !self.wrong_response => Response::StopRequested,
             Request::Build { .. } => Response::Queued(QueueReceipt { id: 17 }),
             Request::CancelQueue { .. } => Response::CancelRequested,
@@ -74,7 +83,7 @@ fn selected_shared_port_runs_only_after_admitted_matching_validated_command() {
             .iter()
             .filter(|c| c.route.destination().starts_with("jenkins."))
             .count(),
-        9
+        10
     );
     assert!(calls.borrow().is_empty());
     assert!(app
@@ -266,4 +275,62 @@ fn ordinary_application_leaves_jenkins_unbound() {
         .unwrap()
         .iter()
         .any(|c| c.route.destination().starts_with("jenkins.")));
+}
+
+#[test]
+fn paged_observation_uses_selected_scoped_port_and_keeps_header_variant_admission() {
+    let calls = Rc::new(RefCell::new(vec![]));
+    let drops = Rc::new(Cell::new(0));
+    let app = Application::bootstrap_with_jenkins(
+        LocalConfig::default(),
+        Selected {
+            calls: calls.clone(),
+            drops: drops.clone(),
+            wrong_response: false,
+        },
+    )
+    .unwrap();
+    let command = JenkinsCommand::BuildPage {
+        job: "folder/suite".into(),
+        offset: 50,
+        limit: 50,
+    };
+    assert!(app
+        .invoke(
+            route("jenkins.recent-builds"),
+            Command::Jenkins(command.clone())
+        )
+        .is_err());
+    assert!(app
+        .invoke(
+            route("jenkins.build-page"),
+            Command::Jenkins(JenkinsCommand::BuildPage {
+                job: "suite".into(),
+                offset: 100001,
+                limit: 50
+            })
+        )
+        .is_err());
+    assert!(calls.borrow().is_empty());
+    assert_eq!(
+        app.invoke(route("jenkins.build-page"), Command::Jenkins(command))
+            .unwrap(),
+        Output::Jenkins(Response::BuildPage(forge_jenkins::BuildPageListing {
+            job: "folder/suite".into(),
+            offset: 50,
+            builds: vec![],
+            truncated: false,
+            next_offset: None
+        }))
+    );
+    assert_eq!(
+        &*calls.borrow(),
+        &[Request::BuildPage {
+            job: "folder/suite".into(),
+            offset: 50,
+            limit: 50
+        }]
+    );
+    drop(app);
+    assert_eq!(drops.get(), 1);
 }

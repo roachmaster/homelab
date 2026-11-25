@@ -266,8 +266,8 @@ class DeliveryConfig:
 
 class ForgeJenkinsPort:
     """Uses the real Rust IoClient CLI; no alternate Python Jenkins transport."""
-    def __init__(self, config, execute=command):
-        self.config, self.execute = config, execute
+    def __init__(self, config, execute=command, *, observer=None):
+        self.config, self.execute, self.observer = config, execute, observer
 
     def call(self, action, *arguments, structured=False):
         binary = self.config.jenkins_binary
@@ -289,6 +289,12 @@ class ForgeJenkinsPort:
         return result
 
     def find(self, expected):
+        if self.observer is not None:
+            from work_jenkins_observer import JenkinsReadUnavailable
+            try:
+                return self.observer.find(self.config.jenkins_job, expected)
+            except (JenkinsReadUnavailable, PublicationError, ValueError, KeyError, TypeError, OSError) as error:
+                raise ObservationUnavailable('Jenkins read-only history observation unavailable') from error
         try:
             queue = self.call('queue-list', structured=True)
             builds = self.call('recent-builds', self.config.jenkins_job, 50, structured=True)
@@ -873,10 +879,12 @@ class TrustedDeliveryPort:
 
 
 class DeliveryProviderFactory:
-    def __init__(self, config, *, jenkins_factory=ForgeJenkinsPort, execute=command):
+    def __init__(self, config, *, jenkins_factory=ForgeJenkinsPort, execute=command, observer=None):
         if not isinstance(config, DeliveryConfig) or not callable(jenkins_factory) or not callable(execute):
             raise TypeError('Expected typed delivery factories')
-        self.config, self.jenkins_factory, self.execute = config, jenkins_factory, execute
+        if observer is not None and not all(callable(getattr(observer, name, None)) for name in ('find', 'assert_scope')):
+            raise TypeError('Expected a ready read-only Jenkins observer')
+        self.config, self.jenkins_factory, self.execute, self.observer = config, jenkins_factory, execute, observer
 
     def create(self):
         selected = json.loads(read_private(self.config.jenkins_config, owner=os.geteuid()))
@@ -886,8 +894,12 @@ class DeliveryProviderFactory:
             raise ValueError('Jenkins must explicitly expose the complete public correlation contract')
         if hashlib.sha256(read_private(self.config.jenkins_binary, maximum=64 * 1024 * 1024)).hexdigest() != self.config.jenkins_binary_sha256:
             raise ValueError('Pinned Jenkins executable changed')
+        options = {}
+        if self.observer is not None:
+            self.observer.assert_scope(self.config.jenkins_job, selected['endpoint'], PARAMETERS)
+            options['observer'] = self.observer
         self.config.state_root.mkdir(parents=True, mode=0o700, exist_ok=True)
-        return TrustedDeliveryPort(self.config, self.jenkins_factory(self.config, self.execute), execute=self.execute)
+        return TrustedDeliveryPort(self.config, self.jenkins_factory(self.config, self.execute, **options), execute=self.execute)
 
 
 class ExternalDeliveryWorker:
@@ -1041,9 +1053,14 @@ class ExternalDeliveryWorker:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
+    parser.add_argument('--read-observer-config', type=Path)
     options = parser.parse_args()
     config = DeliveryConfig.parse(json.loads(read_private(options.config, owner=os.geteuid())))
-    provider = DeliveryProviderFactory(config).create()
+    from work_jenkins_observer import CONFIG_ENV, configured_read_observer
+    selected = configured_read_observer(options.read_observer_config if options.read_observer_config is not None
+        else os.environ.get(CONFIG_ENV), command)
+    observer = selected.create() if selected is not None else None
+    provider = DeliveryProviderFactory(config, observer=observer).create()
     database = dict(config.database)
     database['dbname'] = database.pop('name')
     dao = ExternalDeliveryStoreFactory(lambda: psycopg2.connect(**database,

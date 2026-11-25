@@ -20,7 +20,7 @@ import jenkins_config
 from jenkins_emitter import InProcessJenkinsEmitter
 from work_agent_branch import AgentBranchProvider, BranchOwnershipConflictError, PERSISTENT_BRANCH_POLICY
 from work_executor import SystemdSupervisor, WorkspaceProvider
-from work_external_delivery import DeliveryConfig, read_private
+from work_external_delivery import DeliveryConfig, DeliveryProviderFactory, command, read_private
 from work_jenkins_lifecycle import DRAIN_SHUTDOWN_TIMEOUT_SECONDS, IntentDrain
 from work_publication_checks import IsolatedCheckRunner
 from work_publication_clients import (DIGEST, SHA, GitHubPullRequestClient, GitRepositoryProvider,
@@ -355,7 +355,7 @@ class PublicationWorkerFactory:
                  post_merge_worker_factory=PostMergeWorker,
                  source_observer_factory=SourceObserverFactory,
                  release_provider_factory=ReleaseProviderFactory,
-                 release_worker_factory=ReleaseWorker, stop=None):
+                 release_worker_factory=ReleaseWorker, stop=None, jenkins_read_observer_factory=None):
         if not isinstance(config, PublicationConfig) or not callable(store_factory):
             raise TypeError("Publication requires frozen config and a store factory")
         if (type(config.merge_enabled) is not bool or config.merge_method != "merge"
@@ -365,6 +365,12 @@ class PublicationWorkerFactory:
                 (not config.merge_enabled or config.hosted_provider != 'jenkins'
                  or config.post_merge_jenkins_delivery_config is None)):
             raise ValueError('Post-merge verification requires explicit trusted Jenkins selection')
+        if (jenkins_read_observer_factory is not None
+                and not callable(getattr(jenkins_read_observer_factory, 'create', None))):
+            raise TypeError('Expected a selected Jenkins read observer factory')
+        if jenkins_read_observer_factory is not None and config.hosted_provider != 'jenkins':
+            raise ValueError('A Jenkins observer requires a selected Jenkins delivery consumer')
+        self.jenkins_read_observer_factory = jenkins_read_observer_factory
         self.config, self.store_factory, self.stop = config, store_factory, stop
         self.workspace_factory, self.snapshot_factory, self.git_factory = workspace_factory, snapshot_factory, git_factory
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None else
@@ -437,6 +443,10 @@ class PublicationWorkerFactory:
                 InProcessJenkinsEmitter(drain))
 
     def create(self):
+        observer = (self.jenkins_read_observer_factory.create()
+                    if self.jenkins_read_observer_factory is not None else None)
+        delivery_options = ({'delivery_factory': lambda selected: DeliveryProviderFactory(selected, observer=observer)}
+                            if observer is not None else {})
         self.config.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.config.state_root.is_symlink() or self.config.state_root.stat().st_mode & 0o077:
             raise PublicationError("publication_state_unavailable")
@@ -466,9 +476,14 @@ class PublicationWorkerFactory:
             if self.config.jenkins_events is not None:
                 emitter, event_lookup, jenkins_instance, drain_emitter = self._jenkins_events()
             native_ci = self.native_jenkins_factory(self.config, store, git, candidates, supervisor, client=pulls, stop=self.stop,
+<<<<<<< HEAD
                                                     emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance)
             if branch_provider is not None and hasattr(native_ci, "branch_provider"):
                 native_ci.branch_provider = branch_provider
+=======
+                                                    emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance,
+                                                    **delivery_options)
+>>>>>>> fddc4aafca10bb7235f7557b1fa602a50fd3c946
             if drain_emitter is not None:
                 jenkins_drain = IntentDrain(native_ci.delivery.config.state_root / 'actions', drain_emitter)
             checks = hosted = native_ci
@@ -501,7 +516,7 @@ class PublicationWorkerFactory:
             available = store.delivery_available if self.config.delivery_enabled else store.post_merge_available
             if not available(self.config.worker.owner):
                 raise ValueError('Post-merge schema and scoped worker grant must be provisioned')
-            provider = self.post_merge_provider_factory(self.config).create()
+            provider = self.post_merge_provider_factory(self.config, **delivery_options).create()
             verification_store = DeliveryVerificationStore(store) if self.config.delivery_enabled else store
             post_merge = self.post_merge_worker_factory(self.config, verification_store, provider, stop=self.stop)
         if self.config.source_observation_enabled:
@@ -529,7 +544,10 @@ def main():
     stop = threading.Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda _signum, _frame: stop.set())
-    PublicationWorkerFactory(load_config(os.environ[CONFIG_ENV]), default_store_factory, stop=stop).create().run_forever()
+    from work_jenkins_observer import CONFIG_ENV as OBSERVER_CONFIG_ENV, configured_read_observer
+    selected = configured_read_observer(os.environ.get(OBSERVER_CONFIG_ENV), command)
+    PublicationWorkerFactory(load_config(os.environ[CONFIG_ENV]), default_store_factory, stop=stop,
+                             jenkins_read_observer_factory=selected).create().run_forever()
 
 
 if __name__ == "__main__":
