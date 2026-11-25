@@ -83,6 +83,8 @@ publish "$directory/work_external_delivery_store.py" "$target/work_external_deli
 publish "$directory/work_external_delivery.py" "$target/work_external_delivery.py"
 publish "$directory/work_jenkins_observer.py" "$target/work_jenkins_observer.py"
 publish "$directory/work_native_ci_reprepare.py" "$target/work_native_ci_reprepare.py"
+publish "$directory/work_native_ci_postfix.py" "$target/work_native_ci_postfix.py"
+publish "$directory/work_native_ci_postfix_proof.py" "$target/work_native_ci_postfix_proof.py"
 publish "$directory/work_artifact_identity.py" "$target/work_artifact_identity.py"
 publish "$directory/work_artifact_source.py" "$target/work_artifact_source.py"
 publish "$directory/work_identity_contract.py" "$target/work_identity_contract.py"
