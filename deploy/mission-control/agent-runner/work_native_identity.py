@@ -7,14 +7,13 @@ to transport provenance and never enter ArtifactManifest or VerificationIdentity
 from dataclasses import dataclass
 from datetime import datetime,timedelta,timezone
 import hashlib
-import os
 from pathlib import Path
 from uuid import UUID
 
 from work_ci_contract import CiGatePlan
 from work_ci_phases import CiPhase
-from work_external_delivery import read_private
-from work_external_review_context import canonical,strict_json
+from work_external_review_context import canonical
+from work_identity_store import persist_identity_snapshot,read_identity_snapshot
 from work_publication_clients import PublicationError, uuid
 
 PROTOCOL = 'content-v2'
@@ -72,8 +71,7 @@ class NativeVerificationIdentityProvider:
     def read(self,review):
         Manifest,Policy,Identity=self._types()
         try:
-            raw=read_private(self._path(review),owner=os.geteuid(),maximum=MAX_SNAPSHOT_BYTES)
-            snapshot=strict_json(raw)
+            snapshot=read_identity_snapshot(self._path(review),maximum=MAX_SNAPSHOT_BYTES)
             if (not isinstance(snapshot,dict) or set(snapshot)!={'version','scope','artifact','policy','identity','provenance'}
                     or snapshot['version']!=VERSION or set(snapshot['scope'])!=set(SCOPE)
                     or snapshot['scope']['review_id']!=review):raise ValueError('Invalid native identity snapshot')
@@ -136,15 +134,7 @@ class NativeVerificationIdentityProvider:
             'policy':policy.to_dict(),'identity':identity.to_dict(),'provenance':provenance}
         raw=canonical(snapshot)+b'\n'
         if len(raw)>MAX_SNAPSHOT_BYTES:raise PublicationError('native_identity_snapshot_too_large')
-        directory=self._directory(job['review_id']);directory.mkdir(mode=0o700,parents=True,exist_ok=True)
-        # Exclusive generation creation: a changed policy never overwrites a receipt.
-        path=self._path(job['review_id'])
-        descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-        with os.fdopen(descriptor,'wb')as stream:
-            stream.write(raw);stream.flush();os.fsync(stream.fileno())
-        fd=os.open(directory,os.O_DIRECTORY)
-        try:os.fsync(fd)
-        finally:os.close(fd)
+        persist_identity_snapshot(self._path(job['review_id']),snapshot,maximum=MAX_SNAPSHOT_BYTES)
         return self.validate(snapshot,job,repository)
 
 
