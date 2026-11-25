@@ -28,6 +28,7 @@ _INHERIT_RETRY_EVENTS=object()
 MAX_TARGET_BYTES=64*1024*1024+65536
 NATIVE_DEADLINE_POLICY='forge-native-deadline-recovery-v1'
 NATIVE_DEADLINE_RETRIES=1
+NATIVE_DEADLINE_EVENT_POLICY='forge-native-deadline-event-recovery-v1'
 PEER_WIRE_REPLAY_POLICY='forge-peer-wire-replay-v1'
 PEER_CORRECTION_POLICY='forge-peer-correction-v1'
 PEER_WIRE_ERROR='Peer review could not safely continue: PeerReviewError'
@@ -285,11 +286,77 @@ class WorkflowStore:
                           'workflow_id':str(w['workflow_id'])},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
 
+    @staticmethod
+    def _native_deadline_phase(task_id):
+        return 'native_execution.deadline.'+str(task_id)
+
+    def _native_deadline_event(self,cursor,w,task,attempt,rec):
+        """Retain the legacy stopped-action ledger in the selected retry port.
+
+        Late ingestion reserves only an already completed, control-receipt-bound
+        action. It never queues its writer again. Stable observation/action keys
+        make the import idempotent, including after the old event has resolved.
+        """
+        from work_retry_events import RetryScope
+        scope=RetryScope(self.store.owner,task['project_alias'],'native_workflow',w['workflow_id'])
+        phase=self._native_deadline_phase(task['id'])
+        proof=dict(attempt_id=str(attempt['attempt_id']),reconciliation_receipt_id=str(rec['receipt_id']),
+            workspace_digest=rec['workspace_digest'],plan_decision_id=str(task['plan_decision_id'] or task['scope_plan_decision_id']),
+            recipe_digest=task['recipe_digest'])
+        event=self.retry_events.observe_failure(cursor,scope,'infrastructure',str(attempt['attempt_id']),
+            sha256_canonical(proof),phase_id=phase)
+        cursor.execute("""SELECT x.* FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=%s
+          AND x.owner_id=%s AND x.project_alias=%s AND x.kind='decide' AND x.status='completed'
+          AND x.source_key LIKE 'native-deadline-retry:%%' AND x.intent->>'policy'=%s
+          AND x.intent->>'task_id'=%s AND NOT EXISTS(
+            SELECT FROM forge_agent.coding_attempts p WHERE(p.owner_id,p.project_alias,p.task_id)=(x.owner_id,x.project_alias,%s)
+            AND p.phase='stopped' AND p.result_sha256 IS NOT NULL AND NOT p.reservation_active AND p.lease_expires_at IS NULL
+            AND p.published_at>x.created_at AND p.published_at<%s
+            AND EXISTS(SELECT FROM forge_agent.coding_reconciliation_receipts r WHERE(r.owner_id,r.project_alias,r.task_id,r.attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id)))
+          ORDER BY x.created_at,x.action_id""",
+            (w['workflow_id'],self.store.owner,task['project_alias'],NATIVE_DEADLINE_POLICY,str(task['id']),task['id'],attempt['started_at']))
+        legacy=cursor.fetchall()
+        if len(legacy)>NATIVE_DEADLINE_RETRIES:raise Rejected(409,'reconcile_required')
+        for action in legacy:
+            intent=action['intent'];finish=action['finish_receipt'] or {}
+            if not isinstance(intent,dict) or not isinstance(finish,dict):raise Rejected(409,'reconcile_required')
+            try:
+                for field in ('source_attempt_id','reconciliation_receipt_id'):
+                    if str(UUID(intent[field]))!=intent[field]:raise ValueError('Noncanonical retained identity')
+            except (ValueError,TypeError,KeyError,AttributeError):raise Rejected(409,'reconcile_required') from None
+            if (type(intent.get('source_revision')) is not int or intent['source_revision']<1
+                or intent.get('max_native_deadline_retries')!=NATIVE_DEADLINE_RETRIES
+                or action['source_key']!='native-deadline-retry:'+str(intent.get('source_attempt_id'))
+                or finish.get('status')!='native_deadline_retried' or not isinstance(finish.get('receipt'),dict)):
+                raise Rejected(409,'reconcile_required')
+            cursor.execute("""SELECT r.attempt_id,r.task_revision,r.workspace_digest,c.receipt_json
+              FROM forge_agent.coding_reconciliation_receipts r
+              JOIN forge_agent.coding_control_receipts c ON(c.owner_id,c.project_alias,c.task_id)=(r.owner_id,r.project_alias,r.task_id)
+              WHERE(r.owner_id,r.project_alias,r.task_id,r.receipt_id)=(%s,%s,%s,%s)
+              AND c.action='resume' AND c.idempotency_key=%s AND c.base_revision=r.task_revision
+              AND c.result_revision=r.task_revision+1""",
+                (self.store.owner,task['project_alias'],task['id'],intent.get('reconciliation_receipt_id'),intent.get('idempotency_key')))
+            retained=cursor.fetchone()
+            if (not retained or str(retained['attempt_id'])!=intent.get('source_attempt_id')
+                or retained['task_revision']!=intent.get('source_revision')
+                or retained['workspace_digest']!=intent.get('workspace_digest')
+                or retained['receipt_json']!=finish['receipt']
+                or finish['receipt'].get('task_id')!=str(task['id']) or finish['receipt'].get('status')!='queued'):
+                raise Rejected(409,'reconcile_required')
+            observed=self.retry_events.observe_failure(cursor,scope,'infrastructure',
+                'native-deadline-legacy:'+str(action['action_id']),sha256_canonical(dict(intent=intent,finish=finish)),phase_id=phase)
+            if observed['event_id']!=event['event_id'] and observed['status']!='resolved':
+                raise Rejected(409,'reconcile_required')
+            self.retry_events.reserve(cursor,observed['event_id'],action['source_key'])
+        return self.retry_events.get(cursor,event['event_id'])
+
     def retry_native_timeout(self,*,project_alias,task_id,expected_revision,reconciliation_receipt_id,idempotency_key,note=''):
         """Supported private operator/automatic ingress; never a browser override.
 
-        The fixed single native-deadline recovery is DISTINCT from the existing
-        verifier infrastructure-retry budget. No Plan/code counter is reset.
+        The selected retry port accounts up to twenty recoveries in the same
+        unresolved native-execution deadline event. Historical configurations
+        without that port retain their one-shot allowance. Plan/code counters
+        and verifier infrastructure retry episodes are independent.
         """
         self.store._require_project(project_alias)
         if (not isinstance(task_id,UUID) or not isinstance(reconciliation_receipt_id,UUID)
@@ -314,9 +381,11 @@ class WorkflowStore:
                 'idempotency_key':idempotency_key,'note':note}
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",
                            (task['workflow_id'],key))
+            event_intent=dict(intent,policy=NATIVE_DEADLINE_EVENT_POLICY,
+                max_native_deadline_retries=AGENT_RETRY_LIMIT,phase_id=self._native_deadline_phase(task_id))
             previous=cursor.fetchone()
             if previous:
-                if previous['intent']!=intent:raise Rejected(409,'idempotency_conflict')
+                if previous['intent'] not in (intent,event_intent):raise Rejected(409,'idempotency_conflict')
                 if previous['status']!='completed' or not previous['finish_receipt']:raise Rejected(409,'reconcile_required')
                 return dict(previous['finish_receipt']['receipt'])
             if task['revision']!=expected_revision:raise Rejected(409,'revision_conflict')
@@ -365,7 +434,17 @@ class WorkflowStore:
                            (w['workflow_id'],task_id))
             if cursor.fetchone()['sibling_failure']:raise Rejected(409,'not_reviewable')
             cursor.execute("SELECT count(*) AS used FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE 'native-deadline-retry:%%'",(w['workflow_id'],))
-            if cursor.fetchone()['used']>=NATIVE_DEADLINE_RETRIES:raise Rejected(409,'not_reviewable')
+            prior_deadlines=cursor.fetchone()['used']
+            if self.retry_events is None and prior_deadlines>=NATIVE_DEADLINE_RETRIES:
+                raise Rejected(409,'not_reviewable')
+            event=None
+            if self.retry_events is not None:
+                event=self._native_deadline_event(cursor,w,task,attempt,rec)
+                if event['used']>=event['limit']:
+                    event=self.retry_events.reserve(cursor,event['event_id'],key)
+                    self._escalate(cursor,w,'Native execution deadline event exhausted its twenty retry attempts. The stopped workspace and approved Plan are retained.')
+                    return dict(status='needs_attention',reason='native_deadline_event_exhausted',
+                        workflow_id=str(w['workflow_id']),retry_event=event)
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='implement',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
             cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",
@@ -377,11 +456,15 @@ class WorkflowStore:
                     raise Rejected(503,'unavailable')
             authority=BoundNativeRetryAuthority(self.store,cursor,w['workflow_id'],task_id,attempt['attempt_id'],task['revision'])
             resume_note=NATIVE_DEADLINE_NOTE+('\nOperator context: '+note if note else '')
+            if event is not None:
+                event=self.retry_events.reserve(cursor,event['event_id'],key)
+                if event['status']=='exhausted':raise Rejected(409,'not_reviewable')
+                intent=event_intent
             receipt=self.store.resume(project_alias=project_alias,task_id=task_id,expected_revision=expected_revision,
                 idempotency_key=idempotency_key,agent_profile=p['author_profile'],reconciliation_receipt_id=reconciliation_receipt_id,
                 note=resume_note,allowed_modes={'implement'},resolve_recipe=lambda _:recipe,_authority=authority,actor=COORDINATOR_ACTOR)
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
-                (w['workflow_id'],self.store.owner,project_alias,key,Json(intent),Json({'status':'native_deadline_retried','receipt':receipt})))
+                (w['workflow_id'],self.store.owner,project_alias,key,Json(intent),Json(dict(status='native_deadline_retried',receipt=receipt,**({'retry_event':event} if event is not None else {})))))
             return receipt
 
     def _recover_native_timeouts(self):
@@ -406,8 +489,9 @@ class WorkflowStore:
                 AND e.event_kind='needs_reconcile' AND e.payload->>'attempt_id'=a.attempt_id::text
                 AND e.payload->>'reason' IN('deadline_exceeded','stopped_without_publication') AND e.created_at>=a.deadline_at)
               AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=w.workflow_id
-                 AND x.kind='decide' AND x.source_key LIKE 'native-deadline-retry:%%')
-              ORDER BY r.created_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),[x[0] for x in NATIVE_POLICIES.values()]))
+                 AND x.kind='decide' AND (x.source_key='native-deadline-retry:'||a.attempt_id::text
+                   OR(%s AND x.source_key LIKE 'native-deadline-retry:%%')))
+              ORDER BY r.created_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),[x[0] for x in NATIVE_POLICIES.values()],self.retry_events is None))
             candidates=cursor.fetchall()
         for task in candidates:
             try:
@@ -899,6 +983,11 @@ class WorkflowStore:
                     continue
                 if t['mode']=='plan':self._queue_review(cursor,w,t,None)
                 elif t['mode']=='implement':
+                    if self.retry_events is not None:
+                        from work_retry_events import RetryScope
+                        self.retry_events.resolve_verified(cursor,RetryScope(self.store.owner,w['project_alias'],'native_workflow',w['workflow_id']),
+                            'infrastructure','native-artifact:'+str(t['latest_attempt_id']),t['result_sha256'],
+                            phase_id=self._native_deadline_phase(t['id']))
                     cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s AND phase='local' ORDER BY created_at DESC LIMIT 1",(self.store.owner,w['project_alias'],t['id'],t['latest_attempt_id']))
                     q=cursor.fetchone()
                     if q and q['status']=='awaiting_review' and q['verification'].get('checks_passed') is True and q['verification'].get('cleanup_confirmed') is True:
