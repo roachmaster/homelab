@@ -350,4 +350,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=41)
 \ir migrations/0041_agent_branch_and_cicd_stages.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(41,'agent_branch_and_cicd_stages');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=42) AS apply_0042
+\gset
+\if :apply_0042
+\ir migrations/0042_remove_sql_json_rehash.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(42,'remove_sql_json_rehash');
+\endif
 COMMIT;
