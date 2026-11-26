@@ -21,3 +21,4 @@ Task definitions collected from the Forge database on Mission Control on 2026-11
 - `base-refresh-override.yaml` - resubmit: yes - status at collection: failed - Add a base-refresh override for external (muse-db) workflows. Problem: every muse-db task is claimed
 - `backlog-flow.yaml` - resubmit: yes - status at collection: drafted-never-filed - backlog-flow
 - `backlog-recipe-resolution.yaml` - resubmit: yes - status at collection: drafted-never-filed - backlog-recipe-resolution
+- `agent-failure-output-discarded.yaml` - resubmit: yes - status at collection: drafted-never-filed - Preserve agent output when an attempt fails instead of discarding it
