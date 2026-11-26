@@ -1,4 +1,56 @@
-# Current: Restore bounded embedded documentation rendering — 2026-11-26
+# Current: Match portal host admission to generated UI ABI16 — 2026-11-26
+
+The user authorizes fixing verified deployment blockers. Jenkins100 and a clean
+local full browser gate on source908fbab1 fail at the first owned Agents fixture:
+Assets::load still requires ABI15 while the actual generator/WASM use ABI16.
+Make host admission strict to ABI16, retain all manifest/file integrity checks,
+and update native synthetic fixtures to the current ABI. Cover stale15, future17
+and malformed ABI rejection before remote effects, plus actual generated assets
+through the fixed full browser gate. Use pinned existing CI toolchain/browser
+prerequisites without installation/security changes or fixture credential logs.
+Root owns publication/deployment review; source work stays in this isolated908
+worktree with Cargo and QA evidence outside tracked source paths.
+
+The first fixed full browser run passed fixture startup and reached accepted-task
+reload. Its stale locator searched the inbox for the reader's full long title,
+although triage intentionally compacts inbox titles. Reopen by the fixture's
+unique visible prefix and assert exact full-title restoration in the reader.
+The failed run confirmed owned-resource cleanup; later groups remained not run.
+A subsequent stale assertion still required two-line CSS clipping, which triage
+intentionally replaced with whole-word bounded prose. The browser now verifies
+its exact bounded prefix, word boundary and no vertical clipping at all three
+viewports, while retaining horizontal-overflow and touch-target checks. Reload
+also verifies a single matching row and unchanged full title/correlation.
+The next browser obstruction was a missing explicit Tests-view fixture record:
+the journey seeded only Console, so its legitimate Tests request received404.
+Seed the structured test summary/cases for that view without changing application
+behavior or weakening the inspector's text, paging or escaping assertions.
+The full browser run then reached the expanded implementation reader, whose
+acceptance still expected three tables and earlier checkpoint/navigation wording.
+Its source document now contains six tables. Keep current source ABI references
+at16 in both current-contract rows; dated historical release identities remain
+unchanged. Align the reader assertions to the reviewed document and retain all
+same-tab, table, safe-link and narrow-layout checks.
+The expanded reader's Mermaid text fence caused real phone overflow:375px
+viewport,631px document,615px unwrapped code. A scoped declarative pre-wrap /
+overflow-wrap rule keeps implementation code readable within the page. Preserve
+the existing browser overflow check and inspect owned before/after geometry and
+phone screenshots; do not replace the check with a CSS-string assertion.
+
+Validation: all six affected native asset tests and five public asset consumer
+checks passed, as did workspace formatting. The fixed full `make ui-qa` passed
+28/28 ordered groups with all owned cleanup passed on clean checkpoint
+`48dd58f70e0bdc1941270da9f6df5b1c8bb5651e`, unchanged source fingerprint
+`030ad6fa51f70b79d48ca6d6a70e65f5bab6437aacbc78b8403e6a9b704bdb8b`.
+Evidence: `/mnt/data/homelab-build/portal-browser-fix-908-qa/forge-ui-qa-r2gjr1p0`.
+Pinned existing CI Rust1.97.1, browser dependencies and sandbox were preserved.
+Owned after-fix geometry matches375/390/1440px viewports; the375px code screenshot
+is readable and contained. Final follow-up changes only documentation: neutral
+responsibility labels, explicitly dated pre-deployment observations, and the
+schema50 source target. Tested application bytes remain unchanged. Exact final
+published-source Jenkins qualification and deployment remain root-owned work.
+
+# Previous: Restore bounded embedded documentation rendering — 2026-11-26
 
 The user authorizes fixing deployment blockers. Jenkins99 on main a55a17f8
 failed while building the web host: the 38 KiB implementation document uses

@@ -28,8 +28,8 @@ release.
 flowchart LR
   UI[Generated portal and Rust/WASM] --> Host[Admitted native web host]
   Host --> Source[Configured source agent]
-  Host --> API[Work/event API runner: stopped]
-  API <--> DB[(PostgreSQL: live schema40)]
+  Host --> API[Configured Work/event API]
+  API <--> DB[(Durable PostgreSQL state)]
   Workers[Isolated coding and review workers] <--> DB
   Delivery[Trusted publication and delivery workers] <--> DB
   Delivery --> Git[Git candidates and pull requests]
@@ -44,7 +44,7 @@ authors and external database authors such as Muse have different execution
 contracts, while independent review, immutable feedback and trusted delivery
 remain shared requirements.
 
-## Current operating and source checkpoints
+## Pre-deployment operating and source checkpoints — 26 November 2026
 
 | Layer | Checked or implemented state | Practical implication |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ remain shared requirements.
 | Database, read-only observation | Highest migration is **40**, `provider_author_handoff`; 39 is `terminal_retry_settlement`. | Schema41 branch/stage tables are not established by the observed live migration registry. This observation is not a full role/function audit. |
 | Installed release selection | Web ExecStart names `portal-auto-0070e78f…`; API/worker/publisher/external-delivery ExecStart paths select `codex-quota-handoff-0070e78f`. | These are configured source labels, not a new artifact-digest or browser qualification. |
 | Git/source | `main` advanced to `4bf1d230` with the preserved resubmission queue; consolidated `backup/main` is under draft PR29. `feature/muse` is retained separately. | Task/development branch names were retired after preserving their committed tips. Worktree files remain available; consolidation is not main promotion. |
-| Consolidated contract | **ABI16**, native HTTP protocol1, additive migration **41** (`agent_branch_and_cicd_stages`). Migrations 1–40 are unchanged. | Host, assets, WASM, schema and grants need a coordinated, qualified rollout. Source presence does not establish runtime activation. |
+| Consolidated contract | **ABI16**, native HTTP protocol1, migrations **41–50** through the schema50 rollout target. Migration41 is `agent_branch_and_cicd_stages`; migrations 1–40 are unchanged. | Host, assets, WASM, schema and grants need a coordinated, qualified rollout. Source presence does not establish runtime activation. |
 
 The current portal navigation is **Agents, Workbench, Home and Design**. Chat is
 inactive and Mail retired as portal views; their PostgreSQL history and inert
@@ -66,7 +66,7 @@ CI/CD stages and bounded Errors/Tests/Console inspection through
 | Capability | Present in source | Next evidence or decision |
 | --- | --- | --- |
 | Author/reviewer workflows | Separate configured author and independent reviewer, retained Plans, immutable feedback, source-bound AGY-to-Codex quota handoff | Qualify the combined source and preserve original workflow authority, workspace and budgets across any selected handoff. |
-| Branch ownership and CI visibility | One default `forge/agent/<profile-slug>` branch, exclusive workflow reservation, main synchronization, cache scope and correlation-stage/log projection | Apply schema41 only in an authorized rollout with matching services/grants. Prove stale-owner, open-PR, restart and paging behavior through the real path. |
+| Branch ownership and CI visibility | One default `forge/agent/<profile-slug>` branch, exclusive workflow reservation, main synchronization, cache scope and correlation-stage/log projection | Apply migrations41–50 only in an authorized rollout with matching services/grants. Prove stale-owner, open-PR, restart and paging behavior through the real path. |
 | Verification identity and recovery | Opt-in content-v2 manifests/policy generations; retained legacy bindings; private historical-CI pass and completion helpers | Verify actual source, process ownership and genuine receipts. Helpers do not authorize CI, reset event allowances or deploy themselves. |
 | Triage and Workbench | Needs attention, task detail/evidence disclosures, focus/scroll retention; admitted source inspection and opt-in managed writes | Complete current actual-WASM/browser and desktop/narrow visual acceptance. Recheck live write/Studio configuration before describing either as enabled. |
 | Other framework consumers | Durable Rust jobs, local tools, game simulation/assets/replay and static-web Studio service | Keep their contracts distinct from the Python/PostgreSQL delivery workflow; expand them when a concrete consumer and acceptance case require it. |
@@ -200,7 +200,7 @@ Earlier observations below are dated history, not current readiness claims.
 | Agents | Catalog-backed autonomous assignments with configured independent author/reviewer roles, bounded revisions/repairs, exact-head checks and trusted automatic publication/merge; legacy assignments retain their manual lifecycle. Task/usage cards use semantic badges, readable times, precise token metrics and scoped refresh. | Independent Work/Usage grants and supervised workers remain required. Quota blocks never automatically rotate accounts or purchase credits. Runtime activation is recorded separately from source UI delivery. |
 | Grok provider | Pinned native 1.0.92 adapter, explicit fresh sessions, bound terminal cache accounting, instruction-only project trust and owned credential cleanup. Typed cards render supplied catalog/usage data. | Execution defaults off in API and worker config. Usage-only visibility reports Not reported; no quota polling, inferred allowance, paid fallback or change to Gemini/Codex roles. Historical M18/P9 qualification remains distinct from schema26/P10/ABI13 source support and separately verified runtime enablement. |
 | Muse database workflow | A scoped `muse-db-primary` external runner authors Plan/Implement through PostgreSQL. The API coordinator queues actual independent native Codex reviews, bounded revisions and trusted Jenkins delivery; the root envelope displays phase, reviewer links and verified candidate/merge receipts. | Muse owns its process. No Mission Control Muse CLI or email runner is used. External artifacts supply no native attempt, stop proof or inferred allowance. Activation requires the matching schema22 scopes, `external_reviews:true`, delivery service and Jenkins job. |
-| Main delivery | Negotiated projections separate merged history, main verification, per-event repairs and release. Project delivery covers observed main changes without a fabricated task. | The native relay selects delivery and retry-event version1 headers. A main pass is not deployment: Deployed requires a healthy release receipt. ABI15 host/assets/WASM must be activated with matching backend support. |
+| Main delivery | Negotiated projections separate merged history, main verification, per-event repairs and release. Project delivery covers observed main changes without a fabricated task. | The native relay selects delivery and retry-event version1 headers. A main pass is not deployment: Deployed requires a healthy release receipt. ABI16 host/assets/WASM must be activated with matching backend support. |
 | Task envelopes and history | Every task has an immutable correlation UUID; every event has its own UUID and derives correlation from its owning task. One task row opens a visual event-stream stage diagram (current stage, workflow-specific path, loops/halts, post-merge delivery and bounded observed transitions) alongside paged lifecycle/progress history with exact identities in disclosures. | Rust retains one 50-event page, a 256KiB summary budget, 64 cursor bookmarks and a bounded 32-hop monotonic stage trace. Native current-attempt milestones keep their separate 21-entry bound. Foreign attempt/assignment/workflow summaries are omitted. |
 | Editing | Direct textarea editing, Undo and status reconciliation are implemented for admitted managed projects. Chat questions and model-generated proposal controls are inactive; backend contracts remain preserved. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. They were not enabled for the last checked live `homelab` project. A rendered button is not write authority. |
 
@@ -210,7 +210,7 @@ The current [implementation captures](/design/wireframes) use disposable accepta
 
 | Concern | Implemented ownership | Practical limit |
 | --- | --- | --- |
-| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **15**; deploy matching host and HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version1. |
+| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **16**; deploy matching host and HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version1. |
 | Same-tab navigation | The IDE saves a checkpoint and bounded local JSON handoff before Home/Design. Return resumes admission, restores state and re-verifies Workbench source. Declared `#workbench` and `#agents` entry actions run after restore and are consumed. Legacy `#chat` and `#mail` map to Agents. Inert restore/save preserves Chat metadata without hydration. | URLs contain view intent, not reports, credentials or source identities. A fresh tab does not inherit another tab's unsent drafts. |
 | Chat persistence | PostgreSQL keeps operator history, tab checkpoints, conversation retention and queued runs. The history DAO supports list/open, expiry, long-term retention and deletion. | A default expiry applies automatically; deleting a saved conversation is distinct from cancelling a model run. |
 | Mail persistence | PostgreSQL retains threads, ordered messages, queued runs and recall metadata for backend access. | Supported legacy navigation snapshots retain inert draft hints. No Mail UI or polling is active, and there is no durable cross-device Mail-draft table. |

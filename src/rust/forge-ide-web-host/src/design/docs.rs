@@ -2,6 +2,10 @@ use super::markup;
 
 const STYLES: markup::Styles = &[
     (
+        ".implementation-report pre",
+        &[("white-space", "pre-wrap"), ("overflow-wrap", "anywhere")],
+    ),
+    (
         ".implementation-report .engine-table table",
         &[("table-layout", "fixed")],
     ),
