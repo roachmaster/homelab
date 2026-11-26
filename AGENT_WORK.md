@@ -31,6 +31,11 @@ Its source document now contains six tables. Keep current source ABI references
 at16 in both current-contract rows; dated historical release identities remain
 unchanged. Align the reader assertions to the reviewed document and retain all
 same-tab, table, safe-link and narrow-layout checks.
+The expanded reader's Mermaid text fence caused real phone overflow:375px
+viewport,631px document,615px unwrapped code. A scoped declarative pre-wrap /
+overflow-wrap rule keeps implementation code readable within the page. Preserve
+the existing browser overflow check and inspect owned before/after geometry and
+phone screenshots; do not replace the check with a CSS-string assertion.
 
 # Previous: Restore bounded embedded documentation rendering — 2026-11-26
 
