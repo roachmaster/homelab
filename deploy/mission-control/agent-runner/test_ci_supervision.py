@@ -851,14 +851,15 @@ class SupervisionBoundaryTest(unittest.TestCase):
                 run_child_override=no_checks, cache_config_override={'enabled': False},
             )
         self.assertEqual(skew_result['status'], 'failed')
-        self.assertEqual(skew_result['failure'], 'verification_unavailable')
+        self.assertEqual(skew_result['failure'], 'gate_manifest_mismatch')
         self.assertEqual(skew_result['failure_kind'], 'infrastructure')
         self.assertEqual(skew_result['checks'], [])
         self.assertEqual(skew_result['phase_results'], [])
         self.assertEqual(skew_result['passed_kinds'], [])
         self.assertTrue(skew_result['cleanup_confirmed'])
-        self.assertEqual(skew_result['log_sha256'], empty_log_sha)
-        self.assertEqual(skew_log, '')
+        self.assertEqual(skew_result['log_sha256'], hashlib.sha256(skew_log.encode()).hexdigest())
+        self.assertIn('FORGE_GATE_MANIFEST_MISMATCH', skew_log)
+        self.assertNotIn('fixture-repo', skew_log)
         self.assertEqual([s['name'] for s in skew_result['stages']], ['prepare_source', 'cleanup'])
         prep = skew_result['stages'][0]
         self.assertEqual(set(prep), {'name', 'status', 'reason', 'elapsed_ms'})
