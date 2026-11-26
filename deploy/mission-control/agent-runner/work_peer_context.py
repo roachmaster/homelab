@@ -9,6 +9,8 @@ import stat
 from work_peer_review import PeerReviewError, parse_review_target, parse_review_verdict
 from work_review_context import DIGEST, SECRET, ReviewContext, _uuid
 from work_candidate_source import linked_candidate_input
+from work_author_handoff_context import (AUTHOR_HANDOFF_POLICY, AuthorHandoffContext,
+    parse_author_handoff)
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,7 @@ class WorkflowFeedbackContext:
     workflow_id: str
     workflow_review_id: str
     target_kind: str
+    author_handoff: AuthorHandoffContext | None = None
 
 
 def validate_workflow_feedback(lease, envelope, *, plan_context=None, feedback_context=None):
@@ -37,8 +40,9 @@ def validate_workflow_feedback(lease, envelope, *, plan_context=None, feedback_c
         _uuid(review_id)
         if (not isinstance(expected, str) or not DIGEST.fullmatch(expected)
                 or lease.get("workflow_review_id") is not None
-                or not isinstance(envelope, dict) or set(envelope) != {
-                    "target_json", "target_sha256", "verdict_json", "verdict_sha256"}
+                or not isinstance(envelope, dict) or set(envelope) not in ({
+                    "target_json", "target_sha256", "verdict_json", "verdict_sha256"}, {
+                    "target_json", "target_sha256", "verdict_json", "verdict_sha256", "author_handoff"})
                 or envelope["verdict_sha256"] != expected or not isinstance(envelope["verdict_json"], str)):
             raise PeerReviewError("feedback.envelope")
         target = parse_review_target(envelope["target_json"], envelope["target_sha256"])
@@ -46,8 +50,14 @@ def validate_workflow_feedback(lease, envelope, *, plan_context=None, feedback_c
         if hashlib.sha256(raw).hexdigest() != expected:
             raise PeerReviewError("feedback.verdict_sha256")
         verdict = parse_review_verdict(raw, target)
+        handoff = None
+        if "author_handoff" in envelope:
+            handoff = parse_author_handoff(envelope["author_handoff"], lease, target["author_profile"], kind="peer")
+            if (target["author_profile"] == lease["agent_profile"]
+                    or handoff.target_author_profile == target["reviewer_profile"]):
+                raise PeerReviewError("feedback.author_handoff")
         if (target["workflow_id"] != lease.get("workflow_id") or target["workflow_review_id"] != review_id
-                or target["author_profile"] != lease["agent_profile"]
+                or (target["author_profile"] != lease["agent_profile"] and handoff is None)
                 or target["source_task_id"] not in {lease["task_id"], lease.get("parent_task_id")}
                 or not isinstance(plan_context, dict)):
             raise PeerReviewError("feedback.binding")
@@ -72,7 +82,7 @@ def validate_workflow_feedback(lease, envelope, *, plan_context=None, feedback_c
                     or target["approved_plan"]["attempt_id"] != plan_context.get("plan_attempt_id")
                     or target["approved_plan"]["sha256"] != plan_context.get("plan_sha256")):
                 raise PeerReviewError("feedback.code_binding")
-        return WorkflowFeedbackContext(raw, expected, target["workflow_id"], review_id, target["target_kind"])
+        return WorkflowFeedbackContext(raw, expected, target["workflow_id"], review_id, target["target_kind"], handoff)
     except PeerReviewError:
         raise
     except (ValueError, KeyError, TypeError, AttributeError, UnicodeError):
