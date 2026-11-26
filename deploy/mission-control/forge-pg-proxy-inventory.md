@@ -214,7 +214,7 @@ defaults for local peer + other hosts). `forge_agent`,
 `forge_coding_worker`, `forge_coding_reconciler` connect over the
 local Unix socket (peer) and/or TCP from the runner host.
 
-Preparation (migration 40 applied, 41 not yet): the preparation
+Preparation (migration 42 applied, 43 not yet): the preparation
 HBA template (`postgres-worker-hba-preparation.conf`) admits the
 caller roles via local peer auth through the `forge-preparation`
 ident map (six peer rules first), then retains the original four

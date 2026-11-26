@@ -717,7 +717,7 @@ TASK_RECOVERY_GUARD_AST_SHA256 = {
 
 
 # Accepted M36 legacy-progress grandfathering verifier bytes, as rebased onto
-# bf080e2c with the approved forge-pg-proxy (M40/M41) stage-aware checks.
+# bf080e2c with the approved forge-pg-proxy (M42/M43) stage-aware checks.
 # The M36 grandfathering itself is unchanged; only the proxy's stage-aware
 # privilege/catalogue checks were added. This qualifies no applied migration
 # or other SQL authority.

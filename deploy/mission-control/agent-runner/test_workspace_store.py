@@ -1468,7 +1468,7 @@ class WorkspaceStoreTest(RunnerPrivilegeDriftMixin, unittest.TestCase):
                      "Disposable PostgreSQL 16 integration requires its binaries and a non-root user; DB tests run only on main")
 class WorkspaceStoreCutoverTest(RunnerPrivilegeDriftMixin, unittest.TestCase):
     """The cutover stage of the same drift machinery: this fixture
-    applies migration 41 (pg_proxy_cutover) via apply-cutover.sql
+    applies migration 43 (pg_proxy_cutover) via apply-cutover.sql
     on top of the preparation fixture, so forge_agent keeps SELECT
     only — the proxy is the only writer. Round-6 finding 7: this
     matrix was previously asserted against a preparation-only
@@ -1505,7 +1505,7 @@ class WorkspaceStoreCutoverTest(RunnerPrivilegeDriftMixin, unittest.TestCase):
         command("psql", *psql, "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner",
                 "-f", SQL / "apply.sql", "-f", SQL / "apply.sql",
                 "-f", SQL / "management/grant-runner.sql", "-f", SQL / "management/verify.sql")
-        # Cutover: migration 41 only, through its dedicated entry
+        # Cutover: migration 43 only, through its dedicated entry
         # point, then the stage-aware grants re-apply.
         command("psql", *psql, "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner",
                 "-f", SQL / "apply-cutover.sql", "-f", SQL / "management/grant-runner.sql",

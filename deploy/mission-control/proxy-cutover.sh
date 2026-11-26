@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # forge-pg-proxy cutover (rollout step 4): make the proxy the only writer.
 #
-# Preparation (migration 40) is installed by an ordinary upgrade;
-# cutover (migration 41) is NOT. This script is the only entry point
+# Preparation (migration 42) is installed by an ordinary upgrade;
+# cutover (migration 43) is NOT. This script is the only entry point
 # for cutover, and it refuses to proceed unless every gate passes:
-#   1. Migration 40 applied, migration 41 not yet applied.
+#   1. Migration 42 applied, migration 43 not yet applied.
 #   2. Caller migration complete (rollout steps 2-3): every inventoried
 #      caller is pointed at the proxy and verified in staging. The
 #      script proves the enforceable part before cutover
@@ -240,12 +240,12 @@ check_caller_routing() {
 
 check_ready() {
     local ready=true
-    if ! migration_applied 40 pg_proxy_preparation; then
-        printf 'NOT READY: preparation migration (40) is not applied.\n'
+    if ! migration_applied 42 pg_proxy_preparation; then
+        printf 'NOT READY: preparation migration (42) is not applied.\n'
         ready=false
     fi
-    if migration_applied 41 pg_proxy_cutover; then
-        printf 'NOT READY: cutover migration (41) is already applied.\n'
+    if migration_applied 43 pg_proxy_cutover; then
+        printf 'NOT READY: cutover migration (43) is already applied.\n'
         ready=false
     fi
     if [[ "$ready" == true ]]; then
@@ -275,10 +275,10 @@ if [[ "$action" == --check ]]; then
 fi
 
 # --- cutover run ----------------------------------------------------------
-migration_applied 40 pg_proxy_preparation ||
-    fail 'Cutover requires the preparation migration (40) first.'
-migration_applied 41 pg_proxy_cutover &&
-    fail 'Cutover migration (41) is already applied; nothing to do.'
+migration_applied 42 pg_proxy_preparation ||
+    fail 'Cutover requires the preparation migration (42) first.'
+migration_applied 43 pg_proxy_cutover &&
+    fail 'Cutover migration (43) is already applied; nothing to do.'
 
 # Prove caller routing before stopping anything: cutover refuses
 # while any inventoried caller is still direct (see
@@ -321,7 +321,7 @@ printf 'quiescent: no caller sessions, leased assignments, or leased runs\n'
 # run afterwards, so a later re-provision cannot restore them.
 psql_as postgres forge_agent -c 'SET ROLE forge_agent_owner' \
     -f "$directory/sql/apply-cutover.sql"
-printf 'cutover migration (41) applied\n'
+printf 'cutover migration (43) applied\n'
 
 # Rotate the SCRAM credentials so the old ones stop working. The new
 # values are written to root-only files and never printed; the

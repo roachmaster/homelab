@@ -83,9 +83,9 @@ class DisposablePostgresCluster:
         )
 
     def apply_cutover(self):
-        """Apply ONLY migration 41 (pg_proxy_cutover) through
+        """Apply ONLY migration 43 (pg_proxy_cutover) through
         sql/apply-cutover.sql — apply.sql deliberately stops at
-        migration 40 (preparation) — then re-run grant-runner.sql,
+        migration 42 (preparation) — then re-run grant-runner.sql,
         whose stage-aware grants re-apply the cutover revocation,
         the way setup-postgres.sh does after a cutover."""
         psql = ("-h", self.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1")

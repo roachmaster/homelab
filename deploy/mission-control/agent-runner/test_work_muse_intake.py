@@ -210,7 +210,7 @@ class DormantIntakePostgresTest(unittest.TestCase):
         cluster.apply_and_verify()
         with closing(cluster.connect("postgres")) as connection, connection.cursor() as cursor:
             cursor.execute("SELECT max(version) FROM forge_agent.schema_migrations")
-            self.assertEqual(cursor.fetchone()[0], 40)
+            self.assertEqual(cursor.fetchone()[0], 42)
             cursor.execute("SELECT to_regclass('forge_agent.coding_muse_intake')")
             self.assertIsNone(cursor.fetchone()[0])
             cursor.execute("SELECT count(*) FROM pg_roles WHERE rolname='muse_events'")
