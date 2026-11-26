@@ -77,6 +77,37 @@ class IdentityCatalogTest(unittest.TestCase):
         self.assertEqual(b[1], a[1] + 1)
         self.assertNotEqual(b[0], a[0])
 
+    def test_policy_fence_compares_frozen_identity_document_not_legacy_digest(self):
+        _, receipt = self.fixture.submit()
+        flow = self.fixture.coordinator.store
+        workflow_id = self.rows("SELECT workflow_id FROM forge_agent.coding_tasks WHERE id=%s", (receipt['task_id'],))[0][0]
+        with closing(self.cluster.connect('postgres')) as connection, connection, connection.cursor() as cursor:
+            # A digest that no longer matches (e.g. a canonicalization change) is not drift
+            # when the frozen catalog document equals the current policy.
+            cursor.execute("ALTER TABLE forge_agent.coding_workflows DISABLE TRIGGER USER")
+            cursor.execute("UPDATE forge_agent.coding_workflows SET policy_digest=%s WHERE workflow_id=%s", ('e' * 64, workflow_id))
+            cursor.execute("ALTER TABLE forge_agent.coding_workflows ENABLE TRIGGER USER")
+        row = self.rows("SELECT workflow_id,project_alias,policy_digest,snapshot FROM forge_agent.coding_workflows WHERE workflow_id=%s", (workflow_id,))[0]
+        workflow = dict(workflow_id=row[0], project_alias=row[1], policy_digest=row[2], snapshot=row[3])
+        self.assertIsNotNone(flow._current_policy(workflow))
+        self.assertFalse(flow.store.policy_drifted(workflow_id, workflow['snapshot']))
+        changed = dict(workflow['snapshot'], max_plan_revisions=workflow['snapshot'].get('max_plan_revisions', 0) + 7)
+        self.assertTrue(flow.store.policy_drifted(workflow_id, changed))
+        self.assertIsNone(flow.store.policy_drifted(uuid4(), changed))
+
+    def test_retry_switching_between_policy_digest_and_id_replays_by_idempotency_key(self):
+        policy = self.discovered()
+        key = str(uuid4())
+        first = self.service.submit(replace(make_submit(agent_profile='agy-v2', idempotency_key=key),
+                                            workflow_policy_digest=policy['policy_digest']))
+        again = self.service.submit(replace(make_submit(agent_profile='agy-v2', idempotency_key=key),
+                                            workflow_policy_id=UUID(policy['policy_id'])))
+        self.assertEqual(again['task_id'], first['task_id'])
+        with self.assertRaises(Rejected) as raised:
+            self.service.submit(replace(make_submit(agent_profile='agy-v2', idempotency_key=key, prompt='different'),
+                                        workflow_policy_id=UUID(policy['policy_id'])))
+        self.assertEqual(raised.exception.code, 'idempotency_conflict')
+
     def test_verifier_rejects_identity_catalog_privilege_and_function_drift(self):
         for statement in ('GRANT UPDATE ON forge_agent.coding_identity_catalog TO forge_agent',
                           'GRANT SELECT ON forge_agent.coding_task_identities TO PUBLIC',

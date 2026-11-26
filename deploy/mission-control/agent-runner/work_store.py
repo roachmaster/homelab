@@ -382,6 +382,23 @@ class WorkStore:
             return self._register_identity(cursor, project_alias, kind, "policy",
                                            self._policy_document(snapshot), snapshot["policy_digest"])
 
+    def policy_drifted(self, workflow_id, snapshot):
+        """Policy fence by identity: compare the workflow's frozen catalog document
+        to the current policy document. Returns None when no frozen identity exists
+        (pre-M44 database or a workflow created before M44); callers then fall back
+        to the legacy digest comparison."""
+        with self._transaction() as cursor:
+            if not self._identity_catalog_ready(cursor):
+                return None
+            cursor.execute("""SELECT c.document FROM forge_agent.coding_task_identities i
+                              JOIN forge_agent.coding_identity_catalog c ON c.identity_id=i.workflow_policy_id
+                              WHERE i.owner_id=%s AND i.workflow_id=%s
+                              ORDER BY i.created_at LIMIT 1""", (self._owner, workflow_id))
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return row["document"] != self._policy_document(snapshot)
+
     def _attach_policy_identities(self, projects, config):
         """Discovery: advertise the catalog id and generation of each current policy."""
         external = getattr(self._external, "workflow", None)
@@ -658,7 +675,29 @@ class WorkStore:
             existing = cursor.fetchone()
             if existing is not None:
                 if existing["intent_digest"] != intent_digest:
-                    raise Rejected(409, "idempotency_conflict")
+                    # The Idempotency-Key identifies the request; the policy fence
+                    # fields (digest or catalog id) are preconditions, not intent,
+                    # so a retry that switches between the two forms replays.
+                    core = dict(project_alias=project_alias, base_revision=base_revision, mode=mode,
+                                agent_profile=agent_profile, prompt=prompt,
+                                acceptance_criteria=acceptance_criteria, auto_repair=auto_repair)
+                    digests, ids = {None, workflow_policy_digest}, {None, workflow_policy_id}
+                    cursor.execute("""SELECT w.workflow_id, w.policy_digest FROM forge_agent.coding_tasks t
+                                      JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id
+                                      WHERE t.owner_id=%s AND t.project_alias=%s AND t.idempotency_key=%s""",
+                                   (self._owner, project_alias, idempotency_key))
+                    frozen = cursor.fetchone()
+                    if frozen is not None:
+                        digests.add(frozen["policy_digest"])
+                        if self._identity_catalog_ready(cursor):
+                            cursor.execute("""SELECT workflow_policy_id FROM forge_agent.coding_task_identities
+                                              WHERE owner_id=%s AND workflow_id=%s AND workflow_policy_id IS NOT NULL""",
+                                           (self._owner, frozen["workflow_id"]))
+                            ids.update(row["workflow_policy_id"] for row in cursor.fetchall())
+                    variants = {_submit_intent_digest(**core, workflow_policy_digest=d, workflow_policy_id=i)
+                                for d in digests for i in ids}
+                    if existing["intent_digest"] not in variants:
+                        raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
             cursor.execute("""

@@ -175,7 +175,10 @@ class WorkflowStore:
         if policy is None:
             raise Rejected(403,'denied')
         current=policy.snapshot(self.catalog,self.config.repair_policy)
-        if current['policy_digest']!=workflow['policy_digest'] and not budget_compatible_snapshot(workflow['snapshot'],current):
+        fence=getattr(type(self.store),'policy_drifted',None)
+        drifted=fence(self.store,workflow['workflow_id'],current) if fence is not None and 'workflow_id' in workflow else None
+        if drifted is None:drifted=current['policy_digest']!=workflow['policy_digest']
+        if drifted and not budget_compatible_snapshot(workflow['snapshot'],current):
             raise Rejected(403,'denied')
         if not {'plan','review','implement'}<=self.config.allowed_modes:
             raise Rejected(403,'denied')
