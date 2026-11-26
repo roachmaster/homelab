@@ -27,6 +27,7 @@ SET LOCAL search_path = pg_catalog;
 -- Verify M28 additions before excluding only its known catalog additions.
 \ir verify-delivery.sql
 \ir verify-post-merge.sql
+\ir verify-identity-catalog.sql
 
 DO $verify$
 DECLARE

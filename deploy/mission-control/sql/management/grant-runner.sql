@@ -208,3 +208,11 @@ GRANT EXECUTE ON FUNCTION
     forge_external_delivery_api.agent_branch_release(text, text, text, uuid, bigint, text, boolean, text)
 TO forge_coding_reconciler;
 \endif
+
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=44) AS has_identity_catalog
+\gset
+\if :has_identity_catalog
+GRANT SELECT ON forge_agent.coding_identity_catalog TO forge_agent;
+GRANT SELECT,INSERT ON forge_agent.coding_task_identities TO forge_agent;
+GRANT EXECUTE ON FUNCTION forge_agent.coding_identity_register(text,text,text,text,jsonb,text) TO forge_agent;
+\endif
