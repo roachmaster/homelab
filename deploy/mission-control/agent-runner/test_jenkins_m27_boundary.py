@@ -14,6 +14,7 @@ source admission and consolidated CI remain Root-owned delivery gates.
 
 import ast
 import hashlib
+import json
 from pathlib import Path
 import re
 import shlex
@@ -870,7 +871,182 @@ TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256 = {
 EVENT_STREAM_STABILITY_CONTEXT_SHA256 = {'AGENTS.md': 'fe75a58fd9ab3690d231bfa33d4e2ff6b9a9b1e4a6b939b6e36eb81de9c14fce', 'AGENT_WORK.md': '91dcfc672189fffbab8c90f9aa7ec1539bbbec5a6b085f852845e37f9f1df13e', 'deploy/mission-control/agent-runner/setup-runner.sh': '0ff1b4192378ad2c69366e64633878f8709e9bd602a18b28c086c259f51748c7', 'deploy/mission-control/agent-runner/test_agents_runtime_integration.py': '0a424b2d54294c18d7e3020ca5aafd07e0e3d8ea9ad704702597ebfddbb67563', 'deploy/mission-control/agent-runner/test_backend_main_parallel.py': '186c1cacba27c8d553cc20be060647d4e6f4c7a03bb93f0190a852ac54ce0fb9', 'deploy/mission-control/agent-runner/test_ci_restart_deferral.py': '9caff2c41ea3c1bbee0dad07026a905ad06c8b12a2003c7f2aa5c8e0ca38d8c6', 'deploy/mission-control/agent-runner/test_external_artifact_repair.py': '4265691920f84e320c4ed95ba7d5be5fb6cdf211dc13e0432c8b5f829b2efc4e', 'deploy/mission-control/agent-runner/test_external_content_identity.py': '872bda34f49a3ba1a3cfc5bc0c0b37858308d78d428640f883bab653701e2148', 'deploy/mission-control/agent-runner/test_external_flow.py': '2df06cfc8b86e223f59bc9bc371f1930d7ff0e7231a72c8c3501636ce23d2cd0', 'deploy/mission-control/agent-runner/test_external_main_refresh.py': 'eb2fbda414580812a9c116ae134b479e47271ad8ab6dc50d23abaff26f89fde1', 'deploy/mission-control/agent-runner/test_grok_auth_cleanup.py': '089dbc3c6be479baa92ed820ad5fd49833754c26edf270e1535063c0f3103cbe', 'deploy/mission-control/agent-runner/test_grok_trust.py': '8c3a614dd97c45c5787693ba8f0d9a551b75f2ab4f9eea87dc122174739b802f', 'deploy/mission-control/agent-runner/test_muse_auth_cleanup.py': '13a68a7cc0d001e04d3e3fa30d358cfb5673577ca628221956524eb4001f7d87', 'deploy/mission-control/agent-runner/test_native_ci_reconcile_stability.py': '18a0a78fd6c6c1cc21121845099fe03f2e894518a206b050255981f195687a0f', 'deploy/mission-control/agent-runner/test_provider_authority_ci_policy.py': '5e50260d16d72d561ba10c4e203002d7c4de94e945cf5ade4e68347b1ea3a70a', 'deploy/mission-control/agent-runner/test_provider_cooldown.py': '0fe7cd04099786b7a230c0aeb3622fff7baef2ac53ede3705fb38bdc0f67ffe8', 'deploy/mission-control/agent-runner/test_provider_model_route.py': '16c03d73b595c0f1a6fb149bf1caa8d7f48df7b81c8a89488dd35f55179d3f4f', 'deploy/mission-control/agent-runner/test_provider_quota_audit.py': 'f867a78be8e08e78922a09989dcb9b1180023e5fdc59edf9c82bfd35340e4d80', 'deploy/mission-control/agent-runner/test_provider_quota_diagnostics.py': 'cbcd1c4638d975807c92bdb73948b3377347c3d0ad130011e9b6bc15df81d797', 'deploy/mission-control/agent-runner/test_stopped_binary_pin.py': 'a6b400468c10eae7d2d5d92d68539369d013d00c51f3adf95efdd1c1c862bfe4', 'deploy/mission-control/agent-runner/test_work_grok.py': '60a11986c8c9145f174ba9615a0602ea24a8681f810867971733df66ecc48703', 'deploy/mission-control/agent-runner/work_ci_contract.py': '9d850a97997133882efa5cc3d899cd4559000ed865a7bab1665b5401b7f76027', 'deploy/mission-control/agent-runner/work_config.py': '8f63edf1d8d6e820e35213362932f6ad2a3d85b131fdc104b6bdf0cc9babda28', 'deploy/mission-control/agent-runner/work_executor.py': 'f7126e21fd865c6b3ad3ddee0681c6010e05bf18938aee12c2b3ce4204747a79', 'deploy/mission-control/agent-runner/work_external_delivery.py': '0525feeddcf9783fc7e88c021c7a8b39f654940c3e573b0a926efab1c1c31a48', 'deploy/mission-control/agent-runner/work_external_review_context.py': '0c0ce4c96ec542843c202ebb29bd881680bee09c305f370828f27a75c44b2a95', 'deploy/mission-control/agent-runner/work_external_workflow.py': 'a82e9085c6c18a0a641706a8b65884ccafc022b04626ac3f6a1cd5d845281907', 'deploy/mission-control/agent-runner/work_identity_contract.py': '8dd55de1ba81cbaa25fd6ddd240fc7c2ee9029eb194bff3dfc8ef9824b91e597', 'deploy/mission-control/agent-runner/work_native_jenkins.py': '0d75260a93a5b4d2fc599bf7d62d01cbb19cc296a1b089ca4f4937037dc10371', 'deploy/mission-control/agent-runner/work_provider_cooldown.py': '0e92de7b12eb4f21af8da55d0086b4bdfdd6c6daf18f7baa8f39fb90d80932cb', 'deploy/mission-control/agent-runner/work_provider_model_route.py': '8c36f1ec1c3e7ddde7036132f26e0304639459aeef0d1565ca20fdc23fbe810f', 'deploy/mission-control/agent-runner/work_quota_diagnostics.py': 'c080b2401827a47b06df72f1d3f71b88f888743720df7796fc78ef1e98c10528', 'deploy/mission-control/agent-runner/work_store.py': '20b071ab13be70af58c26b1914cfa3fc796cc64dea07fa8e8c7d7d093caa1410', 'deploy/mission-control/agent-runner/work_worker.py': '4ec3f71e4ff162cf9ee53794240cf69791db43e87bcaebaf5b68664b6ce5472d', 'deploy/mission-control/agent-runner/work_worker_config.py': 'fb497d37c7c6af50d5c85fdc74e7a43e5896552dd9fbdf1a889d74f9a83f2336', 'deploy/mission-control/agent-runner/work_workflow.py': 'a7c56620752fc167441ea7c814d125f7b67fac4352c2fbe8654d935845f85b73', 'deploy/mission-control/backend-suites.py': 'c8be37b4959a6401afc83cc2f23f47cab4591862efc6824a0cf7270683df893e', 'deploy/mission-control/jenkins/README.md': 'd85e73d1d0c8b5f00e2fa361f4ed20a8f3a811ad67e3b74ad83dade066aa6874', 'deploy/mission-control/jenkins/setup-ci.py': '65fa3508c6e30d7a096ad557ac85828e6ba91e44a268ddf941e8926d59dd1bac', 'deploy/mission-control/jenkins/verify-candidate.py': '62aa87d01f9eab687312fd6459c5c68f2ea060905dc7c8c4e3dd6826c1a56fc0', 'docs/architecture/external-agent-workflow.md': 'd4b977856102f6c027013f7110b06a15b031b96d2238a6de00ddf118726f5c9e', 'docs/reports/event-stream-stability-20261125.md': '06b423238a43e1e1c046a0e8f3a2dfe6238e96e288f953dcd79deb44025c8161'}
 EVENT_STREAM_STABILITY_GUARD_AST_SHA256 = {'work_workflow.py::WorkflowStore.retry_native_timeout': '4f260de8444a5467f762f02a94baa5949d50eee7350ff2df3edbab69ff422cf8', 'work_workflow.py::WorkflowStore.retry_peer_verdict': '909f97fd129487202654b7c131ff15f9f6944f95b54e5d0d45f8806b6902b5ec', 'work_workflow.py::WorkflowStore.retry_preparation': 'cc948756f1707d4f8393ab4eb2c5adc1c6d065e2e65d32304707dd456514c259'}
 
+# Explicit M40 author-handoff qualification. Every predecessor map below stays
+# immutable provenance. Only these declared source paths may use the new bytes;
+# M01-M39 migrations and the legacy authority AST comparisons remain raw pins.
+# Exact installed M40 functions/owners/ACLs are independently checked by the
+# read-only SQL verifier and actual PostgreSQL handoff/schema regressions.
+# This source context grants no task approval, CI pass or deployment authority.
+CODEX_AUTHOR_HANDOFF_SOURCE_PATHS = frozenset(('AGENT_WORK.md',
+ 'deploy/mission-control/agent-runner/README.md',
+ 'deploy/mission-control/agent-runner/quota-handoff-config.example.json',
+ 'deploy/mission-control/agent-runner/setup-runner.sh',
+ 'deploy/mission-control/agent-runner/test_agent_handoff.py',
+ 'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py',
+ 'deploy/mission-control/agent-runner/test_author_handoff_schema.py',
+ 'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py',
+ 'deploy/mission-control/agent-runner/test_muse_read_access.py',
+ 'deploy/mission-control/agent-runner/test_quota_handoff_config.py',
+ 'deploy/mission-control/agent-runner/test_superseding_review_schema.py',
+ 'deploy/mission-control/agent-runner/test_work_author_handoff_context.py',
+ 'deploy/mission-control/agent-runner/test_work_owner_fence.py',
+ 'deploy/mission-control/agent-runner/test_work_policy_upgrade.py',
+ 'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py',
+ 'deploy/mission-control/agent-runner/work_agent_handoff.py',
+ 'deploy/mission-control/agent-runner/work_author_handoff_context.py',
+ 'deploy/mission-control/agent-runner/work_ci_contract.py',
+ 'deploy/mission-control/agent-runner/work_config.py',
+ 'deploy/mission-control/agent-runner/work_context_recovery.py',
+ 'deploy/mission-control/agent-runner/work_identity_contract.py',
+ 'deploy/mission-control/agent-runner/work_peer_context.py',
+ 'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py',
+ 'deploy/mission-control/agent-runner/work_provider_model_route.py',
+ 'deploy/mission-control/agent-runner/work_review_context.py',
+ 'deploy/mission-control/agent-runner/work_reviewer_correction.py',
+ 'deploy/mission-control/agent-runner/work_store.py',
+ 'deploy/mission-control/agent-runner/work_superseding_review.py',
+ 'deploy/mission-control/agent-runner/work_workflow.py',
+ 'deploy/mission-control/jenkins/verify-candidate.py',
+ 'deploy/mission-control/sql/apply.sql',
+ 'deploy/mission-control/sql/management/verify-agy-unattended.sql',
+ 'deploy/mission-control/sql/management/verify-author-handoff.sql',
+ 'deploy/mission-control/sql/management/verify-autonomy.sql',
+ 'deploy/mission-control/sql/management/verify-feedback.sql',
+ 'deploy/mission-control/sql/management/verify-retry-events.sql',
+ 'deploy/mission-control/sql/management/verify.sql',
+ 'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql',
+ 'docs/architecture/agent-quota-handoff.md'))
+CODEX_AUTHOR_HANDOFF_SQL_PATHS = frozenset(('deploy/mission-control/sql/apply.sql',
+ 'deploy/mission-control/sql/management/verify-agy-unattended.sql',
+ 'deploy/mission-control/sql/management/verify-author-handoff.sql',
+ 'deploy/mission-control/sql/management/verify-autonomy.sql',
+ 'deploy/mission-control/sql/management/verify-feedback.sql',
+ 'deploy/mission-control/sql/management/verify-retry-events.sql',
+ 'deploy/mission-control/sql/management/verify.sql',
+ 'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql'))
+CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': 'bbcf7619b221fffdc50a9846a22380babb793f6b659dcf3b5afbab36d981547d',
+ 'deploy/mission-control/agent-runner/README.md': '191b5987f5a3b619e34e1eb7d1a2a11220e56f6edfc21d1953c70ff52e9df62a',
+ 'deploy/mission-control/agent-runner/quota-handoff-config.example.json': 'f4c2a2841f0cea15b6739c6b965566a26b476242a7b4947ebf7e4a083b9172aa',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'bcaab70bf4f2dc87a396a2ce03ef4a26868d6599bd93427a1d15a4e8892c97e0',
+ 'deploy/mission-control/agent-runner/test_agent_handoff.py': 'e8832ff62bdeb07c34cc4c3e0933099d01065fdf63007eae425a740dac01bcb1',
+ 'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': 'c509f69be90685abf37ac22748a640e9f33a4afff811c9241746fe3a1ed3211e',
+ 'deploy/mission-control/agent-runner/test_author_handoff_schema.py': '3bef878eafbba94414b2955fa5820b6a78e58c6def435ed3e46dadec20cdeec9',
+ 'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '29cf3499d17a8b98479d6b726fe5a9fbd4a383830cf9203141b06c7904cf2091',
+ 'deploy/mission-control/agent-runner/test_muse_read_access.py': 'd017689f5ec431c5ee475673437e3084feb18d08f0cf2777830d1f572903e4fa',
+ 'deploy/mission-control/agent-runner/test_quota_handoff_config.py': 'd0f2cf25353cf76d2a3f20ea4a166d82ae59e7ef2f1f591da0533d106248a643',
+ 'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'b8526881c611de11e715d5919afd90c9caa3f4669578327cde3a23c9df1f8150',
+ 'deploy/mission-control/agent-runner/test_work_author_handoff_context.py': '59eb04a7dc65b0ed1322c3bd3e24e2d1cae938bcb5c4b16cf4e5146cb7cc4ba7',
+ 'deploy/mission-control/agent-runner/test_work_owner_fence.py': '27723ca8bb40a4a0c55708a5ddadc4b58b825de077c343c2e6fe1534421be9da',
+ 'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '30025f31a0f8d3dbafd95f9c3db5a4ae592b26d267c9ec7abc4a1349ddd585a9',
+ 'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '3adbdc87b3604cf94e8ebdb7932583182a8b3b978a226977177095847a3dec72',
+ 'deploy/mission-control/agent-runner/work_agent_handoff.py': 'd47d6f46ec0d7813c7a857da5e503d9663544dba6b31c3418f7fc0638986c0c7',
+ 'deploy/mission-control/agent-runner/work_author_handoff_context.py': '7f28a0865ca1c5685b27a7392a57d4e565102fafb2a9350c5424b8bffda0e21a',
+ 'deploy/mission-control/agent-runner/work_ci_contract.py': 'a0cb71223f1b4be141636e0d9a9361480b26e75aa4b25ca478a85f02c15024ec',
+ 'deploy/mission-control/agent-runner/work_config.py': '95b5dab25cda35f5f9e04c1423c765f13f947546284b2e55279f7caad8ed9155',
+ 'deploy/mission-control/agent-runner/work_context_recovery.py': 'bf6b7ad1418db1e2cedd1106b11bc76fc63e34ff4a53e0769e4851a9e8b4072b',
+ 'deploy/mission-control/agent-runner/work_identity_contract.py': 'f08b0d279e99efb4ffba41620813ce4475d213dfee44cd75094fa375aea86ee3',
+ 'deploy/mission-control/agent-runner/work_peer_context.py': 'e70b79c9f5779503fcfc6fee480eba33a700ce2d5d3978d3b845212879086e52',
+ 'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py': 'f9beb01574406c84d5b96ce7a35d48ebe1d263903dfba076158138ae422456a2',
+ 'deploy/mission-control/agent-runner/work_provider_model_route.py': 'd26c3806bc04e7d56dd7bee55c21be8c55fc7fe25fb86e2a1bb96f0a00b3ca68',
+ 'deploy/mission-control/agent-runner/work_review_context.py': 'c64b9849130ea73e4abb064b71bc11da50f090bb6c232735a0689ac8254cd377',
+ 'deploy/mission-control/agent-runner/work_reviewer_correction.py': 'd7ab9c6169fe78bf4ce68816c4dfc22acba96fe86f7d0f8e9f6f1168bf38a614',
+ 'deploy/mission-control/agent-runner/work_store.py': '72a40634782df7c894cf3621cefacb86dda4d383ead8191377b778d81bd08b2b',
+ 'deploy/mission-control/agent-runner/work_superseding_review.py': 'ca6b13e6f2e84ebc9c25b02687d2c9910f9c8185953b11c074cb3bcd26a6e382',
+ 'deploy/mission-control/agent-runner/work_workflow.py': 'a7c56620752fc167441ea7c814d125f7b67fac4352c2fbe8654d935845f85b73',
+ 'deploy/mission-control/jenkins/verify-candidate.py': 'c6de3461e7434cd58a7c977acb172022f0605cbb6654c463df83e81124434140',
+ 'deploy/mission-control/sql/apply.sql': '402372ecf6fbdcdd9ec11e58edf810e59e5ff90cc69a025f0d0ea941a9de9b69',
+ 'deploy/mission-control/sql/management/verify-agy-unattended.sql': '7019d5230f9b4e52ca445f22785382fe953cfe829ef921a740addcbef8593031',
+ 'deploy/mission-control/sql/management/verify-author-handoff.sql': '730f6030c5c5ffe3d31008753d100447de8989daf12fa2f14ace653040d3dce7',
+ 'deploy/mission-control/sql/management/verify-autonomy.sql': 'c8584fe692cc206470e8a01c9228ea851e5ca750278b39b9a73d5e850b31c6fa',
+ 'deploy/mission-control/sql/management/verify-feedback.sql': '4d63f7ab810355452e190cc0fd1919ec5f6514440f84a7f982651e54fcd40e23',
+ 'deploy/mission-control/sql/management/verify-retry-events.sql': '39f376abbd16dd60f8e88fe26b31b8f07ca780241c9b414e0fe52b1667eb6e48',
+ 'deploy/mission-control/sql/management/verify.sql': '70c810c1ddced6fdcc0788d97022fdb3dfede74a4bfc00f1d665e65a9abc85b3',
+ 'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql': '0f884ee5db7f90be8ed2caefd20e8455fff4c106f3b87aaf1390848fdf40b6b8',
+ 'docs/architecture/agent-quota-handoff.md': 'a9d3d2ff414573be316f50e2b5fc5106832c2cf2ea4e1f55a2cae5adfb542ba2'}
+PRE_HANDOFF_MIGRATION_SHA256 = {'0001_agent.sql': '62b639497347191b534ee2055bd4f09838ef98f69b0824c9bf2a55e5637b1331',
+ '0002_ide_workspace.sql': '61fca7c93cfc2a38ffdf39f1c4ef189233676cc1e93e07faee50c1db488b61a8',
+ '0003_ide_chat_history.sql': '91004ce176e3332dbb96c21d270564819994c2ccfe32d5ca7650bd509d7c0301',
+ '0004_ide_chat_default_expiration.sql': 'b060f253ba04dff86f1a1a3e338a102c7ce69c0e4b69071eb2a6a48aa60c9ea7',
+ '0005_inference_dispatch.sql': '74285871ddfc316eafd5459d98c2364ae4172987461f1107dddea2948b84dcbb',
+ '0006_inference_model_selection.sql': 'b228402869abd7614e784c920225a442ba59d9fe0e6b4382206f39d987471ddc',
+ '0007_ide_mail.sql': '58aeb69b6a0e760338378e5dc03c8606d55508265a32cad5e15bcd7cfe63f99a',
+ '0008_mail_archive.sql': '755679fcd42d9c727be602406875b1419c5e7002f6af181595d8c409481b403a',
+ '0009_coding_admission.sql': '4d9bf3aad61ecc281baf7a82b7e2e32b4d0414de3e138e8e8215b10d06c9f772',
+ '0010_coding_execution_and_usage.sql': 'a1fef2e563b83df633181040875c5c02b211a0dec89523aa5fc7cb87b7d0c6ac',
+ '0011_coding_elevated_tool_policy.sql': '3bcd1a1cd440a57cd3d12b5d8116144079d5925c023debbdb880f3d0d8d9f0a2',
+ '0012_coding_progress.sql': 'f04db86c316e5fce931050d1325db117652e05a5fbd6d8a405e902a31c2515ef',
+ '0013_coding_task_session_policy.sql': '2b6c8b3c25b5a5b91df0912db2d8dad37712a4395f9da290ea8fcb07a85a77ec',
+ '0014_coding_plan_workflow.sql': 'dcc61c328b7f3aa242c1fa7bc26a2c673c146f26cb6d4ee0f6f8125dfe1dd561',
+ '0015_coding_feedback_loop.sql': 'a9b35958de1614bd1bf04979152f674c85e6139372294df8b374ea68f60f06a4',
+ '0016_coding_autonomous_workflows.sql': '90452fddd77f81983fb7c6eb45e96c2bcc85cea53937d5ac0ded6cee2a001604',
+ '0017_coding_codex_warm_sessions.sql': 'da3a0b0afef1cf1e823445fe7a13a07cf039efbc697f75f30a621d623c4463cb',
+ '0018_coding_grok_provider.sql': 'bebb2849e5e62a1e75e5d69943d9e1828574ca7d8c737c5eb42d8cc3de0936e2',
+ '0019_coding_muse_provider.sql': '16012f62fb8769bc26f7305498976e37668809f0ddf52f6aa310313e5c464365',
+ '0020_external_agent_transport.sql': 'c68528d81371e5541b8843eb5a13e97f2bb190eba116575056ef824643fdd62a',
+ '0021_coding_event_trace.sql': '27d0f242fde4e7f9ebb9f8960083de8fbc51d760728ca56510a6d6b50bcf08dc',
+ '0022_external_workflows.sql': '04bb27131d4a7dc7bfaa8828a33105407deb6cc9c26441a96b543c5462f92f52',
+ '0023_coding_agy_unattended.sql': '2282757e99d5c8b83656f7267b4aee5d269ad0130c30a89c3b89c9e716960fee',
+ '0024_native_jenkins_context.sql': 'ee78572dbd036a7c6330090b63017cb84cfc94e33d6a26b6efe18eb686519a98',
+ '0025_native_delivery_repair.sql': '36b7ef798205514d6bcbdf2ca761de4aa8de476bee2be2b6ec3f97c720a165e7',
+ '0026_coding_owner_continuation.sql': '676b4518d1e83768b3e9eb8bf440e1f5d60d338fd55928c3fc3858a141a3d007',
+ '0027_jenkins_events.sql': 'f10c7d8a4b43e566c125933dd49729397076d266f2384820d7cebd66b54abcb1',
+ '0028_post_merge_verification.sql': 'dba349627f5583fbb37956d0742b521e7fb257879efbbe2d61389d792cbe4a00',
+ '0029_delivery_automation.sql': 'e4ad1045a4cd0fdaf1d2f2eff2fbe639e7f1ace7005c29eae9a7f1ff92aa8926',
+ '0030_agent_wide_retry_policy.sql': '5a2b07a8be9c5835c5ab90d03d2a85c7936a95e01596d4c550c711b0a2122975',
+ '0031_retry_events.sql': 'bf6adff966e9f6610ac3e5dd31650b3427b8af5324cd5945f2a22284a9116c41',
+ '0032_observer_retry_lineage.sql': '88705c12ceb94b3264d5af084e0cf08bb095a10ec74460099c54da3dfe64bfbf',
+ '0033_superseding_reviews.sql': 'c8cc28b5e0aeb618ffe43725452935024ce66973420120181f01b3d887edf30e',
+ '0034_jenkins_stage_started.sql': '5e921a74ebe2d09f1e0db2d4ac793ba826cff6a7343509aa390fde8374cc512e',
+ '0035_event_stream_peer_review_diagnostics.sql': 'bb30872c207b9dd7b510430dde93761567c03c46b72424b305025923c6c07957',
+ '0036_event_stream_actor_cause.sql': '3c341f9a4cdd848f70542ebaa9be1c172b26a92f0708bbfa6c14d833c7ab8b81',
+ '0037_event_stream_jenkins_producer.sql': '6446296c83e0bbdcb41b2e5c7b9292c69d56a741f0a761e6ac6eeaaf354d17c6',
+ '0038_external_plan_approve_override.sql': '4e231e802726cde93a949d99b591aed3be3153abfa239bf7525959c24f49cf81',
+ '0039_terminal_retry_settlement.sql': 'a1707d8137a103a0fa351c71e1646334059ff16d00a1688380ecd6a4b77a00ee'}
+HISTORICAL_QUALIFICATION_MAP_NAMES = ('AGENT_WIDE_RETRY_CONTEXT_SHA256',
+ 'AGENT_WIDE_RETRY_GUARD_AST_SHA256',
+ 'CONSOLIDATED_UI_CONTEXT_SHA256',
+ 'CONTENT_IDENTITY_CONTEXT_SHA256',
+ 'DELIVERY_AUTOMATION_CONTEXT_SHA256',
+ 'EVENT_RETRY_CONTEXT_SHA256',
+ 'EVENT_RETRY_GUARD_AST_SHA256',
+ 'EVENT_STREAM_STABILITY_CONTEXT_SHA256',
+ 'EVENT_STREAM_STABILITY_GUARD_AST_SHA256',
+ 'INCLUDED_RETIREMENT_CONTEXT_SHA256',
+ 'INCLUDED_REVIEWER_CONTEXT_SHA256',
+ 'JENKINS_PAGED_OBSERVER_CONTEXT_SHA256',
+ 'LINEAGE_RETRY_CONTEXT_SHA256',
+ 'M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256',
+ 'MIGRATION_SHA256',
+ 'MUSE_MERGE_COMPATIBILITY_CONTEXT_SHA256',
+ 'NATIVE_CI_CONTEXT_RECOVERY_SHA256',
+ 'NATIVE_POSTFIX_CONTEXT_SHA256',
+ 'PEER_FEEDBACK_CONTEXT_SHA256',
+ 'PIPELINE_DIAGRAM_CONTEXT_SHA256',
+ 'PLAN_APPROVE_OVERRIDE_CONTEXT_SHA256',
+ 'POST_MERGE_CONTEXT_SHA256',
+ 'REVIEWED_CI_CONTEXT_SHA256',
+ 'REVIEW_PROTOCOL_CONTEXT_SHA256',
+ 'SUPERSEDING_REVIEW_CONTEXT_SHA256',
+ 'TASK_ORGANIZATION_CONTEXT_SHA256',
+ 'TASK_RECOVERY_CONTEXT_SHA256',
+ 'TASK_RECOVERY_GUARD_AST_SHA256',
+ 'TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256',
+ 'UI_DELIVERY_CONTEXT_SHA256',
+ 'UI_STAGE_DIAGRAM_CONTEXT_SHA256',
+ 'UNCHANGED_BASELINE_SHA256',
+ 'UNCHANGED_LEGACY_GUARD_AST_SHA256',
+ 'VERIFIER_POLICY_PARITY_CONTEXT_SHA256')
+HISTORICAL_QUALIFICATION_MAPS_SHA256 = '3eb68f33b5f58cbacde29a7b7d8689a64b9cd0268f7ffff048e34b8f2e45a495'
+
+def qualified_handoff_sql(relative, expected):
+    """Only M40's explicit registry/verifier paths can replace old SQL context."""
+    if relative in CODEX_AUTHOR_HANDOFF_SQL_PATHS:
+        return CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256[relative]
+    return expected
+
 def qualified_source(relative, expected):
+    if relative in CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256:
+        return CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256[relative]
     if relative in EVENT_STREAM_STABILITY_CONTEXT_SHA256:
         return EVENT_STREAM_STABILITY_CONTEXT_SHA256[relative]
     if relative in TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256:
@@ -918,6 +1094,57 @@ STRICT_VERIFIER_FILES = {
 
 
 class JenkinsM27SourceBoundaryTest(unittest.TestCase):
+    def test_author_handoff_context_is_explicit_and_exact(self):
+        self.assertEqual(set(CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256), set(CODEX_AUTHOR_HANDOFF_SOURCE_PATHS))
+        self.assertEqual({name for name in CODEX_AUTHOR_HANDOFF_SOURCE_PATHS if '/sql/' in name}, set(CODEX_AUTHOR_HANDOFF_SQL_PATHS))
+        self.assertEqual(set(CODEX_AUTHOR_HANDOFF_SQL_PATHS), {
+            'deploy/mission-control/sql/apply.sql',
+            'deploy/mission-control/sql/management/verify.sql',
+            'deploy/mission-control/sql/management/verify-autonomy.sql',
+            'deploy/mission-control/sql/management/verify-feedback.sql',
+            'deploy/mission-control/sql/management/verify-retry-events.sql',
+            'deploy/mission-control/sql/management/verify-agy-unattended.sql',
+            'deploy/mission-control/sql/management/verify-author-handoff.sql',
+            'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql',
+        })
+        for relative, expected in CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256.items():
+            with self.subTest(author_handoff_source=relative):
+                self.assertTrue(relative.startswith('deploy/mission-control/') or relative in {
+                    'AGENT_WORK.md', 'docs/architecture/agent-quota-handoff.md'})
+                if '/migrations/' in relative:
+                    self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql')
+                self.assertRegex(expected, r'^[0-9a-f]{64}$')
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+        installed = (MANAGEMENT / 'verify-author-handoff.sql').read_text()
+        for signature in ('coding_workflow_author_handoff(uuid)', 'coding_workflow_author_feedback(uuid,text)',
+                'coding_workflow_role_granted(uuid,text,text)', 'claim(text,uuid,text[])',
+                'read_workflow_feedback(uuid,uuid)', 'read_feedback(uuid,uuid)'):
+            self.assertIn(signature, installed)
+        published = {tuple(shlex.split(line, comments=True)) for line in (RUNNER / 'setup-runner.sh').read_text().splitlines() if line.lstrip().startswith('publish ')}
+        for module in ('work_agent_handoff.py', 'work_author_handoff_context.py'):
+            self.assertIn(('publish', '$directory/' + module, '$target/' + module), published)
+
+    def test_author_handoff_preserves_every_historical_qualification_map(self):
+        self.assertEqual(len(HISTORICAL_QUALIFICATION_MAP_NAMES), 34)
+        maps = {name: globals()[name] for name in HISTORICAL_QUALIFICATION_MAP_NAMES}
+        current = hashlib.sha256(json.dumps(maps, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(current, HISTORICAL_QUALIFICATION_MAPS_SHA256)
+
+    def test_author_handoff_cannot_qualify_any_predecessor_migration(self):
+        present = {path.name for path in MIGRATIONS.glob('[0-9][0-9][0-9][0-9]_*.sql') if 1 <= int(path.name[:4]) <= 39}
+        self.assertEqual(len(PRE_HANDOFF_MIGRATION_SHA256), 39)
+        self.assertEqual(present, set(PRE_HANDOFF_MIGRATION_SHA256))
+        for name, expected in PRE_HANDOFF_MIGRATION_SHA256.items():
+            relative = 'deploy/mission-control/sql/migrations/' + name
+            with self.subTest(pre_handoff_migration=name):
+                self.assertEqual(hashlib.sha256((MIGRATIONS / name).read_bytes()).hexdigest(), expected)
+                self.assertNotIn(relative, CODEX_AUTHOR_HANDOFF_SOURCE_PATHS)
+                self.assertEqual(qualified_handoff_sql(relative, 'historical-pin'), 'historical-pin')
+        for relative in ('deploy/mission-control/sql/management/grant-runner.sql',
+                'deploy/mission-control/sql/management/verify-owner-continuation.sql',
+                'deploy/mission-control/sql/management/verify-task-events.sql'):
+            self.assertEqual(qualified_handoff_sql(relative, 'historical-pin'), 'historical-pin')
+
     def test_applied_migrations_one_through_twenty_six_are_byte_identical(self):
         historical_files = {
             path.name for path in MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql")
@@ -1152,7 +1379,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         })
         for relative, expected in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256.items():
             with self.subTest(accepted_m36_verifier=relative):
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_handoff_sql(relative, expected))
 
     def test_jenkins_paged_observer_context_is_scoped_and_exact(self):
         self.assertEqual(set(JENKINS_PAGED_OBSERVER_CONTEXT_SHA256), {
@@ -1278,7 +1505,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in VERIFIER_POLICY_PARITY_CONTEXT_SHA256.items():
             with self.subTest(verifier_policy_parity_source=relative):
                 self.assertNotIn('/sql/', relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected if '/sql/' in relative else qualified_source(relative, expected))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_handoff_sql(relative, expected) if '/sql/' in relative else qualified_source(relative, expected))
 
     def test_terminal_projection_settlement_overlay_is_scoped_and_preserves_applied_migrations(self):
         self.assertIn('deploy/mission-control/sql/migrations/0039_terminal_retry_settlement.sql', TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256)
@@ -1293,7 +1520,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 self.assertNotIn('/fragments/', relative)
                 if '/migrations/' in relative:
                     self.assertEqual(relative, 'deploy/mission-control/sql/migrations/0039_terminal_retry_settlement.sql')
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected if '/sql/' in relative else qualified_source(relative, expected))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_handoff_sql(relative, expected) if '/sql/' in relative else qualified_source(relative, expected))
 
     def test_event_stream_stability_context_is_scoped_and_exact(self):
         self.assertEqual(set(EVENT_STREAM_STABILITY_CONTEXT_SHA256), {'docs/reports/event-stream-stability-20261125.md', 'deploy/mission-control/agent-runner/test_native_ci_reconcile_stability.py', 'deploy/mission-control/agent-runner/work_external_delivery.py', 'deploy/mission-control/agent-runner/test_agents_runtime_integration.py', 'deploy/mission-control/agent-runner/work_worker_config.py', 'AGENTS.md', 'deploy/mission-control/agent-runner/work_config.py', 'deploy/mission-control/agent-runner/test_provider_model_route.py', 'deploy/mission-control/agent-runner/test_external_content_identity.py', 'deploy/mission-control/agent-runner/test_ci_restart_deferral.py', 'deploy/mission-control/agent-runner/test_stopped_binary_pin.py', 'deploy/mission-control/agent-runner/test_provider_quota_audit.py', 'AGENT_WORK.md', 'deploy/mission-control/agent-runner/test_external_main_refresh.py', 'deploy/mission-control/agent-runner/test_grok_trust.py', 'deploy/mission-control/agent-runner/test_external_flow.py', 'deploy/mission-control/agent-runner/work_native_jenkins.py', 'docs/architecture/external-agent-workflow.md', 'deploy/mission-control/agent-runner/work_external_workflow.py', 'deploy/mission-control/agent-runner/test_backend_main_parallel.py', 'deploy/mission-control/agent-runner/work_external_review_context.py', 'deploy/mission-control/agent-runner/work_provider_model_route.py', 'deploy/mission-control/agent-runner/work_worker.py', 'deploy/mission-control/agent-runner/work_identity_contract.py', 'deploy/mission-control/agent-runner/work_workflow.py', 'deploy/mission-control/agent-runner/test_provider_authority_ci_policy.py', 'deploy/mission-control/jenkins/verify-candidate.py', 'deploy/mission-control/agent-runner/test_external_artifact_repair.py', 'deploy/mission-control/agent-runner/work_provider_cooldown.py', 'deploy/mission-control/jenkins/README.md', 'deploy/mission-control/agent-runner/test_provider_quota_diagnostics.py', 'deploy/mission-control/agent-runner/setup-runner.sh', 'deploy/mission-control/agent-runner/work_quota_diagnostics.py', 'deploy/mission-control/agent-runner/test_grok_auth_cleanup.py', 'deploy/mission-control/agent-runner/work_store.py', 'deploy/mission-control/agent-runner/work_executor.py', 'deploy/mission-control/agent-runner/test_provider_cooldown.py', 'deploy/mission-control/agent-runner/test_muse_auth_cleanup.py', 'deploy/mission-control/agent-runner/test_work_grok.py', 'deploy/mission-control/agent-runner/work_ci_contract.py', 'deploy/mission-control/backend-suites.py', 'deploy/mission-control/jenkins/setup-ci.py'})
@@ -1301,7 +1528,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in EVENT_STREAM_STABILITY_CONTEXT_SHA256.items():
             with self.subTest(event_stream_source=relative):
                 self.assertNotIn('/sql/', relative)
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
         source = (RUNNER / 'setup-runner.sh').read_text()
         for name in ('work_quota_diagnostics.py', 'work_provider_model_route.py', 'work_provider_cooldown.py'):
             self.assertIn('publish "$directory/' + name + '" "$target/' + name + '"', source)
@@ -1336,7 +1563,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             visited.add(source)
             for name in re.findall(r"^\\ir\s+(\S+)\s*$", source.read_text(), re.MULTILINE):
                 pending.append(source.parent / name)
-        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES)
+        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES | {"verify-author-handoff.sql"})
 
     def test_normal_installer_preserves_owner_control_and_installs_event_service(self):
         published = {
