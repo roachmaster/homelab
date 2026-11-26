@@ -1,0 +1,20 @@
+[package]
+name = "forge-mcp-host"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Host binary for the Mission Control MCP API: composition root that selects the MissionControlPort implementation and serves MCP over stdio or Streamable HTTP."
+
+[lints]
+workspace = true
+
+[dependencies]
+forge-mcp = { workspace = true }
+tokio = { version = "1", features = ["full"] }
+rmcp = { version = "0.8", features = ["server", "transport-io", "transport-streamable-http-server"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-postgres = "0.7"
+uuid = { version = "1", features = ["v4"] }
+axum = "0.8"
