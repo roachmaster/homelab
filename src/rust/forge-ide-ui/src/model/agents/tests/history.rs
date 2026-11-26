@@ -25,6 +25,7 @@ fn event(sequence: u64) -> WorkLogEvent {
         external_progress: None,
         workflow_progress: None,
         failure: None,
+        deadline_extension: None,
     }
 }
 fn reader() -> Agents {
@@ -255,6 +256,7 @@ fn event_page_bookmarks_are_bounded_and_context_changes_clear_history() {
                 external_progress: None,
                 workflow_progress: None,
                 failure: None,
+                deadline_extension: None,
             })
             .collect();
         let request = a.pending.as_ref().unwrap().request_id().to_owned();

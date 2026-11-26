@@ -49,6 +49,7 @@ fn wf_event(sequence: u64, phase: WorkWorkflowPhase, summary: &str) -> WorkLogEv
             related_task_id: None,
         }),
         failure: None,
+        deadline_extension: None,
     }
 }
 
@@ -64,6 +65,7 @@ fn raw_event(sequence: u64, kind: WorkEventKind) -> WorkLogEvent {
         external_progress: None,
         workflow_progress: None,
         failure: None,
+        deadline_extension: None,
     }
 }
 
@@ -235,6 +237,7 @@ fn external_muse_workflow_orders_code_review_before_checks_and_checks_provenance
             }),
             workflow_progress: None,
             failure: None,
+            deadline_extension: None,
         },
         // Foreign assignment checkpoint must be ignored.
         WorkLogEvent {
@@ -253,6 +256,7 @@ fn external_muse_workflow_orders_code_review_before_checks_and_checks_provenance
             }),
             workflow_progress: None,
             failure: None,
+            deadline_extension: None,
         },
         wf_event(6, WorkWorkflowPhase::CodeReview, "Code review approved"),
         wf_event(7, WorkWorkflowPhase::Checks, "Running trusted checks"),
@@ -650,6 +654,7 @@ fn multipage_history_preserves_stage_trace_collapses_checkpoints_and_rejects_for
             external_progress: None,
             workflow_progress: None,
             failure: None,
+            deadline_extension: None,
         },
         WorkLogEvent {
             event_id: "00000064-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
@@ -667,6 +672,7 @@ fn multipage_history_preserves_stage_trace_collapses_checkpoints_and_rejects_for
             external_progress: None,
             workflow_progress: None,
             failure: None,
+            deadline_extension: None,
         },
         WorkLogEvent {
             event_id: "00000065-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
@@ -684,6 +690,7 @@ fn multipage_history_preserves_stage_trace_collapses_checkpoints_and_rejects_for
                 related_task_id: None,
             }),
             failure: None,
+            deadline_extension: None,
         },
     ]);
 
