@@ -57,6 +57,8 @@ BEGIN
  AND s->>'policy_digest'=encode(sha256(convert_to(forge_agent._coding_author_canonical_json(s-'policy_digest'),'UTF8')),'hex')
  AND e->>'policy_digest'=encode(sha256(convert_to(forge_agent._coding_author_canonical_json(e-'policy_digest'),'UTF8')),'hex')
  AND e->>'author_profile'=i->>'target_profile' AND s->>'author_profile'=i->>'source_profile'
+ AND (s-ARRAY['recipes','policy_digest'])=(w.snapshot-ARRAY['recipes','policy_digest'])
+ AND (s->'recipes')-ARRAY['author_plan','author_implement']=(w.snapshot->'recipes')-ARRAY['author_plan','author_implement']
  AND (e-ARRAY['author_profile','recipes','policy_digest'])=(s-ARRAY['author_profile','recipes','policy_digest'])
  AND e->'recipes'->'reviewer_review'=s->'recipes'->'reviewer_review'
  AND (e->'recipes')-ARRAY['author_plan','author_implement']=(s->'recipes')-ARRAY['author_plan','author_implement']
@@ -76,6 +78,9 @@ BEGIN
  END IF;
  FOREACH handoff_mode IN ARRAY ARRAY['plan','implement'] LOOP
   entry:='author_'||handoff_mode;recipe:=e->'recipes'->entry->'recipe';
+  IF ((s->'recipes'->entry->'recipe')-'model'=(w.snapshot->'recipes'->entry->'recipe')-'model'
+   AND s->'recipes'->entry->'recipe'->>'model'=i->>'source_model'
+   AND s->'recipes'->entry->>'digest'=encode(sha256(convert_to(forge_agent._coding_author_canonical_json(s->'recipes'->entry->'recipe'),'UTF8')),'hex')) IS DISTINCT FROM true THEN RETURN NULL;END IF;
   IF (jsonb_typeof(recipe)='object' AND recipe->'version'='2'::jsonb AND recipe->>'backend'='codex'
    AND recipe->>'mode'=handoff_mode AND recipe->'generation_token_limit'='null'::jsonb
    AND recipe->>'model'~'^[ -~]{1,128}$' AND recipe->>'resource_profile'~'^forge-coding-v[0-9]+$'
@@ -87,6 +92,9 @@ BEGIN
  IF NOT EXISTS(SELECT FROM forge_agent.coding_worker_grants g WHERE(g.owner_id,g.project_alias,g.agent_profile,g.mode)=(w.owner_id,w.project_alias,w.snapshot->>'reviewer_profile','review')) THEN RETURN NULL;END IF;
  SELECT * INTO t FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,workflow_id,id)=(w.owner_id,w.project_alias,w.workflow_id,(i->>'task_id')::uuid);
  IF NOT FOUND OR t.workflow_review_id IS NOT NULL THEN RETURN NULL;END IF;
+ IF i->>'source_mode'='implement' AND NOT EXISTS(SELECT FROM forge_agent.coding_plan_decisions pd
+ WHERE(pd.owner_id,pd.project_alias,pd.task_id)=(w.owner_id,w.project_alias,w.root_task_id)
+ AND pd.decision_id=coalesce((i->>'plan_decision_id')::uuid,(i->>'scope_plan_decision_id')::uuid) AND pd.decision='resume') THEN RETURN NULL;END IF;
  SELECT * INTO q FROM forge_agent.coding_attempts WHERE(owner_id,project_alias,attempt_id)=(w.owner_id,w.project_alias,(i->>'quota_source_attempt_id')::uuid);
  IF (q.agent_profile=i->>'source_profile' AND q.pinned_recipe->>'backend'='antigravity' AND q.pinned_recipe->>'model'=i->>'source_model'
  AND q.phase='stopped' AND q.outcome='quota_blocked' AND NOT q.reservation_active AND q.lease_expires_at IS NULL
@@ -107,7 +115,11 @@ BEGIN
    AND own_attempt.agent_profile=i->>'source_profile' AND own_attempt.published_at IS NOT NULL
    AND own_attempt.finished_at IS NOT NULL AND own_attempt.published_at<=r.created_at AND r.created_at<=a.created_at
    AND r.workspace_digest=i->>'source_workspace_digest'
-   AND to_jsonb(own_attempt.plan_decision_id) IS NOT DISTINCT FROM nullif(i->'plan_decision_id','null'::jsonb)
+   AND (to_jsonb(own_attempt.plan_decision_id) IS NOT DISTINCT FROM nullif(i->'plan_decision_id','null'::jsonb)
+    OR(i->>'source_status'='queued' AND i->>'source_mode'='implement' AND own_attempt.pinned_recipe->>'mode'='plan'
+    AND EXISTS(SELECT FROM forge_agent.coding_plan_decisions pd
+     WHERE(pd.owner_id,pd.project_alias,pd.task_id,pd.plan_attempt_id)=(w.owner_id,w.project_alias,w.root_task_id,own_attempt.attempt_id)
+     AND pd.decision_id=(i->>'plan_decision_id')::uuid AND pd.decision='resume')))
    AND to_jsonb(own_attempt.scope_plan_decision_id) IS NOT DISTINCT FROM nullif(i->'scope_plan_decision_id','null'::jsonb)
    AND to_jsonb(own_attempt.feedback_id) IS NOT DISTINCT FROM nullif(i->'feedback_id','null'::jsonb)
    AND to_jsonb(own_attempt.feedback_sha256) IS NOT DISTINCT FROM nullif(i->'feedback_sha256','null'::jsonb)
