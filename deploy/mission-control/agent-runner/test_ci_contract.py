@@ -10,8 +10,10 @@ from unittest.mock import Mock, patch
 
 import test_ci_supervision as supervision
 import work_external_delivery as delivery
-from work_ci_contract import (CiGateContractFactory, LEGACY_PROFILE, SCOPED_PROFILE,
-    LEGACY_CHECKS, SCOPED_BRANCH_CHECKS, SCOPED_MAIN_CHECKS, V2_PROTECTED_PATHS)
+from work_ci_contract import (CiGateContractFactory, EVENT_PROFILE, LEGACY_PROFILE, SCOPED_PROFILE,
+    LEGACY_CHECKS, SCOPED_BRANCH_CHECKS, SCOPED_MAIN_CHECKS, V2_PROTECTED_PATHS,
+    verify_verifier_policy_parity)
+from work_post_merge_provider import PostMergeProviderFactory, PostMergeVerificationProvider
 from work_native_jenkins import NativeJenkinsVerification, binding_version
 from work_publication_clients import PublicationError
 
@@ -117,6 +119,119 @@ class CiContractTest(unittest.TestCase):
             'source_gate_sha256': hashlib.sha256(delivery.canonical(old_map)).hexdigest()}
         self.assertEqual(supervision.CI.profile_gate_manifest(LEGACY_PROFILE, 'branch/one', selected, '0' * 64),
                          hashlib.sha256(delivery.canonical(old_manifest)).hexdigest())
+
+    def test_verifier_policy_parity_and_bootstrap_factories_fail_closed_on_v3_skew(self):
+        aligned_bytes = Path(supervision.CI.__file__).read_bytes()
+        for profile in (LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE):
+            verify_verifier_policy_parity(CiGateContractFactory(profile).create(), aligned_bytes)
+
+        skewed_v3_text = aligned_bytes.decode('utf-8')
+        for dropped in (
+            "            'deploy/mission-control/agent-runner/work_external_plan_override.py',\n",
+            "            'deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql',\n",
+        ):
+            self.assertIn(dropped, skewed_v3_text)
+            skewed_v3_text = skewed_v3_text.replace(dropped, '', 1)
+        skewed_v3_bytes = skewed_v3_text.encode('utf-8')
+        with self.assertRaises(ValueError):
+            verify_verifier_policy_parity(CiGateContractFactory(EVENT_PROFILE).create(), skewed_v3_bytes)
+        verify_verifier_policy_parity(CiGateContractFactory(SCOPED_PROFILE).create(), skewed_v3_bytes)
+
+        skewed_v2_bytes = aligned_bytes.replace(
+            b"    'deploy/mission-control/agent-runner/work_post_merge.py',\n", b'', 1
+        )
+        for profile in (SCOPED_PROFILE, EVENT_PROFILE):
+            with self.assertRaises(ValueError):
+                verify_verifier_policy_parity(CiGateContractFactory(profile).create(), skewed_v2_bytes)
+
+        skewed_prefix_bytes = aligned_bytes.replace(
+            b"deploy/mission-control/sql/migrations/0033_", b"deploy/mission-control/sql/migrations/9999_", 1
+        )
+        with self.assertRaises(ValueError):
+            verify_verifier_policy_parity(CiGateContractFactory(EVENT_PROFILE).create(), skewed_prefix_bytes)
+
+        for corrupt in (b'', b'def broken(:\n', b'CHECKS = ()\n'):
+            for profile in (LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE):
+                with self.assertRaises(ValueError):
+                    verify_verifier_policy_parity(CiGateContractFactory(profile).create(), corrupt)
+
+        with TemporaryDirectory(prefix='forge-parity-bootstrap-') as temporary:
+            root = Path(temporary)
+            binary = root / 'forge-jobs'
+            binary.write_bytes(b'frozen-jenkins-binary')
+            binary.chmod(0o700)
+            binary_sha = hashlib.sha256(binary.read_bytes()).hexdigest()
+            jenkins_cfg = root / 'jenkins.json'
+            delivery.durable_json(jenkins_cfg, {
+                'endpoint': 'http://127.0.0.1:18084/',
+                'allow_mutations': True,
+                'observed_parameters': list(delivery.PARAMETERS),
+            })
+            verifier = root / 'verify-candidate.py'
+            raw_delivery = {
+                'owner': 'owner', 'worker_id': 'worker-1',
+                'database': {'host': '/var/run/postgresql', 'port': 5432,
+                             'name': 'forge_agent', 'user': 'forge_coding_reconciler'},
+                'projects': {'homelab': {'repository': 'fixture/project', 'canonical_repo': str(root / 'repo')}},
+                'state_root': str(root / 'delivery-state'), 'spool_root': str(root / 'spool'),
+                'results_root': str(root / 'results'), 'github_config_dir': str(root / 'gh'),
+                'jenkins_binary': str(binary), 'jenkins_binary_sha256': binary_sha,
+                'jenkins_config': str(jenkins_cfg), 'verifier': str(verifier),
+                'jenkins_job': 'forge-native-candidate', 'verification_profile': EVENT_PROFILE,
+            }
+            config = delivery.DeliveryConfig.parse(raw_delivery)
+            real_read = delivery.read_private
+            def owned_read(path, **kw):
+                if kw.get('owner') == 0:
+                    kw['owner'] = os.geteuid()
+                return real_read(path, **kw)
+
+            # Missing verifier fails closed at bootstrap before creating state_root.
+            jenkins_factory = Mock()
+            delivery_factory = delivery.DeliveryProviderFactory(config, jenkins_factory=jenkins_factory)
+            jenkins_factory.assert_not_called()
+            self.assertFalse(config.state_root.exists())
+            with patch.object(delivery, 'read_private', side_effect=owned_read):
+                with self.assertRaises(OSError):
+                    delivery_factory.create()
+            jenkins_factory.assert_not_called()
+            self.assertFalse(config.state_root.exists())
+
+            # Skewed installed v3 verifier fails closed in DeliveryProviderFactory and PostMergeProviderFactory.
+            verifier.write_bytes(skewed_v3_bytes)
+            verifier.chmod(0o600)
+            pm_delivery_cfg = root / 'post-merge-delivery.json'
+            delivery.durable_json(pm_delivery_cfg, raw_delivery)
+            pm_config = SimpleNamespace(
+                worker=SimpleNamespace(owner='owner', projects={'homelab': root / 'repo'}),
+                repositories={'homelab': 'fixture/project'},
+                github_config_dir=root / 'gh',
+                state_root=root / 'publication-state',
+                post_merge_jenkins_delivery_config=pm_delivery_cfg,
+            )
+            pm_factory = PostMergeProviderFactory(pm_config)
+            self.assertFalse((pm_config.state_root / 'post-merge-ci').exists())
+            with patch.object(delivery, 'read_private', side_effect=owned_read):
+                with self.assertRaises(ValueError):
+                    delivery_factory.create()
+                with self.assertRaises(ValueError):
+                    pm_factory.create()
+            jenkins_factory.assert_not_called()
+            self.assertFalse(config.state_root.exists())
+            self.assertFalse((pm_config.state_root / 'post-merge-ci').exists())
+
+            # Aligned installed v3 verifier passes both factories and preserves frozen bindings.
+            verifier.write_bytes(aligned_bytes)
+            verifier.chmod(0o600)
+            with patch.object(delivery, 'read_private', side_effect=owned_read):
+                ready_delivery = delivery_factory.create()
+                ready_post_merge = pm_factory.create()
+            jenkins_factory.assert_called_once()
+            self.assertIsInstance(ready_delivery, delivery.TrustedDeliveryPort)
+            self.assertIsInstance(ready_post_merge, PostMergeVerificationProvider)
+            self.assertEqual(ready_post_merge.delivery.config.jenkins_binary_sha256, binary_sha)
+            self.assertEqual(ready_post_merge.delivery.config.jenkins_config, jenkins_cfg)
+            self.assertEqual(ready_post_merge.delivery.config.jenkins_job, 'forge-native-candidate')
 
 
 class ProducerConsumerTest(unittest.TestCase):

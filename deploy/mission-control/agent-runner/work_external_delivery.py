@@ -1064,9 +1064,10 @@ class DeliveryProviderFactory:
             raise ValueError('Jenkins must explicitly expose the complete public correlation contract')
         if hashlib.sha256(read_private(self.config.jenkins_binary, maximum=64 * 1024 * 1024)).hexdigest() != self.config.jenkins_binary_sha256:
             raise ValueError('Pinned Jenkins executable changed')
-        if self.config.verification_profile in {SCOPED_PROFILE, EVENT_PROFILE} or self.config.verifier.exists():
-            verifier_bytes = read_private(self.config.verifier, owner=0, maximum=1024 * 1024)
-            verify_verifier_policy_parity(verifier_bytes, self.config.verification_profile)
+        contract = contract_for_config(self.config)
+        if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} or self.config.verifier.exists() or self.config.verifier.is_symlink():
+            verifier_source = read_private(self.config.verifier, owner=0, maximum=1024 * 1024)
+            verify_verifier_policy_parity(contract, verifier_source)
         options = {}
         if self.observer is not None:
             self.observer.assert_scope(self.config.jenkins_job, selected['endpoint'], PARAMETERS)
