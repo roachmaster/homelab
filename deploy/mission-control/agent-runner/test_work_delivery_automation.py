@@ -207,6 +207,15 @@ class DeliveryAutomationPGTest(unittest.TestCase):
         self.assertTrue(self.db.delivery_release_finish(job,'deployed',receipt,'Actually activated before revocation; health proved'))
         self.assertTrue(self.db.delivery_release_finish(job,'deployed',receipt,'Actually activated before revocation; health proved'))
         self.assertEqual(self.service().catalog()['projects'][0]['delivery']['release']['status'],'deployed')
+    def test_release_checkpoint_does_not_rehash_plan_json_in_sql(self):
+        # M43: SQL no longer recomputes plan_sha256 over its own JSON
+        # serialization; it checks the format and the stored-plan conflict only.
+        self.verification();job=self.db.delivery_release_claim('release');plan=release_plan(job);self.root_authorize(job)
+        with self.assertRaises(Exception):self.db.delivery_release_checkpoint(job,{**plan,'plan_sha256':'not-a-digest'})
+        serializer_skew={**plan,'plan_sha256':'e'*64}
+        self.assertTrue(self.db.delivery_release_checkpoint(job,serializer_skew))
+        self.assertTrue(self.db.delivery_release_checkpoint(job,serializer_skew))
+        with self.assertRaises(Exception):self.db.delivery_release_checkpoint(job,plan)
     def test_precheckpoint_actor_started_can_recover_cleanup_after_revoke_and_restart(self):
         self.verification();job=self.db.delivery_release_claim('release');plan=release_plan(job);self.assertTrue(self.root_authorize(job)['allowed'])
         self.pg.admin_exec("UPDATE forge_agent.delivery_capability_grants SET enabled=false WHERE capability='release'")
