@@ -988,12 +988,16 @@ class WorkStore:
                 if not 0 <= offset_bytes < total_bytes:
                     raise Rejected(400, "invalid_request")
 
+            # _read_query returns the chunk rows on BOTH transports
+            # (run_read_query consumes the cursor itself on a direct
+            # connection and bypasses it through the proxy); a second
+            # fetchall here would discard them and report every
+            # nonempty published result as unavailable.
             rows = _read_query(db_cursor, "result_chunks_page",
                                {"owner_id": self._owner, "project_alias": project_alias,
                                 "task_id": task_id, "attempt_id": attempt_id,
                                 "end_byte": offset_bytes,
                                 "start_byte": offset_bytes + limit_bytes})
-            rows = db_cursor.fetchall()
 
         if not rows:
             raise Rejected(503, "unavailable")

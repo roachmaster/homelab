@@ -1476,6 +1476,12 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
                 " WHERE workflow_id = %s", (workflow_id,))
         for task_id in self._task_ids:
             self.fixture_sql(
+                "DELETE FROM forge_agent.coding_result_chunks"
+                " WHERE task_id = %s", (task_id,))
+            self.fixture_sql(
+                "DELETE FROM forge_agent.coding_attempts"
+                " WHERE task_id = %s", (task_id,))
+            self.fixture_sql(
                 "DELETE FROM forge_agent.coding_review_budget"
                 " WHERE root_task_id = %s", (task_id,))
             self.fixture_sql(
@@ -1550,6 +1556,82 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
         page = self.store.list_tasks(project_alias="homelab")
         self.assertIn(task_id,
                       [item["task_id"] for item in page["tasks"]])
+
+    def _insert_published_result(self, task_id, chunks):
+        """A published attempt whose result is stored as chunks."""
+        attempt_id = self.insert_attempt("mission-control", task_id)
+        content = "".join(chunks)
+        self.fixture_sql(
+            "UPDATE forge_agent.coding_attempts SET phase = 'stopped',"
+            " outcome = 'awaiting_review', outcome_digest = %s,"
+            " publish_receipt = '{}'::jsonb,"
+            " published_at = clock_timestamp(), result_sha256 = %s,"
+            " result_byte_count = %s, result_chunk_count = %s"
+            " WHERE attempt_id = %s",
+            (DIGEST64, SHA64, len(content.encode("utf-8")),
+             len(chunks), attempt_id))
+        for index, chunk in enumerate(chunks):
+            self.fixture_sql(
+                "INSERT INTO forge_agent.coding_result_chunks"
+                " (owner_id, project_alias, task_id, attempt_id,"
+                " chunk_index, content, byte_length, content_sha256)"
+                " VALUES ('mission-control', 'homelab', %s, %s, %s,"
+                " %s, %s, %s)",
+                (task_id, attempt_id, index, chunk,
+                 len(chunk.encode("utf-8")), SHA64))
+        return attempt_id
+
+    def test_result_read_through_the_proxy(self):
+        # Finding: WorkStore.result discarded the chunk rows
+        # _read_query returned and re-fetched from the cursor, so a
+        # valid nonempty published result failed with 503 on both
+        # transports. The rows _read_query returns are the result.
+        from uuid import UUID
+        task_id = self.insert_task()
+        self._task_ids.append(task_id)
+        attempt_id = self._insert_published_result(
+            task_id, ["hello ", "world", "!"])
+        record = self.store.result(
+            project_alias="homelab", task_id=UUID(task_id),
+            attempt_id=UUID(attempt_id))
+        self.assertEqual(record["content"], "hello world!")
+        self.assertEqual(record["total_bytes"], 12)
+        self.assertTrue(record["complete"])
+        self.assertIsNone(record["next_cursor"])
+        # Pagination: a small page returns a cursor, and the next
+        # page resumes exactly where the first stopped.
+        first = self.store.result(
+            project_alias="homelab", task_id=UUID(task_id),
+            attempt_id=UUID(attempt_id), limit_bytes=8)
+        self.assertEqual(first["content"], "hello wo")
+        self.assertFalse(first["complete"])
+        self.assertIsNotNone(first["next_cursor"])
+        second = self.store.result(
+            project_alias="homelab", task_id=UUID(task_id),
+            attempt_id=UUID(attempt_id), cursor=first["next_cursor"],
+            limit_bytes=8)
+        self.assertEqual(second["content"], "rld!")
+        self.assertTrue(second["complete"])
+        self.assertEqual(second["offset_bytes"], 8)
+
+    def test_result_read_on_direct_transport(self):
+        # The same regression on a direct connection: run_read_query
+        # consumes the cursor itself there, so the discarded fetchall
+        # returned an empty list and result() raised 503.
+        from uuid import UUID
+        from work_store import WorkStore
+        task_id = self.insert_task()
+        self._task_ids.append(task_id)
+        attempt_id = self._insert_published_result(
+            task_id, ["direct ", "result"])
+        direct = WorkStore(
+            "mission-control", {"homelab"},
+            lambda: self.cluster.connect("forge_agent", "forge_agent"))
+        record = direct.result(
+            project_alias="homelab", task_id=UUID(task_id),
+            attempt_id=UUID(attempt_id))
+        self.assertEqual(record["content"], "direct result")
+        self.assertTrue(record["complete"])
 
     def test_workflow_claim_leases_through_the_proxy(self):
         from types import SimpleNamespace
