@@ -11,6 +11,21 @@ prerequisites without installation/security changes or fixture credential logs.
 Root owns publication/deployment review; source work stays in this isolated908
 worktree with Cargo and QA evidence outside tracked source paths.
 
+The first fixed full browser run passed fixture startup and reached accepted-task
+reload. Its stale locator searched the inbox for the reader's full long title,
+although triage intentionally compacts inbox titles. Reopen by the fixture's
+unique visible prefix and assert exact full-title restoration in the reader.
+The failed run confirmed owned-resource cleanup; later groups remained not run.
+A subsequent stale assertion still required two-line CSS clipping, which triage
+intentionally replaced with whole-word bounded prose. The browser now verifies
+its exact bounded prefix, word boundary and no vertical clipping at all three
+viewports, while retaining horizontal-overflow and touch-target checks. Reload
+also verifies a single matching row and unchanged full title/correlation.
+The next browser obstruction was a missing explicit Tests-view fixture record:
+the journey seeded only Console, so its legitimate Tests request received404.
+Seed the structured test summary/cases for that view without changing application
+behavior or weakening the inspector's text, paging or escaping assertions.
+
 # Previous: Restore bounded embedded documentation rendering — 2026-11-26
 
 The user authorizes fixing deployment blockers. Jenkins99 on main a55a17f8

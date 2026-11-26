@@ -3121,6 +3121,8 @@ async function agentsJourney() {
     await check(page.locator('#agents-accept')).toBeHidden();
     const historyReads = relay.calls.filter(kind => kind === 'work_events').length;
     const acceptedTitle = await page.locator('#agents-task-title').innerText();
+    const acceptedCorrelation = await page.locator('#agents-task-correlation').textContent();
+    assert.match(acceptedCorrelation, /^Correlation · [0-9a-f-]{36}$/);
     await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
     // Reload restores the earlier local handoff draft. Reopen the saved task
     // from the list; progress history comes from PostgreSQL, not that draft.
@@ -3128,8 +3130,14 @@ async function agentsJourney() {
     await page.locator('#agents-back').click();
     await check(page.locator('#agents-overview')).toBeVisible();
     await chooseTaskScope('history');
-    await page.locator('#agents-tasks .fg-row-select').filter({ hasText: acceptedTitle }).click();
+    // Inbox titles are compact; reopen by this fixture's unique visible prefix,
+    // then verify the reader recovered the exact full accepted title.
+    const acceptedRow = page.locator('#agents-tasks .fg-row-select').filter({ hasText: 'Keep this local Agents draft.' });
+    await check(acceptedRow).toHaveCount(1);
+    await acceptedRow.click();
     await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-title')).toHaveText(acceptedTitle);
+    await check(page.locator('#agents-task-correlation')).toHaveText(acceptedCorrelation);
     await check(page.locator('#agents-task-status')).toContainText('Accepted');
     await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
     await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
@@ -3211,10 +3219,14 @@ async function agentsJourney() {
         const [a, b] = nodes.map(node => node.getBoundingClientRect());
         return phone ? b.top >= a.bottom - 1 : Math.abs(a.top - b.top) <= 1;
       }, width < 800), true, 'provider cards stack on phones and share a desktop row');
-      assert.equal(await accepted.locator('.fg-row-label').evaluate(node => {
-        const style = getComputedStyle(node);
-        return style.webkitLineClamp === '2' && node.getBoundingClientRect().height <= 2 * parseFloat(style.lineHeight) + 1;
-      }), true, 'long task titles occupy at most two readable lines');
+      const acceptedLabel = accepted.locator('.fg-row-label');
+      const titlePrefix = (await acceptedLabel.textContent()).replace(/…$/, '');
+      assert(titlePrefix.length <= 96 && acceptedTitle.startsWith(titlePrefix),
+        'the bounded inbox title preserves the exact assignment prefix');
+      assert(/\s/.test(acceptedTitle[titlePrefix.length]),
+        'the bounded inbox title ends at a whole-word boundary');
+      assert.equal(await acceptedLabel.evaluate(node => node.scrollHeight <= node.clientHeight + 1), true,
+        'the whole-word inbox title is readable without vertical clipping');
       for (const control of [codexCard.locator('.fg-metric-refresh'), summary]) {
         const box = await control.boundingBox();
         assert(box && box.width >= 44 && box.height >= 44, 'card actions retain touch-sized targets');
@@ -3785,6 +3797,7 @@ async function agentsJourney() {
       ],
     },{
       [`${branchActionId}:unit-tests:console`]:{content:cicdConsoleLog,pageSize:200,tests_passed:964,tests_failed:1,tests_skipped:0,test_cases:[{name:'tests::failing_case',status:'failed'}]},
+      [`${branchActionId}:unit-tests:tests`]:{content:'Tests: 964 passed, 1 failed, 0 skipped\n[failed] tests::failing_case',tests_passed:964,tests_failed:1,tests_skipped:0,test_cases:[{name:'tests::failing_case',status:'failed'}]},
     });
     await page.locator('#agents-refresh').click();
     await check(page.locator('#agents-cicd-panel')).toBeVisible();
