@@ -112,6 +112,43 @@ class AuthorHandoffSchemaTest(unittest.TestCase):
             cursor.execute('SELECT forge_agent.coding_workflow_author_profile(%s)', (intent['workflow_id'],))
             self.assertEqual(cursor.fetchone()[0], self.target_profile)
 
+    def test_queued_implementation_keeps_the_just_approved_plan_decision(self):
+        quota, _ = self.stop_quota()
+        self.fixture.submit()
+        plan, _critic = self.fixture.finish_plan_round()
+        receipt = self.rows('SELECT receipt_id FROM forge_agent.coding_reconciliation_receipts WHERE attempt_id=%s ORDER BY created_at DESC LIMIT 1', (plan.attempt_id,))[0][0]
+        intent = self.intent(plan.task_id, quota, own_lease=plan, receipt=str(receipt))
+        self.assertEqual(intent['source_status'], 'queued')
+        self.assertEqual(intent['source_mode'], 'implement')
+        self.assertIsNotNone(intent['plan_decision_id'])
+        with closing(self.cluster.connect('forge_agent')) as connection, connection, connection.cursor() as cursor:
+            cursor.execute("SET LOCAL forge.coding_owner='mission-control'")
+            self.insert(cursor, intent)
+            cursor.execute('SELECT forge_agent.coding_workflow_author_profile(%s)', (intent['workflow_id'],))
+            self.assertEqual(cursor.fetchone()[0], self.target_profile)
+
+    def test_forged_model_overlay_cannot_change_frozen_scope_or_review_policy(self):
+        quota, _ = self.stop_quota()
+        _, admitted = self.fixture.submit()
+        intent = self.intent(admitted['task_id'], quota)
+        intent['source_snapshot']['auto_merge'] = False
+        intent['source_snapshot'].pop('policy_digest')
+        intent['source_snapshot']['policy_digest'] = sha256_canonical(intent['source_snapshot'])
+        intent['source_snapshot_sha256'] = intent['source_snapshot']['policy_digest']
+        intent['effective_snapshot']['auto_merge'] = False
+        intent['effective_snapshot'].pop('policy_digest')
+        intent['effective_snapshot']['policy_digest'] = sha256_canonical(intent['effective_snapshot'])
+        with closing(self.cluster.connect('forge_agent')) as connection, connection, connection.cursor() as cursor:
+            cursor.execute("SET LOCAL forge.coding_owner='mission-control'")
+            cursor.execute("""INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt)
+                VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)""",
+                (intent['workflow_id'], intent['owner'], 'homelab', 'provider-model-route:' + str(uuid4()),
+                 Json(dict(original_snapshot_sha256=intent['original_snapshot_sha256'], effective_snapshot=intent['source_snapshot'])),
+                 Json(dict(status='provider_model_routed'))))
+            self.insert(cursor, intent)
+            cursor.execute('SELECT forge_agent.coding_workflow_author_profile(%s)', (intent['workflow_id'],))
+            self.assertIsNone(cursor.fetchone()[0])
+
     def test_malformed_foreign_or_self_review_handoffs_never_grant_authority(self):
         quota, _ = self.stop_quota()
         _, admitted = self.fixture.submit()
