@@ -10,7 +10,7 @@ import re
 from uuid import UUID, uuid5
 
 from work_ci_contract import CiGateContractFactory, EVENT_PROFILE
-from work_external_delivery import read_private
+from work_external_delivery import read_private, native_action_ids
 from work_external_review_context import canonical, strict_json
 from work_native_ci_postfix_proof import _root_read
 from work_verification import check_id, protected_retry_observation
@@ -94,9 +94,8 @@ class NativePostfixPassProof:
         tree = _hex(request['candidate_tree'], _SHA)
         identity = {**scope, 'candidate_commit': candidate, 'candidate_tree': tree,
                     'native_gate_manifest_sha256': review['gate_manifest_sha256']}
-        expected_action = str(uuid5(UUID(scope['workflow_id']), _VERSION + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
         if (binding.get('version') != _VERSION or binding.get('scope') != scope
-                or any(request.get(k) != v for k, v in scope.items()) or action != expected_action
+                or any(request.get(k) != v for k, v in scope.items()) or action not in native_action_ids(_VERSION, identity)
                 or request.get('action_id') != action or request.get('prepare_action_id') != str(uuid5(UUID(action), 'candidate-bundle'))
                 or request.get('candidate_commit') != candidate or request.get('verification_profile') != EVENT_PROFILE
                 or binding.get('native_gate_manifest_sha256') != review['gate_manifest_sha256']
