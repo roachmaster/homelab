@@ -1691,6 +1691,12 @@ class Proxy:
     def _new_connection(self, role):
         kwargs = dict(self.dsn)
         kwargs["user"] = role
+        # Every proxy-owned connection identifies itself, so the
+        # cutover quiescence check can tell the proxy's own pooled
+        # sessions (which must stay up) from caller sessions (which
+        # must drain). Without this the drain could never settle:
+        # the proxy connects as the caller roles themselves.
+        kwargs["application_name"] = "forge-pg-proxy"
         # Per-role passwords come from PGPASSFILE / the environment.
         return self.connect(**kwargs)
 
@@ -2156,7 +2162,9 @@ class NotificationHub:
     def _listen_loop(self, channel):
         while not self._stop.is_set():
             try:
-                conn = self.connect(**dict(self.dsn, user="forge_pg_proxy"))
+                conn = self.connect(**dict(
+                    self.dsn, user="forge_pg_proxy",
+                    application_name="forge-pg-proxy"))
                 conn.set_isolation_level(
                     psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
                 with closing(conn.cursor()) as cur:

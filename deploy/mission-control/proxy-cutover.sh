@@ -74,13 +74,19 @@ migration_applied() {
 check_quiescence() {
     # Returns 0 with a report on stdout when quiescent, 1 otherwise.
     # Caller sessions: any backend for a caller role other than this
-    # script's own connection. Leased assignments count only ACTIVE
+    # script's own connection and other than the proxy's own
+    # (application_name 'forge-pg-proxy') sessions. Leased assignments count only ACTIVE
     # leases (lease_until still in the future): expiration alone never
     # changes the stored status, so counting every 'leased' row would
     # make the drain wait out leases the reconciler already cleared.
     local sessions leased_assignments leased_runs
+    # The proxy's own sessions are excluded by application_name:
+    # the proxy stays running through the drain (it must — the
+    # drain reconciles leases through it) and holds pooled
+    # connections AS the caller roles, so counting them would make
+    # quiescence unreachable.
     sessions="$(psql_as postgres postgres -Atc \
-        "SELECT count(*) FROM pg_stat_activity WHERE usename IN ($CALLER_ROLES) AND pid <> pg_backend_pid()")"
+        "SELECT count(*) FROM pg_stat_activity WHERE usename IN ($CALLER_ROLES) AND pid <> pg_backend_pid() AND coalesce(application_name, '') <> 'forge-pg-proxy'")"
     # quiescence: leased_assignments query (tested by QuiescenceTest)
     leased_assignments="$(psql_as postgres forge_agent -Atc \
         "SELECT count(*) FROM forge_external_agent.assignments WHERE status = 'leased' AND lease_until > clock_timestamp()")"
@@ -330,15 +336,17 @@ for role in forge_gpu_worker muse_events; do
         "$role" "$credential_directory" "$role"
 done
 
-# Terminate any remaining non-proxy sessions for the caller roles.
-# The proxy is not running yet, so every such session is non-proxy
-# by definition; the proxy re-establishes its own connections on
-# start. The script's own backend (role postgres) is excluded.
+# Terminate any remaining non-proxy sessions for the caller
+# roles. The proxy IS running (it started at the preparation
+# stage); its own sessions carry application_name
+# 'forge-pg-proxy' and are excluded — they are the post-cutover
+# write path, not stale callers. The script's own backend (role
+# postgres) is excluded.
 terminated="$(psql_as postgres postgres -Atc \
-    "SELECT count(*) FROM pg_stat_activity WHERE usename IN ($CALLER_ROLES) AND pid <> pg_backend_pid()")"
+    "SELECT count(*) FROM pg_stat_activity WHERE usename IN ($CALLER_ROLES) AND pid <> pg_backend_pid() AND coalesce(application_name, '') <> 'forge-pg-proxy'")"
 if [[ "$terminated" != 0 ]]; then
     psql_as postgres postgres -c \
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename IN ($CALLER_ROLES) AND pid <> pg_backend_pid()"
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename IN ($CALLER_ROLES) AND pid <> pg_backend_pid() AND coalesce(application_name, '') <> 'forge-pg-proxy'"
     printf 'terminated %s stale caller session(s)\n' "$terminated"
 fi
 
@@ -347,10 +355,12 @@ fi
 "$directory/setup-postgres.sh"
 printf 'provisioning verified at the post-cutover stage\n'
 
-# Start the proxy, then restart the caller services that were
+# Restart the proxy (it has been running since the preparation
+# stage) so its pooled connections re-authenticate under the
+# post-cutover HBA, then restart the caller services that were
 # running before. The proxy readiness check lives in
 # setup-runner.sh (127.0.0.1:18087 /health).
-systemctl start forge-pg-proxy.service
+systemctl restart forge-pg-proxy.service
 /usr/bin/python3 - <<'PY'
 import http.client
 import sys

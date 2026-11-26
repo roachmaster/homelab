@@ -565,6 +565,34 @@ class ProxyReadTest(unittest.TestCase):
                 if param == "owner_id" or param.endswith("_owner_id")}
             self.assertTrue(owner_params, name)
 
+    def test_proxy_connections_identify_themselves(self):
+        # Round-6 finding 6: the cutover quiescence check excludes
+        # the proxy's own sessions by application_name, so every
+        # connection the proxy opens must carry it — otherwise the
+        # drain counts the proxy's pooled caller-role sessions and
+        # can never settle.
+        seen = []
+
+        def connect(**kwargs):
+            seen.append(kwargs)
+            return FakeConnection(user=kwargs.get("user"))
+
+        callers = {}
+        for name in ("coordinator",):
+            callers[name] = proxy.Caller(
+                name, proxy.CALLER_ROLES[name], "mission-control",
+                proxy.CALLER_ACTOR_KINDS[name],
+                proxy.CALLER_ALLOWLISTS[name])
+        instance = proxy.Proxy(
+            callers, {"host": "127.0.0.1", "port": 5432,
+                      "dbname": "forge_agent"}, connect=connect)
+        instance.execute(callers["coordinator"],
+                         "read.forge_agent.coding_tasks", {})
+        self.assertTrue(seen)
+        self.assertTrue(all(
+            kwargs.get("application_name") == "forge-pg-proxy"
+            for kwargs in seen))
+
     def test_reads_reject_unknown_tables_and_columns(self):
         instance, _ = make_proxy()
         coordinator = instance.callers["coordinator"]

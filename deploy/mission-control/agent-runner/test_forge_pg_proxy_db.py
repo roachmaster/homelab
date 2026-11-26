@@ -2301,7 +2301,8 @@ class QuiescenceTest(ProxyDbTestCase, FixtureMixin):
         " WHERE pid <> pg_backend_pid() AND usename IN"
         " ('forge_agent', 'forge_coding_worker',"
         " 'forge_coding_reconciler', 'forge_gpu_worker',"
-        " 'forge_pg_proxy', 'muse_events', 'muse_proxy_writer')")
+        " 'muse_proxy_writer', 'muse_events', 'forge_pg_proxy')"
+        " AND coalesce(application_name, '') <> 'forge-pg-proxy'")
     ASSIGNMENT_SQL = (
         "SELECT count(*) FROM forge_external_agent.assignments"
         " WHERE status = 'leased'"
@@ -2347,6 +2348,35 @@ class QuiescenceTest(ProxyDbTestCase, FixtureMixin):
             " clock_timestamp() + interval '5 minutes')",
             (task, json.dumps(intent), DIGEST64, _uuid()))
         return task
+
+    def test_proxy_attributed_sessions_do_not_block_quiescence(self):
+        # Round-6 finding 6: the proxy stays running through the
+        # cutover drain and holds pooled sessions AS the caller
+        # roles; only application_name tells them apart. A caller
+        # session attributed to the proxy must not block, and an
+        # unattributed one still must.
+        baseline = self.fixture_sql(self.SESSION_SQL)[0][0]
+        proxy_like = psycopg2.connect(
+            host=self.cluster.sockdir,
+            port=self.cluster.port or 5432,
+            dbname="forge_agent", user="forge_coding_worker",
+            application_name="forge-pg-proxy")
+        try:
+            proxy_like.autocommit = True
+            self.assertEqual(
+                self.fixture_sql(self.SESSION_SQL)[0][0], baseline)
+        finally:
+            proxy_like.close()
+        plain = self.cluster.connect("forge_agent",
+                                     "forge_coding_worker")
+        try:
+            plain.autocommit = True
+            self.assertEqual(
+                self.fixture_sql(self.SESSION_SQL)[0][0], baseline + 1)
+        finally:
+            plain.close()
+        self.assertEqual(
+            self.fixture_sql(self.SESSION_SQL)[0][0], baseline)
 
     def test_leased_assignment_blocks_quiescence(self):
         task = self._leased_assignment()
