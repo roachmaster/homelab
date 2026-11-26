@@ -374,4 +374,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=45)
 \ir migrations/0045_typed_renew_progress_deadline.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(45,'typed_renew_progress_deadline');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=46) AS apply_0046
+\gset
+\if :apply_0046
+\ir migrations/0046_failure_cause.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(46,'failure_cause');
+\endif
 COMMIT;
