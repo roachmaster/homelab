@@ -1,10 +1,17 @@
 # Forge agent runner
 
+**Operating note — 26 November 2026:** the event/API runner is deliberately
+stopped and disabled at boot. Coding, publication and external-delivery workers
+are separate services and remain active; this is not a full queue/workflow pause.
+The live database reports schema40. Consolidated source in PR29 adds schema41
+branch/stage contracts and ABI16, with qualification/rollout still outstanding.
+See the [current system picture](../../../docs/design/implementation-status.md).
+
 [AGY quota handoff to Codex](../../../docs/architecture/agent-quota-handoff.md)
 describes optional source-bound author delegation, retained Plans/workspaces,
 independent review and required schema/configuration rollout.
 
-Mission Control runs `forge-agent-runner.service` as the `forge_agent` account.
+When started, Mission Control runs `forge-agent-runner.service` as the `forge_agent` account.
 The service listens on `127.0.0.1:18083`. In legacy mode it uses the private
 tunnel on `127.0.0.1:18082` to send inference requests to Forge GPU. In dispatch
 mode the API stores jobs in PostgreSQL and consumes results from a worker on Forge.
@@ -920,7 +927,7 @@ and every earlier immutable recipe, receipt and migration. See the [Muse provide
 design](../../../docs/architecture/muse-code-provider.md) for the fixed command,
 accounting convention, lifecycle and activation boundary.
 
-### Persistent per-agent branches & correlation CI/CD stages (migration 0039)
+### Persistent per-agent branches & correlation CI/CD stages (migration 0041)
 
 In source, `branch_policy` defaults to `"persistent-agent-v1"` across `WorkConfig`,
 `WorkerConfig`, `PublicationConfig`, and external delivery (with explicit
@@ -941,4 +948,4 @@ open PRs confirmed on GitHub (otherwise `reservation_blocker = 'open_pr_awaiting
 Read-only correlation CI/CD stage projections and bounded Errors/Tests/Console logs
 are exposed through `ide.work.catalog`, `ide.work.get`, and `ide.work.cicd.stage_log`
 backed by `forge_agent.jenkins_stage_results` and `jenkins_stage_log_chunks`.
-Live migration 0039 activation and portal deployment remain separate authorized steps.
+Live migration 0041 activation and portal deployment remain separate authorized steps.

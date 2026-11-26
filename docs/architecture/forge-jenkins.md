@@ -218,7 +218,7 @@ Native-provider tests use owned fixtures and do not impersonate production
 model approvals or Jenkins results. Deployment and live-task evidence are
 recorded in `AGENT_WORK.md`.
 
-## Persistent agent branches & portal stage inspection (source M39)
+## Persistent agent branches & portal stage inspection (source M41)
 
 Under default `branch_policy = "persistent-agent-v1"`, native verification and
 publication reuse one persistent branch per profile (`forge/agent/<profile-slug>`

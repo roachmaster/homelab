@@ -3,10 +3,11 @@ system: Forge IDE and local agent
 verified_at_utc: '2026-11-11T20:18:21Z'
 purpose: Record implemented Forge capabilities and distinguish current local deployment from dated remote observations.
 scope:
-- Generated portal, Chat, Mail, source inspection and optional managed editing
+- Agents/Workbench/Home/Design portal, source inspection and optional managed editing
+- Retained inactive Chat/Mail history and backend contracts
 - Private queued inference and PostgreSQL state
 - Game runtime, worker I/O and optional static-web Studio
-- Proposed general agent orchestration, repository sandbox and Bash execution
+- Deferred generic fleet orchestration, repository sandbox and Bash execution proposals
 status_definitions:
   deployed: Observed in the current operating setup.
   retained: Available as supporting material for maintenance or rebuilds.
@@ -20,11 +21,11 @@ mission_control_deployment:
   service_bundles: Reviewed unit files and registered drop-ins from an operator-provided directory.
   future_provisioning:
     status: deferred
-    authoring: A Forge GPU model drafts K3s provisioning from the verified service inventory.
+    authoring: Historical K3s proposal only; no cluster/container rollout is selected or authorized.
     validation: Mission Control validates the proposed changes before a trusted deployment step.
 hosts:
 - id: mission-control
-  role: Serves the IDE and workbench and relays private inference requests.
+  role: Serves the portal/source agent and PostgreSQL-backed coding/delivery services; event/API runner is currently stopped.
   observed_resources:
     vcpus: 8
     usable_ram_gib: 62
@@ -32,7 +33,7 @@ hosts:
     kvm_device_present: true
   proposed_role: Native systemd host for the IDE, agent, storage, and CPU-only sandbox.
 - id: forge-gpu
-  role: Runs the local inference adapter and its llama.cpp child.
+  role: Retained inference/reference host; current GPU/model service availability is not requalified here.
   observed_resources:
     cpu: AMD Ryzen 7 7700X
     cores: 8
@@ -389,9 +390,46 @@ first_acceptance_checks:
 - Disconnecting Forge leaves saved conversations readable on Mission Control.
 references:
   postgres_listen: https://www.postgresql.org/docs/current/sql-listen.html
-documentation_reviewed_on: '2026-11-18'
-observation_scope: verified_at_utc remains the date of the original remote/hardware observations; local_checkpoint
+documentation_reviewed_on: '2026-11-26'
+observation_scope: verified_at_utc remains the date of original remote/hardware observations; current_runtime_checkpoint supersedes local status, while local_checkpoint
   is a separate read-only check. This document is not an automatic release ledger.
+current_runtime_checkpoint:
+  checked_at_utc: '2026-11-26T04:56:09Z'
+  host: mission-control
+  source_review: backup/main application code 0163a615, draft PR29
+  main_tip_at_review: 4bf1d230
+  main_tip_change: Preserved resubmission queue added after the application consolidation.
+  source_browser_abi: 16
+  source_schema: 41
+  observed_database_schema: 40
+  observed_database_migration: provider_author_handoff
+  event_api_runner:
+    service: forge-agent-runner.service
+    active_state: inactive
+    unit_file_state: disabled
+    meaning: Intentional API/event front-door stop; other workers were not stopped.
+  observed_active_enabled_services:
+  - forge-coding-worker.service
+  - forge-codex-author-worker.service
+  - forge-gemini-worker.service
+  - forge-grok-worker.service
+  - forge-publication-worker.service
+  - forge-external-delivery.service
+  - homelab-web.service
+  - homelab-agent.service
+  - jenkins.service
+  configured_release_labels:
+    web: portal-auto-0070e78f
+    api_worker_publication_external_delivery: codex-quota-handoff-0070e78f
+  evidence_scope:
+  - Read-only systemctl state and ExecStart inspection; read-only migration registry query.
+  - Service liveness is not task progress, provider readiness, or end-to-end acceptance.
+  - No deployment, service restart, remote GPU inspection, or full database function/grant audit.
+  - Installed artifact digests, selected private CI profile, Studio relay and managed-write settings were not requalified.
+  pending:
+  - Explicit integrated source-fingerprint qualification and actual-browser acceptance.
+  - Main-scoped exact-source verification and coordinated ABI16/schema41 rollout.
+  interpretation: This checkpoint supersedes older local readiness claims; components and flows elsewhere retain their original dated observation/proposal scope.
 local_checkpoint:
   checked_on: '2026-11-18'
   services_active:

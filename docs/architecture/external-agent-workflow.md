@@ -213,7 +213,7 @@ a `P0009` `BEFORE UPDATE OR DELETE` trigger). Prior plan reviews, artifacts,
 and exhausted retry events remain untouched, and full independent Codex code
 review, Jenkins checks, and guarded merge execute unchanged.
 
-## Persistent per-agent branch tracking (source M39)
+## Persistent per-agent branch tracking (source M41)
 
 External author profiles (such as `muse-db-primary`) resolve to a single
 persistent non-`main` branch (`forge/agent/muse-db-primary` by default, or an
@@ -224,4 +224,4 @@ enforces the same exclusive active-workflow ownership contract through
 `source_branch`, tracking trunk `main` fetch SHA/timestamps and Jenkins cache
 status in `forge_agent.agent_branch_state`, and projecting both branch and
 post-merge Jenkins stages under the workflow's `correlation_id`. Live rollout
-of migration 0039 and delivery services remains a separate authorized step.
+of migration 0041 and delivery services remains a separate authorized step.

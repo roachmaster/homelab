@@ -1,4 +1,21 @@
-# Current: Consolidate local development and remaining feat/fix branches — 2026-11-26
+# Current: Reconcile the system picture and delivery direction — 2026-11-26
+
+User requests reviewing the consolidated changes and updating files/notes to
+reflect the current system and where it is headed. Update the existing status,
+roadmap, architecture and operating references on backup/main / draft PR29.
+Use application code 0163a615 and dated read-only runtime evidence. Separate
+framework primitives, the concrete Python/PostgreSQL delivery application,
+installed configuration, qualified artifacts and future proposals.
+
+Observed schema40; event/API runner inactive/disabled; coding/publication/
+external-delivery/web/source-agent/Jenkins services active/enabled. Source adds
+ABI16/schema41; historical fingerprint and actual-browser qualification remain
+open. Preserve dated historical evidence and existing migration files. This is
+a documentation pass, not a deployment, service-start, test-qualification or
+workflow-policy change. Review links, YAML and contract references, then publish
+the notes through the existing PR.
+
+# Previous: Consolidate local development and remaining feat/fix branches — 2026-11-26
 
 User authorizes merging every local development branch plus remote
 `feat/forge-ide-agents-triage` and `fix/native-postfix-verification-20261125`
