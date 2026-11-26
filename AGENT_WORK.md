@@ -25,6 +25,12 @@ The next browser obstruction was a missing explicit Tests-view fixture record:
 the journey seeded only Console, so its legitimate Tests request received404.
 Seed the structured test summary/cases for that view without changing application
 behavior or weakening the inspector's text, paging or escaping assertions.
+The full browser run then reached the expanded implementation reader, whose
+acceptance still expected three tables and earlier checkpoint/navigation wording.
+Its source document now contains six tables. Keep current source ABI references
+at16 in both current-contract rows; dated historical release identities remain
+unchanged. Align the reader assertions to the reviewed document and retain all
+same-tab, table, safe-link and narrow-layout checks.
 
 # Previous: Restore bounded embedded documentation rendering — 2026-11-26
 
