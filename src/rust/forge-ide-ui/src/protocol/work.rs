@@ -1013,6 +1013,48 @@ pub struct WorkLogEvent {
     pub external_progress: Option<WorkExternalProgress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_progress: Option<WorkWorkflowProgress>,
+    /// Why a failed attempt failed (M46); absent on older events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<WorkEventFailure>,
+}
+/// Machine-readable cause plus a bounded summary attached by the failing
+/// component when the attempt failed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkEventFailure {
+    pub cause: WorkFailureCause,
+    pub summary: String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkFailureCause {
+    MalformedOutput,
+    PolicyUnavailable,
+    ContextUnavailable,
+    ResourceBound,
+    AgentInput,
+    AgentFailed,
+}
+impl WorkFailureCause {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MalformedOutput => "malformed agent output",
+            Self::PolicyUnavailable => "execution policy unavailable",
+            Self::ContextUnavailable => "repository or context unavailable",
+            Self::ResourceBound => "resource bound exceeded",
+            Self::AgentInput => "agent input not delivered",
+            Self::AgentFailed => "agent failed",
+        }
+    }
+}
+impl WorkEventFailure {
+    pub fn is_valid(&self) -> bool {
+        self.summary.len() <= 512
+            && self
+                .summary
+                .chars()
+                .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1972,6 +2014,9 @@ impl WorkResponse {
                             .count()
                                 <= 1
                             && (!e.progress_verified || e.progress.is_some())
+                            && e.failure
+                                .as_ref()
+                                .is_none_or(|f| e.kind == WorkEventKind::Failed && f.is_valid())
                     })
                     && events
                         .iter()
@@ -2280,6 +2325,28 @@ where
 mod tests {
     use super::*;
     #[test]
+    fn failed_event_failure_cause_is_optional_typed_and_bounded() {
+        let json = r#"{"event_id":"77777777-7777-4777-8777-777777777777","correlation_id":"99999999-9999-4999-8999-999999999999","sequence":5,"kind":"failed","created_at":"2026-11-26T08:00:00Z","failure":{"cause":"malformed_output","summary":"The coding agent returned malformed machine output."}}"#;
+        let event: WorkLogEvent = serde_json::from_str(json).unwrap();
+        let failure = event.failure.as_ref().unwrap();
+        assert_eq!(failure.cause, WorkFailureCause::MalformedOutput);
+        assert!(failure.is_valid());
+        assert!(serde_json::from_str::<WorkLogEvent>(
+            &json.replace("malformed_output", "host_logs")
+        )
+        .is_err());
+        let old = json.split(r#","failure""#).next().unwrap().to_string() + "}";
+        assert!(serde_json::from_str::<WorkLogEvent>(&old)
+            .unwrap()
+            .failure
+            .is_none());
+        let long = WorkEventFailure {
+            cause: WorkFailureCause::AgentFailed,
+            summary: "x".repeat(513),
+        };
+        assert!(!long.is_valid());
+    }
+    #[test]
     fn failure_reasons_are_optional_bounded_and_tied_to_their_code() {
         let wire = serde_json::json!({
             "kind": "work_failed",
@@ -2385,6 +2452,7 @@ mod tests {
                 progress_verified: false,
                 external_progress: None,
                 workflow_progress: None,
+                failure: None,
                 sequence: 5,
                 kind: WorkEventKind::Checkpoint,
                 progress: None,
