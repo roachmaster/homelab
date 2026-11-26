@@ -3,6 +3,8 @@ use super::*;
 fn policy() -> WorkWorkflowPolicy {
     WorkWorkflowPolicy {
         policy_digest: "c".repeat(64),
+        policy_id: None,
+        policy_generation: None,
         author_profile: "agy-primary".into(),
         reviewer_profile: "codex-primary".into(),
         max_plan_revisions: 3,
@@ -31,6 +33,7 @@ fn add_external(agents: &mut Agents) {
         backend: WorkBackend::Muse,
         model: "External runner".into(),
         modes: vec![WorkMode::Plan, WorkMode::Review],
+        branch: None,
         transport: Some(WorkTransport::ExternalDb),
     });
 }
@@ -198,16 +201,14 @@ fn event_retry_progress_is_independent_of_lifetime_revision_history() {
     task.retry_event = Some(event.clone());
     assert!(task.is_valid());
     let task_summary = task.summary();
-    assert_eq!(
-        agents.task_summary_badge(&task_summary).label,
-        "Fixing tests · Retry 4/20"
-    );
+    assert_eq!(agents.task_summary_badge(&task_summary).label, "Repairing");
     let mut view = ViewModel::default();
     agents.project(&mut view, true, true, true);
     assert!(view
         .texts
         .iter()
-        .any(|binding| binding.id == "agents-retry-event" && binding.text == event.label()));
+        .any(|binding| binding.id == "agents-retry-event"
+            && binding.text == "Tests retry budget · 4 of 20 used · Open"));
     assert!(view
         .texts
         .iter()
@@ -223,21 +224,21 @@ fn terminal_projection_badges_preserve_live_retries_and_settle_terminal_states()
             WorkRetryKind::Review,
             2,
             WorkRetryStatus::Open,
-            "Addressing code review · Retry 2/20",
+            "Repairing",
         ),
         (
             WorkWorkflowPhase::Checks,
             WorkRetryKind::Verification,
             0,
             WorkRetryStatus::Open,
-            "Retrying verification · Retry 0/20",
+            "Running checks",
         ),
         (
             WorkWorkflowPhase::Repair,
             WorkRetryKind::FeedbackDelivery,
             1,
             WorkRetryStatus::Open,
-            "Recovering feedback delivery · Retry 1/20",
+            "Repairing",
         ),
         (
             WorkWorkflowPhase::Escalated,
@@ -265,7 +266,7 @@ fn terminal_projection_badges_preserve_live_retries_and_settle_terminal_states()
             WorkRetryKind::Review,
             MAX_AGENT_RETRIES,
             WorkRetryStatus::Exhausted,
-            "Code review needs attention · Retry 20/20",
+            "Needs attention",
         ),
     ];
     for (phase, kind, used, status, expected_label) in cases {
@@ -566,6 +567,7 @@ fn new_assignment_cannot_discard_an_inflight_initial_or_refreshed_catalog() {
                 profiles: incoming.profiles,
                 worker_status: incoming.worker_status,
                 observed_at: incoming.observed_at,
+                agent_branches: vec![],
             }),
             "loaded",
         );

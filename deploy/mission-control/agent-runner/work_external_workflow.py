@@ -13,7 +13,7 @@ from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
 from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64,ExternalSourceIntegration
 from work_retry_policy import AGENT_RETRY_LIMIT,AGENT_RETRY_POLICY_ID,effective_limit
-from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause
+from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause, escalation_cause
 
 TERMINAL={'completed','cancelled','escalated'}
 MAX_NATIVE_VERDICT=65536
@@ -74,6 +74,9 @@ def validate_branch_scope(scope,*,candidate_commit,expected_main):
     raise ValueError('Invalid workflow branch scope')
 
 
+# Manifest-return rounds per workflow before the loop is stopped (manifest-return-loop defect).
+MANIFEST_RETURN_LIMIT=3
+
 class ExternalWorkflowStore:
     def __init__(self,config,catalog,*,recovery_grant_provider=None,plan_override_grant_provider=None):
         self.config,self.catalog=config,catalog
@@ -104,11 +107,12 @@ class ExternalWorkflowStore:
     def _resolve_retry(self,cursor,w,kind,source_id,digest):
         if self._retry_events is not None:return self._retry_events.resolve_verified(cursor,self._retry_scope(w),kind,source_id,digest,phase_id=kind)
 
-    def _reserve_retry(self,cursor,w,kind,source_id,digest,action_key,*,passed_kinds=(),phase_id=None,passed_phase_ids=()):
+    def _reserve_retry(self,cursor,w,kind,source_id,digest,action_key,*,passed_kinds=(),phase_id=None,passed_phase_ids=(),infrastructure=False):
         event=self._retry_events.observe_failure(cursor,self._retry_scope(w),kind,source_id,digest,passed_kinds,phase_id=phase_id or kind,passed_phase_ids=passed_phase_ids)
         event=self._retry_events.reserve(cursor,event['event_id'],action_key)
         if event['status']=='exhausted':
-            self._escalate(cursor,w,kind.replace('_',' ').capitalize()+' event exhausted its twenty retry attempts. All source and review evidence are retained.')
+            self._escalate(cursor,w,kind.replace('_',' ').capitalize()+' event exhausted its twenty retry attempts. All source and review evidence are retained.',
+                           cancel_children=not infrastructure)
             return None
         return event
 
@@ -222,14 +226,14 @@ class ExternalWorkflowStore:
                      actor=COORDINATOR_ACTOR)
         cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
 
-    def _save(self,cursor,w,summary,*,phase=None,related_task_id=None):
+    def _save(self,cursor,w,summary,*,phase=None,related_task_id=None,details=None):
         if phase is not None:w['phase']=phase
         cursor.execute('''UPDATE forge_external_workflow.workflows SET active_task_id=%s,phase=%s,plan_revisions=%s,code_revisions=%s,
           enabled=%s,state=%s,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND revision=%s RETURNING revision''',
           (w['active_task_id'],w['phase'],w['plan_revisions'],w['code_revisions'],w['enabled'],Json(w['state']),w['workflow_id'],w['revision']))
         row=cursor.fetchone()
         if not row:raise Rejected(409,'result_mismatch')
-        w['revision']=row['revision'];self._event(cursor,w,summary,related_task_id)
+        w['revision']=row['revision'];self._event(cursor,w,summary,related_task_id,details=details)
 
     def _task(self,cursor,w,task_id=None):
         cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(%s,%s,%s) FOR UPDATE',(self.owner,w['project_alias'],task_id or w['active_task_id']))
@@ -465,14 +469,17 @@ class ExternalWorkflowStore:
             raise Rejected(409,'result_mismatch')
         for task in (root,source,critic):
             if not self.related_task(cursor,w['project_alias'],w['workflow_id'],task['id']):raise Rejected(409,'result_mismatch')
-        if (critic['status']!='cancelled' or critic['latest_attempt_id'] is None
+        # Before M45-era escalation the cascade cancelled root/source/critic; an
+        # infrastructure escalation now leaves them as they were. Accept both.
+        source_cancelled=source['status']=='cancelled'
+        if (critic['status'] not in {'cancelled','needs_reconcile'} or critic['latest_attempt_id'] is None
                 or critic['agent_profile']!=w['reviewer_profile']
                 or critic['recipe_digest']!=w['snapshot']['recipes']['reviewer_review']['digest']
                 or source['mode']!='implement' or source['latest_attempt_id'] is not None
-                or source['agent_profile']!=w['author_profile'] or source['status']!='cancelled'
+                or source['agent_profile']!=w['author_profile'] or source['status'] not in {'cancelled','awaiting_review'}
                 or source['recipe_digest']!=w['snapshot']['recipes']['author_implement']['digest']
-                or source['revision']!=target['source_revision']+1
-                or root['status']!='cancelled' or root['latest_attempt_id'] is not None):
+                or source['revision']!=target['source_revision']+(1 if source_cancelled else 0)
+                or root['status'] not in {'cancelled','awaiting_review'} or root['latest_attempt_id'] is not None):
             raise Rejected(409,'not_reviewable')
         cursor.execute("SELECT EXISTS(SELECT FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=ANY(%s::uuid[]) AND action='cancel') AS cancelled",
             (self.owner,w['project_alias'],[str(t['id']) for t in (root,source,critic)]))
@@ -616,11 +623,32 @@ class ExternalWorkflowStore:
             except ValueError:
                 return self._revise(cursor,w,'code',{'summary':'Return the exact candidate JSON manifest with version,candidate_commit,candidate_tree,base_revision,summary (and optional source_branch). Preserve your existing branch and completed work.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
             if manifest['base_revision']!=task['base_revision']:
+                # Bound the manifest-return loop: an identical manifest returned
+                # again (or too many return rounds) terminates with a recorded
+                # reason instead of queueing another identical implement task.
+                returned={k:manifest[k] for k in ('candidate_commit','candidate_tree','base_revision')}
+                history=w['state'].get('manifest_returns',{'rounds':0,'last':None})
+                recorded=w['state'].get('candidate') or {}
+                repeated=(history.get('last')==returned
+                          or (recorded.get('author_candidate_commit',recorded.get('candidate_commit'))==manifest['candidate_commit']
+                              and recorded.get('integration_base')==manifest['base_revision']))
+                if repeated or history.get('rounds',0)>=MANIFEST_RETURN_LIMIT:
+                    w['state']['manifest_returns']={'rounds':history.get('rounds',0),'last':returned,'stopped':True}
+                    self._escalate(cursor,w,('The author returned the identical candidate manifest at base '+manifest['base_revision'] if repeated
+                                             else 'The bounded manifest-return budget is exhausted at base '+manifest['base_revision'])
+                                   +' although base '+task['base_revision']+' was requested. Manifest-return loop stopped; the candidate and all tasks are retained.',
+                                   cancel_children=False)
+                    return True
+                w['state']['manifest_returns']={'rounds':history.get('rounds',0)+1,'last':returned}
                 return self._revise(cursor,w,'code',{'summary':'Return the exact candidate manifest at the originally supplied base '+task['base_revision']+'. Preserve the existing implementation.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
             request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':manifest['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
             identity_protocol=w['state'].get('identity_protocol','legacy-v1')
             if identity_protocol not in ('legacy-v1','content-v2'):raise ValueError('Invalid frozen identity protocol')
             if identity_protocol=='content-v2':request['identity_protocol']=identity_protocol
+            profile_cfg = getattr(self.config, 'profiles', {}).get(w['author_profile'])
+            expected_branch = getattr(profile_cfg, 'branch', None)
+            request.update(agent_profile=w['author_profile'], root_task_id=str(w['root_task_id']))
+            if expected_branch is not None:request['expected_agent_branch']=expected_branch
             if manifest.get('source_branch') is not None:
                 request['source_branch']=manifest['source_branch']
             prepare_key=artifact['sha256']
@@ -784,7 +812,7 @@ class ExternalWorkflowStore:
         cursor.execute('UPDATE forge_external_workflow.reviews SET status=%s,reviewer_attempt_id=%s,reviewer_result_sha256=%s,verdict=%s,receipt=%s,updated_at=clock_timestamp() WHERE review_id=%s',('approved' if verdict['decision']=='approve' else 'revise' if verdict['decision']=='revise' else 'escalated',result['attempt_id'],result['sha256'],Json(verdict),Json(receipt),review['review_id']))
         self._accept_task(cursor,w,critic)
         self._resolve_retry(cursor,w,'reviewer_correction','review:'+str(review['review_id']),result['sha256'])
-        if verdict['decision']=='escalate':self._escalate(cursor,w,verdict['summary']);return True
+        if verdict['decision']=='escalate':self._escalate(cursor,w,verdict['summary'],cause='review_verdict');return True
         if verdict['decision']=='revise':return self._revise(cursor,w,review['target_kind'],verdict,source)
         self._accept_task(cursor,w,task)
         self._resolve_retry(cursor,w,'planning' if review['target_kind']=='plan' else 'review','review:'+str(review['review_id']),result['sha256'])
@@ -803,12 +831,15 @@ class ExternalWorkflowStore:
         if critic['status'] in {'quota_blocked','blocked_auth','blocked_permission','cancelled'}:
             self._escalate(cursor,w,summary);return True
         retry=w['state'].get('review_retries',0)+1
+        # needs_reconcile = the reviewer could not run (context/lease/deadline),
+        # not a judgement on the candidate.
+        infrastructure=critic['status']=='needs_reconcile'
         if self._retry_events is None:
-            if retry>AGENT_RETRY_LIMIT:self._escalate(cursor,w,summary);return True
+            if retry>AGENT_RETRY_LIMIT:self._escalate(cursor,w,summary,cancel_children=not infrastructure);return True
         else:
             source_id='reviewer:'+str(review['review_id'])
             evidence=hashlib.sha256(canonical({'target':review['target_sha256'],'task_id':str(critic['id']),'attempt_id':str(critic['latest_attempt_id']),'summary':summary})).hexdigest()
-            event=self._reserve_retry(cursor,w,'reviewer_correction',source_id,evidence,'reviewer:'+str(review['review_id']))
+            event=self._reserve_retry(cursor,w,'reviewer_correction',source_id,evidence,'reviewer:'+str(review['review_id']),infrastructure=infrastructure)
             if event is None:return True
             retry=event['used']
         cursor.execute("UPDATE forge_external_workflow.reviews SET status='retry',updated_at=clock_timestamp() WHERE review_id=%s",(review['review_id'],))
@@ -990,19 +1021,23 @@ class ExternalWorkflowStore:
         self._save(cursor,w,'Main changed; selecting the new trusted source before bounded rebase.',phase='repair')
         return True
 
-    def _escalate(self,cursor,w,reason):
+    def _escalate(self,cursor,w,reason,*,cancel_children=True,cause=None):
         root=self._task(cursor,w,w['root_task_id'])
         if w['phase'] not in TERMINAL|{'merging'} and root['status'] in {'cancelled','cancel_requested'}:
             self._cancel_locked(cursor,w,'Root workflow task was cancelled.',actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
             return
-        self._cancel_children(cursor,w,actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
+        # An infrastructure failure (e.g. review context could not be loaded) is
+        # not a verdict: escalate the step alone and leave the submitted
+        # candidate and every sibling task untouched for recovery.
+        if cancel_children:self._cancel_children(cursor,w,actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
 
         # The public workflow DTO caps this field in UTF-8 bytes, not characters.
         # Keep the complete review artifact separately and preserve whole codepoints.
         safe=''.join(c for c in reason if unicodedata.category(c)!='Cc' or c in '\r\n\t')
         bounded=safe.encode('utf-8')[:2048].decode('utf-8',errors='ignore')
+        code=escalation_cause(reason,cause)
         w['enabled']=False;w['state']['escalation_reason']=bounded
-        self._save(cursor,w,bounded,phase='escalated')
+        self._save(cursor,w,bounded,phase='escalated',details={'escalation_cause':code})
         self._resolve_open_retries(cursor,w)
 
     def _cleanup_action(self,cursor,w,action):

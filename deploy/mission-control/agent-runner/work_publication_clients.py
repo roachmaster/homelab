@@ -5,6 +5,8 @@ GitHub authentication remains in the trusted publisher's existing gh account.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import fcntl
 import json
 import hashlib
 import os
@@ -18,6 +20,12 @@ import time
 from urllib.parse import urlencode
 from uuid import UUID
 
+from work_agent_branch import (
+    EPHEMERAL_BRANCH_POLICY,
+    PERSISTENT_BRANCH_POLICY,
+    canonical_profile_slug,
+    validate_git_branch_name,
+)
 from work_executor import MAX_FILES, MAX_WORKSPACE_BYTES
 from work_process import terminate_and_reap
 
@@ -75,7 +83,26 @@ def uuid(value):
     return value
 
 
-def branch_name(job):
+def branch_name(job, config=None):
+    explicit = job.get("branch_name") if isinstance(job, dict) else None
+    if isinstance(explicit, str) and explicit:
+        try:
+            validated = validate_git_branch_name(explicit)
+            if validated == "main":
+                raise ValueError()
+            return validated
+        except ValueError:
+            raise PublicationError("invalid_publication_identity") from None
+    if (config is not None
+            and getattr(config, "branch_policy", EPHEMERAL_BRANCH_POLICY) == PERSISTENT_BRANCH_POLICY
+            and isinstance(job, dict) and job.get("agent_profile")
+            and not str(job.get("branch_publication_id") or "").startswith("legacy:")):
+        try:
+            return config.resolved_branch_policy().resolve_branch(
+                job["project_alias"], job["agent_profile"]
+            )
+        except (KeyError, ValueError):
+            raise PublicationError("invalid_publication_identity") from None
     return "forge/task-" + uuid(job.get("branch_publication_id") or job.get("target_publication_id") or job["publication_id"])
 
 
@@ -239,9 +266,10 @@ class WorkspaceSnapshotProvider:
 
 
 class GitRepositoryProvider:
-    def __init__(self, config, *, execute=command, remote_url_factory=None):
+    def __init__(self, config, *, execute=command, remote_url_factory=None, branch_provider=None):
         self.config, self.execute = config, execute
         self.remote_url_factory = remote_url_factory or (lambda alias: "https://github.com/" + config.repositories[alias] + ".git")
+        self.branch_provider = branch_provider
 
     def _git(self, repository, *args, network=False, timeout=60):
         argv = ["/usr/bin/git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
@@ -251,6 +279,69 @@ class GitRepositoryProvider:
         if repository is not None:
             argv += ["-C", str(repository)]
         return self.execute([*argv, *args], env=parent_environment(self.config), timeout=timeout)
+
+    def _agent_cache_dir(self, project_alias, agent_profile):
+        root = self.config.state_root / "agent-branches" / project_alias / canonical_profile_slug(agent_profile)
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if root.is_symlink() or root.parent.is_symlink():
+            raise PublicationError("publication_state_changed")
+        return root
+
+    def _recover_dirty_git_state(self, clone_dir):
+        """Abort any crashed in-progress rebase or merge inside an owned cached clone."""
+        git_dir = clone_dir / ".git"
+        if not git_dir.is_dir():
+            return
+        if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists():
+            try:
+                self._git(clone_dir, "rebase", "--abort")
+            except PublicationError:
+                shutil.rmtree(git_dir / "rebase-merge", ignore_errors=True)
+                shutil.rmtree(git_dir / "rebase-apply", ignore_errors=True)
+        if (git_dir / "MERGE_HEAD").exists():
+            try:
+                self._git(clone_dir, "merge", "--abort")
+            except PublicationError:
+                (git_dir / "MERGE_HEAD").unlink(missing_ok=True)
+        try:
+            self._git(clone_dir, "reset", "--hard", "HEAD")
+            self._git(clone_dir, "clean", "-fd")
+        except PublicationError:
+            pass
+
+    def sync_agent_cache_clone(self, project_alias, agent_profile, branch, remote, *, candidate_commit=None, candidate_repo=None):
+        """Maintain a file-locked per-agent cached clone tracking remote main and branch ref."""
+        cache_root = self._agent_cache_dir(project_alias, agent_profile)
+        lock_path = cache_root / "clone.lock"
+        clone_dir = cache_root / "repo"
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "r+b") as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                if clone_dir.is_symlink():
+                    raise PublicationError("publication_state_changed")
+                if not (clone_dir / ".git").is_dir():
+                    if clone_dir.exists():
+                        shutil.rmtree(clone_dir)
+                    self._git(None, "clone", "--quiet", "--no-local", "--no-checkout", "--",
+                              str(self.config.worker.projects[project_alias]), str(clone_dir))
+                else:
+                    self._recover_dirty_git_state(clone_dir)
+                self._git(clone_dir, "fetch", "--quiet", "--no-tags", "--", remote,
+                          "+refs/heads/main:refs/remotes/origin/main", network=True, timeout=120)
+                fetched_main = self._git(clone_dir, "rev-parse", "refs/remotes/origin/main").decode().strip()
+                if candidate_repo is not None and candidate_commit is not None:
+                    self._git(clone_dir, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules",
+                              "--", str(candidate_repo), candidate_commit)
+                    self._git(clone_dir, "update-ref", "refs/heads/" + branch, candidate_commit)
+                return fetched_main
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+    def _persistent_mode(self, job):
+        return (getattr(self.config, "branch_policy", EPHEMERAL_BRANCH_POLICY) == PERSISTENT_BRANCH_POLICY
+                and isinstance(job, dict) and bool(job.get("agent_profile"))
+                and not str(job.get("branch_publication_id") or "").startswith("legacy:"))
 
     def prepare(self, job, snapshot):
         return self._prepare(job, snapshot, branch_first=False)
@@ -301,11 +392,13 @@ class GitRepositoryProvider:
             if actual != expected or self._git(selected,'rev-parse','FETCH_HEAD').decode().strip() != main:
                 raise PublicationError('publication_state_changed')
             if version == 2:
-                if (receipt.get('integration')!='current-main-three-way-v1'
+                integration = receipt.get('integration')
+                if (integration not in {'current-main-three-way-v1', 'trunk-rebase-v1'}
                     or self._git(selected,'rev-parse',authored+'^{tree}').decode().strip()!=receipt.get('authored_tree')
                     or self._git(selected,'rev-parse',head+'^{tree}').decode().strip()!=receipt.get('candidate_tree')):
                     raise PublicationError('publication_state_changed')
-                self._git(selected,'merge-base','--is-ancestor',authored,head)
+                if integration == 'current-main-three-way-v1':
+                    self._git(selected,'merge-base','--is-ancestor',authored,head)
                 self._git(selected,'merge-base','--is-ancestor',main,head)
                 paths=receipt.get('conflict_paths')
                 if not isinstance(paths,list)or len(paths)>32 or any(not isinstance(path,str)for path in paths):
@@ -319,10 +412,6 @@ class GitRepositoryProvider:
             shutil.rmtree(repository)  # Only this stopped, identity-bound private clone.
         self._git(None, "clone", "--quiet", "--no-local", "--no-checkout", "--",
                   str(self.config.worker.projects[job["project_alias"]]), str(repository))
-        # Linked repairs may start at a reviewed commit imported without a ref.
-        # clone copies advertised refs, so import this exact admitted object from
-        # the selected canonical repository before checkout. Canonical refs,
-        # FETCH_HEAD and working files are never changed by this acquisition.
         canonical = self.config.worker.projects[job["project_alias"]]
         base = job["base_revision"]
         if self._git(canonical, "rev-parse", "--verify", base + "^{commit}").decode().strip() != base:
@@ -331,8 +420,9 @@ class GitRepositoryProvider:
                   "--no-write-fetch-head", "--", str(canonical), base)
         if self._git(repository, "rev-parse", "--verify", base + "^{commit}").decode().strip() != base:
             raise PublicationError("publication_base_changed")
+        branch = branch_name(job, self.config)
         self._git(repository, "checkout", "--quiet", "--detach", job["base_revision"])
-        self._git(repository, "checkout", "--quiet", "-b", branch_name(job))
+        self._git(repository, "checkout", "--quiet", "-b", branch)
         for child in repository.iterdir():
             if child.name != ".git":
                 if child.is_dir() and not child.is_symlink():
@@ -364,30 +454,86 @@ class GitRepositoryProvider:
         authored=self._git(repository,'rev-parse','HEAD').decode().strip()
         authored_tree=self._git(repository,'rev-parse','HEAD^{tree}').decode().strip()
         remote = self.remote_url_factory(job["project_alias"])
+        persistent = self._persistent_mode(job)
+        fetched_at = datetime.now(timezone.utc)
+        if persistent:
+            self.sync_agent_cache_clone(job["project_alias"], job["agent_profile"], branch, remote)
+            if self.branch_provider is not None:
+                self.branch_provider.record_sync(
+                    job["project_alias"], job["agent_profile"],
+                    branch_name=branch, sync_status="rebasing",
+                    last_task_id=job.get("task_id"),
+                    last_correlation_id=job.get("correlation_id"),
+                )
         self._git(repository, "fetch", "--quiet", "--no-tags", "--", remote, "refs/heads/main", network=True, timeout=120)
         main=self._git(repository,'rev-parse','FETCH_HEAD').decode().strip()
         conflicts=[]
-        try:
-            # Three-way integration is owned exclusively by this private clone.
-            # The native worktree and its admitted base/receipt stay unchanged.
-            self._git(repository, "merge", "--no-edit", "--no-gpg-sign", "FETCH_HEAD")
-        except PublicationError:
-            if not branch_first:raise PublicationError('main_merge_conflict')from None
-            conflicts=[path.decode('utf-8')for path in self._git(repository,'diff','--name-only','--diff-filter=U','-z').split(b'\0')if path]
-            if not conflicts:raise PublicationError('main_merge_unavailable')from None
-            if len(conflicts)>32:raise PublicationError('main_merge_conflicts_out_of_scope')from None
-            for path in conflicts:safe_relative(path)
-            # Preserve actual unresolved markers and nonconflicting main files,
-            # with both genuine parents. This is never approval or CI evidence.
-            self._git(repository,'add','--all','--','.')
-            self._git(repository,'commit','--quiet','--no-gpg-sign','-m','Unverified Forge current-main integration conflict; resolve before review')
+        integration_mode = 'current-main-three-way-v1'
+        if persistent and changed:
+            try:
+                self._git(repository, "rebase", "--quiet", "FETCH_HEAD")
+                integration_mode = 'trunk-rebase-v1'
+            except PublicationError:
+                self._recover_dirty_git_state(repository)
+                self._git(repository, "checkout", "--quiet", "-B", branch, authored)
+                if not branch_first:
+                    if self.branch_provider is not None:
+                        self.branch_provider.record_sync(
+                            job["project_alias"], job["agent_profile"],
+                            branch_name=branch, fetched_main_sha=main, fetched_main_at=fetched_at,
+                            sync_status="conflict", conflict_paths=[],
+                            last_task_id=job.get("task_id"),
+                            last_correlation_id=job.get("correlation_id"),
+                        )
+                    raise PublicationError('main_merge_conflict') from None
+                try:
+                    self._git(repository, "merge", "--no-edit", "--no-gpg-sign", "FETCH_HEAD")
+                except PublicationError:
+                    conflicts=[path.decode('utf-8')for path in self._git(repository,'diff','--name-only','--diff-filter=U','-z').split(b'\0')if path]
+                    if not conflicts:raise PublicationError('main_merge_unavailable')from None
+                    if len(conflicts)>32:raise PublicationError('main_merge_conflicts_out_of_scope')from None
+                    for path in conflicts:safe_relative(path)
+                    self._git(repository,'add','--all','--','.')
+                    self._git(repository,'commit','--quiet','--no-gpg-sign','-m','Unverified Forge current-main integration conflict; resolve before review')
+        else:
+            try:
+                # Three-way integration is owned exclusively by this private clone.
+                # The native worktree and its admitted base/receipt stay unchanged.
+                self._git(repository, "merge", "--no-edit", "--no-gpg-sign", "FETCH_HEAD")
+            except PublicationError:
+                if not branch_first:raise PublicationError('main_merge_conflict')from None
+                conflicts=[path.decode('utf-8')for path in self._git(repository,'diff','--name-only','--diff-filter=U','-z').split(b'\0')if path]
+                if not conflicts:raise PublicationError('main_merge_unavailable')from None
+                if len(conflicts)>32:raise PublicationError('main_merge_conflicts_out_of_scope')from None
+                for path in conflicts:safe_relative(path)
+                # Preserve actual unresolved markers and nonconflicting main files,
+                # with both genuine parents. This is never approval or CI evidence.
+                self._git(repository,'add','--all','--','.')
+                self._git(repository,'commit','--quiet','--no-gpg-sign','-m','Unverified Forge current-main integration conflict; resolve before review')
         head = self._git(repository, "rev-parse", "HEAD").decode().strip()
         if not SHA.fullmatch(head):raise PublicationError("invalid_publication_commit")
         self.verify(repository, head)
         self._git(repository,'merge-base','--is-ancestor',main,head)
+        if persistent:
+            if not conflicts:
+                self.sync_agent_cache_clone(
+                    job["project_alias"], job["agent_profile"], branch, remote,
+                    candidate_commit=head, candidate_repo=repository,
+                )
+            if self.branch_provider is not None:
+                self.branch_provider.record_sync(
+                    job["project_alias"], job["agent_profile"],
+                    branch_name=branch,
+                    fetched_main_sha=main,
+                    fetched_main_at=fetched_at,
+                    sync_status="conflict" if conflicts else "synced_with_main",
+                    conflict_paths=conflicts,
+                    last_task_id=job.get("task_id"),
+                    last_correlation_id=job.get("correlation_id"),
+                )
         if branch_first:
             from work_external_delivery import durable_json
-            durable_json(prepared, {'version':2,'integration':'current-main-three-way-v1','identity':identity,
+            durable_json(prepared, {'version':2,'integration':integration_mode,'identity':identity,
                 'authored_commit':authored,'authored_tree':authored_tree,'candidate_commit':head,
                 'candidate_tree':self._git(repository,'rev-parse','HEAD^{tree}').decode().strip(),
                 'expected_main':main,'conflict_paths':conflicts})
@@ -409,7 +555,7 @@ class GitRepositoryProvider:
             raise PublicationError("verified_source_changed")
 
     def remote_head(self, job):
-        branch = branch_name(job)
+        branch = branch_name(job, self.config)
         raw = self._git(None, "ls-remote", "--heads", "--", self.remote_url_factory(job["project_alias"]),
                         "refs/heads/" + branch, network=True).decode().strip()
         if not raw:
@@ -419,10 +565,28 @@ class GitRepositoryProvider:
             raise PublicationError("remote_branch_identity_changed")
         return values[0]
 
-    def push(self, job, repository, head):
+    def push(self, job, repository, head, *, expected_remote_head=None, reservation=None, pull_requests=None):
         self.verify(repository, head)
+        branch = branch_name(job, self.config)
+        if reservation is not None:
+            if self.branch_provider is not None:
+                self.branch_provider.verify_owner(reservation)
+            if pull_requests is not None:
+                open_prs = pull_requests.list_open({**job, "branch_name": branch})
+                if reservation.active_pr_url is None:
+                    if open_prs:
+                        raise PublicationError("branch_open_pr_conflict")
+                else:
+                    if len(open_prs) != 1 or open_prs[0].get("html_url") != reservation.active_pr_url:
+                        raise PublicationError("branch_open_pr_conflict")
+            lease_expected = expected_remote_head if expected_remote_head is not None else ""
+            lease_arg = f"--force-with-lease=refs/heads/{branch}:{lease_expected}"
+            self._git(repository, "push", "--quiet", lease_arg, "--",
+                      self.remote_url_factory(job["project_alias"]),
+                      head + ":refs/heads/" + branch, network=True, timeout=120)
+            return
         self._git(repository, "push", "--quiet", "--", self.remote_url_factory(job["project_alias"]),
-                  head + ":refs/heads/" + branch_name(job), network=True, timeout=120)
+                  head + ":refs/heads/" + branch, network=True, timeout=120)
 
 
 class GitHubPullRequestClient:
@@ -444,7 +608,7 @@ class GitHubPullRequestClient:
 
     def _validated(self, job, head, value):
         repository = self.config.repositories[job["project_alias"]]
-        branch = branch_name(job)
+        branch = branch_name(job, self.config)
         try:
             number = value["number"]
             valid = (type(number) is int and number > 0
@@ -459,9 +623,47 @@ class GitHubPullRequestClient:
             raise PublicationError("pull_request_identity_changed")
         return value["html_url"]
 
-    def find(self, job, head):
+    def list_open(self, job):
         repository = self.config.repositories[job["project_alias"]]
-        query = urlencode({"state": "all", "head": repository.split("/")[0] + ":" + branch_name(job),
+        branch = branch_name(job, self.config)
+        query = urlencode({"state": "open", "head": repository.split("/")[0] + ":" + branch,
+                           "base": "main", "per_page": 100})
+        values = self._api("GET", "repos/" + repository + "/pulls?" + query)
+        if not isinstance(values, list):
+            raise PublicationError("invalid_pull_request_response")
+        return values
+
+    def find(self, job, head, *, expected_pr_url=None):
+        repository = self.config.repositories[job["project_alias"]]
+        branch = branch_name(job, self.config)
+        persistent = (
+            getattr(self.config, "branch_policy", EPHEMERAL_BRANCH_POLICY) == PERSISTENT_BRANCH_POLICY
+            and (bool(job.get("agent_profile")) or bool(job.get("branch_name")) or expected_pr_url is not None)
+            and not branch.startswith("forge/task-")
+        )
+        if persistent:
+            open_prs = self.list_open({**job, "branch_name": branch})
+            if len(open_prs) > 1:
+                raise PublicationError("pull_request_identity_changed")
+            if len(open_prs) == 1:
+                if expected_pr_url is not None and open_prs[0].get("html_url") != expected_pr_url:
+                    raise PublicationError("pull_request_identity_changed")
+                return self._validated(job, head, open_prs[0])
+            if expected_pr_url is not None:
+                # Lost-ACK reconciliation for a recorded PR that may have already been merged/closed.
+                query = urlencode({"state": "all", "head": repository.split("/")[0] + ":" + branch,
+                                   "base": "main", "per_page": 100})
+                values = self._api("GET", "repos/" + repository + "/pulls?" + query)
+                if not isinstance(values, list):
+                    raise PublicationError("invalid_pull_request_response")
+                matches = [row for row in values
+                           if isinstance(row, dict)
+                           and row.get("html_url") == expected_pr_url
+                           and row.get("head", {}).get("sha") == head]
+                if len(matches) == 1:
+                    return self._validated(job, head, matches[0])
+            return None
+        query = urlencode({"state": "all", "head": repository.split("/")[0] + ":" + branch,
                            "base": "main", "per_page": 100})
         values = self._api("GET", "repos/" + repository + "/pulls?" + query)
         if not isinstance(values, list) or len(values) > 1:
@@ -471,7 +673,7 @@ class GitHubPullRequestClient:
     def create(self, job, head):
         repository = self.config.repositories[job["project_alias"]]
         payload = {"title": "Forge implementation " + uuid(job["task_id"]),
-                   "head": branch_name(job), "base": "main", "draft": True, "maintainer_can_modify": False,
+                   "head": branch_name(job, self.config), "base": "main", "draft": True, "maintainer_can_modify": False,
                    "body": "Implements the approved Forge plan.\n\nTask: " + uuid(job["task_id"])
                    + "\nWorkspace digest: `" + job["workspace_digest"] + "`\n\n"
                    + "The configured isolated publication checks passed for commit `" + head + "`.\n"

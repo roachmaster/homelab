@@ -7,7 +7,7 @@ from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import sha256_canonical
 from work_events import operator_actor
-from work_external_delivery import read_private
+from work_external_delivery import read_private, native_action_ids
 from work_external_review_context import canonical
 from work_workflow import BoundPreparationRetryAuthority,recipe_from_snapshot,_ready_for_recipe,NATIVE_POLICIES
 
@@ -62,10 +62,9 @@ class NativeCiStoppedProof:
         request=binding.get('request',{});receipt=cancel.get('receipt',{})
         identity={**expected,'candidate_commit':request.get('candidate_commit'),'candidate_tree':request.get('candidate_tree'),
             'native_gate_manifest_sha256':binding.get('native_gate_manifest_sha256')}
-        expected_action=str(uuid5(UUID(expected['workflow_id']),index['version']+':'+hashlib.sha256(canonical(identity)).hexdigest()))
         if (binding.get('version')!=index['version'] or binding.get('scope')!=expected
                 or any(request.get(k)!=v for k,v in expected.items()) or request.get('action_id')!=action
-                or expected_action!=action or request.get('prepare_action_id')!=str(uuid5(UUID(action),'candidate-bundle'))
+                or action not in native_action_ids(index['version'],identity) or request.get('prepare_action_id')!=str(uuid5(UUID(action),'candidate-bundle'))
                 or request.get('candidate_commit')!=review['candidate_commit']
                 or request.get('integration_base')!=review['verification'].get('integration_base')
                 or cancel.get('status')!='cancelled' or receipt.get('provider')!='jenkins'

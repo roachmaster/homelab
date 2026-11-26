@@ -19,6 +19,7 @@ from jenkins_events import (
     JenkinsEventRecord,
     JenkinsStageStatus,
     MAX_SEQUENCE,
+    parse_utc_timestamp,
     VALID_DELIVERY_STATUSES,
     sanitize_error_message,
     validate_build_url,
@@ -51,6 +52,35 @@ def _iso_utc(value) -> str | None:
     return str(value)
 
 
+_TIMESTAMP_FIELDS = frozenset({"occurred_at", "started_at"})
+_OPTIONAL_SEMANTIC_FIELDS = ("action_id", "branch_scope")
+
+
+def _same_semantic_event(event, row) -> bool:
+    """Compare a replayed emit with the stored row field by field.
+
+    payload_sha256 is still written as recorded evidence, but replay identity
+    is the typed fields themselves, so a re-encoding of the same event can
+    never turn into an idempotency conflict.
+    """
+    payload = event.semantic_payload()
+    for name in _OPTIONAL_SEMANTIC_FIELDS:
+        payload.setdefault(name, None)
+    for name, value in payload.items():
+        stored = row.get(name)
+        if name in _TIMESTAMP_FIELDS:
+            if (value is None) != (stored is None):
+                return False
+            if value is not None and parse_utc_timestamp(value) != parse_utc_timestamp(stored):
+                return False
+        elif name == "action_id":
+            if (None if stored is None else str(stored)) != value:
+                return False
+        elif stored != value:
+            return False
+    return True
+
+
 def _row_to_event(row) -> JenkinsEventRecord:
     return JenkinsEventRecord(
         event_id=str(row["event_id"]),
@@ -80,6 +110,8 @@ def _row_to_event(row) -> JenkinsEventRecord:
         reconciled=bool(row["reconciled"]),
         completion_time_estimated=bool(row["completion_time_estimated"]),
         started_at=_iso_utc(row["started_at"]),
+        action_id=str(row["action_id"]) if row.get("action_id") is not None else None,
+        branch_scope=row.get("branch_scope"),
     )
 
 
@@ -247,7 +279,7 @@ class JenkinsStore:
 
             cursor.execute(
                 """
-                SELECT event_id, project_alias, sequence, payload_sha256
+                SELECT *
                 FROM forge_agent.jenkins_events
                 WHERE owner_id = %s
                   AND project_alias = %s
@@ -258,7 +290,7 @@ class JenkinsStore:
             )
             existing = cursor.fetchone()
             if existing is not None:
-                if existing["payload_sha256"] != digest:
+                if not _same_semantic_event(event, existing):
                     raise Rejected(409, "idempotency_conflict")
                 cursor.execute(
                     "SELECT count(*) AS count FROM forge_agent.jenkins_event_deliveries WHERE event_id = %s",
@@ -304,14 +336,16 @@ class JenkinsStore:
                     event_kind, build_number, queue_id, commit_sha, branch, build_result,
                     stage_name, stage_status, duration_ms, build_url, summary,
                     correlation_id, occurred_at, payload_sha256,
-                    actor, backfilled, reconciled, completion_time_estimated, started_at
+                    actor, backfilled, reconciled, completion_time_estimated, started_at,
+                    action_id, branch_scope
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s,
+                    %s, %s
                 )
                 RETURNING event_id, project_alias, sequence, payload_sha256
                 """,
@@ -341,6 +375,8 @@ class JenkinsStore:
                     event.reconciled,
                     event.completion_time_estimated,
                     event.started_at,
+                    UUID(event.action_id) if event.action_id is not None else None,
+                    event.branch_scope,
                 ),
             )
             inserted = cursor.fetchone()

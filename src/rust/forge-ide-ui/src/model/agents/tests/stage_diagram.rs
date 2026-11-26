@@ -47,7 +47,10 @@ fn wf_event(sequence: u64, phase: WorkWorkflowPhase, summary: &str) -> WorkLogEv
             phase,
             summary: summary.into(),
             related_task_id: None,
+            escalation_cause: None,
         }),
+        failure: None,
+        deadline_extension: None,
     }
 }
 
@@ -62,6 +65,8 @@ fn raw_event(sequence: u64, kind: WorkEventKind) -> WorkLogEvent {
         progress_verified: false,
         external_progress: None,
         workflow_progress: None,
+        failure: None,
+        deadline_extension: None,
     }
 }
 
@@ -165,7 +170,7 @@ fn native_workflow_covers_all_thirteen_phases_loops_and_halts() {
                 .expect("plan revision loop");
             assert_eq!(branch.kind, FlowBranchKind::Loop);
             assert_eq!(branch.state, FlowStageState::Current);
-            assert!(branch.detail.contains("1/3"));
+            assert!(branch.detail.contains("Plan revisions 1"));
         }
         if phase == WorkWorkflowPhase::Repair {
             let branch = diagram
@@ -175,7 +180,7 @@ fn native_workflow_covers_all_thirteen_phases_loops_and_halts() {
                 .expect("repair loop");
             assert_eq!(branch.kind, FlowBranchKind::Loop);
             assert_eq!(branch.state, FlowStageState::Current);
-            assert!(branch.detail.contains("2/10"));
+            assert!(branch.detail.contains("Code revisions 2"));
         }
         if matches!(
             phase,
@@ -232,6 +237,8 @@ fn external_muse_workflow_orders_code_review_before_checks_and_checks_provenance
                 summary: "Muse checkpoint".into(),
             }),
             workflow_progress: None,
+            failure: None,
+            deadline_extension: None,
         },
         // Foreign assignment checkpoint must be ignored.
         WorkLogEvent {
@@ -249,6 +256,8 @@ fn external_muse_workflow_orders_code_review_before_checks_and_checks_provenance
                 summary: "Foreign external checkpoint".into(),
             }),
             workflow_progress: None,
+            failure: None,
+            deadline_extension: None,
         },
         wf_event(6, WorkWorkflowPhase::CodeReview, "Code review approved"),
         wf_event(7, WorkWorkflowPhase::Checks, "Running trusted checks"),
@@ -645,6 +654,8 @@ fn multipage_history_preserves_stage_trace_collapses_checkpoints_and_rejects_for
             progress_verified: false,
             external_progress: None,
             workflow_progress: None,
+            failure: None,
+            deadline_extension: None,
         },
         WorkLogEvent {
             event_id: "00000064-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
@@ -661,6 +672,8 @@ fn multipage_history_preserves_stage_trace_collapses_checkpoints_and_rejects_for
             progress_verified: false,
             external_progress: None,
             workflow_progress: None,
+            failure: None,
+            deadline_extension: None,
         },
         WorkLogEvent {
             event_id: "00000065-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
@@ -676,7 +689,10 @@ fn multipage_history_preserves_stage_trace_collapses_checkpoints_and_rejects_for
                 phase: WorkWorkflowPhase::Escalated,
                 summary: "Foreign workflow".into(),
                 related_task_id: None,
+                escalation_cause: None,
             }),
+            failure: None,
+            deadline_extension: None,
         },
     ]);
 

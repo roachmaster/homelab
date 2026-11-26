@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import UUID,uuid5
 from queue_store import Rejected
 from work_ci_contract import EVENT_PROFILE,CiGateContractFactory
-from work_external_delivery import DeliveryConfig,read_private,jenkins_gate_manifest
+from work_external_delivery import DeliveryConfig,read_private,jenkins_gate_manifest,native_action_ids
 from work_external_review_context import canonical,strict_json
 from work_publication_clients import command
 from work_native_ci_postfix import NativePostfixEvidence
@@ -130,9 +130,8 @@ class NativePostfixProof:
         expected={'owner_id':task['owner_id'],'project_alias':task['project_alias'],'task_id':str(task['id']),'attempt_id':str(task['latest_attempt_id']),
             'review_id':str(q['review_id']),'workflow_id':str(workflow['workflow_id']),'correlation_id':str(task['correlation_id'])}
         identity={**expected,'candidate_commit':old['candidate_commit'],'candidate_tree':old['candidate_tree'],'native_gate_manifest_sha256':binding['native_gate_manifest_sha256']}
-        wanted=str(uuid5(workflow['workflow_id'],'forge-native-jenkins-v3:'+hashlib.sha256(canonical(identity)).hexdigest()))
         if (binding['version']!=index['version']or binding['scope']!=expected or any(old.get(k)!=v for k,v in expected.items())
-                or old['action_id']!=action or action!=wanted or old['prepare_action_id']!=str(uuid5(UUID(action),'candidate-bundle'))
+                or old['action_id']!=action or action not in native_action_ids('forge-native-jenkins-v3',identity) or old['prepare_action_id']!=str(uuid5(UUID(action),'candidate-bundle'))
                 or old['candidate_commit']!=q['candidate_commit']or binding['native_gate_manifest_sha256']!=q['gate_manifest_sha256']
                 or old['integration_base']!=q['verification']['integration_base']or binding['verifier_sha256']!=OLD_HELPER):raise ValueError('Failed CI source binding changed')
         observation_raw=local(directory/'observation.json');observation=strict_json(observation_raw)

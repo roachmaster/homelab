@@ -1,11 +1,32 @@
 # Forge framework delivery roadmap
 
-**Status: current implementation checkpoints plus the original delivery sequence.**
-Reviewed against the repository on 19 November 2026. Deployment observations
-retain their separate dates. The table below replaces
-older blanket statements that durability, remote access or UI are future work.
-The original milestone exit criteria remain useful goals, not a claim that every
-generic lifecycle or production guarantee has been completed.
+**Reviewed 26 November 2026:** the framework foundation now supports a concrete
+software-delivery application. The near-term work is integration, truthful
+operation and source-bound acceptance of that application. Broader framework
+and hosted-system milestones below remain useful context, not automatic next
+work. [Current operating/source picture](../design/implementation-status.md).
+
+## Immediate delivery sequence
+
+| Step | Outcome | Exit evidence |
+| --- | --- | --- |
+| 1. Reconcile the integrated candidate | Review PR29 (`backup/main` → `main`), preserving the independent author/reviewer model and all legacy receipts | Reconcile the saved resubmission queue with implemented/remaining work; close historical source-fingerprint mismatches through explicit review of changed boundaries; validate branch-scope CI against the exact candidate. Passing local subsets alone is insufficient. |
+| 2. Qualify the integrated main | Preserve the branch/main split and attach coverage to the actual source | After a trusted merge, run the selected main-scoped database/browser plan on the observed main commit; retain real WASM, desktop/narrow screenshot review, cleanup and exact-source receipts. Missing prerequisites remain not-run coverage. |
+| 3. Prepare a coordinated rollout | Install compatible ABI16 host/assets/WASM and schema41 services/grants | Verify old schema/receipt compatibility, branch-owner recovery, open-PR fencing and rollback. Schema40 is the current observed database; consolidation did not activate schema41. |
+| 4. Resume deliberately and prove the loop | Restore the chosen API/event path only when requested; verify an end-to-end delivery | Record Plan, authored candidate, independent review, branch checks, merge, main checks and protected release evidence. Worker process liveness is not completion proof. |
+| 5. Expand from demonstrated demand | Reuse the small framework for Workbench, Studio, games or additional providers | Require a named consumer, bounded contract and acceptance case. Keep provider selection explicit and retain truthful unsupported/unknown states. |
+
+Steps describe direction and acceptance, not deployment or service-start authority.
+The API/event runner is currently stopped/boot-disabled; coding and delivery
+workers remain active. Do not interpret the stopped front door as a full-system
+pause. Main promotion, main qualification and runtime activation are distinct.
+No fleet scheduler, broker, container runtime or Kubernetes rollout is selected
+by this sequence.
+
+The [preserved task inventory](../../resubmission-queue/README.md) records further
+requests for defect/backlog flows, proxy boundaries and a verified-main Drive
+snapshot stage. Re-triage them against the consolidated source and exact saved
+acceptance criteria; their collection-time flags are not current execution orders.
 
 ## Delivery status now
 
@@ -15,14 +36,15 @@ generic lifecycle or production guarantee has been completed.
 | Local terminal | Implemented node observations, admitted discovery, optional native disk sessions and a volatile manually stepped counter | Whole-machine health, a filesystem sandbox and arbitrary process execution |
 | Access and durable jobs | Implemented verified subject/deadline contexts, exact-route grants, a private locked file store, committed sum-job receipts/results, leased attempts and owned worker shutdown | Generic programs, automatic receipt retention, remote job delivery and broad identity/delegation |
 | Agent and managed editing | Implemented configured HTTPS/mTLS node/project/source calls and explicit managed-write grants with revision/journal guards | Enabling writes requires a provisioned private Unix workspace; arbitrary filesystem paths and shell execution remain outside the contract |
-| Generated portal | Implemented Chat/Mail/Workbench, compact mobile controls, Home, focused Design readers and same-tab workspace recovery; local WASM ABI 5 | General editor-widget integration and a universal replaceable navigation/module DSL remain separate designs |
+| Generated portal | Agents, Workbench, Home and Design; inactive Chat/Mail histories retained. Consolidated ABI16 adds triage, per-agent branches and CI stage/log inspection | Main/browser/source-fingerprint qualification and coordinated schema41/asset rollout remain open; general editor-widget integration remains separate |
+| Coding delivery application | Python/PostgreSQL native and external author workflows, independent review, per-event retries, content identities and trusted Git/Jenkins delivery | This application owns workflow policy; it does not make the Rust core a scheduler. Verify installed configuration separately from source capability |
 | Reuse and release | Concrete optional capability consumers and public registrar fixtures exist | Workspace crates remain `publish = false`; source availability, local tests, deployed configuration and a supported public SDK are different claims |
 
 Use the [source-backed blueprint inventory](../architecture/forge-framework-blueprint.md#current-implementation)
 for implementation entry points. Test definitions describe intended coverage;
 this documentation review does not certify a fresh test run or a new deployment.
 
-## Generated IDE UI checkpoint
+## Earlier framework delivery checkpoints
 
 The [initial implementation](../../src/rust/forge-ide-web/README.md) contains typed
 Rust component declarations, YAML style tokens, generated semantic assets, a real
@@ -38,14 +60,15 @@ The [workbench follow-on](../../src/rust/forge-ide-web/WORKBENCH.md) adds the co
 header project/view sheets, a unified report-local entry/symbol query, Problems
 counts/navigation, reusable pane geometry/narrow controls and protected
 DOM teardown. Every local action carries accepted report context; stale integer
-IDs cannot select data from a new report. The current bundle uses local WASM
-ABI 5; older ABI diagrams describe earlier checkpoints. Native HTTP protocol 1
-remains separate. Manual Mail archive is a repository capability behind the
+IDs cannot select data from a new report. That earlier bundle used local WASM
+ABI5; consolidated source is ABI16. Older ABI diagrams describe their own checkpoints. Native HTTP protocol 1
+remains separate. Mail remains inactive in the current portal. Manual Mail archive is a retained repository capability behind the
 native `chat.mail_archive_enabled` opt-in, false by default. It requires matching
 runner/schema and host support; the dated live ABI 4 checkpoint has not been
 upgraded by this source change. See [archive compatibility and rollout](../../src/rust/forge-ide-web-host/README.md#workbench-asset-compatibility).
-Main promotion requires same-head Rust and actual sandboxed desktop/narrow browser
-checks plus visual review. Bounded source and managed-edit operations now have
+The original UI milestone required same-head Rust and sandboxed desktop/narrow
+browser evidence plus visual review. Current branch/main acceptance follows the
+selected scoped CI contract described above. Bounded source and managed-edit operations now have
 separately admitted native paths. An external editor-widget lifecycle remains a
 proposal.
 
@@ -144,7 +167,7 @@ remain proposals; do not import their illustrative names as if they were the
 implemented APIs. Coordinated changes to exhaustive application enums remain a
 source-compatibility concern.
 
-## Next core slice: bootstrap and registrars
+## Implemented foundation milestone: bootstrap and registrars
 
 **Implemented narrow checkpoint:** `src/rust/forge-bootstrap` now provides prepared groups, atomic consuming registration, declared-order validation/freeze and typed tuple extraction. The five earlier library contracts are unchanged. Three demo packages prove optional capability/implementation registration and explicit provider/task assembly; that bootstrap checkpoint added no CLI, HTTP, IPC, remote execution, home renderer or async runtime. Native disk access is the separate follow-on checkpoint below. The [bootstrap reference](../architecture/bootstrap-registrars.md) distinguishes the real APIs from deferred policies.
 

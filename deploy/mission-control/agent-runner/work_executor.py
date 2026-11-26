@@ -47,6 +47,12 @@ CHILD_STATE = Path("/run/forge-coding-attempt")
 MAX_FILES = 20_000
 MAX_WORKSPACE_BYTES = 256 * 1024 * 1024
 LOG = logging.getLogger("forge-coding-worker")
+# Single tuning point for the hard ceiling on an attempt's wall time once its
+# deadline has been extended. It bounds the local run deadline and the
+# transient scope's RuntimeMaxSec. It must equal the database outer bound in
+# forge_coding_worker_api.renew_status (M45: started_at + interval '4 hours');
+# test_deadline_extension_events checks that parity, so change both together.
+EXTENDED_WALL_BOUND_SECONDS = 4 * 3600
 
 FORBIDDEN_CODEX_FLAGS = frozenset({
     "--last", "--all", "--worktree",
@@ -773,12 +779,15 @@ def _agy_settings(config, *, implement, unattended):
     }}
 
 
+# The CLI's own print timeout is only the hard outer bound (same ceiling as the
+# systemd RuntimeMaxSec and M45 SQL). The executor's progress-aware deadline
+# (POLICY max_wall_seconds + recorded extensions) is what actually ends a run.
 def _agy_argv(binary, model, *, implement, unattended, conversation_id=None):
     argv = (str(binary), *(("--dangerously-skip-permissions",) if unattended else ()),
         "--settings", str(CHILD_STATE / "settings.json"),
         "--mode", "accept-edits" if implement else "plan", "--model", model,
         "--input-format", "stream-json", "--output-format", "stream-json",
-        "--print-timeout", str(POLICY["max_wall_seconds"]) + "s", "--disable-slash-commands")
+        "--print-timeout", str(EXTENDED_WALL_BOUND_SECONDS) + "s", "--disable-slash-commands")
     if conversation_id is not None:
         argv += ("--conversation", conversation_id)
     return argv
@@ -946,7 +955,9 @@ class SystemdSupervisor:
         properties = [
             "Type=exec", "KillMode=control-group", "KillSignal=SIGTERM",
             "FinalKillSignal=SIGKILL", "SendSIGKILL=yes", "TimeoutStopSec=10",
-            "RuntimeMaxSec=" + str(POLICY["max_wall_seconds"]),
+            # Hard scope bound is the outer extension bound (M45: started_at + 4h);
+            # the supervising loop enforces the current, progress-extended deadline.
+            "RuntimeMaxSec=" + str(EXTENDED_WALL_BOUND_SECONDS),
             # Only the fixed system unshare/setpriv launcher executes before the
             # UID/capability drop. The actual CLI has NNP=1 and zero capabilities.
             "NoNewPrivileges=no", "PrivateTmp=yes", "PrivateDevices=yes", "ProtectSystem=strict",
@@ -1457,7 +1468,12 @@ class CommandRunnerProvider:
                           external_sandbox if backend == "codex" else False, native_auth)
 
     def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None, peer_context=None,
-            peer_feedback_context=None, external_context=None, verdict_retry_note=None):
+            peer_feedback_context=None, external_context=None, verdict_retry_note=None, report_activity=None, deadline_hint=None):
+        """``report_activity`` is called when the agent writes output (any
+        backend; Codex has no public progress channel). ``deadline_hint``
+        returns the seconds left on the database deadline, which a recorded
+        extension (M45/M47) can move; the local wall bound follows it up to
+        EXTENDED_WALL_BOUND_SECONDS and never shrinks."""
         invocation = self.invocation(lease, workspace, progress=report_progress is not None,
                                      plan_context=plan_context, feedback_context=feedback_context, peer_context=peer_context,
                                      peer_feedback_context=peer_feedback_context, external_context=external_context,
@@ -1527,6 +1543,8 @@ class CommandRunnerProvider:
                                  if active_invocation.backend == "codex" and conversation is not None
                                  else None)
             deadline = self.clock() + POLICY["max_wall_seconds"] + 15
+            outer_deadline = self.clock() + EXTENDED_WALL_BOUND_SECONDS + 15
+            next_hint = self.clock()
             while True:
                 parser = CliParser(active_invocation.backend, expected_conversation_id=(lease["attempt_id"] if active_invocation.backend == "grok" else conversation))
                 errors = []
@@ -1555,6 +1573,14 @@ class CommandRunnerProvider:
                             except ProgressSinkError:
                                 errors.append(ExecutionError("needs_reconcile", "Agent progress persistence is uncertain; review is required."))
                             next_progress = self.clock() + 1
+                        if deadline_hint is not None and self.clock() >= next_hint:
+                            try:
+                                remaining = deadline_hint()
+                            except Exception:
+                                remaining = None
+                            if type(remaining) in (int, float) and remaining > 0:
+                                deadline = max(deadline, min(outer_deadline, self.clock() + remaining + 15))
+                            next_hint = self.clock() + 1
                         if self.clock() >= deadline and not errors:
                             errors.append(ExecutionError("failed", "Agent exceeded its declared wall-time resource bound."))
                         if (stop.is_set() or errors) and not interrupted:
@@ -1586,6 +1612,11 @@ class CommandRunnerProvider:
                                     key.fileobj.close()
                                     reads -= 1
                                 elif not errors:
+                                    if report_activity is not None:
+                                        try:
+                                            report_activity()
+                                        except Exception:
+                                            LOG.warning("Agent activity signal unavailable")
                                     try:
                                         parser.feed(chunk, stderr=key.data == "error")
                                     except ExecutionError as error:

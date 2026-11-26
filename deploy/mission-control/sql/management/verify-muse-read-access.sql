@@ -21,6 +21,9 @@ BEGIN
     IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=29 AND name='delivery_automation') THEN
         allowed_tables:=allowed_tables||ARRAY['delivery_projects','delivery_capability_grants','delivery_lineages','delivery_ledger','delivery_post_merge_links','delivery_task_lineages','delivery_project_main_heads','delivery_operations'];
     END IF;
+    IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='agent_branch_and_cicd_stages') THEN
+        allowed_tables:=allowed_tables||ARRAY['agent_branch_state','jenkins_stage_results','jenkins_stage_log_chunks'];
+    END IF;
     IF current_database()<>'forge_agent' THEN
         RAISE EXCEPTION 'Muse reader contract requires forge_agent database';
     END IF;

@@ -2,9 +2,11 @@
 use super::{valid_chat_id, valid_chat_text};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+mod cicd;
 mod delivery;
 mod retry;
 mod workflow;
+pub use cicd::*;
 pub use delivery::*;
 pub use retry::*;
 pub use workflow::*;
@@ -695,6 +697,8 @@ pub struct WorkProfile {
     pub model: String,
     pub modes: Vec<WorkMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<WorkTransport>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -707,6 +711,10 @@ impl WorkProfile {
         valid_work_name(&self.alias, 64)
             && valid_work_label(&self.label, 128)
             && valid_work_label(&self.model, 128)
+            && self
+                .branch
+                .as_deref()
+                .is_none_or(|b| valid_work_branch(b) && b != "main")
             && !self.modes.is_empty()
             && self.modes.len() <= 3
             && self
@@ -726,11 +734,14 @@ pub struct WorkCatalog {
     pub worker_status: WorkWorkerStatus,
     #[serde(deserialize_with = "required_nullable")]
     pub observed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_branches: Vec<AgentBranchState>,
 }
 impl WorkCatalog {
     pub fn is_valid(&self) -> bool {
         self.projects.len() <= 64
             && self.profiles.len() <= 64
+            && self.agent_branches.len() <= MAX_AGENT_BRANCHES
             && self.projects.iter().all(|p| {
                 p.delivery.as_ref().is_none_or(WorkDelivery::is_valid)
                     && p.workflow.as_ref().is_none_or(WorkWorkflowPolicy::is_valid)
@@ -744,6 +755,7 @@ impl WorkCatalog {
                         .is_none_or(|s| valid_work_hex(s, 40))
             })
             && self.profiles.iter().all(WorkProfile::is_valid)
+            && self.agent_branches.iter().all(AgentBranchState::is_valid)
             && self
                 .projects
                 .iter()
@@ -891,6 +903,9 @@ pub struct WorkTaskDetail {
     /// Authenticated external artifact; carries no native process or workspace proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_result: Option<WorkExternalResult>,
+    /// Correlation-scoped Jenkins CI/CD runs, stages, and persistent agent branch state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_cicd: Option<WorkCorrelationCicd>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -975,6 +990,10 @@ impl WorkTaskDetail {
                 .as_ref()
                 .zip(self.result.as_ref())
                 .is_none_or(|(a, r)| a.attempt_id == r.attempt_id)
+            && self
+                .correlation_cicd
+                .as_ref()
+                .is_none_or(|c| c.is_valid() && c.correlation_id == self.correlation_id)
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -994,6 +1013,97 @@ pub struct WorkLogEvent {
     pub external_progress: Option<WorkExternalProgress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_progress: Option<WorkWorkflowProgress>,
+    /// Why a failed attempt failed (M46); absent on older events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<WorkEventFailure>,
+    /// A recorded attempt deadline extension (M47); checkpoint events only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_extension: Option<WorkDeadlineExtension>,
+}
+/// The worker's progress signal let a nearly due attempt deadline move.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkDeadlineExtension {
+    pub attempt_id: String,
+    pub extension_no: u8,
+    pub previous_deadline: String,
+    pub new_deadline: String,
+    pub signal: WorkDeadlineSignal,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkDeadlineSignal {
+    ProgressReport,
+    Checkpoint,
+    Output,
+}
+impl WorkDeadlineSignal {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProgressReport => "progress report",
+            Self::Checkpoint => "checkpoint",
+            Self::Output => "agent output",
+        }
+    }
+}
+impl WorkDeadlineExtension {
+    pub fn is_valid(&self) -> bool {
+        fn utc_second(value: &str) -> bool {
+            let b = value.as_bytes();
+            b.len() == 20
+                && b.iter().enumerate().all(|(i, c)| match i {
+                    4 | 7 => *c == b'-',
+                    10 => *c == b'T',
+                    13 | 16 => *c == b':',
+                    19 => *c == b'Z',
+                    _ => c.is_ascii_digit(),
+                })
+        }
+        valid_chat_id(&self.attempt_id)
+            && (1..=64).contains(&self.extension_no)
+            && utc_second(&self.previous_deadline)
+            && utc_second(&self.new_deadline)
+            && self.previous_deadline < self.new_deadline
+    }
+}
+/// Machine-readable cause plus a bounded summary attached by the failing
+/// component when the attempt failed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkEventFailure {
+    pub cause: WorkFailureCause,
+    pub summary: String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkFailureCause {
+    MalformedOutput,
+    PolicyUnavailable,
+    ContextUnavailable,
+    ResourceBound,
+    AgentInput,
+    AgentFailed,
+}
+impl WorkFailureCause {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MalformedOutput => "malformed agent output",
+            Self::PolicyUnavailable => "execution policy unavailable",
+            Self::ContextUnavailable => "repository or context unavailable",
+            Self::ResourceBound => "resource bound exceeded",
+            Self::AgentInput => "agent input not delivered",
+            Self::AgentFailed => "agent failed",
+        }
+    }
+}
+impl WorkEventFailure {
+    pub fn is_valid(&self) -> bool {
+        self.summary.len() <= 512
+            && self
+                .summary
+                .chars()
+                .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1003,11 +1113,47 @@ pub struct WorkWorkflowProgress {
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub related_task_id: Option<String>,
+    /// Machine-readable escalation cause; escalated checkpoints only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalation_cause: Option<WorkEscalationCause>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkEscalationCause {
+    ReviewVerdict,
+    RetryExhausted,
+    BudgetExhausted,
+    GrantRevoked,
+    AgentStopped,
+    ReviewUnavailable,
+    VerificationFailed,
+    PublicationFailed,
+    CandidateRepeated,
+    Handoff,
+    Unclassified,
+}
+impl WorkEscalationCause {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ReviewVerdict => "reviewer escalated",
+            Self::RetryExhausted => "retry attempts exhausted",
+            Self::BudgetExhausted => "revision budget exhausted",
+            Self::GrantRevoked => "grant revoked",
+            Self::AgentStopped => "agent stopped",
+            Self::ReviewUnavailable => "review unavailable",
+            Self::VerificationFailed => "verification failed",
+            Self::PublicationFailed => "publication failed",
+            Self::CandidateRepeated => "identical candidate returned",
+            Self::Handoff => "handed off",
+            Self::Unclassified => "unclassified",
+        }
+    }
 }
 impl WorkWorkflowProgress {
     pub fn is_valid(&self) -> bool {
         valid_chat_id(&self.workflow_id)
             && self.related_task_id.as_deref().is_none_or(valid_chat_id)
+            && (self.escalation_cause.is_none() || self.phase == WorkWorkflowPhase::Escalated)
             && valid_chat_text(&self.summary, 4096)
             && self
                 .summary
@@ -1085,6 +1231,9 @@ pub enum WorkRequest {
         auto_repair: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workflow_policy_digest: Option<String>,
+        /// M44 catalog id of the presented policy; preferred over the digest.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workflow_policy_id: Option<String>,
     },
     WorkGet {
         request_id: String,
@@ -1202,6 +1351,19 @@ pub enum WorkRequest {
         note: String,
         idempotency_key: String,
     },
+    WorkCicdStageLog {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        correlation_id: String,
+        action_id: String,
+        stage_id: String,
+        view: WorkCicdStageView,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
+        #[serde(default = "cicd_stage_log_limit")]
+        limit_bytes: usize,
+    },
 }
 const fn list_limit() -> usize {
     20
@@ -1211,6 +1373,9 @@ const fn event_limit() -> usize {
 }
 const fn result_limit() -> usize {
     MAX_WORK_RESULT_PAGE_BYTES
+}
+const fn cicd_stage_log_limit() -> usize {
+    MAX_CICD_STAGE_LOG_PAGE_BYTES
 }
 impl WorkRequest {
     pub fn request_id(&self) -> &str {
@@ -1227,7 +1392,8 @@ impl WorkRequest {
             | Self::WorkPlanDecide { request_id, .. }
             | Self::WorkReviewDecide { request_id, .. }
             | Self::WorkRepair { request_id, .. }
-            | Self::WorkPublicationRetry { request_id, .. } => request_id,
+            | Self::WorkPublicationRetry { request_id, .. }
+            | Self::WorkCicdStageLog { request_id, .. } => request_id,
         }
     }
     pub fn project_alias(&self) -> Option<&str> {
@@ -1244,7 +1410,8 @@ impl WorkRequest {
             | Self::WorkPlanDecide { project_alias, .. }
             | Self::WorkReviewDecide { project_alias, .. }
             | Self::WorkRepair { project_alias, .. }
-            | Self::WorkPublicationRetry { project_alias, .. } => Some(project_alias),
+            | Self::WorkPublicationRetry { project_alias, .. }
+            | Self::WorkCicdStageLog { project_alias, .. } => Some(project_alias),
         }
     }
     pub fn task_id(&self) -> Option<&str> {
@@ -1258,7 +1425,8 @@ impl WorkRequest {
             | Self::WorkPlanDecide { task_id, .. }
             | Self::WorkReviewDecide { task_id, .. }
             | Self::WorkRepair { task_id, .. }
-            | Self::WorkPublicationRetry { task_id, .. } => Some(task_id),
+            | Self::WorkPublicationRetry { task_id, .. }
+            | Self::WorkCicdStageLog { task_id, .. } => Some(task_id),
             _ => None,
         }
     }
@@ -1277,6 +1445,7 @@ impl WorkRequest {
             Self::WorkReviewDecide { .. } => "ide.work.review.decide",
             Self::WorkRepair { .. } => "ide.work.repair",
             Self::WorkPublicationRetry { .. } => "ide.work.publication.retry",
+            Self::WorkCicdStageLog { .. } => "ide.work.cicd.stage_log",
         }
     }
     pub fn is_destination(value: &str) -> bool {
@@ -1295,6 +1464,7 @@ impl WorkRequest {
                 | "ide.work.review.decide"
                 | "ide.work.repair"
                 | "ide.work.publication.retry"
+                | "ide.work.cicd.stage_log"
         )
     }
     pub fn is_mutation(&self) -> bool {
@@ -1320,6 +1490,7 @@ impl WorkRequest {
                     mode,
                     auto_repair,
                     workflow_policy_digest,
+                    workflow_policy_id,
                     base_revision,
                     agent_profile,
                     prompt,
@@ -1330,6 +1501,9 @@ impl WorkRequest {
                     valid_work_hex(base_revision, 40)
                         && workflow_policy_digest.as_deref().is_none_or(|digest| {
                             valid_work_hex(digest, 64) && *mode == WorkMode::Plan && !auto_repair
+                        })
+                        && workflow_policy_id.as_deref().is_none_or(|id| {
+                            valid_chat_id(id) && *mode == WorkMode::Plan && !auto_repair
                         })
                         && (!auto_repair || *mode == WorkMode::Implement)
                         && valid_work_name(agent_profile, 64)
@@ -1483,6 +1657,22 @@ impl WorkRequest {
                         && optional_text(note, 2048)
                         && valid_work_name(idempotency_key, 128)
                 }
+                Self::WorkCicdStageLog {
+                    correlation_id,
+                    action_id,
+                    stage_id,
+                    cursor,
+                    limit_bytes,
+                    ..
+                } => {
+                    valid_chat_id(correlation_id)
+                        && valid_chat_id(action_id)
+                        && valid_work_name(stage_id, 64)
+                        && (1..=MAX_CICD_STAGE_LOG_PAGE_BYTES).contains(limit_bytes)
+                        && cursor
+                            .as_deref()
+                            .is_none_or(|c| work_result_cursor(c).is_some())
+                }
             }
     }
 }
@@ -1529,6 +1719,42 @@ impl WorkFailure {
         }
     }
 }
+/// Optional refinement of a `result_mismatch` or `denied` submit failure.
+///
+/// It names only which part of the caller's own submission was stale or not
+/// granted, so the operator can tell what to refresh without a digest diff.
+/// Clients that read only `code` keep working.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkFailureReason {
+    BaseStale,
+    PolicyStale,
+    PolicyMissing,
+    PolicyNotApplicable,
+    WorkflowMode,
+    WorkflowProfile,
+    ModeNotGranted,
+    ProfileNotGranted,
+    ProfileDisabled,
+    ProfileModeNotAllowed,
+}
+impl WorkFailureReason {
+    /// The failure code this reason may refine.
+    pub fn code(self) -> WorkFailure {
+        match self {
+            Self::BaseStale
+            | Self::PolicyStale
+            | Self::PolicyMissing
+            | Self::PolicyNotApplicable
+            | Self::WorkflowMode
+            | Self::WorkflowProfile => WorkFailure::ResultMismatch,
+            Self::ModeNotGranted
+            | Self::ProfileNotGranted
+            | Self::ProfileDisabled
+            | Self::ProfileModeNotAllowed => WorkFailure::Denied,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkResponse {
@@ -1539,6 +1765,8 @@ pub enum WorkResponse {
         worker_status: WorkWorkerStatus,
         #[serde(deserialize_with = "required_nullable")]
         observed_at: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agent_branches: Vec<AgentBranchState>,
     },
     WorkSubmitted {
         request_id: String,
@@ -1649,9 +1877,38 @@ pub enum WorkResponse {
         status: WorkStatus,
         publication_id: String,
     },
+    WorkCicdStageLogPage {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        correlation_id: String,
+        action_id: String,
+        stage_id: String,
+        view: WorkCicdStageView,
+        content: String,
+        truncated: bool,
+        total_bytes: u64,
+        byte_offset: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prev_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tests_passed: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tests_failed: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tests_skipped: Option<u64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        test_cases: Vec<WorkCicdTestCase>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_excerpt: Option<String>,
+    },
     WorkFailed {
         request_id: String,
         code: WorkFailure,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<WorkFailureReason>,
     },
 }
 pub type WorkReply = WorkResponse;
@@ -1671,6 +1928,7 @@ impl WorkResponse {
             | Self::WorkReviewDecided { request_id, .. }
             | Self::WorkRepairSubmitted { request_id, .. }
             | Self::WorkPublicationRetryQueued { request_id, .. }
+            | Self::WorkCicdStageLogPage { request_id, .. }
             | Self::WorkFailed { request_id, .. } => request_id,
         }
     }
@@ -1686,13 +1944,19 @@ impl WorkResponse {
                 && base.checked_add(1) == Some(revision)
         };
         match (self, request) {
-            (Self::WorkFailed { code, .. }, _) => http_status == code.status(),
+            (Self::WorkFailed { code, reason, .. }, _) => {
+                http_status == code.status()
+                    && reason.is_none_or(|reason| {
+                        reason.code() == *code && matches!(request, WorkRequest::WorkSubmit { .. })
+                    })
+            }
             (
                 Self::WorkCatalog {
                     projects,
                     profiles,
                     worker_status,
                     observed_at,
+                    agent_branches,
                     ..
                 },
                 WorkRequest::WorkCatalog { .. },
@@ -1703,6 +1967,7 @@ impl WorkResponse {
                         profiles: profiles.clone(),
                         worker_status: *worker_status,
                         observed_at: observed_at.clone(),
+                        agent_branches: agent_branches.clone(),
                     }
                     .is_valid()
             }
@@ -1834,6 +2099,16 @@ impl WorkResponse {
                             .count()
                                 <= 1
                             && (!e.progress_verified || e.progress.is_some())
+                            && e.failure
+                                .as_ref()
+                                .is_none_or(|f| e.kind == WorkEventKind::Failed && f.is_valid())
+                            && e.deadline_extension.as_ref().is_none_or(|x| {
+                                e.kind == WorkEventKind::Checkpoint
+                                    && x.is_valid()
+                                    && e.progress.is_none()
+                                    && e.external_progress.is_none()
+                                    && e.workflow_progress.is_none()
+                            })
                     })
                     && events
                         .iter()
@@ -2064,6 +2339,68 @@ impl WorkResponse {
                                 })
                     }
             }
+            (
+                Self::WorkCicdStageLogPage {
+                    project_alias,
+                    task_id,
+                    correlation_id,
+                    action_id,
+                    stage_id,
+                    view,
+                    content,
+                    truncated,
+                    total_bytes,
+                    byte_offset,
+                    next_cursor,
+                    prev_cursor,
+                    tests_passed,
+                    tests_failed,
+                    tests_skipped,
+                    test_cases,
+                    error_excerpt,
+                    ..
+                },
+                WorkRequest::WorkCicdStageLog {
+                    correlation_id: req_correlation,
+                    action_id: req_action,
+                    stage_id: req_stage,
+                    view: req_view,
+                    cursor,
+                    limit_bytes,
+                    ..
+                },
+            ) => {
+                let wanted = cursor.as_deref().and_then(work_result_cursor);
+                let end = byte_offset.checked_add(content.len() as u64);
+                http_status == 200
+                    && project(project_alias)
+                    && task(task_id)
+                    && correlation_id == req_correlation
+                    && action_id == req_action
+                    && stage_id == req_stage
+                    && view == req_view
+                    && content.len() <= *limit_bytes
+                    && content.len() <= MAX_CICD_STAGE_LOG_PAGE_BYTES
+                    && *total_bytes <= MAX_CICD_STAGE_LOG_BYTES
+                    && *byte_offset == wanted.map_or(0, |(_, n)| n)
+                    && end.is_some_and(|n| n <= *total_bytes)
+                    && (*truncated == end.is_some_and(|n| n < *total_bytes))
+                    && next_cursor
+                        .as_deref()
+                        .is_none_or(|c| work_result_cursor(c).is_some())
+                    && prev_cursor
+                        .as_deref()
+                        .is_none_or(|c| work_result_cursor(c).is_some())
+                    && (*truncated == next_cursor.is_some())
+                    && tests_passed.is_none_or(|n| n <= MAX_WORK_INTEGER)
+                    && tests_failed.is_none_or(|n| n <= MAX_WORK_INTEGER)
+                    && tests_skipped.is_none_or(|n| n <= MAX_WORK_INTEGER)
+                    && test_cases.len() <= MAX_CICD_TEST_CASES
+                    && test_cases.iter().all(WorkCicdTestCase::is_valid)
+                    && error_excerpt
+                        .as_deref()
+                        .is_none_or(|e| optional_text(e, MAX_CICD_ERROR_EXCERPT_BYTES))
+            }
             _ => false,
         }
     }
@@ -2079,6 +2416,123 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_event_failure_cause_is_optional_typed_and_bounded() {
+        let json = r#"{"event_id":"77777777-7777-4777-8777-777777777777","correlation_id":"99999999-9999-4999-8999-999999999999","sequence":5,"kind":"failed","created_at":"2026-11-26T08:00:00Z","failure":{"cause":"malformed_output","summary":"The coding agent returned malformed machine output."}}"#;
+        let event: WorkLogEvent = serde_json::from_str(json).unwrap();
+        let failure = event.failure.as_ref().unwrap();
+        assert_eq!(failure.cause, WorkFailureCause::MalformedOutput);
+        assert!(failure.is_valid());
+        assert!(serde_json::from_str::<WorkLogEvent>(
+            &json.replace("malformed_output", "host_logs")
+        )
+        .is_err());
+        let old = json.split(r#","failure""#).next().unwrap().to_string() + "}";
+        assert!(serde_json::from_str::<WorkLogEvent>(&old)
+            .unwrap()
+            .failure
+            .is_none());
+        let long = WorkEventFailure {
+            cause: WorkFailureCause::AgentFailed,
+            summary: "x".repeat(513),
+        };
+        assert!(!long.is_valid());
+    }
+    #[test]
+    fn escalated_workflow_progress_carries_optional_typed_cause() {
+        let json = r#"{"event_id":"77777777-7777-4777-8777-777777777779","correlation_id":"99999999-9999-4999-8999-999999999999","sequence":7,"kind":"checkpoint","created_at":"2026-11-26T09:00:00Z","workflow_progress":{"workflow_id":"66666666-6666-4666-8666-666666666666","phase":"escalated","summary":"The bounded main integration budget is exhausted.","escalation_cause":"budget_exhausted"}}"#;
+        let event: WorkLogEvent = serde_json::from_str(json).unwrap();
+        let progress = event.workflow_progress.as_ref().unwrap();
+        assert_eq!(
+            progress.escalation_cause,
+            Some(WorkEscalationCause::BudgetExhausted)
+        );
+        assert!(progress.is_valid());
+        assert!(serde_json::from_str::<WorkLogEvent>(
+            &json.replace("budget_exhausted", "sha_mismatch")
+        )
+        .is_err());
+        let old = json.replace(r#","escalation_cause":"budget_exhausted""#, "");
+        let old: WorkLogEvent = serde_json::from_str(&old).unwrap();
+        assert!(old.workflow_progress.unwrap().escalation_cause.is_none());
+        let mut wrong_phase = progress.clone();
+        wrong_phase.phase = WorkWorkflowPhase::Implement;
+        assert!(!wrong_phase.is_valid());
+    }
+    #[test]
+    fn checkpoint_deadline_extension_is_optional_typed_and_bounded() {
+        let json = r#"{"event_id":"77777777-7777-4777-8777-777777777778","correlation_id":"99999999-9999-4999-8999-999999999999","sequence":6,"kind":"checkpoint","created_at":"2026-11-26T08:30:00Z","deadline_extension":{"attempt_id":"88888888-8888-4888-8888-888888888888","extension_no":1,"previous_deadline":"2026-11-26T08:32:00Z","new_deadline":"2026-11-26T08:42:00Z","signal":"output"}}"#;
+        let event: WorkLogEvent = serde_json::from_str(json).unwrap();
+        let extension = event.deadline_extension.as_ref().unwrap();
+        assert_eq!(extension.signal, WorkDeadlineSignal::Output);
+        assert!(extension.is_valid());
+        assert!(
+            serde_json::from_str::<WorkLogEvent>(&json.replace("\"output\"", "\"heartbeat\""))
+                .is_err()
+        );
+        let mut backwards = extension.clone();
+        backwards.new_deadline = "2026-11-26T08:00:00Z".into();
+        assert!(!backwards.is_valid());
+        let mut zero = extension.clone();
+        zero.extension_no = 0;
+        assert!(!zero.is_valid());
+    }
+    #[test]
+    fn failure_reasons_are_optional_bounded_and_tied_to_their_code() {
+        let wire = serde_json::json!({
+            "kind": "work_failed",
+            "request_id": "r",
+            "code": "result_mismatch",
+            "reason": "policy_stale",
+        });
+        let failed: WorkResponse = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(
+            failed,
+            WorkResponse::WorkFailed {
+                request_id: "r".into(),
+                code: WorkFailure::ResultMismatch,
+                reason: Some(WorkFailureReason::PolicyStale),
+            }
+        );
+        assert_eq!(serde_json::to_value(&failed).unwrap(), wire);
+        let legacy = WorkResponse::WorkFailed {
+            request_id: "r".into(),
+            code: WorkFailure::ResultMismatch,
+            reason: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&legacy).unwrap(),
+            serde_json::json!({"kind": "work_failed", "request_id": "r", "code": "result_mismatch"})
+        );
+        let mut unknown = wire;
+        unknown["reason"] = "other_profile_digest".into();
+        assert!(serde_json::from_value::<WorkResponse>(unknown).is_err());
+        for (reason, code) in [
+            (WorkFailureReason::BaseStale, WorkFailure::ResultMismatch),
+            (
+                WorkFailureReason::PolicyMissing,
+                WorkFailure::ResultMismatch,
+            ),
+            (
+                WorkFailureReason::WorkflowProfile,
+                WorkFailure::ResultMismatch,
+            ),
+            (WorkFailureReason::ProfileDisabled, WorkFailure::Denied),
+            (WorkFailureReason::ModeNotGranted, WorkFailure::Denied),
+        ] {
+            assert_eq!(reason.code(), code);
+        }
+        // A reason refines only submit replies with its own code.
+        let events = WorkRequest::WorkEvents {
+            request_id: "r".into(),
+            project_alias: "p".into(),
+            task_id: "00000000-0000-0000-0000-000000000000".into(),
+            after_sequence: 0,
+            limit: 50,
+        };
+        assert!(legacy.valid_for(&events, 409));
+        assert!(!failed.valid_for(&events, 409));
+    }
     #[test]
     fn configured_backends_have_stable_wire_names_and_labels() {
         for (backend, wire, label) in [
@@ -2129,6 +2583,8 @@ mod tests {
                 progress_verified: false,
                 external_progress: None,
                 workflow_progress: None,
+                failure: None,
+                deadline_extension: None,
                 sequence: 5,
                 kind: WorkEventKind::Checkpoint,
                 progress: None,

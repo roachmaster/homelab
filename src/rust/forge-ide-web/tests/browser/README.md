@@ -104,6 +104,53 @@ catalog and usage ports. Its unobserved readiness, allowance and counters remain
 Unknown/Not reported, without a quota meter. The actual WASM journey verifies
 this generic card at 320/390/1440px; it does not invoke a real Grok CLI.
 
+### Agents triage fixture coverage
+
+The same fixed `real.report.partial` group also runs an isolated, read-only
+Agents triage journey through real WASM and the admitted native host. Its
+owned relay seeds native and Muse assignments directly in disposable memory.
+It performs no assignment submission, retry, cancellation, acceptance or merge.
+The corpus checks:
+
+- A visible keyboard-accessible Needs attention scope alongside Active,
+  History and All assignments; counts come from the controlled service response.
+- Readable whole-word titles, phase, agent and last update, with the exact full
+  assignment retained in detail.
+- An automatic plan retry at 1 of 20 with 7 cumulative revisions; an open retry
+  at 20 of 20 that remains Active; and an authoritative escalation at only
+  1 of 20 that still needs attention. A cancelled author under an escalated
+  workflow remains distinct from user cancellation.
+- Native automatic revision, Muse independent review and an operator action in
+  Now / Why / Next. Worker ready remains separate from Main verification queued.
+- Accepted rows retained after a failed list refresh, empty Active, a delayed
+  detail read and a failed detail read without inherited progress or success.
+- The same focused DOM row, selection and scroll position across background
+  polling and keyboard return from detail. Native disclosures expose full
+  assignment, stages, workflow evidence, technical IDs and event history.
+- Inbox and detail at **1363 × 844**, **320 × 844** and **390 × 844**. Full
+  stage evidence is a deliberate vertical list; the current stage remains
+  available in the compact summary before opening the evidence disclosure.
+
+Known fixture captures are explicitly allowlisted by the hosted workflow:
+`ide-agents-triage-inbox-{1363,320,390}.png`,
+`ide-agents-triage-detail-{1363,320,390}.png`,
+`ide-agents-triage-attention-390.png` and `ide-agents-triage-muse-390.png`.
+Existing `ide-agents-overview-{phone,desktop}.png` and
+`ide-agents-stage-diagram-{phone,desktop}.png` preserve the earlier controlled
+scenarios for comparison with a baseline run. These are capture instructions,
+not evidence that a run or screenshot review has occurred.
+
+For before/after evidence, run the unmodified fixed gate in a separate clean
+baseline checkout and again on the proposed source, retaining both `QA_OUTPUT`
+directories and their revision/fingerprint reports. Compare the common inbox
+and native-stage fixture states, then inspect the additional triage captures.
+Do not copy baseline PNGs into a current run or present missing captures as
+passed. The ordinary PR workflow runs harness checks but **skips full browser
+execution**; a successful PR job is not screenshot or interaction evidence.
+Use the existing workflow dispatch on the feature ref, or run `make ui-qa` in
+an environment with its documented prerequisites, for the full gate. No gate
+condition or deployment path is changed by these tests.
+
 The current portal does not expose Chat, model selection, saved-chat management,
 contextual inference or model-generated edit proposals. Assertions require those
 entry points and screens to be absent. The request observer counts inference,

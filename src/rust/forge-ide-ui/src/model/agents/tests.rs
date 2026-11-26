@@ -24,12 +24,14 @@ fn ready() -> Agents {
                 alias: "agy-primary".into(),
                 label: "Gemini".into(),
                 backend: WorkBackend::Antigravity,
+                branch: None,
                 transport: None,
                 model: "Fixture model".into(),
                 modes: vec![WorkMode::Plan, WorkMode::Review],
             }],
             worker_status: WorkWorkerStatus::Ready,
             observed_at: Some(TIME.into()),
+            agent_branches: vec![],
         }),
         ..Agents::default()
     }
@@ -85,6 +87,7 @@ fn detail(status: WorkStatus) -> WorkTaskDetail {
         workflow: None,
         review: None,
         external_result: None,
+        correlation_cicd: None,
     }
 }
 fn draft(agents: &mut Agents) {
@@ -237,6 +240,7 @@ fn unavailable_mutation_is_unknown_and_snapshot_restores_without_automatic_execu
         UiEvent::Work(WorkResponse::WorkFailed {
             request_id: "send".into(),
             code: WorkFailure::Unavailable,
+            reason: None,
         }),
         "failed",
     );
@@ -353,6 +357,8 @@ fn polling_uses_owned_watch_and_accepts_events_beyond_task_revision() {
                 progress_verified: false,
                 external_progress: None,
                 workflow_progress: None,
+                failure: None,
+                deadline_extension: None,
                 sequence: 55,
                 kind: WorkEventKind::Checkpoint,
                 progress: None,
@@ -766,6 +772,8 @@ fn terminal_history_keeps_public_plan_and_updates_without_revision_changes() {
             progress_verified: false,
             external_progress: None,
             workflow_progress: None,
+            failure: None,
+            deadline_extension: None,
             sequence: ordinal,
             kind: WorkEventKind::Checkpoint,
             created_at: TIME.into(),
@@ -848,6 +856,8 @@ fn reports_from_an_old_attempt_do_not_become_current_progress() {
         progress_verified: false,
         external_progress: None,
         workflow_progress: None,
+        failure: None,
+        deadline_extension: None,
         sequence: 10,
         kind: WorkEventKind::Checkpoint,
         created_at: TIME.into(),
@@ -872,6 +882,8 @@ fn an_external_resume_clears_the_old_plan_once_without_restarting_history_foreve
         progress_verified: false,
         external_progress: None,
         workflow_progress: None,
+        failure: None,
+        deadline_extension: None,
         sequence: 3,
         kind: WorkEventKind::Checkpoint,
         created_at: TIME.into(),
@@ -1498,6 +1510,7 @@ mod history;
 mod review;
 mod scopes;
 mod stage_diagram;
+mod triage;
 mod workflow;
 
 #[test]
@@ -1515,4 +1528,56 @@ fn nonexecutable_provider_setup_diagnostic_is_visible_without_invented_quota() {
         Some(badge("Not reported", BadgeTone::Neutral))
     );
     assert!(card.quotas.is_empty());
+}
+
+#[test]
+fn submit_rejection_reason_names_what_to_refresh() {
+    for (code, reason, status, message) in [
+        (
+            WorkFailure::ResultMismatch,
+            Some(WorkFailureReason::BaseStale),
+            409,
+            "The project base moved. Refresh the catalog and resubmit on the current base.",
+        ),
+        (
+            WorkFailure::ResultMismatch,
+            Some(WorkFailureReason::PolicyStale),
+            409,
+            "The workflow policy changed. Refresh the catalog and resubmit.",
+        ),
+        (
+            WorkFailure::Denied,
+            Some(WorkFailureReason::ProfileDisabled),
+            403,
+            "This agent profile is disabled for execution.",
+        ),
+        (
+            WorkFailure::Denied,
+            None,
+            403,
+            "This project, profile or mode is not authorized.",
+        ),
+    ] {
+        let mut agents = ready();
+        draft(&mut agents);
+        step(
+            &mut agents,
+            UiEvent::SendAgentTask {
+                idempotency_key: KEY.into(),
+            },
+            "send",
+        );
+        step(
+            &mut agents,
+            UiEvent::Work(WorkResponse::WorkFailed {
+                request_id: "send".into(),
+                code,
+                reason,
+            }),
+            "failed",
+        );
+        assert_eq!(code.status(), status);
+        assert_eq!(agents.status, message, "{reason:?}");
+        assert!(agents.retry.is_none());
+    }
 }

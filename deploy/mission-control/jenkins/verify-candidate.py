@@ -321,7 +321,8 @@ class StageEmitter:
                  timeout_seconds=STAGE_EMIT_TIMEOUT_SECONDS,
                  max_attempts=STAGE_EMIT_MAX_ATTEMPTS,
                  total_budget_seconds=STAGE_EMIT_TOTAL_BUDGET_SECONDS,
-                 connection_factory=HTTPConnection, clock=time.monotonic, log=None):
+                 connection_factory=HTTPConnection, clock=time.monotonic, log=None,
+                 correlation_id=None, branch=None, branch_scope=None):
         self._action_id = action_id
         self._project_alias = project_alias
         self._commit_sha = commit_sha
@@ -329,6 +330,9 @@ class StageEmitter:
         self._build_number = build_number
         self._job_name = job_name
         self._logical_names = tuple(logical_names)
+        self._correlation_id = correlation_id
+        self._branch = branch
+        self._branch_scope = branch_scope
         self._token_paths = tuple(token_paths)
         self._host, self._port = host, port
         self._timeout, self._max_attempts = float(timeout_seconds), int(max_attempts)
@@ -425,6 +429,14 @@ class StageEmitter:
         }
         if stage_status is not None:
             wire['stage_status'] = stage_status
+        if self._correlation_id is not None:
+            wire['correlation_id'] = self._correlation_id
+        if self._action_id is not None and len(str(self._action_id)) == 36 and str(self._action_id).count('-') == 4:
+            wire['action_id'] = self._action_id
+        if self._branch is not None:
+            wire['branch'] = self._branch
+        if self._branch_scope is not None:
+            wire['branch_scope'] = self._branch_scope
         payload = _stage_canonical_json(wire)
         for _attempt in range(self._max_attempts):
             if self._elapsed >= self._budget:
@@ -478,7 +490,10 @@ def build_stage_emitter(action, request, config):
         action_id=action, project_alias=request['project_alias'],
         commit_sha=request['candidate_commit'], jenkins_instance=instance,
         build_number=int(raw_build), job_name=job_name,
-        logical_names=logical_names), None
+        logical_names=logical_names,
+        correlation_id=request.get('correlation_id'),
+        branch=request.get('source_branch'),
+        branch_scope=request.get('branch_scope')), None
 
 
 def profile_coverage(profile, branch_scope):
@@ -503,8 +518,20 @@ def profile_gate_manifest(profile, branch_scope, protected, helper_digest):
             for p in event_phases_for_scope(branch_scope)]
     return hashlib.sha256(canonical(policy)).hexdigest()
 
+
+def gate_contract_name(profile, branch_scope):
+    """Named gate contract accepted in place of the legacy manifest digest.
+
+    The name binds the verification profile (which fixes the check plan) and
+    the validated branch scope. The verifier itself is still pinned by
+    verifier_sha256 and the source by candidate commit/tree, so no canonical
+    JSON has to be reproduced byte-for-byte by the requester."""
+    return profile + ':' + branch_scope
+
 SHA = re.compile('[0-9a-f]{40}')
 DIGEST = re.compile('[0-9a-f]{64}')
+GATE_CONTRACT_RE = re.compile(
+    r'forge-sdlc-jenkins-v[1-3]:(?:main|detached|branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?)')
 BRANCH_NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
 BRANCH_SLUG_RE = re.compile(r'[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
 BRANCH_SCOPE_RE = re.compile(r'branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
@@ -529,6 +556,24 @@ class MainAncestorRequired(ValueError):
 
 class GateManifestMismatch(ValueError):
     """Submitted gate manifest disagrees with installed verifier policy and source."""
+
+
+PREPARE_SOURCE_FAILURE_REASONS = frozenset({
+    'gate_manifest_mismatch',
+    'verifier_digest_mismatch',
+    'source_bounds_exceeded',
+    'checkout_failed',
+    'io_unavailable',
+})
+
+
+class PrepareSourceError(ValueError):
+    """Closed, non-secret classification for pre-check prepare_source failures."""
+    def __init__(self, reason):
+        if reason not in PREPARE_SOURCE_FAILURE_REASONS:
+            raise ValueError('Unknown prepare_source failure reason')
+        super().__init__(reason)
+        self.reason = reason
 
 
 def main_ancestor_preflight(source, request, env):
@@ -601,7 +646,8 @@ def profile_protected_gate_path(path, profile):
             or path.startswith('deploy/mission-control/sql/migrations/0033_')
             or path.startswith('deploy/mission-control/sql/fragments/0033_')
             or path.startswith('deploy/mission-control/sql/migrations/0040_')
-            or path.startswith('deploy/mission-control/sql/fragments/0040_'))
+            or path.startswith('deploy/mission-control/sql/fragments/0040_')
+            or path.startswith('deploy/mission-control/sql/migrations/0041_'))
         or profile in {SCOPED_PROFILE,EVENT_PROFILE} and path in V2_PROTECTED_PATHS)
 
 
@@ -3206,9 +3252,12 @@ def _execute_locked(action, config, *, cache_port):
     for key in ('candidate_commit', 'candidate_tree', 'expected_main'):
         if not isinstance(request[key], str) or not SHA.fullmatch(request[key]):
             raise ValueError('Invalid CI source')
-    for key in ('gate_manifest_sha256', 'bundle_sha256'):
-        if not isinstance(request[key], str) or not DIGEST.fullmatch(request[key]):
-            raise ValueError('Invalid CI digest')
+    if not isinstance(request['bundle_sha256'], str) or not DIGEST.fullmatch(request['bundle_sha256']):
+        raise ValueError('Invalid CI digest')
+    # The gate is either the legacy manifest digest or a named gate contract.
+    gate_value = request['gate_manifest_sha256']
+    if not isinstance(gate_value, str) or not (DIGEST.fullmatch(gate_value) or GATE_CONTRACT_RE.fullmatch(gate_value)):
+        raise ValueError('Invalid CI digest')
     if request['verification_profile'] != config['verification_profile'] or request['project_alias'] not in config['projects']:
         raise ValueError('CI scope denied')
     # Fail-closed branch scope validation before any cache or build slot filesystem access.
@@ -3315,6 +3364,8 @@ def _execute_locked(action, config, *, cache_port):
         portal_export = None
         portal_assets = None
         portal_builds = None
+        prepare_source_done = False
+        prep_started = time.monotonic()
         try:
             prep_started = time.monotonic()
             short_tmp = create_short_tmp(account)
@@ -3328,7 +3379,7 @@ def _execute_locked(action, config, *, cache_port):
             import_verified_bundle(verified_bundle, source, safe_env)
             observed = bounded_output(['/usr/bin/git', '-C', str(source), 'rev-parse', request['candidate_commit'] + '^{tree}'], env=safe_env).decode().strip()
             if observed != request['candidate_tree']:
-                raise ValueError('CI tree mismatch')
+                raise PrepareSourceError('checkout_failed')
             rows = bounded_output(['/usr/bin/git', '-C', str(source), 'ls-tree', '-r', '-l', '-z', '--full-tree', request['candidate_commit']], env=safe_env)
             protected = {}
             manifest_parents = []
@@ -3340,14 +3391,17 @@ def _execute_locked(action, config, *, cache_port):
                     continue
                 descriptor, raw_path = record.split(b'\t', 1)
                 mode, kind, blob, size = descriptor.decode().split()
-                path = raw_path.decode('utf-8')
+                try:
+                    path = raw_path.decode('utf-8')
+                except UnicodeDecodeError:
+                    raise PrepareSourceError('source_bounds_exceeded') from None
                 count += 1
                 total += int(size) if size.isdecimal() else MAX_SOURCE_BYTES * 3
                 if (kind != 'blob' or mode not in {'100644', '100755'} or count > 20000
                         or total > 256 * 1024 * 1024 or len(raw_path) > 1024
                         or any(ord(c) < 32 for c in path) or path.startswith('/')
                         or any(part in {'', '.', '..'} for part in path.split('/'))):
-                    raise ValueError('CI source contains links or exceeds checkout bounds')
+                    raise PrepareSourceError('source_bounds_exceeded')
                 tree_blobs[path] = (mode, blob)
                 if Path(path).name == 'Cargo.toml':
                     manifest_parents.append(str(Path(path).parent))
@@ -3357,8 +3411,11 @@ def _execute_locked(action, config, *, cache_port):
                     protected[path] = [mode, blob]
             helper_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
             if helper_digest != config['verifier_sha256']:
-                raise ValueError('Installed verification policy changed')
-            manifest = profile_gate_manifest(config['verification_profile'], branch_scope, protected, helper_digest)
+                raise PrepareSourceError('verifier_digest_mismatch')
+            if DIGEST.fullmatch(request['gate_manifest_sha256']):
+                manifest = profile_gate_manifest(config['verification_profile'], branch_scope, protected, helper_digest)
+            else:
+                manifest = gate_contract_name(config['verification_profile'], branch_scope)
             if manifest != request['gate_manifest_sha256']:
                 os.write(fd, (
                     'FORGE_GATE_MANIFEST_MISMATCH profile=' + config['verification_profile']
@@ -3367,7 +3424,7 @@ def _execute_locked(action, config, *, cache_port):
                     + ' expected_manifest=' + manifest
                     + ' request_manifest=' + request['gate_manifest_sha256'] + '\n'
                 ).encode('utf-8'))
-                raise GateManifestMismatch('Gate manifest does not match the installed policy and source')
+                raise PrepareSourceError('gate_manifest_mismatch')
             if require_main:
                 try:
                     main_ancestor_preflight(source, request, safe_env)
@@ -3381,14 +3438,17 @@ def _execute_locked(action, config, *, cache_port):
                            stderr=subprocess.DEVNULL, timeout=30)
             node_modules = source / 'src/rust/forge-ide-web/tests/browser/node_modules'
             if node_modules.exists() or node_modules.is_symlink():
-                raise ValueError('Candidate includes dependency output')
+                raise PrepareSourceError('source_bounds_exceeded')
             node_modules.symlink_to(config['node_modules'], target_is_directory=True)
             target_link = source / 'src/rust/target'
             if target_link.exists() or target_link.is_symlink():
-                raise ValueError('Candidate includes build output')
+                raise PrepareSourceError('source_bounds_exceeded')
             target_link.symlink_to(scratch / 'target', target_is_directory=True)
             generated = [node_modules, target_link]
-            mapped_targets = map_cargo_targets(source, scratch, manifest_parents, account)
+            try:
+                mapped_targets = map_cargo_targets(source, scratch, manifest_parents, account)
+            except ValueError:
+                raise PrepareSourceError('source_bounds_exceeded') from None
             generated.extend(mapped_targets)
             exclude_generated_outputs(source, generated)
             for current, directories, files in os.walk(source, followlinks=False):
@@ -3416,6 +3476,7 @@ def _execute_locked(action, config, *, cache_port):
                 'status': 'passed',
                 'elapsed_ms': int((time.monotonic() - prep_started) * 1000),
             })
+            prepare_source_done = True
 
             cache_key = cache_port.resolve_key(
                 project_alias=request['project_alias'],
@@ -3613,8 +3674,22 @@ def _execute_locked(action, config, *, cache_port):
             failure = 'cancelled_or_timed_out'
             if cache_port.enabled and publish_outcome.status == 'not_run':
                 publish_outcome = CachePublishOutcome(status='skipped_cancelled', reason='interrupted')
-        except (OSError, ValueError, subprocess.SubprocessError):
-            failure = 'verification_unavailable'
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            if not prepare_source_done:
+                if isinstance(error, PrepareSourceError):
+                    reason = error.reason
+                elif isinstance(error, OSError):
+                    reason = 'io_unavailable'
+                else:
+                    reason = 'checkout_failed'
+                stages.append({
+                    'name': 'prepare_source',
+                    'status': 'failed',
+                    'reason': reason,
+                    'elapsed_ms': int((time.monotonic() - prep_started) * 1000),
+                })
+            failure = (error.reason if isinstance(error, PrepareSourceError)
+                       and error.reason == 'gate_manifest_mismatch' else 'verification_unavailable')
             if cache_port.enabled and publish_outcome.status == 'not_run':
                 publish_outcome = CachePublishOutcome(status='skipped_failed', reason='verification_unavailable')
         finally:

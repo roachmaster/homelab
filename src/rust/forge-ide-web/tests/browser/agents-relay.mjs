@@ -20,10 +20,35 @@ const resultText = '## Fixture agent result\n\nVerified first section.\n\n'
 const bytes = Buffer.from(resultText);
 const digest = createHash('sha256').update(bytes).digest('hex');
 const profiles = [
-  { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review', 'implement'] },
-  { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review', 'implement'] },
-  { alias: 'grok-primary', label: 'Grok', backend: 'grok', model: 'grok-4.7', modes: ['review'] },
+  { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review', 'implement'], branch: 'forge/agent/agy-primary' },
+  { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review', 'implement'], branch: 'forge/agent/codex-primary' },
+  { alias: 'grok-primary', label: 'Grok', backend: 'grok', model: 'grok-4.7', modes: ['review'], branch: 'forge/agent/grok-primary' },
 ];
+function defaultAgentBranches() {
+  return profiles.map((p, idx) => ({
+    project_alias: project,
+    agent_profile: p.alias,
+    branch_name: p.branch,
+    branch_scope: `branch/forge-agent-${p.alias}-0123456789abcde${idx}`,
+    head_commit_sha: 'e'.repeat(40),
+    fetched_main_sha: base,
+    fetched_main_at: time,
+    sync_status: 'synced_with_main',
+    conflict_paths: [],
+    cache_status: idx === 0 ? 'hit_branch' : 'hit_main',
+    cache_updated_at: time,
+    last_task_id: null,
+    last_correlation_id: null,
+    reservation_status: 'idle',
+    active_scope_kind: null,
+    active_scope_id: null,
+    active_root_task_id: null,
+    active_task_id: null,
+    active_pr_url: null,
+    reservation_epoch: idx,
+    reservation_blocker: null,
+  }));
+}
 
 function task(status, number, input = {}) {
   const taskId = number === 0 ? '11111111-1111-4111-8111-111111111111' : randomUUID();
@@ -97,7 +122,8 @@ function detail(t) {
   delete fields.updated_at;
   if(t.external_result)return {...fields,prompt:t.prompt,acceptance_criteria:t.acceptance_criteria,
     attempt:null,result:null,reconciliation_receipt_id:null,workflow_required:t.workflow_required===true,workflow:t.workflow??null,
-    external_result:t.external_result};
+    external_result:t.external_result,
+    ...(t.correlation_cicd ? { correlation_cicd: t.correlation_cicd } : {})};
   return {
     ...fields, prompt: t.prompt, acceptance_criteria: t.acceptance_criteria,
     attempt: t.status === 'queued' ? null : { attempt_id: t.attempt_id, worker_id: 'fixture-worker', phase: processing ? 'running' : 'stopped', started_at: time, finished_at: processing ? null : time, summary: processing ? t.public_summary ?? 'The fixture agent is working.' : 'Fixture process scope stopped.' },
@@ -105,6 +131,7 @@ function detail(t) {
     reconciliation_receipt_id: null,
     ...(t.publication ? { publication: t.publication } : {}),
     ...(t.review ? { review:t.review } : {}),
+    ...(t.correlation_cicd ? { correlation_cicd: t.correlation_cicd } : {}),
     workflow_required:t.workflow_required===true,workflow:t.workflow??null,
   };
 }
@@ -143,7 +170,7 @@ export async function startAgentsRelay() {
   const receipts = new Map();
   const controls = new Map();
   const calls = [];
-  const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false,
+  const faults = { dropNextSubmit: false, denyNextSubmit: false, denyNextList: false, denyNextGet: null, holdProgressCompletion: false,
     dropNextPlanDecision: false, holdPublication: false, autonomousPolicy:false,externalWorkflow:false,denyNextEvents:null };
   const planDecisions = [], reviewDecisions = [], publicationRevisions = [], workflowSubmissions=[];
   const verificationRetries = [], reviewReads = [], eventReads = [];
@@ -163,7 +190,7 @@ export async function startAgentsRelay() {
       const send = (status, kind, fields = {}) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ protocol_version: 1, event: { kind, request_id: requestId, ...fields } })); };
       const failed = (status, code) => send(status, input.kind.startsWith('usage_') ? 'usage_failed' : 'work_failed', { code });
       if (input.kind === 'work_catalog') {
-        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}),...(faults.projectDelivery?{delivery:faults.projectDelivery}:{}),...(faults.externalWorkflow?{external_workflow:externalWorkflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time }); return;
+        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}),...(faults.projectDelivery?{delivery:faults.projectDelivery}:{}),...(faults.externalWorkflow?{external_workflow:externalWorkflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time, agent_branches: faults.agentBranches ?? defaultAgentBranches() }); return;
       }
       if (input.project_alias !== project) { failed(403, 'denied'); return; }
       if (input.kind === 'usage_overview' || input.kind === 'usage_detail') {
@@ -175,6 +202,7 @@ export async function startAgentsRelay() {
         refreshes++; send(202, 'usage_refresh_queued', { project_alias: project, refresh_id: randomUUID(), profiles: [input.agent_profile], coalesced: false }); return;
       }
       if (input.kind === 'work_list') {
+        if(faults.denyNextList){faults.denyNextList=false;failed(503,'unavailable');return;}
         const roots=[...tasks.values()].filter(t=>!t.internal);
         const scoped=['active','attention','history','all'].includes(input.status_filter);
         const counts={active:0,attention:0,history:0,all:roots.length};
@@ -211,6 +239,7 @@ export async function startAgentsRelay() {
       const selected = tasks.get(input.task_id);
       if (!selected) { failed(404, 'not_found'); return; }
       if (input.kind === 'work_get') {
+        if(faults.denyNextGet===selected.task_id){faults.denyNextGet=null;failed(503,'unavailable');return;}
         if (selected.publication && ['pending', 'checking', 'publishing'].includes(selected.publication.status)) {
           publicationRevisions.push(selected.revision);
           if (!faults.holdPublication) {
@@ -339,6 +368,42 @@ export async function startAgentsRelay() {
         }
         send(200, input.kind === 'work_accept' ? 'work_accepted' : 'work_cancel_recorded', receipt); return;
       }
+      if (input.kind === 'work_cicd_stage_log') {
+        if (input.correlation_id !== selected.correlation_id) { failed(403, 'denied'); return; }
+        const logs = selected.cicd_stage_logs ?? {};
+        const key = `${input.action_id}:${input.stage_id}:${input.view}`;
+        const entry = logs[key];
+        if (!entry) { failed(404, 'not_found'); return; }
+        const full = Buffer.from(entry.content ?? '', 'utf8');
+        const logDigest = createHash('sha256').update(full).digest('hex');
+        const [cursorDigest, rawOffset] = input.cursor?.split('.') ?? [logDigest, '0'];
+        const offset = Number(rawOffset);
+        if (cursorDigest !== logDigest || !Number.isSafeInteger(offset) || offset < 0 || offset > full.length) { failed(409, 'result_mismatch'); return; }
+        const limit = Math.min(input.limit_bytes ?? 32768, entry.pageSize ?? 32768);
+        let end = Math.min(full.length, offset + limit);
+        while (end < full.length && (full[end] & 0xc0) === 0x80) end--;
+        const content = full.subarray(offset, end).toString('utf8');
+        send(200, 'work_cicd_stage_log_page', {
+          project_alias: project,
+          task_id: selected.task_id,
+          correlation_id: selected.correlation_id,
+          action_id: input.action_id,
+          stage_id: input.stage_id,
+          view: input.view,
+          content,
+          truncated: end < full.length,
+          total_bytes: full.length,
+          byte_offset: offset,
+          next_cursor: end < full.length ? `${logDigest}.${end}` : null,
+          prev_cursor: offset > 0 ? `${logDigest}.${Math.max(0, offset - limit)}` : null,
+          tests_passed: entry.tests_passed ?? null,
+          tests_failed: entry.tests_failed ?? null,
+          tests_skipped: entry.tests_skipped ?? null,
+          test_cases: entry.test_cases ?? [],
+          error_excerpt: entry.error_excerpt ?? null,
+        });
+        return;
+      }
       if (input.kind === 'work_result') {
         if (!['awaiting_review', 'completed'].includes(selected.status) || input.attempt_id !== selected.attempt_id) { failed(404, 'not_found'); return; }
         const [cursorDigest, rawOffset] = input.cursor?.split('.') ?? [digest, '0'];
@@ -355,6 +420,32 @@ export async function startAgentsRelay() {
   await once(server, 'listening');
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
     planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,verificationRetries,reviewReads,eventReads,
+    // This corpus is created directly in owned fixture memory. Its journey may
+    // read and navigate; it never submits/retries/cancels/accepts an assignment.
+    seedTriage(){
+      const add=(prompt,phase,{external=false,status='awaiting_review',retry=null,revisionCount=0}={})=>{
+        const next=task(status,tasks.size,{prompt,mode:'plan',agent_profile:external?'muse-db-primary':'agy-primary',workflow_policy_digest:external?externalWorkflowPolicy.policy_digest:workflowPolicy.policy_digest});
+        next.updated_at=`2026-11-23T12:00:${String(tasks.size).padStart(2,'0')}Z`;
+        next.workflow.phase=phase;next.workflow.plan_revisions=revisionCount;
+        next.workflow.escalation_reason=phase==='escalated'?'Independent review requires operator attention; the saved plan is preserved.':null;
+        if(retry){next.retry_event={event_id:randomUUID(),kind:'planning',used:retry.used,limit:20,status:retry.status};next.workflow.retry_event={...next.retry_event};}
+        if(external){const content='# Owned Muse triage plan\n\nReview the preserved database artifact.';next.external_result={assignment_id:randomUUID(),provider:'muse-db',sha256:createHash('sha256').update(content).digest('hex'),content,submitted_at:time,summary:'Owned external triage fixture'};}
+        tasks.set(next.task_id,next);return next;
+      };
+      const rows=Array.from({length:12},(_,index)=>add(`Review bounded fixture component ${index+1} and preserve its existing approval gates.`,index%2?'code_review':'checks'));
+      const prompt='Make the authoritative assignment state understandable while preserving independent reviews and verification across extraordinarilylongword boundaries.\nFull assignment evidence remains here, including this second line.';
+      const automatic=add(prompt,'plan_revision',{retry:{used:1,status:'open'},revisionCount:7});
+      const boundary=add('The last admitted automatic retry is still Active until its workflow changes.','plan_revision',{retry:{used:20,status:'open'},revisionCount:44});
+      const escalation=add('Investigate the preserved author after independent review requires attention.','escalated',{status:'cancelled',retry:{used:20,status:'exhausted'},revisionCount:29});
+      const earlyEscalation=add('Workflow escalation requires attention even before its retry budget is spent.','escalated',{status:'cancelled',retry:{used:1,status:'open'},revisionCount:1});
+      const muse=add('Review the external Muse assignment before its independent reviewer advances it.','plan_review',{external:true,revisionCount:3});
+      const delivery=add('Keep worker readiness separate from exact main verification.','completed',{status:'completed'});
+      delivery.workflow.can_cancel=false;delivery.workflow.merge_commit='f'.repeat(40);delivery.delivery=deliveryProjection('queued');
+      const manual=task('awaiting_review',tasks.size,{mode:'plan',prompt:'Review this saved plan before authorizing implementation.'});tasks.set(manual.task_id,manual);
+      return {rows:rows.map(row=>row.task_id),automatic:automatic.task_id,boundary:boundary.task_id,escalation:escalation.task_id,earlyEscalation:earlyEscalation.task_id,muse:muse.task_id,delivery:delivery.task_id,manual:manual.task_id,prompt};
+    },
+    // Same-row content change proves background patching without new task identity.
+    updateTriagePhase(taskId,phase){const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');selected.workflow.phase=phase;selected.revision++;},
     requireVerificationRetry(taskId){
       const selected=tasks.get(taskId);
       if(selected?.mode!=='implement'||selected.status!=='awaiting_review'||!selected.review)throw new Error('No finished fixture implementation');
@@ -365,7 +456,13 @@ export async function startAgentsRelay() {
     },
     reviewSnapshot(taskId){const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');return JSON.parse(JSON.stringify(detail(selected)));},
     enableAutonomy(){faults.autonomousPolicy=true;},
-    enableExternal(){if(profiles.some(p=>p.alias==='muse-db-primary'))return;profiles.push({alias:'muse-db-primary',label:'Muse database runner',backend:'muse',model:'External runner',modes:['plan','review'],transport:'external_db'});},
+    enableExternal(){if(profiles.some(p=>p.alias==='muse-db-primary'))return;profiles.push({alias:'muse-db-primary',label:'Muse database runner',backend:'muse',model:'External runner',modes:['plan','review'],branch:'forge/agent/muse-db-primary',transport:'external_db'});},
+    setCorrelationCicd(taskId,cicd,stageLogs={}){
+      const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');
+      selected.correlation_cicd={...cicd,correlation_id:selected.correlation_id};
+      selected.cicd_stage_logs=stageLogs;
+      selected.revision++;
+    },
     enableExternalWorkflow(){faults.externalWorkflow=true;profiles.find(p=>p.alias==='muse-db-primary').modes=['plan','review','implement'];},
     addHistory(){const next=task('awaiting_review',tasks.size,{prompt:'Complete event history fixture'});next.events=[];next.sequence=0;for(let i=1;i<=61;i++)event(next,'checkpoint',{attempt_id:next.attempt_id,sequence:Math.min(i,128),stage:i===1?'plan':'progress',summary:`History checkpoint ${i}. Literal <img src=x onerror=globalThis.__historyExecuted=true> remains text.`});tasks.set(next.task_id,next);return next.task_id;},
     get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},

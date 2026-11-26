@@ -250,7 +250,7 @@ class AuthorHandoffSchemaTest(unittest.TestCase):
                 connection.rollback()
         with closing(self.cluster.connect('forge_agent')) as connection, connection.cursor() as cursor:
             cursor.execute("SET LOCAL forge.coding_owner='mission-control'")
-            self.insert(cursor, valid, finish_changes=dict(intent_sha256='f' * 64))
+            self.insert(cursor, valid, finish_changes=dict(status='queued'))
             cursor.execute('SELECT forge_agent.coding_workflow_author_profile(%s)', (valid['workflow_id'],))
             self.assertIsNone(cursor.fetchone()[0])
             connection.rollback()
@@ -260,7 +260,8 @@ class AuthorHandoffSchemaTest(unittest.TestCase):
             'GRANT EXECUTE ON FUNCTION forge_agent.coding_workflow_author_handoff(uuid) TO forge_coding_worker',
             'GRANT EXECUTE ON FUNCTION forge_agent.coding_workflow_author_feedback(uuid,text) TO PUBLIC',
             'ALTER FUNCTION forge_agent._coding_author_feedback_proof(uuid,text) SECURITY INVOKER',
-            "ALTER FUNCTION forge_agent._coding_author_canonical_json(jsonb) SET search_path='public'",
+            "ALTER FUNCTION forge_agent.coding_workflow_author_handoff(uuid) SET search_path='public'",
+            'CREATE FUNCTION forge_agent._coding_author_canonical_json(p_value jsonb) RETURNS text LANGUAGE sql AS $$SELECT p_value::text$$',
             "CREATE OR REPLACE FUNCTION forge_agent.coding_workflow_author_profile(p_workflow uuid) RETURNS text LANGUAGE sql AS 'SELECT ''codex-author'''",
         )
         for statement in faults:
@@ -300,7 +301,7 @@ class AuthorHandoffSchemaTest(unittest.TestCase):
                 self.assertEqual(snapshot(), before)
                 with closing(cluster.connect('postgres')) as connection, connection.cursor() as cursor:
                     cursor.execute('SELECT max(version) FROM forge_agent.schema_migrations')
-                    self.assertEqual(cursor.fetchone(), (40,))
+                    self.assertEqual(cursor.fetchone(), (50,))
             finally:
                 cluster.stop()
 

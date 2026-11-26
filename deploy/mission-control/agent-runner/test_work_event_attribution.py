@@ -511,6 +511,7 @@ EXPECTED_SQL_EVENT_INSERTS = {
     ("0036_event_stream_actor_cause.sql", "forge_coding_reconciler_api.native_merge_failure"): 1,
     ("0036_event_stream_actor_cause.sql", "forge_agent.coding_schedule_repair"): 2,
     ("0036_event_stream_actor_cause.sql", "forge_agent.amend_agent_retry_policy"): 1,
+    ("0039_agent_branch_and_cicd_stages.sql", "forge_coding_reconciler_api.native_agent_branch_published"): 1,
 }
 
 
@@ -548,7 +549,7 @@ class EventAttributionCoverageTest(unittest.TestCase):
                 if count:
                     actual[(path.name, match.group(1))] = count
         self.assertEqual(actual, EXPECTED_SQL_EVENT_INSERTS)
-        self.assertEqual(sum(actual.values()), 36)
+        self.assertEqual(sum(actual.values()), 37)
 
 
 if __name__ == "__main__":

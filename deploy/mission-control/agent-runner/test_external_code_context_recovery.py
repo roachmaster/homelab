@@ -84,6 +84,18 @@ class ExternalCodeContextRecoveryTest(unittest.TestCase):
         self.assertEqual(now['phase'],'code_review');self.assertEqual(now['state']['review_retries'],20)
         return candidate
 
+    def test_review_context_outage_escalates_review_alone_without_cancelling_tasks(self):
+        # b3a05d8a: a submitted candidate plus repeated context-load failures.
+        _service,root,flow,last,w,event,prior=self.exhausted()
+        tasks=self.rows("""SELECT t.id,t.status,t.mode FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x
+          ON(x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id) WHERE x.workflow_id=%s""",(w['workflow_id'],))
+        self.assertFalse([t for t in tasks if t['status'] in {'cancelled','cancel_requested'}])
+        statuses={str(t['id']):t['status'] for t in tasks}
+        self.assertEqual(statuses[str(root['task_id'])],'awaiting_review')
+        self.assertEqual(self.rows("SELECT count(*) AS n FROM forge_agent.coding_events WHERE event_kind IN('cancelled','cancel_requested')")[0]['n'],0)
+        self.assertEqual((w['phase'],w['enabled']),('escalated',False))
+        self.assertEqual(w['state']['candidate'],prior)
+
     def test_fresh_prepare_and_valid_review_resolve_same_twenty_spent_event(self):
         _service,root,flow,last,w,event,prior=self.exhausted()
         attempts=self.rows('SELECT * FROM forge_agent.coding_attempts ORDER BY attempt_id')

@@ -13,6 +13,7 @@ for direct INSERTs and fails the build if one appears.
 from psycopg2.extras import Json
 
 from queue_store import Rejected
+from work_failure_cause import FAILURE_CAUSES
 
 ACTOR_KINDS = frozenset({
     "operator",  # a person, via the portal or CLI
@@ -37,9 +38,57 @@ CAUSES = {
         "operator_request", "workflow_cancelled", "budget_exhausted",
         "superseded",
     }),
+    # Failed events (M46): the worker attaches the cause at publish time;
+    # any Python producer must name one too.
+    "failed": FAILURE_CAUSES,
 }
 
 NEGATIVE_KINDS = frozenset(CAUSES)
+
+# Workflow escalation cause codes. The escalation reason stays free text for
+# people; the code is what the portal and tooling branch on. Producers name
+# the code where they know it; otherwise it is derived from the fixed reason
+# literal, and unknown reasons map to ``unclassified`` so an escalation event
+# never lacks a code.
+ESCALATION_CAUSES = frozenset({
+    "review_verdict",       # an independent reviewer decided to escalate
+    "retry_exhausted",      # a bounded retry event ran out of attempts
+    "budget_exhausted",     # a plan/code/source/integration revision budget ran out
+    "grant_revoked",        # the delegation or execution grant is no longer current
+    "agent_stopped",        # an author/agent task stopped or was cancelled
+    "review_unavailable",   # the reviewer could not produce a usable verdict
+    "verification_failed",  # input, source, Jenkins or merge evidence did not verify
+    "publication_failed",   # trusted publication stopped
+    "candidate_repeated",   # the author returned the identical candidate again
+    "handoff",              # an action handed off / needs reconciliation
+    "unclassified",
+})
+
+_ESCALATION_RULES = (
+    ("retry_exhausted", ("retry attempts", "exhausted twenty attempts", "exhausted its twenty")),
+    ("budget_exhausted", ("budget is exhausted",)),
+    ("grant_revoked", ("grant was revoked", "grant is no longer current")),
+    ("candidate_repeated", ("identical candidate",)),
+    ("publication_failed", ("publication",)),
+    ("verification_failed", ("could not be verified", "trusted verification", "did not report success",
+                             "trusted source selection failed")),
+    ("review_unavailable", ("reviewer", "peer review", "review_unavailable", "workspace_busy")),
+    ("agent_stopped", ("agent stopped", "author cannot continue", "task was cancelled")),
+    ("handoff", ("handoff", "needs_reconcile", "revise_plan")),
+)
+
+
+def escalation_cause(reason, cause=None):
+    """Return the escalation cause code: ``cause`` if given, else derived."""
+    if cause is not None:
+        if cause not in ESCALATION_CAUSES:
+            raise ValueError(f"unknown escalation cause {cause!r}")
+        return cause
+    text = (reason or "").lower()
+    for code, needles in _ESCALATION_RULES:
+        if any(needle in text for needle in needles):
+            return code
+    return "unclassified"
 
 # The actor for coordinator-initiated transitions (section 4.2).
 COORDINATOR_ACTOR = {"kind": "coordinator", "id": "forge-coordinator"}

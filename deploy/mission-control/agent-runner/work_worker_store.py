@@ -9,6 +9,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 import psycopg2
+from work_failure_cause import failure_cause
 from psycopg2.extras import Json, register_uuid
 
 from usage_store import (
@@ -437,6 +438,55 @@ class WorkerDB:
             )
             return bool(cursor.fetchone()[0])
 
+    RENEW_STATUSES = frozenset({"renewed", "lease_expired", "deadline_exceeded", "task_cancelled", "task_gone"})
+    PROGRESS_SIGNALS = frozenset({"progress_report", "checkpoint", "output"})
+
+    def renew_status(self, lease, progress_signal=None):
+        """Typed renewal (M45): why a renewal failed, and progress-aware deadlines.
+
+        Before M45 the typed function does not exist; fall back to the boolean
+        renew(), which cannot tell a cancelled task from an expired lease.
+        """
+        if progress_signal is not None and progress_signal not in self.PROGRESS_SIGNALS:
+            raise ValueError(f"invalid progress signal: {progress_signal!r}")
+        attempt_id, attempt_token = _extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT to_regprocedure('forge_coding_worker_api.renew_status(uuid,uuid,text)') IS NOT NULL")
+            if not cursor.fetchone()[0]:
+                cursor.execute("SELECT forge_coding_worker_api.renew(%s, %s)", (attempt_id, attempt_token))
+                return "renewed" if cursor.fetchone()[0] else "lease_expired"
+            cursor.execute("SELECT forge_coding_worker_api.renew_status(%s, %s, %s)",
+                           (attempt_id, attempt_token, progress_signal))
+            status = cursor.fetchone()[0]
+        if status not in self.RENEW_STATUSES:
+            raise ValueError(f"invalid renew status: {status!r}")
+        return status
+
+    def renew_deadline(self, lease, progress_signal=None):
+        """Typed renewal plus the current deadline (M47).
+
+        Returns ``{"status", "deadline_at", "extended"}`` where deadline_at is
+        an aware datetime when renewed. Before M47 returns None so the caller
+        falls back to renew_status().
+        """
+        if progress_signal is not None and progress_signal not in self.PROGRESS_SIGNALS:
+            raise ValueError(f"invalid progress signal: {progress_signal!r}")
+        attempt_id, attempt_token = _extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT to_regprocedure('forge_coding_worker_api.renew_deadline(uuid,uuid,text)') IS NOT NULL")
+            if not cursor.fetchone()[0]:
+                return None
+            cursor.execute("SELECT forge_coding_worker_api.renew_deadline(%s, %s, %s)",
+                           (attempt_id, attempt_token, progress_signal))
+            result = cursor.fetchone()[0]
+        if not isinstance(result, dict) or result.get("status") not in self.RENEW_STATUSES:
+            raise ValueError(f"invalid renew result: {result!r}")
+        deadline = result.get("deadline_at")
+        if deadline is not None:
+            from datetime import datetime
+            deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+        return {"status": result["status"], "deadline_at": deadline, "extended": result.get("extended") is True}
+
     def checkpoint(self, lease, summary):
         attempt_id, attempt_token = _extract_attempt_creds(lease)
         sanitized_summary = _validate_summary(summary)
@@ -493,19 +543,24 @@ class WorkerDB:
         sanitized_proof = _validate_stop_proof(
             stop_proof, require_stopped=(outcome != "needs_reconcile")
         )
+        arguments = (
+            attempt_id,
+            attempt_token,
+            outcome,
+            None if sanitized_manifest is None else Json(sanitized_manifest),
+            None if sanitized_usage is None else Json(sanitized_usage),
+            sanitized_summary,
+            Json(sanitized_proof),
+        )
         with self._worker_cursor() as cursor:
-            cursor.execute(
-                "SELECT forge_coding_worker_api.publish(%s, %s, %s, %s, %s, %s, %s)",
-                (
-                    attempt_id,
-                    attempt_token,
-                    outcome,
-                    None if sanitized_manifest is None else Json(sanitized_manifest),
-                    None if sanitized_usage is None else Json(sanitized_usage),
-                    sanitized_summary,
-                    Json(sanitized_proof),
-                ),
-            )
+            if outcome == "failed":
+                # M46: the failed event carries a cause code and bounded summary.
+                cursor.execute("SELECT to_regprocedure('forge_coding_worker_api.publish_with_cause(uuid,uuid,text,jsonb,jsonb,text,jsonb,text)') IS NOT NULL")
+                if cursor.fetchone()[0]:
+                    cursor.execute("SELECT forge_coding_worker_api.publish_with_cause(%s, %s, %s, %s, %s, %s, %s, %s)",
+                                   arguments + (failure_cause(sanitized_summary),))
+                    return dict(cursor.fetchone()[0])
+            cursor.execute("SELECT forge_coding_worker_api.publish(%s, %s, %s, %s, %s, %s, %s)", arguments)
             return dict(cursor.fetchone()[0])
 
     def record_stop(self, lease, stop_proof, summary, cause):
@@ -977,3 +1032,193 @@ class WorkerDB:
     def native_ci_acquire_context(self, job):
         """Acquire canonical identities only through a current local-review lease."""
         return self._native_ci_context(job, acquire=True)
+
+    # -- M39: Persistent per-agent branch state, exclusive ownership & CI/CD stage evidence --
+
+    def task_branch_scope(self, project_alias, task_id):
+        validate_identifier(project_alias, "project_alias")
+        task_uuid = _coerce_uuid(task_id, "task_id")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.task_branch_scope(%s,%s)",
+                (project_alias, task_uuid),
+            )
+            value = cursor.fetchone()[0]
+        return None if value is None else dict(value)
+
+    def agent_branch_get(self, project_alias, agent_profile):
+        validate_identifier(project_alias, "project_alias")
+        validate_identifier(agent_profile, "agent_profile")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.agent_branch_get(%s,%s)",
+                (project_alias, agent_profile),
+            )
+            value = cursor.fetchone()[0]
+        return None if value is None else dict(value)
+
+    def agent_branch_upsert(self, *, project_alias, agent_profile, branch_name, branch_scope,
+                            head_commit_sha=None, fetched_main_sha=None, fetched_main_at=None,
+                            sync_status=None, conflict_paths=None, cache_status=None,
+                            last_task_id=None, last_correlation_id=None):
+        validate_identifier(project_alias, "project_alias")
+        validate_identifier(agent_profile, "agent_profile")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.agent_branch_upsert(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    project_alias, agent_profile, branch_name, branch_scope,
+                    head_commit_sha, fetched_main_sha, fetched_main_at,
+                    sync_status,
+                    Json(list(conflict_paths)) if conflict_paths is not None else None,
+                    cache_status,
+                    _coerce_uuid(last_task_id, "last_task_id") if last_task_id is not None else None,
+                    _coerce_uuid(last_correlation_id, "last_correlation_id") if last_correlation_id is not None else None,
+                ),
+            )
+            return dict(cursor.fetchone()[0])
+
+    def agent_branch_acquire(self, *, project_alias, agent_profile, branch_name, branch_scope,
+                             scope_kind, scope_id, root_task_id, task_id,
+                             review_id=None, publication_id=None):
+        validate_identifier(project_alias, "project_alias")
+        validate_identifier(agent_profile, "agent_profile")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.agent_branch_acquire(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    project_alias, agent_profile, branch_name, branch_scope,
+                    scope_kind,
+                    _coerce_uuid(scope_id, "scope_id"),
+                    _coerce_uuid(root_task_id, "root_task_id"),
+                    _coerce_uuid(task_id, "task_id"),
+                    _coerce_uuid(review_id, "review_id") if review_id is not None else None,
+                    _coerce_uuid(publication_id, "publication_id") if publication_id is not None else None,
+                ),
+            )
+            return dict(cursor.fetchone()[0])
+
+    def agent_branch_verify_owner(self, *, project_alias, agent_profile, scope_kind, scope_id,
+                                  expected_epoch):
+        validate_identifier(project_alias, "project_alias")
+        validate_identifier(agent_profile, "agent_profile")
+        if type(expected_epoch) is not int or expected_epoch < 0:
+            raise ValueError("Invalid expected_epoch")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.agent_branch_verify_owner(%s,%s,%s,%s,%s)",
+                (project_alias, agent_profile, scope_kind, _coerce_uuid(scope_id, "scope_id"), expected_epoch),
+            )
+            return dict(cursor.fetchone()[0])
+
+    def agent_branch_record_publication(self, *, project_alias, agent_profile, scope_kind, scope_id,
+                                        expected_epoch, candidate_commit=None, pr_url=None,
+                                        publication_id=None):
+        validate_identifier(project_alias, "project_alias")
+        validate_identifier(agent_profile, "agent_profile")
+        if type(expected_epoch) is not int or expected_epoch < 0:
+            raise ValueError("Invalid expected_epoch")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.agent_branch_record_publication(%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    project_alias, agent_profile, scope_kind, _coerce_uuid(scope_id, "scope_id"),
+                    expected_epoch, candidate_commit, pr_url,
+                    _coerce_uuid(publication_id, "publication_id") if publication_id is not None else None,
+                ),
+            )
+            return dict(cursor.fetchone()[0])
+
+    def agent_branch_set_blocker(self, *, project_alias, agent_profile, scope_kind, scope_id,
+                                 expected_epoch, blocker):
+        validate_identifier(project_alias, "project_alias")
+        validate_identifier(agent_profile, "agent_profile")
+        if type(expected_epoch) is not int or expected_epoch < 0:
+            raise ValueError("Invalid expected_epoch")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.agent_branch_set_blocker(%s,%s,%s,%s,%s,%s)",
+                (project_alias, agent_profile, scope_kind, _coerce_uuid(scope_id, "scope_id"), expected_epoch, blocker),
+            )
+            return dict(cursor.fetchone()[0])
+
+    def agent_branch_release(self, *, project_alias, agent_profile, scope_kind, scope_id,
+                             expected_epoch, release_reason, remote_open_pr_confirmed_none,
+                             merge_commit=None):
+        validate_identifier(project_alias, "project_alias")
+        validate_identifier(agent_profile, "agent_profile")
+        if type(expected_epoch) is not int or expected_epoch < 0:
+            raise ValueError("Invalid expected_epoch")
+        if type(remote_open_pr_confirmed_none) is not bool:
+            raise ValueError("Invalid remote_open_pr_confirmed_none")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.agent_branch_release(%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    project_alias, agent_profile, scope_kind, _coerce_uuid(scope_id, "scope_id"),
+                    expected_epoch, release_reason, remote_open_pr_confirmed_none, merge_commit,
+                ),
+            )
+            return dict(cursor.fetchone()[0])
+
+    def agent_branch_reconcilable_reservations(self, limit=64):
+        if type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError("Invalid reconciliation limit")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.agent_branch_reconcilable_reservations(%s)",
+                (limit,),
+            )
+            value = cursor.fetchone()[0]
+        return list(value) if isinstance(value, list) else []
+
+    def review_claim_for_branch_policy(self, worker_id):
+        validate_identifier(worker_id, "worker_id")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(%s,%s))",
+                (self._owner, REVIEW_ADMISSION_LOCK_SALT),
+            )
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.review_claim_for_branch_policy(%s)",
+                (worker_id,),
+            )
+            value = cursor.fetchone()[0]
+        return None if value is None else dict(value)
+
+    def publication_claim_for_branch_policy(self, worker_id):
+        validate_identifier(worker_id, "worker_id")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.publication_claim_for_branch_policy(%s)",
+                (worker_id,),
+            )
+            value = cursor.fetchone()[0]
+        return None if value is None else dict(value)
+
+    def native_agent_branch_published(self, job, receipt):
+        """Persist confirmed persistent-agent-branch event and update branch head."""
+        if not isinstance(receipt, dict):
+            raise ValueError("Invalid native agent branch receipt")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.native_agent_branch_published(%s,%s,%s)",
+                (_coerce_uuid(job["review_id"]), _coerce_uuid(job["lease_token"]), Json(receipt)),
+            )
+            value = cursor.fetchone()[0]
+        if not isinstance(value, dict) or set(value) != {"event_id", "correlation_id"}:
+            raise ValueError("Invalid native agent branch event acknowledgement")
+        _coerce_uuid(value["event_id"], "native agent branch event")
+        _coerce_uuid(value["correlation_id"], "native agent branch correlation")
+        return dict(value)
+
+    def record_jenkins_stage_evidence(self, evidence, chunks=()):
+        """Persist immutable per-stage CI/CD evidence and bounded redacted log chunks."""
+        if not isinstance(evidence, dict):
+            raise ValueError("Invalid stage evidence")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_reconciler_api.record_jenkins_stage_evidence(%s,%s)",
+                (Json(evidence), Json(list(chunks or ()))),
+            )
+            return dict(cursor.fetchone()[0])

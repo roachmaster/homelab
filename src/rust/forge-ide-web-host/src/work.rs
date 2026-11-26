@@ -208,7 +208,10 @@ impl WorkRelay {
         };
         let is_catalog = matches!(reply.event, WorkReply::WorkCatalog { .. });
         if let WorkReply::WorkCatalog {
-            projects, profiles, ..
+            projects,
+            profiles,
+            agent_branches,
+            ..
         } = &mut reply.event
         {
             projects.retain(|p| self.grants.allowed_projects.contains(&p.alias));
@@ -219,6 +222,10 @@ impl WorkRelay {
                     .retain(|mode| self.grants.allowed_modes.contains(mode));
             }
             profiles.retain(|p| !p.modes.is_empty());
+            agent_branches.retain(|b| {
+                self.grants.allowed_projects.contains(&b.project_alias)
+                    && self.grants.allowed_profiles.contains(&b.agent_profile)
+            });
         }
         if !reply.event.valid_for(&request, status) {
             return failed(header, Failure::Unavailable);
@@ -239,6 +246,7 @@ pub(crate) fn failed(header: &Header, code: Failure) -> Result<(u16, Bytes), Rej
         event: WorkReply::WorkFailed {
             request_id: header.request_id().to_owned(),
             code,
+            reason: None,
         },
     };
     Ok((

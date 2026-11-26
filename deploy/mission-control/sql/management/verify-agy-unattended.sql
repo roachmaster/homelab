@@ -7,32 +7,24 @@ BEGIN
   RAISE EXCEPTION 'Missing unattended Antigravity migration23';
  END IF;
  FOR expected IN SELECT * FROM(VALUES
-  ('forge_agent.coding_attempts','coding_attempts_agy_unattended_recipe_check','8ffbc65b39fb97945cb4da7b33837575ac3c3d64f8929c716efde4011c2bfcab'),
-  ('forge_agent.coding_attempts','coding_attempts_pinned_recipe_check','983db564b1f5f6bdbc0a0d085d3b478f16413952632a56a1bc996b787572065d'),
-  ('forge_agent.coding_tasks','coding_tasks_agy_unattended_recipe_check','8ffbc65b39fb97945cb4da7b33837575ac3c3d64f8929c716efde4011c2bfcab')
- )x(relation,name,sha256) LOOP
-  SELECT encode(sha256(convert_to(jsonb_build_array(pg_get_constraintdef(c.oid),c.contype,c.convalidated,c.condeferrable,c.condeferred)::text,'UTF8')),'hex')
+  ('forge_agent.coding_attempts','coding_attempts_agy_unattended_recipe_check',$shape1$["CHECK ((((pinned_recipe ->> 'resource_profile'::text) IS DISTINCT FROM 'forge-coding-agy-unattended-v1'::text) OR (((jsonb_typeof(pinned_recipe) = 'object'::text) AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb) AND (pinned_recipe ?& ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) AND ((pinned_recipe -> 'version'::text) = '2'::jsonb) AND ((pinned_recipe ->> 'backend'::text) = 'antigravity'::text) AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text) AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1) AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128)) AND (btrim((pinned_recipe ->> 'model'::text)) <> ''::text) AND ((pinned_recipe ->> 'model'::text) ~ '^[ -~]+$'::text) AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text])) AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text) AND ((pinned_recipe ->> 'policy_digest'::text) = '223cba6fa54a1d6c809ed8ab84d7b96b140962e5dbe026bc28cc3a42a29b3130'::text)) IS TRUE)))", "c", true, false, false]$shape1$),
+  ('forge_agent.coding_attempts','coding_attempts_pinned_recipe_check',$shape1$["CHECK ((((jsonb_typeof(pinned_recipe) = 'object'::text) AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb) AND (pinned_recipe ?& ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) AND ((pinned_recipe -> 'version'::text) = '2'::jsonb) AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text, 'grok'::text, 'muse'::text])) AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text) AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1) AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128)) AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text, 'forge-coding-v3'::text, 'forge-coding-v4'::text, 'forge-coding-v5'::text, 'forge-coding-v6'::text, 'forge-coding-v7'::text, 'forge-coding-v8'::text, 'forge-coding-v9'::text, 'forge-coding-v10'::text, 'forge-coding-agy-unattended-v1'::text])) AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text])) AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text) AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))", "c", true, false, false]$shape1$),
+  ('forge_agent.coding_tasks','coding_tasks_agy_unattended_recipe_check',$shape1$["CHECK ((((pinned_recipe ->> 'resource_profile'::text) IS DISTINCT FROM 'forge-coding-agy-unattended-v1'::text) OR (((jsonb_typeof(pinned_recipe) = 'object'::text) AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb) AND (pinned_recipe ?& ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) AND ((pinned_recipe -> 'version'::text) = '2'::jsonb) AND ((pinned_recipe ->> 'backend'::text) = 'antigravity'::text) AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text) AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1) AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128)) AND (btrim((pinned_recipe ->> 'model'::text)) <> ''::text) AND ((pinned_recipe ->> 'model'::text) ~ '^[ -~]+$'::text) AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text])) AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text) AND ((pinned_recipe ->> 'policy_digest'::text) = '223cba6fa54a1d6c809ed8ab84d7b96b140962e5dbe026bc28cc3a42a29b3130'::text)) IS TRUE)))", "c", true, false, false]$shape1$)
+ )x(relation,name,shape) LOOP
+  SELECT jsonb_build_array(pg_get_constraintdef(c.oid),c.contype,c.convalidated,c.condeferrable,c.condeferred)::text
   INTO actual FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid
   WHERE c.conrelid=expected.relation::regclass AND c.conname=expected.name AND r.relowner='forge_agent_owner'::regrole;
-  IF actual IS DISTINCT FROM expected.sha256 THEN RAISE EXCEPTION 'Unattended AGY constraint drift: %.%',expected.relation,expected.name;END IF;
+  IF actual IS DISTINCT FROM expected.shape THEN RAISE EXCEPTION 'Unattended AGY constraint drift: %.%',expected.relation,expected.name;END IF;
  END LOOP;
  FOR expected IN SELECT * FROM(VALUES
-  ('forge_agent.coding_make_feedback(uuid,uuid,text,text,jsonb)','31fe8ac18e8e5b8a38b8bd7534e7d783327e5d4b785702098c9f89f45248cca3'),
-  ('forge_coding_reconciler_api.publication_claim(text)','0636bf07b9355e7019de93164c2e913a341690cc80db37357d0e44e3cec9c8ac'),
-  ('forge_coding_reconciler_api.review_claim(text)','bea9f804d670dc5c905b85dc60d660853d811083851b7fd7a1adae0348d9415e'),
-  ('forge_coding_worker_api.claim(text,uuid,text[])','25030544388d1d4fe200b3d68542375073c2f960279a759fcaf24bf5fd0ac5af')
- )x(signature,sha256) LOOP
-  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN
-  SELECT encode(sha256(convert_to(jsonb_build_array(replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,forge_agent._coding_author_handoff_legacy_source(p.oid,p.prosrc))),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
+  ('forge_agent.coding_make_feedback(uuid,uuid,text,text,jsonb)','["forge_agent_owner", true, ["search_path=pg_catalog, pg_temp"], ["forge_agent=X/forge_agent_owner", "forge_agent_owner=X/forge_agent_owner"]]'),
+  ('forge_coding_reconciler_api.publication_claim(text)','["forge_agent_owner", true, ["search_path=pg_catalog, pg_temp"], ["forge_agent_owner=X/forge_agent_owner", "forge_coding_reconciler=X/forge_agent_owner"]]'),
+  ('forge_coding_reconciler_api.review_claim(text)','["forge_agent_owner", true, ["search_path=pg_catalog, pg_temp"], ["forge_agent_owner=X/forge_agent_owner", "forge_coding_reconciler=X/forge_agent_owner"]]'),
+  ('forge_coding_worker_api.claim(text,uuid,text[])','["forge_agent_owner", true, ["search_path=pg_catalog, pg_temp"], ["forge_agent_owner=X/forge_agent_owner", "forge_coding_worker=X/forge_agent_owner"]]')
+ )x(signature,shape) LOOP
+  SELECT jsonb_build_array(pg_get_userbyid(p.proowner),p.prosecdef,p.proconfig,ARRAY(SELECT unnest(p.proacl::text[]) ORDER BY 1))::text
   INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
-  ELSIF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
-  SELECT encode(sha256(convert_to(jsonb_build_array(replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,p.prosrc)),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
-  INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
-  ELSE
-  SELECT encode(sha256(convert_to(jsonb_build_array(pg_get_functiondef(p.oid),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
-  INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
-  END IF;
-  IF actual IS DISTINCT FROM expected.sha256 THEN RAISE EXCEPTION 'Unattended AGY function drift: %',expected.signature;END IF;
+  IF actual IS DISTINCT FROM expected.shape THEN RAISE EXCEPTION 'Unattended AGY function drift: %',expected.signature;END IF;
  END LOOP;
 END;
 $agy_unattended_verify$;

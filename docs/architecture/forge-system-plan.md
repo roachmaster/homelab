@@ -1,6 +1,13 @@
 # Forge hosted system research and implementation plan
 
-**Recommendation:** keep Forge as a small, hosted application kernel on top of the
+**Current direction, 26 November 2026:** local tools, durable jobs, configured
+remote inspection and the Agents delivery application already exist in narrower
+forms. Prioritize the [integrated delivery roadmap](../roadmap/forge-framework.md)
+and [current system picture](../design/implementation-status.md). The historical
+node → jobs → remote sequence below explains the foundation; it is not a plan to
+replace the working system or introduce generic fleet orchestration now.
+
+**Foundational design recommendation:** keep Forge as a small, hosted application kernel on top of the
 existing OS. Add **local node information and truthful status first**, then a
 bounded job lifecycle, then one explicitly selected remote boundary. Reuse the
 six core crates and optional `forge-system` clients; do not start a new kernel,

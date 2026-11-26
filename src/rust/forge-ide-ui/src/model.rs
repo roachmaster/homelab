@@ -258,6 +258,10 @@ impl UiModel {
                 | UiEvent::NextAgentUsage {}
                 | UiEvent::PreviousAgentUsage {}
                 | UiEvent::SelectAgentUsage { .. }
+                | UiEvent::SelectCicdRun { .. }
+                | UiEvent::SelectCicdStage { .. }
+                | UiEvent::SelectCicdStageView { .. }
+                | UiEvent::CicdStageLogPage { .. }
                 | UiEvent::PollAgents { .. }
                 | UiEvent::RestoreAgentsNavigation { .. }
                 | UiEvent::Work(_)
@@ -533,6 +537,10 @@ impl UiModel {
             | UiEvent::NextAgentUsage {}
             | UiEvent::PreviousAgentUsage {}
             | UiEvent::SelectAgentUsage { .. }
+            | UiEvent::SelectCicdRun { .. }
+            | UiEvent::SelectCicdStage { .. }
+            | UiEvent::SelectCicdStageView { .. }
+            | UiEvent::CicdStageLogPage { .. }
             | UiEvent::PollAgents { .. }
             | UiEvent::RestoreAgentsNavigation { .. }
             | UiEvent::Work(_)

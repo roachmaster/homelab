@@ -344,4 +344,64 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=40)
 \ir migrations/0040_provider_author_handoff.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(40,'provider_author_handoff');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=41) AS apply_0041
+\gset
+\if :apply_0041
+\ir migrations/0041_agent_branch_and_cicd_stages.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(41,'agent_branch_and_cicd_stages');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=42) AS apply_0042
+\gset
+\if :apply_0042
+\ir migrations/0042_remove_sql_json_rehash.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(42,'remove_sql_json_rehash');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=43) AS apply_0043
+\gset
+\if :apply_0043
+\ir migrations/0043_remove_delivery_json_rehash.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(43,'remove_delivery_json_rehash');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=44) AS apply_0044
+\gset
+\if :apply_0044
+\ir migrations/0044_identity_catalog.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(44,'identity_catalog');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=45) AS apply_0045
+\gset
+\if :apply_0045
+\ir migrations/0045_typed_renew_progress_deadline.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(45,'typed_renew_progress_deadline');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=46) AS apply_0046
+\gset
+\if :apply_0046
+\ir migrations/0046_failure_cause.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(46,'failure_cause');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=47) AS apply_0047
+\gset
+\if :apply_0047
+\ir migrations/0047_deadline_extension_events.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(47,'deadline_extension_events');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=48) AS apply_0048
+\gset
+\if :apply_0048
+\ir migrations/0048_retry_source_key.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(48,'retry_source_key');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=49) AS apply_0049
+\gset
+\if :apply_0049
+\ir migrations/0049_gate_contract_names.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(49,'gate_contract_names');
+\endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=50) AS apply_0050
+\gset
+\if :apply_0050
+\ir migrations/0050_delivery_receipt_source_key.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(50,'delivery_receipt_source_key');
+\endif
 COMMIT;

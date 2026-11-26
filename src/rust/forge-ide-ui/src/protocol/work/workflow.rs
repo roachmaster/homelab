@@ -5,6 +5,11 @@ use super::*;
 #[serde(deny_unknown_fields)]
 pub struct WorkWorkflowPolicy {
     pub policy_digest: String,
+    /// M44 catalog identity of this policy (dual-written beside the digest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_generation: Option<u32>,
     pub author_profile: String,
     pub reviewer_profile: String,
     pub max_plan_revisions: u32,
@@ -14,6 +19,11 @@ pub struct WorkWorkflowPolicy {
 impl WorkWorkflowPolicy {
     pub fn is_valid(&self) -> bool {
         valid_work_hex(&self.policy_digest, 64)
+            && self.policy_id.is_some() == self.policy_generation.is_some()
+            && self.policy_id.as_deref().is_none_or(valid_chat_id)
+            && self
+                .policy_generation
+                .is_none_or(|generation| generation > 0)
             && valid_work_name(&self.author_profile, 64)
             && valid_work_name(&self.reviewer_profile, 64)
             && self.author_profile != self.reviewer_profile
@@ -134,6 +144,8 @@ mod tests {
     fn valid_policy() -> WorkWorkflowPolicy {
         WorkWorkflowPolicy {
             policy_digest: "c".repeat(64),
+            policy_id: None,
+            policy_generation: None,
             author_profile: "agy-primary".into(),
             reviewer_profile: "codex-primary".into(),
             max_plan_revisions: 3,
@@ -161,6 +173,33 @@ mod tests {
             candidate_commit: None,
             merge_commit: None,
         }
+    }
+
+    #[test]
+    fn policy_identity_is_optional_but_paired_and_well_formed() {
+        let mut policy = valid_policy();
+        policy.policy_id = Some("11111111-1111-4111-8111-111111111111".into());
+        policy.policy_generation = Some(1);
+        assert!(policy.is_valid());
+        let decoded: WorkWorkflowPolicy =
+            serde_json::from_value(serde_json::to_value(&policy).unwrap()).unwrap();
+        assert_eq!(decoded, policy);
+        let mut unpaired = policy.clone();
+        unpaired.policy_generation = None;
+        assert!(!unpaired.is_valid());
+        let mut zero = policy.clone();
+        zero.policy_generation = Some(0);
+        assert!(!zero.is_valid());
+        let mut malformed = policy;
+        malformed.policy_id = Some("not-a-uuid".into());
+        assert!(!malformed.is_valid());
+        let legacy: WorkWorkflowPolicy = serde_json::from_value(serde_json::json!({
+            "policy_digest": "c".repeat(64), "author_profile": "agy-primary",
+            "reviewer_profile": "codex-primary", "max_plan_revisions": 3,
+            "max_code_revisions": 10, "auto_merge": true
+        }))
+        .unwrap();
+        assert_eq!(legacy, valid_policy());
     }
 
     #[test]

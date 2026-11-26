@@ -1,6 +1,7 @@
 """Factory-wired native coding worker; PostgreSQL remains the queue authority."""
 
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from dataclasses import fields, is_dataclass, replace
 import hashlib
 import logging
@@ -31,6 +32,27 @@ from work_cli_transport import CliDiagnosticReporter
 
 LOG = logging.getLogger("forge-coding-worker")
 FEEDBACK_INTEGRITY_SUMMARY = "Review feedback integrity could not be verified; explicit review is required."
+def _accepts(function, name):
+    """Whether a runner's run() names an optional hook. Only an explicit
+    parameter counts: wrappers taking **kwargs may forward them elsewhere."""
+    import inspect
+    try:
+        parameters = inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in parameters and parameters[name].kind is not inspect.Parameter.VAR_KEYWORD
+
+
+CANCELLED_STOP_SUMMARY = "The task or its workflow was cancelled; the agent scope was stopped."
+DEADLINE_STOP_SUMMARY = "The attempt reached its deadline without recent progress; the agent scope was stopped."
+RENEW_STATUSES = frozenset({"renewed", "lease_expired", "deadline_exceeded", "task_cancelled", "task_gone"})
+
+
+def _stop_cause(cause, proof):
+    """A cancellation stop is scope_stopped only when the scope stop is proven."""
+    if cause == "scope_stopped" and not (proof or {}).get("scope_stopped"):
+        return "interrupted"
+    return cause
 SCAN_SECONDS = 5
 ADVERTISE_SECONDS = 30
 VERDICT_SELF_CHECK_RETRIES = 2
@@ -281,16 +303,65 @@ class CodingWorker:
         lost = threading.Event()
         cancelled = threading.Event()
 
+        progressed = threading.Event()
+        # Any agent output (Codex included) is a liveness signal that lets a
+        # nearly due deadline be extended (M45); the database deadline is
+        # mirrored here so the executor's local wall bound can follow it.
+        produced = threading.Event()
+        deadline_state = {"deadline_at": None}
+
+        def report_activity():
+            produced.set()
+
+        def deadline_hint():
+            current = deadline_state["deadline_at"]
+            if current is None:
+                return None
+            return (current - datetime.now(timezone.utc)).total_seconds()
+        # Why the lease ended, so a cancellation or a deadline is never
+        # reported as "lease lost" (typed renewal, M45).
+        stop_cause = {"cause": "lease_lost", "summary": None}
+
         def report_progress(sequence, kind, summary):
             if lost.is_set() or stop.is_set():
                 raise ExecutionError("needs_reconcile", "The assignment is no longer accepting progress reports.")
             try:
-                return self.store.report_progress(lease, sequence, kind, summary)
+                result = self.store.report_progress(lease, sequence, kind, summary)
             except Exception as error:
                 if not _retryable(error) or lost.is_set() or stop.is_set():
                     raise
                 # Retry only the identical idempotent report, never agent work.
-                return self.store.report_progress(lease, sequence, kind, summary)
+                result = self.store.report_progress(lease, sequence, kind, summary)
+            progressed.set()
+            return result
+
+        def renewed():
+            progress_signal = "progress_report" if progressed.is_set() else ("output" if produced.is_set() else None)
+            status = None
+            extended = getattr(self.store, "renew_deadline", None)
+            if callable(extended):
+                result = extended(lease, progress_signal)
+                if isinstance(result, dict):
+                    status = result.get("status")
+                    if status == "renewed" and result.get("deadline_at") is not None:
+                        deadline_state["deadline_at"] = result["deadline_at"]
+            typed = getattr(self.store, "renew_status", None)
+            if status is None and callable(typed):
+                status = typed(lease, progress_signal)
+            if not isinstance(status, str) or status not in RENEW_STATUSES:
+                status = "renewed" if self.store.renew(lease) else "lease_expired"
+            if status == "renewed":
+                progressed.clear()
+                produced.clear()
+                return True
+            if status == "task_cancelled":
+                cancelled.set()
+                stop_cause.update(cause="scope_stopped", summary=CANCELLED_STOP_SUMMARY)
+            elif status == "deadline_exceeded":
+                stop_cause.update(cause="deadline_exceeded", summary=DEADLINE_STOP_SUMMARY)
+            lost.set()
+            stop.set()
+            return False
 
         def renew():
             while not done.is_set():
@@ -298,9 +369,7 @@ class CodingWorker:
                     if self.store.cancellation_requested(lease):
                         cancelled.set()
                         stop.set()
-                    if not self.store.renew(lease):
-                        lost.set()
-                        stop.set()
+                    renewed()
                 except Exception:
                     lost.set()
                     stop.set()
@@ -319,7 +388,7 @@ class CodingWorker:
         try:
             if not verify_recipe(self.config, lease):
                 raise ExecutionError("failed", "Pinned execution policy or profile is unavailable.")
-            if lost.is_set() or not self.store.renew(lease):
+            if lost.is_set() or not renewed():
                 lost.set()
                 raise ExecutionError("needs_reconcile", "The assignment lease is no longer current.")
             if lease.get("workflow_review_id") is not None:
@@ -330,7 +399,7 @@ class CodingWorker:
                 except Exception:
                     raise ExecutionError("needs_reconcile", "The read-only reviewer source could not be verified.") from None
             with self.workspaces.acquire(lease) as workspace:
-                if lost.is_set() or not self.store.renew(lease):
+                if lost.is_set() or not renewed():
                     lost.set()
                     raise ExecutionError("needs_reconcile", "The assignment lease is no longer current.")
                 if self.store.cancellation_requested(lease):
@@ -350,6 +419,9 @@ class CodingWorker:
                     # stays unchanged and retains terminal-result reporting.
                     reporter = report_progress if lease["recipe"]["backend"] == "antigravity" else None
                     arguments = {"report_progress": reporter}
+                    for name, hook in (("report_activity", report_activity), ("deadline_hint", deadline_hint)):
+                        if _accepts(self.runner.run, name):
+                            arguments[name] = hook
                     if lease.get("workflow_review_id") is not None:
                         try:
                             if self.peer_contexts is None:
@@ -398,7 +470,8 @@ class CodingWorker:
                     outcome = replace(outcome, status="needs_reconcile", text="", stop_proof=proof,
                                       summary="Worker shutdown requires review before any replacement attempt.")
                 if lost.is_set():
-                    self.store.record_stop(lease, proof, "Prior agent scope stopped after its lease was lost.", "lease_lost")
+                    self.store.record_stop(lease, proof, stop_cause["summary"] or "Prior agent scope stopped after its lease was lost.",
+                                           _stop_cause(stop_cause["cause"], proof))
                     return
                 if not proof["scope_stopped"]:
                     outcome = replace(outcome, status="needs_reconcile", text="", stop_proof=proof,
@@ -414,7 +487,7 @@ class CodingWorker:
         except ExecutionError as error:
             proof = proof or self.supervisor.stop(lease["unit_name"])
             if lost.is_set():
-                self.store.record_stop(lease, proof, error.summary, "lease_lost")
+                self.store.record_stop(lease, proof, stop_cause["summary"] or error.summary, _stop_cause(stop_cause["cause"], proof))
             else:
                 status = error.outcome if proof["scope_stopped"] else "needs_reconcile"
                 outcome = CliOutcome(status, "", None, None, error.summary, proof)

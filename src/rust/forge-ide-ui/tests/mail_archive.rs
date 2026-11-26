@@ -70,6 +70,7 @@ fn agent(retry: bool) -> AgentsNavigationSnapshot {
             acceptance_criteria: criteria,
             auto_repair: false,
             workflow_policy_digest: None,
+            workflow_policy_id: None,
             idempotency_key: "same-saved-key".into(),
         }),
     }
@@ -234,12 +235,14 @@ fn removed_mail_replies_cannot_decode_or_interfere_with_pending_agents_request()
                 alias: "agy-primary".into(),
                 label: "Gemini".into(),
                 backend: WorkBackend::Antigravity,
+                branch: None,
                 transport: None,
                 model: "Fixture".into(),
                 modes: vec![WorkMode::Plan],
             }],
             worker_status: WorkWorkerStatus::Ready,
             observed_at: None,
+            agent_branches: vec![],
         }),
     );
     assert!(o

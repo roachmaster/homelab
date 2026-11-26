@@ -83,6 +83,21 @@ jobs:
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-portal-home-phone.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-progress-phone.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-delivery-deployed.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-overview-phone.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-overview-desktop.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-stage-diagram-phone.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-stage-diagram-desktop.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-external-muse.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-external-workflow.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-event-history.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-triage-inbox-1363.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-triage-inbox-320.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-triage-inbox-390.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-triage-detail-1363.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-triage-detail-320.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-triage-detail-390.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-triage-attention-390.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-triage-muse-390.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-implementation-phone.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-characters-phone.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-characters-desktop.png

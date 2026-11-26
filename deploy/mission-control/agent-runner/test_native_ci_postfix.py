@@ -26,6 +26,7 @@ class NativePostfixTest(unittest.TestCase):
     verdict=fixtures.AutonomousWorkflowTest.verdict
     finish_plan_round=fixtures.AutonomousWorkflowTest.finish_plan_round
     checked_implementation=fixtures.AutonomousWorkflowTest.checked_implementation
+    preparation_failure=preparation.PreparationRetryTest.preparation_failure
     rows=preparation.PreparationRetryTest.rows
     @classmethod
     def setUpClass(cls):cls.cluster=DisposablePostgresCluster().start();cls.addClassCleanup(cls.cluster.stop)

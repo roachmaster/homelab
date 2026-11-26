@@ -27,12 +27,13 @@ def validate_content_identity(value):
         raise ValueError('Invalid external content identity')
     policy=VerificationPolicySnapshot.parse_dict(value['policy'])
     verification=VerificationIdentity.from_dict(value['verification'])
-    for key in ('artifact_id','base_artifact_id','manifest_sha256','verification_id'):
+    for key in ('artifact_id','base_artifact_id','manifest_sha256'):
         item=value[key]
         if not isinstance(item,str) or len(item)!=64 or any(c not in '0123456789abcdef' for c in item):
             raise ValueError('Invalid external content digest')
+    # verification_id is the typed UUID or the legacy hex of the same identity.
     if (verification.artifact_id!=value['artifact_id'] or verification.policy_sha256!=policy.policy_sha256
-            or verification.verification_id!=value['verification_id']):
+            or not verification.matches_id(value['verification_id'])):
         raise ValueError('External verification identity differs from saved content or policy')
     return value
 
@@ -69,8 +70,9 @@ class ExternalCandidateIdentityProvider:
         protected=ArtifactManifest.from_dict(snapshot['protected_artifact'])
         all_entries=set(artifact.entries)
         policy=VerificationPolicySnapshot.parse_dict(snapshot['policy'])
-        if (hashlib.sha256(canonical(snapshot)).hexdigest()!=reference['manifest_sha256']
-                or artifact.artifact_id!=reference['artifact_id'] or base.artifact_id!=reference['base_artifact_id']
+        # The saved manifest is compared structurally (content ids, policy and
+        # verification), never by re-hashing its re-encoded JSON.
+        if (artifact.artifact_id!=reference['artifact_id'] or base.artifact_id!=reference['base_artifact_id']
                 or snapshot['policy']!=reference['policy'] or snapshot['verification']!=reference['verification']
                 or policy.to_dict()['policy'].get('protected_artifact_id')!=protected.artifact_id
                 or any(entry not in all_entries for entry in protected.entries)):

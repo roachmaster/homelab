@@ -9,7 +9,7 @@ adapts inspection and bounded source reads to the remote agent; native credentia
 
 The [workbench guide](WORKBENCH.md) describes the compact toolbar, report-keyed
 project-wide file/symbol search, numbered source windows, Outline, Problems and
-reversible keyboard/narrow panes. The current atomic portal bundle uses local ABI 15.
+reversible keyboard/narrow panes. The current atomic portal bundle uses local ABI 16.
 
 ## Authoring and build boundary
 
@@ -79,6 +79,35 @@ Workbench, Home and Design. Legacy `#chat` and `OpenChat` intents lead to Agents
 Chat and model-assisted Workbench question/proposal controls are absent. Backend
 Chat APIs, PostgreSQL conversations and retention remain available to authorized
 native clients. The portal issues no Chat, history, model-discovery or run requests.
+
+### Agents triage
+
+The explicit **Needs attention** control uses the existing typed task scope;
+Active, History and All assignments remain available. Rust prepares readable
+word-boundary titles, the authoritative phase, agent label, update time and
+separately labeled retry allowance. Full assignment text and exact timestamps
+remain in task details. Counts come from the accepted list response.
+
+Task detail leads with **Now / Why / Next** from the accepted Rust model. It
+distinguishes automatic recovery, independent review/revision, an admitted user
+decision and unavailable state. Retry-event allowance is separate from cumulative
+revision counts. The compact current-stage label and disclosed complete path use
+the same stage projection, including native/Muse and linked-task distinctions.
+Workflow evidence, event history and technical IDs use native disclosures. Worker
+readiness and main verification remain separate observations.
+
+The typed `list_detail_tree` declaration adds reusable presentation-only focus and
+scroll retention. Rust supplies an opaque optional `ListBinding.context`; the
+generated main-thread primitive compares it without interpreting workflow state.
+Accepted navigation restores a retained row and scroll anchor, while background
+updates retain current keyboard focus. Context changes and protected teardown
+invalidate retained presentation state. This is an additive ABI15 view binding;
+it reuses the existing scope event and introduces no new backend effect or
+workflow-policy contract. Assets and WASM still require one atomic generated bundle.
+
+See the [owned-fixture QA guide](tests/browser/README.md#agents-triage-fixture-coverage)
+for the desktop/320/390px, adverse-state and before/after capture procedure. Fixture
+evidence does not establish signed-in live portal behavior.
 
 Workspace restore/save uses explicit `preserve_chat: true` with normal ownership,
 lease, revision and size checks. It retains the full dormant Chat snapshot,

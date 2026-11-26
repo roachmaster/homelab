@@ -63,6 +63,8 @@ EMIT_OPTIONAL_KEYS = frozenset({
     "backfilled",
     "reconciled",
     "completion_time_estimated",
+    "action_id",
+    "branch_scope",
 })
 
 
@@ -285,6 +287,8 @@ def decode(route: Destination, correlation: str, body):
                 backfilled=body.get("backfilled", False),
                 reconciled=body.get("reconciled", False),
                 completion_time_estimated=body.get("completion_time_estimated", False),
+                action_id=body.get("action_id"),
+                branch_scope=body.get("branch_scope"),
             )
 
         if route is Destination.LIST and kind == "jenkins_events_list":

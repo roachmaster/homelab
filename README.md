@@ -1,10 +1,26 @@
 # Homelab
 
-A professional engineering portfolio: lessons from the Forge experiments, a growing composable Rust framework, and reusable design practices.
+Forge combines a small Rust application-assembly framework with a concrete software-delivery system: an Agents portal, isolated coding workers, independent review, Jenkins verification and trusted publication. Workbench, game/runtime and Studio capabilities are additional consumers of the same explicit contracts.
 
 ## Current implementation
 
-[Current design and deployment status](docs/design/implementation-status.md) is the starting point. The generated portal opens to Agents, with Workbench, Home and Design alongside it. Chat and Mail are inactive portal views; their PostgreSQL history remains preserved. Repository capabilities include optional managed editing, typed providers and durable jobs, game runtime/assets/replay and the static-web Studio service. The last qualified live release is `95651a5` on 23 November 2026, using ABI13 and schema26; Studio has no configured relay and its source project is read-only. Documentation and source fixes after that checkpoint do not deploy themselves. The portal's [Design reader](https://portal.thedevex.com/design/implementation) reflects its installed release until a separate verified rollout.
+[Current system picture and deployment status](docs/design/implementation-status.md)
+is the starting point; [the roadmap](docs/roadmap/forge-framework.md) gives the
+next acceptance steps. The active navigation is Agents, Workbench, Home and
+Design. Chat/Mail history is retained behind inactive portal views.
+
+As checked on 26 November 2026, Mission Control has database schema40 and active
+web, source-agent, worker, publication, external-delivery and Jenkins services.
+The event/API runner is deliberately **stopped and disabled at boot**; this is
+not a shutdown of the other workers. Service state alone does not prove healthy
+end-to-end operation.
+
+[Draft PR29](https://github.com/roachmaster/homelab/pull/29), `backup/main` → `main`,
+consolidates persistent agent branches, CI stage/log inspection, Agents triage
+and recovery helpers. Its source contract is **ABI16/schema41**; it has not been
+promoted or deployed by the consolidation. Historical source-fingerprint checks,
+actual-browser acceptance and final scoped CI qualification remain open. The
+portal's Design reader reflects its installed release until a separate rollout.
 
 ## Forge framework portfolio
 
@@ -32,7 +48,7 @@ The [Mission Control runner](deploy/mission-control/agent-runner/README.md) reta
 
 The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) opens a single allowed project automatically and provides project-wide file/symbol search, Explorer, Outline and a read-only source viewer. Opening a file reads bounded source through the admitted host and agent; its SHA-256 must match the bytes used for inspection. Selecting a symbol reveals its numbered source lines, including on phones. Problems, metadata and source-shape analysis remain supporting tools. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above are design images, not screenshots. Managed editing/saving are implemented behind explicit project opt-in and revision checks; LSP and general Run/Debug remain future capabilities.
 
-[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe current compositions and state ownership, including the mobile controls. The [generated IDE](src/rust/forge-ide-web/README.md) opens to Agents and uses local WASM ABI13. Deploy matching host and HTML/CSS/JS/WASM assets atomically. The native gateway admits `ide.source` separately and validates inspected-content digests; an unchanged agent can remain running only after its wire compatibility is verified. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
+[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe current compositions and state ownership, including the mobile controls. The [generated IDE](src/rust/forge-ide-web/README.md) opens to Agents; the consolidated source uses local WASM ABI16. Deploy matching host and HTML/CSS/JS/WASM assets atomically. The native gateway admits `ide.source` separately and validates inspected-content digests; an unchanged agent can remain running only after its wire compatibility is verified. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
 
 ## Forge IDE generated browser boundary
 

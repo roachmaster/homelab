@@ -54,7 +54,7 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         native_fixtures.NativeTimeoutRetryTest.setUp(self)
         profiles = dict(self.config.profiles)
         profiles["agy-v2"] = replace(profiles["agy-v2"], quota_handoff_profile="codex-author")
-        profiles["codex-author"] = replace(profiles["codex-v2"], alias="codex-author")
+        profiles["codex-author"] = replace(profiles["codex-v2"], alias="codex-author", branch=None)
         self.install_config(replace(self.config, profiles=profiles))
         self.cluster.grant_worker("mission-control", "homelab", "codex-author", modes=("plan", "implement"))
         self.advertise()

@@ -1,0 +1,148 @@
+{
+  "date": "2026-11-26",
+  "destination": "backup/main",
+  "original_base": "0070e78f9b567ccffcc7a7fdd8c9caeaf44275ff",
+  "task_branches": [
+    {
+      "branch": "forge/task-0613b9c6-a1c7-4be1-a33c-781976ec3d3e",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-2adda418-d546-4d4f-9351-51e731f009f5",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-2ce6eebe-0b3d-4b30-a124-558d567326eb",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-2cfdcc7f-8228-404e-91b2-4503193711dc",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-35af19a9-ee88-4e76-9191-047b0eb3f230",
+      "sha": "717d9820c174886e15fc7f6c94d3e1021c769e59"
+    },
+    {
+      "branch": "forge/task-37433b18-ee55-40a3-a20d-7a738f2b36c8",
+      "sha": "ea55f792236e5d0b65ed6b96a755235eacf54847"
+    },
+    {
+      "branch": "forge/task-3cc3c5dc-367e-47a1-b9b3-d1b7458464f2",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-4a19ca73-16d9-49be-97ef-ce3aab2ef1ad",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-51d5efa6-3254-4189-a555-3d12e94d15dc",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-53cbe4c7-1573-4944-9e2f-7c57e195007f",
+      "sha": "f04cda7fe30c5d2314e662f8aea59786a14750f9"
+    },
+    {
+      "branch": "forge/task-5669ed03-b9ac-4ac5-8af6-87e0efccb9e7",
+      "sha": "bd1d6b4f46a1608135ee44055ac0731feeff89c0"
+    },
+    {
+      "branch": "forge/task-58d7b20f-66d2-4527-b6c2-d642813ef8d4",
+      "sha": "382bc4465df7911d51e791400b2fb31646e2a26f"
+    },
+    {
+      "branch": "forge/task-74ed2383-1852-4e00-97e7-92fe6d77b4e4",
+      "sha": "a45b5b8d1be74c7ef99d09fd074b8fb79356b5f3"
+    },
+    {
+      "branch": "forge/task-78de7ac9-1478-4279-8640-364235e8c665",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-7e38cf74-ed2b-4689-8439-b6eaa91657ab",
+      "sha": "0c14a8a4162a92b8e3cb26d9a419d9f88b9150bf"
+    },
+    {
+      "branch": "forge/task-9a671d6c-47c0-4a94-8096-76c94730ce7c",
+      "sha": "d177417e77ce6271f54aa5a6d8d0d4b8290f94d3"
+    },
+    {
+      "branch": "forge/task-9b37b8df-71d3-49ab-93ec-9491c4ee070a",
+      "sha": "f02eecea8dd98e90d399d71c4ccac249c5f33976"
+    },
+    {
+      "branch": "forge/task-a07e549a-4374-4dd1-84e6-e9fdf857a10f",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-a8931f4c-6bb9-4ae3-a764-0fcfd9070f19",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-b4fa7e19-5d03-4bf1-9ed6-28ee83c4cd52",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-b6669b2e-7a2d-4ece-b704-b3f387ddfc1e",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-b6ad3cfb-2b82-4e1d-b6a4-50a27d34b3fa",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-b73d2d26-ac3d-4268-84d8-d5683225b92a",
+      "sha": "e1e977fecd92c80e5324b14bda676c3b93cb6787"
+    },
+    {
+      "branch": "forge/task-bcee3a63-9b34-4dde-8927-ce1498491c5b",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-c95a9da7-9116-4ee3-853b-87b8ef343c04",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-cb99e885-2eae-4404-a931-f4e424328a30",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-dc7a0da2-278d-4a62-a5d7-3c86b4325e7d",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-e02c4068-300d-4fa2-856d-21d3942a32b2",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-edaa72d9-d3d9-486c-ae64-e808be7fb014",
+      "sha": "15e611636866c4bc04e9e0e4eb828eb74e2d715a"
+    },
+    {
+      "branch": "forge/task-f0a34852-bf44-4861-98c1-d7789447986f",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-f2a9ecef-26e9-437e-84b6-9a0abf41d231",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    },
+    {
+      "branch": "forge/task-f868f589-f653-4889-924c-bbdbb76cabc2",
+      "sha": "927342ebeba347bf3c70dbcf90b5440e62a46555"
+    }
+  ],
+  "scope": "Remote forge/task-* branches only; preserve all other branches and worktrees.",
+  "integration_notes": [
+    "Retain newer integrated plan-override and terminal-settlement implementations.",
+    "Combine persistent agent branch and CI stage work with content identity and author handoff.",
+    "Renumber unapplied task migration to 0041; migrations 0001 through 0040 remain unchanged."
+  ],
+  "validation": {
+    "backend_integration": "129 tests passed",
+    "source_fingerprint_guards": "33 tests ran; 268 subtest failures against historical source pins; fresh combined-source qualification is still required.",
+    "runtime": "No deployment or service startup authorized by this consolidation.",
+    "author_handoff_schema": "9 tests passed",
+    "rust_ui": "316 tests passed across forge-ide-ui, forge-ide-web and forge-ide-web-host using the existing /opt/forge-ci/toolchain toolchain"
+  }
+}
