@@ -54,7 +54,13 @@ class CiContractTest(unittest.TestCase):
                     delivery.protected_delivery_gate(path, SCOPED_PROFILE))
                 selected = SimpleNamespace(**vars(config), verification_profile=SCOPED_PROFILE)
                 first = delivery.jenkins_gate_manifest(selected, before, 'branch/one')
-                self.assertNotEqual(first[2], delivery.jenkins_gate_manifest(selected, after, 'branch/one')[2])
+                # The gate is a contract name bound to profile and scope; the protected
+                # source is bound by the source digest, the candidate commit/tree and
+                # the verifier pin, so a protected change moves the source digest only.
+                after_manifest = delivery.jenkins_gate_manifest(selected, after, 'branch/one')
+                self.assertEqual(first[2], SCOPED_PROFILE + ':branch/one')
+                self.assertEqual(first[2], after_manifest[2])
+                self.assertNotEqual(first[0], after_manifest[0])
                 self.assertNotEqual(first[2], delivery.jenkins_gate_manifest(selected, before, 'main')[2])
                 if not delivery.protected_delivery_gate(path):
                     self.assertEqual(delivery.jenkins_gate_manifest(config, before),
