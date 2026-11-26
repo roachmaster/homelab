@@ -161,7 +161,7 @@ class NativeJenkinsVerification:
         if 'content_identity' in binding:
             if self.identities is None:raise PublicationError('native_identity_provider_required')
             reference=binding['content_identity'];snapshot=self.identities.read(reference['generation'])
-            if (self.identities.reference(snapshot)!=reference or snapshot['scope']!=binding['scope']
+            if (not self.identities.reference_matches(reference,snapshot) or snapshot['scope']!=binding['scope']
                     or snapshot['provenance']['native_gate_manifest_sha256']!=binding['native_gate_manifest_sha256']):
                 raise PublicationError('native_identity_source_changed')
             return self.identities.plan(snapshot)

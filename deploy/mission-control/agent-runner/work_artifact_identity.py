@@ -8,7 +8,7 @@ import hashlib
 import json
 import math
 import re
-from uuid import UUID
+from uuid import UUID, uuid5
 
 ARTIFACT_DOMAIN = 'forge.source-artifact'
 POLICY_DOMAIN = 'forge.verification-policy'
@@ -222,6 +222,26 @@ class VerificationIdentity:
     @property
     def verification_id(self):
         return hashlib.sha256(self.canonical_bytes()).hexdigest()
+
+    @property
+    def verification_uuid(self):
+        """Typed identity: the generation UUID namespaces the artifact/policy pair.
+
+        No JSON is re-encoded or hashed; the two inputs are content hashes of
+        file bytes and the stored policy bytes."""
+        return uuid5(self.generation, VERIFICATION_DOMAIN + ':' + str(VERSION) + ':'
+                     + self.artifact_id + ':' + self.policy_sha256)
+
+    def matches_id(self, value):
+        """Accept the typed UUID form or the legacy hex form of this identity."""
+        if not isinstance(value, str):
+            return False
+        if _SHA256.fullmatch(value):
+            return value == self.verification_id
+        try:
+            return str(UUID(value)) == value and UUID(value) == self.verification_uuid
+        except ValueError:
+            return False
 
     @classmethod
     def from_dict(cls, value):
