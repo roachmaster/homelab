@@ -13,6 +13,7 @@ import { VIEWPORTS, verifyViewportProfiles } from './viewports.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
 import { startDurableRelay } from './durable-relay.mjs';
 import { startAgentsRelay } from './agents-relay.mjs';
+import { exerciseAgentsTriage } from './agents-triage.mjs';
 
 let assets, agent, fixtureBinary, output, browser, browserOwner, durableRelayOwner, agentsRelayOwner, check, report;
 const active = new Set();
@@ -3236,6 +3237,7 @@ async function agentsJourney() {
       await check(row).toBeVisible(); await row.click();
       await check(page.locator('#agents-plan-actions')).toBeVisible();
       await check(page.locator('#agents-stage-panel')).toBeVisible();
+      await disclosure(page, 'agents-stage-evidence', true);
       await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText(status === 'completed' ? 'Accepted' : 'Ready for review');
       await check(page.locator('#agents-stage-diagram script,#agents-stage-diagram img')).toHaveCount(0);
       await check(page.locator('#agents-plan-resume')).toBeEnabled();
@@ -3412,6 +3414,8 @@ async function agentsJourney() {
     await page.locator('#agents-criteria').fill('Keep peer review and automatic merge source-bound.');
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    await disclosure(page, 'agents-workflow', true);
+    await disclosure(page, 'agents-stage-evidence', true);
     await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Autonomous workflow · Native');
     await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Plan review');
     const autonomousSubmission=relay.workflowSubmissions.at(-1);
@@ -3563,6 +3567,9 @@ async function agentsJourney() {
     await page.locator('#agents-refresh').click();
     await page.locator(`#agents-tasks [data-row-id="${historyTaskId}"] .fg-row-select`).click();
     await check(page.locator('#agents-task-correlation')).toContainText('Correlation ·');
+    await disclosure(page, 'agents-task-technical', true);
+    await disclosure(page, 'agents-history-panel', true);
+    await disclosure(page, 'agents-stage-evidence', true);
     await check(page.locator('#agents-history > li')).toHaveCount(50);
     await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
     await check(page.locator('#agents-stage-diagram .fg-flow-summary')).toContainText('Events 1–61');
@@ -3636,10 +3643,8 @@ async function agentsJourney() {
     for(const width of [320,390,1440]){
       await page.setViewportSize({width,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'event metadata and summaries fit the viewport');
-      assert.equal(await page.locator('#agents-stage-diagram .fg-flow-track').evaluate((node,phone)=>{
-        const dir=getComputedStyle(node).flexDirection;
-        return phone?dir==='column':dir==='row';
-      },width<640),true,'stage track stacks vertically on phones and flows horizontally on desktop');
+      assert.equal(await page.locator('#agents-stage-diagram .fg-flow-track').evaluate(node=>
+        getComputedStyle(node).flexDirection==='column'),true,'full stage evidence has a deliberate vertical reading order at desktop and phone widths');
     }
     await page.setViewportSize({width:390,height:844});
     // Verify touch-target sizing, reduced-motion cascade, and direct tap/click toggle on phone without hover.
@@ -3668,6 +3673,9 @@ async function agentsJourney() {
     await page.locator('#agents-criteria').fill('Preserve the envelope history and source receipts with no manual approvals.');
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    await disclosure(page, 'agents-workflow', true);
+    await disclosure(page, 'agents-stage-evidence', true);
+    await disclosure(page, 'agents-history-panel', true);
     await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Autonomous workflow · External Muse');
     await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Plan review');
     assert.deepEqual(
@@ -3677,12 +3685,12 @@ async function agentsJourney() {
     );
     const externalWorkflowTask=relay.latestWorkflowTaskId;
     relay.retryEvent(externalWorkflowTask,'compilation',20,{total:20});await page.locator('#agents-refresh').click();
-    await check(page.locator('#agents-retry-event')).toHaveText('Fixing compilation · Retry 20/20');
+    await check(page.locator('#agents-retry-event')).toHaveText('Compilation retry budget · 20 of 20 used · Open');
     relay.retryEvent(externalWorkflowTask,'tests',1,{total:21});await page.locator('#agents-refresh').click();
-    await check(page.locator('#agents-retry-event')).toHaveText('Fixing tests · Retry 1/20');
+    await check(page.locator('#agents-retry-event')).toHaveText('Tests retry budget · 1 of 20 used · Open');
     await check(page.locator('#agents-workflow-revisions')).toContainText('Code revisions 21');
     relay.retryEvent(externalWorkflowTask,'tests',20,{total:40});await page.locator('#agents-refresh').click();
-    await check(page.locator('#agents-retry-event')).toHaveText('Fixing tests · Retry 20/20');
+    await check(page.locator('#agents-retry-event')).toHaveText('Tests retry budget · 20 of 20 used · Open');
     await check(page.locator('#agents-workflow-revisions')).toContainText('Code revisions 40');
     relay.retryEvent(externalWorkflowTask,'tests',20,{status:'resolved',total:40});
     for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
@@ -3713,7 +3721,10 @@ async function agentsJourney() {
         await page.locator(`#agents-tasks [data-row-id="${externalWorkflowTask}"] .fg-row-select`).click();
         await check(page.locator('#agents-workflow-phase')).toHaveText(label);
       }
-      for(const id of ['agents-accept','agents-resume','agents-plan-actions','agents-review-actions'])await check(page.locator('#'+id)).toBeHidden();
+      for(const id of ['agents-accept','agents-resume','agents-plan-actions','agents-verification-actions']){
+        await check(page.locator('#'+id)).toHaveCount(1);
+        await check(page.locator('#'+id)).toBeHidden();
+      }
     }
     await check(page.locator('#agents-history')).toContainText('Trusted fixture workflow: completed.');
     await check(page.locator('#agents-workflow-source')).toContainText('Merged commit');
@@ -3829,9 +3840,32 @@ async function agentsJourney() {
   }
 }
 
+async function agentsTriageJourney() {
+  agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
+  let fixture, context;
+  try {
+    const relay = await agentsRelayOwner.ready;
+    relay.enableAutonomy();
+    relay.enableExternal();
+    relay.enableExternalWorkflow();
+    fixture = await startFixture(false, false, { agents: relay });
+    context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const traffic = await observe(context);
+    const { page, errors } = await connect(context, fixture);
+    await exerciseAgentsTriage({ page, relay, check, screenshot, origin: fixture.origin });
+    await assertRetiredChat(page, traffic);
+    assert.equal(traffic.businessCalls().mail, 0, 'triage uses no retired Mail gateway');
+    assert.deepEqual(errors, []);
+  } finally {
+    try { if (context) await context.close(); }
+    finally { try { if (fixture) await stopFixture(fixture); } finally { await agentsRelayOwner.close(); } }
+  }
+}
+
 async function realJourney() {
   report.start('real.report.partial');
   await agentsJourney();
+  await agentsTriageJourney();
   await sourceSearchJourney();
   const fixture = await startFixture();
   report.setStage('context_start');

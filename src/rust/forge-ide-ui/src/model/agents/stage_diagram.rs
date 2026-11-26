@@ -370,6 +370,8 @@ impl Agents {
         let show = visible_now && self.task.is_some();
         view.visibility.push(visible("agents-stage-panel", show));
         let Some(task) = self.task.as_ref().filter(|_| show) else {
+            view.texts
+                .push(text("agents-current-stage", "Current stage unavailable"));
             view.flow_diagrams.push(FlowDiagramBinding {
                 id: "agents-stage-diagram",
                 track_label: String::new(),
@@ -391,6 +393,15 @@ impl Agents {
             self.events_more,
             self.now_ms,
         );
+        let current_stage = if self.warning {
+            "Update unavailable · stage evidence is the last accepted snapshot".into()
+        } else {
+            diagram.nodes.iter().find(|node| node.current).map_or_else(
+                || "No current stage reported".into(),
+                |node| node.label.clone(),
+            )
+        };
+        view.texts.push(text("agents-current-stage", current_stage));
         view.flow_diagrams.push(diagram);
     }
 }
@@ -399,7 +410,7 @@ impl Agents {
 /// from the backend (`workflow_id` / `forge_external_workflow.tasks`), but own
 /// their own `Queued -> Running -> Ready for review -> Accepted/Review complete`
 /// lifecycle rather than the parent workflow's phase track.
-fn is_linked_reviewer_task(task: &WorkTaskDetail) -> bool {
+pub(super) fn is_linked_reviewer_task(task: &WorkTaskDetail) -> bool {
     (task.workflow.is_some() || task.workflow_required)
         && (task.mode == WorkMode::Review
             || task.workflow.as_ref().is_some_and(|w| {
@@ -415,7 +426,7 @@ fn is_linked_repair_task(task: &WorkTaskDetail) -> bool {
         .is_some()
 }
 
-fn is_workflow_root_task(task: &WorkTaskDetail) -> bool {
+pub(super) fn is_workflow_root_task(task: &WorkTaskDetail) -> bool {
     !is_linked_reviewer_task(task) && !is_linked_repair_task(task)
 }
 
@@ -447,11 +458,10 @@ fn build_diagram(
     // root task (never attach parent delivery stages onto a linked child task).
     let delivery_active = task.delivery.as_ref().filter(|_| {
         is_workflow_root_task(task)
-            && (task.status == WorkStatus::Completed
-                || task
-                    .workflow
-                    .as_ref()
-                    .is_some_and(|w| w.phase == WorkWorkflowPhase::Completed))
+            && task.workflow.as_ref().map_or(
+                !task.workflow_required && task.status == WorkStatus::Completed,
+                |workflow| workflow.phase == WorkWorkflowPhase::Completed,
+            )
     });
     if let Some(delivery) = delivery_active {
         append_delivery_stages(&mut binding, delivery, now_ms);
@@ -466,15 +476,18 @@ fn build_diagram(
         .nodes
         .iter()
         .position(|n| n.current)
-        .map_or(total, |idx| idx + 1);
+        .map(|idx| idx + 1);
     let stream_status = completeness_label(trace, events_loaded, events_more);
-    binding.summary = if total > 0 {
+    binding.summary = if let Some(current_pos) = current_pos {
         format!(
             "Stage {current_pos} of {total} · {} · {stream_status}",
             binding.current_badge.label
         )
     } else {
-        format!("{} · {stream_status}", binding.current_badge.label)
+        format!(
+            "No current stage reported · {} · {stream_status}",
+            binding.current_badge.label
+        )
     };
 
     let (trace_label, trace_hops) = build_trace_hops(trace, events_loaded, now_ms);
@@ -579,14 +592,12 @@ fn build_workflow_diagram(
                 FlowStageState::Current
             };
             let count_label = match workflow.phase {
-                WorkWorkflowPhase::PlanRevision => Some(format!(
-                    "Rev {}/{}",
-                    workflow.plan_revisions, workflow.max_plan_revisions
-                )),
-                WorkWorkflowPhase::Repair => Some(format!(
-                    "Repair {}/{}",
-                    workflow.code_revisions, workflow.max_code_revisions
-                )),
+                WorkWorkflowPhase::PlanRevision => {
+                    Some(format!("Plan revisions {}", workflow.plan_revisions))
+                }
+                WorkWorkflowPhase::Repair => {
+                    Some(format!("Code revisions {}", workflow.code_revisions))
+                }
                 _ => stats.and_then(stats_count_label),
             };
             let phase_stats = match workflow.phase {
@@ -674,9 +685,8 @@ fn build_workflow_diagram(
             label: "Plan revision → Plan".into(),
             state,
             detail: format!(
-                "Revisions {}/{}{}",
+                "Plan revisions {}{}",
                 workflow.plan_revisions,
-                workflow.max_plan_revisions,
                 stats_seq_suffix(rev_stats)
             ),
             time: rev_stats.map(|s| timestamp(&s.last_at, now_ms)),
@@ -705,9 +715,8 @@ fn build_workflow_diagram(
             label: "Repair → Implement".into(),
             state,
             detail: format!(
-                "Revisions {}/{}{}",
+                "Code revisions {}{}",
                 workflow.code_revisions,
-                workflow.max_code_revisions,
                 stats_seq_suffix(rep_stats)
             ),
             time: rep_stats.map(|s| timestamp(&s.last_at, now_ms)),

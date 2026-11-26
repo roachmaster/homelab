@@ -1501,6 +1501,7 @@ mod history;
 mod review;
 mod scopes;
 mod stage_diagram;
+mod triage;
 mod workflow;
 
 #[test]

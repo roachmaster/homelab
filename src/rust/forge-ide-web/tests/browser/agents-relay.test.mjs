@@ -86,6 +86,66 @@ test('organized lists filter before pagination and expose truthful scope counts'
   assert.equal(legacy.body.event.scope_counts, undefined);
 });
 
+test('triage corpus separates authoritative scope, event allowance, revisions and worker readiness', async t => {
+  const { relay, post } = await relayFixture(t);
+  relay.enableExternal();
+  const corpus = relay.seedTriage();
+  const active = (await post('work_list', { status_filter: 'active', limit: 20 })).body.event;
+  const attention = (await post('work_list', { status_filter: 'attention', limit: 20 })).body.event;
+  const activeIds = active.tasks.map(task => task.task_id);
+  const attentionIds = attention.tasks.map(task => task.task_id);
+  assert(activeIds.includes(corpus.automatic));
+  assert(activeIds.includes(corpus.boundary), 'an open final retry does not manufacture an escalation');
+  assert(!activeIds.includes(corpus.escalation));
+  assert(attentionIds.includes(corpus.escalation));
+  assert(attentionIds.includes(corpus.earlyEscalation), 'workflow escalation does not wait for a full retry counter');
+  assert(!attentionIds.includes(corpus.automatic));
+  assert(!attentionIds.includes(corpus.boundary));
+  const automatic = (await post('work_get', { task_id: corpus.automatic })).body.event.task;
+  assert.equal(automatic.workflow.phase, 'plan_revision');
+  assert.equal(automatic.retry_event.used, 1);
+  assert.equal(automatic.workflow.plan_revisions, 7);
+  assert.equal(automatic.prompt, corpus.prompt);
+  assert.equal(automatic.title.length, 128, 'fixture retains the backend-bounded title and the full assignment');
+  const escalated = (await post('work_get', { task_id: corpus.escalation })).body.event.task;
+  assert.equal(escalated.status, 'cancelled');
+  assert.equal(escalated.workflow.phase, 'escalated');
+  const muse = (await post('work_get', { task_id: corpus.muse })).body.event.task;
+  assert.equal(muse.workflow.kind, 'external_database');
+  assert.equal(muse.attempt, null);
+  assert.equal(muse.external_result.provider, 'muse-db');
+  const manual = (await post('work_get', { task_id: corpus.manual })).body.event.task;
+  assert.equal(manual.mode, 'plan');
+  assert.equal(manual.workflow_required, false);
+  assert.equal(manual.workflow, null);
+  assert.equal(manual.attempt.phase, 'stopped');
+  assert.equal(manual.result.attempt_id, manual.attempt.attempt_id);
+  const delivery = (await post('work_get', { task_id: corpus.delivery })).body.event.task;
+  assert.equal(delivery.workflow.phase, 'completed');
+  assert.equal(delivery.delivery.verification.status, 'queued');
+  assert.equal((await post('work_catalog', {})).body.event.worker_status, 'ready');
+  assert(relay.calls.every(kind => ['work_list', 'work_get', 'work_catalog'].includes(kind)));
+});
+
+test('triage read failures are consumed once, leave tasks intact, and do not mutate assignments', async t => {
+  const { relay, post } = await relayFixture(t);
+  const corpus = relay.seedTriage();
+  const before = relay.reviewSnapshot(corpus.automatic);
+  relay.faults.denyNextGet = corpus.automatic;
+  const failed = await post('work_get', { task_id: corpus.automatic });
+  assert.equal(failed.status, 503);
+  assert.equal(failed.body.event.code, 'unavailable');
+  assert.equal(failed.body.event.request_id, failed.request_id);
+  const recovered = await post('work_get', { task_id: corpus.automatic });
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(recovered.body.event.task, before);
+  relay.faults.denyNextList = true;
+  assert.equal((await post('work_list', { status_filter: 'active' })).status, 503);
+  assert.equal((await post('work_list', { status_filter: 'active' })).status, 200);
+  assert.deepEqual(relay.reviewSnapshot(corpus.automatic), before);
+  assert(relay.calls.every(kind => ['work_get', 'work_list'].includes(kind)));
+});
+
 test('verification retry returns a new review and exposes it without creating another author', async t => {
   const { relay, post, before, request } = await implementationFixture(t);
   const tasks = relay.taskCount;

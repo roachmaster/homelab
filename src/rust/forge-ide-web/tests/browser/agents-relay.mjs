@@ -170,7 +170,7 @@ export async function startAgentsRelay() {
   const receipts = new Map();
   const controls = new Map();
   const calls = [];
-  const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false,
+  const faults = { dropNextSubmit: false, denyNextSubmit: false, denyNextList: false, denyNextGet: null, holdProgressCompletion: false,
     dropNextPlanDecision: false, holdPublication: false, autonomousPolicy:false,externalWorkflow:false,denyNextEvents:null };
   const planDecisions = [], reviewDecisions = [], publicationRevisions = [], workflowSubmissions=[];
   const verificationRetries = [], reviewReads = [], eventReads = [];
@@ -202,6 +202,7 @@ export async function startAgentsRelay() {
         refreshes++; send(202, 'usage_refresh_queued', { project_alias: project, refresh_id: randomUUID(), profiles: [input.agent_profile], coalesced: false }); return;
       }
       if (input.kind === 'work_list') {
+        if(faults.denyNextList){faults.denyNextList=false;failed(503,'unavailable');return;}
         const roots=[...tasks.values()].filter(t=>!t.internal);
         const scoped=['active','attention','history','all'].includes(input.status_filter);
         const counts={active:0,attention:0,history:0,all:roots.length};
@@ -238,6 +239,7 @@ export async function startAgentsRelay() {
       const selected = tasks.get(input.task_id);
       if (!selected) { failed(404, 'not_found'); return; }
       if (input.kind === 'work_get') {
+        if(faults.denyNextGet===selected.task_id){faults.denyNextGet=null;failed(503,'unavailable');return;}
         if (selected.publication && ['pending', 'checking', 'publishing'].includes(selected.publication.status)) {
           publicationRevisions.push(selected.revision);
           if (!faults.holdPublication) {
@@ -418,6 +420,32 @@ export async function startAgentsRelay() {
   await once(server, 'listening');
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
     planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,verificationRetries,reviewReads,eventReads,
+    // This corpus is created directly in owned fixture memory. Its journey may
+    // read and navigate; it never submits/retries/cancels/accepts an assignment.
+    seedTriage(){
+      const add=(prompt,phase,{external=false,status='awaiting_review',retry=null,revisionCount=0}={})=>{
+        const next=task(status,tasks.size,{prompt,mode:'plan',agent_profile:external?'muse-db-primary':'agy-primary',workflow_policy_digest:external?externalWorkflowPolicy.policy_digest:workflowPolicy.policy_digest});
+        next.updated_at=`2026-11-23T12:00:${String(tasks.size).padStart(2,'0')}Z`;
+        next.workflow.phase=phase;next.workflow.plan_revisions=revisionCount;
+        next.workflow.escalation_reason=phase==='escalated'?'Independent review requires operator attention; the saved plan is preserved.':null;
+        if(retry){next.retry_event={event_id:randomUUID(),kind:'planning',used:retry.used,limit:20,status:retry.status};next.workflow.retry_event={...next.retry_event};}
+        if(external){const content='# Owned Muse triage plan\n\nReview the preserved database artifact.';next.external_result={assignment_id:randomUUID(),provider:'muse-db',sha256:createHash('sha256').update(content).digest('hex'),content,submitted_at:time,summary:'Owned external triage fixture'};}
+        tasks.set(next.task_id,next);return next;
+      };
+      const rows=Array.from({length:12},(_,index)=>add(`Review bounded fixture component ${index+1} and preserve its existing approval gates.`,index%2?'code_review':'checks'));
+      const prompt='Make the authoritative assignment state understandable while preserving independent reviews and verification across extraordinarilylongword boundaries.\nFull assignment evidence remains here, including this second line.';
+      const automatic=add(prompt,'plan_revision',{retry:{used:1,status:'open'},revisionCount:7});
+      const boundary=add('The last admitted automatic retry is still Active until its workflow changes.','plan_revision',{retry:{used:20,status:'open'},revisionCount:44});
+      const escalation=add('Investigate the preserved author after independent review requires attention.','escalated',{status:'cancelled',retry:{used:20,status:'exhausted'},revisionCount:29});
+      const earlyEscalation=add('Workflow escalation requires attention even before its retry budget is spent.','escalated',{status:'cancelled',retry:{used:1,status:'open'},revisionCount:1});
+      const muse=add('Review the external Muse assignment before its independent reviewer advances it.','plan_review',{external:true,revisionCount:3});
+      const delivery=add('Keep worker readiness separate from exact main verification.','completed',{status:'completed'});
+      delivery.workflow.can_cancel=false;delivery.workflow.merge_commit='f'.repeat(40);delivery.delivery=deliveryProjection('queued');
+      const manual=task('awaiting_review',tasks.size,{mode:'plan',prompt:'Review this saved plan before authorizing implementation.'});tasks.set(manual.task_id,manual);
+      return {rows:rows.map(row=>row.task_id),automatic:automatic.task_id,boundary:boundary.task_id,escalation:escalation.task_id,earlyEscalation:earlyEscalation.task_id,muse:muse.task_id,delivery:delivery.task_id,manual:manual.task_id,prompt};
+    },
+    // Same-row content change proves background patching without new task identity.
+    updateTriagePhase(taskId,phase){const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');selected.workflow.phase=phase;selected.revision++;},
     requireVerificationRetry(taskId){
       const selected=tasks.get(taskId);
       if(selected?.mode!=='implement'||selected.status!=='awaiting_review'||!selected.review)throw new Error('No finished fixture implementation');

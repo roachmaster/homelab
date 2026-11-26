@@ -33,6 +33,14 @@ pub enum ButtonEmphasis {
     Standard,
     Primary,
 }
+/// Presentation references for a list that opens an exclusive detail view.
+/// Accepted list context and selection remain owned by the Rust model.
+#[derive(Clone, Debug)]
+pub struct ListDetailNavigation {
+    pub detail: String,
+    pub detail_focus: String,
+    pub scroll_owner: String,
+}
 /// A document served by the same portal origin.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PortalDocument {
@@ -253,6 +261,7 @@ pub enum Component {
         id: String,
         label: String,
         stacked: bool,
+        navigation: Option<ListDetailNavigation>,
     },
     /// Read-only, bounded source window supplied by the accepted model view.
     Source {
@@ -364,8 +373,16 @@ macro_rules! component {
     (filter $id:expr, $label:expr, $action:expr, $placeholder:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:Some($placeholder.into())} };
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
-    (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:false} };
-    (stacked_tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:true} };
+    (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:false,navigation:None} };
+    (stacked_tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:true,navigation:None} };
+    (list_detail_tree $id:expr, $label:expr, $detail:expr, $focus:expr, $scroll:expr) => {
+        $crate::generate::Component::Tree {
+            id:$id.into(),label:$label.into(),stacked:true,
+            navigation:Some($crate::generate::ListDetailNavigation {
+                detail:$detail.into(),detail_focus:$focus.into(),scroll_owner:$scroll.into(),
+            }),
+        }
+    };
     (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
     (diff $id:expr, $label:expr) => { $crate::generate::Component::Diff{id:$id.into(),label:$label.into()} };
     (source_wrap $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::SourceWrap{id:$id.into(),label:$label.into(),target:$target.into()} };
@@ -414,12 +431,19 @@ impl Document {
                 Ok(())
             }
         }
+        #[derive(Default)]
+        struct NavigationReferences {
+            trees: Vec<(String, ListDetailNavigation)>,
+            containers: BTreeSet<String>,
+            headings: BTreeSet<String>,
+        }
         fn visit(
             c: &Component,
             depth: usize,
             count: &mut usize,
             ids: &mut BTreeSet<String>,
             parent: Option<&Component>,
+            navigation: &mut NavigationReferences,
         ) -> Result<(), &'static str> {
             let in_layout = matches!(parent, Some(Component::PaneLayout { .. }));
             *count += 1;
@@ -493,6 +517,24 @@ impl Document {
             };
             if let Some(id) = id {
                 insert(ids, id)?;
+                if matches!(
+                    c,
+                    Component::Screen { .. }
+                        | Component::Region { .. }
+                        | Component::Panel { .. }
+                        | Component::Pane { .. }
+                ) {
+                    navigation.containers.insert(id.clone());
+                }
+                if matches!(
+                    c,
+                    Component::Text {
+                        style: TextStyle::Heading,
+                        ..
+                    }
+                ) {
+                    navigation.headings.insert(id.clone());
+                }
             }
             if label.is_some_and(|s| !text(s)) || action.is_some_and(|s| !key(s)) {
                 return Err("invalid component label/action");
@@ -651,14 +693,34 @@ impl Document {
                 {
                     return Err("pane action requires a button directly in a pane layout");
                 }
-                Component::PaneAction(button) => visit(button, depth + 1, count, ids, Some(c))?,
+                Component::PaneAction(button) => {
+                    visit(button, depth + 1, count, ids, Some(c), navigation)?
+                }
                 Component::Workspace(_) => insert(ids, "workspace")?,
                 Component::PairForm { id, .. } => {
                     for suffix in ["form", "code"] {
                         insert(ids, &format!("{id}-{suffix}"))?;
                     }
                 }
-                Component::Tree { id, .. } => insert(ids, &format!("{id}-full-name"))?,
+                Component::Tree {
+                    id,
+                    navigation: refs,
+                    ..
+                } => {
+                    insert(ids, &format!("{id}-full-name"))?;
+                    if let Some(refs) = refs {
+                        if [&refs.detail, &refs.detail_focus, &refs.scroll_owner]
+                            .into_iter()
+                            .any(|reference| !key(reference) || reference == id)
+                            || refs.detail == refs.detail_focus
+                            || refs.detail == refs.scroll_owner
+                            || refs.detail_focus == refs.scroll_owner
+                        {
+                            return Err("invalid list detail navigation references");
+                        }
+                        navigation.trees.push((id.clone(), refs.clone()));
+                    }
+                }
                 Component::Pane {
                     id,
                     position,
@@ -755,7 +817,7 @@ impl Document {
             };
             if let Some(children) = children {
                 for child in children {
-                    visit(child, depth + 1, count, ids, Some(c))?;
+                    visit(child, depth + 1, count, ids, Some(c), navigation)?;
                 }
             }
             Ok(())
@@ -771,6 +833,7 @@ impl Document {
             "leave-confirm".into(),
         ]);
         let mut count = 0;
+        let mut navigation = NavigationReferences::default();
         let mut has_brand_link = false;
         let mut has_brand_context = false;
         let mut has_header_actions = false;
@@ -793,7 +856,15 @@ impl Document {
                 }
                 has_brand_context = true;
             }
-            visit(c, 0, &mut count, &mut ids, None)?;
+            visit(c, 0, &mut count, &mut ids, None, &mut navigation)?;
+        }
+        for (_, refs) in navigation.trees {
+            if !navigation.containers.contains(&refs.detail)
+                || !navigation.containers.contains(&refs.scroll_owner)
+                || !navigation.headings.contains(&refs.detail_focus)
+            {
+                return Err("list detail navigation requires declared containers and heading");
+            }
         }
         Ok(())
     }

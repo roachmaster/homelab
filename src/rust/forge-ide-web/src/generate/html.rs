@@ -576,13 +576,26 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 escape(label)
             );
         }
-        Component::Tree { id, label, stacked } => {
+        Component::Tree {
+            id,
+            label,
+            stacked,
+            navigation,
+        } => {
             let class = if *stacked {
                 "fg-tree fg-stacked-tree"
             } else {
                 "fg-tree"
             };
-            let _=write!(out,"<div id=\"{}\" class=\"{class}\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
+            let navigation = navigation.as_ref().map_or_else(String::new, |nav| {
+                format!(
+                    " data-list-detail=\"{}\" data-detail-focus=\"{}\" data-list-scroll=\"{}\"",
+                    escape(&nav.detail),
+                    escape(&nav.detail_focus),
+                    escape(&nav.scroll_owner),
+                )
+            });
+            let _=write!(out,"<div id=\"{}\" class=\"{class}\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"{navigation}><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
         }
         Component::Source { id, label } => {
             let _ = write!(out, "<div class=\"fg-source-frame\" data-source-frame><pre id=\"{}\" class=\"fg-source\" data-source-view tabindex=\"0\" aria-label=\"{}\"></pre></div>", escape(id), escape(label));

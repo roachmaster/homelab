@@ -7,6 +7,7 @@ mod history;
 mod pipeline_diagram;
 mod presentation;
 mod stage_diagram;
+mod triage;
 mod workflow;
 use pipeline_diagram::project_pipeline_diagram;
 use presentation::{compact_counter, group_counter, model_title, relative_time, short_time};
@@ -54,6 +55,8 @@ pub(super) struct Agents {
     auto_repair: bool,
     verified_finding_ids: BTreeSet<String>,
     tasks: Vec<WorkTaskSummary>,
+    list_loaded: bool,
+    list_selected: Option<String>,
     task_scope: WorkListScope,
     scope_counts: Option<WorkScopeCounts>,
     list_cursor: Option<String>,
@@ -212,6 +215,7 @@ impl Agents {
         self.review_note = snapshot.review_note;
         self.auto_repair = snapshot.auto_repair;
         self.selected = snapshot.task_id;
+        self.list_selected = self.selected.clone();
         self.retry = snapshot.retry_intent;
         if self.retry.is_some() {
             self.status =
@@ -524,6 +528,11 @@ impl Agents {
                 self.warning = true;
             }
             UiEvent::AgentsNewTask {} if work && self.assignment_catalog_ready() => {
+                if self.task_scope != WorkListScope::Active {
+                    self.tasks.clear();
+                    self.list_loaded = false;
+                    self.list_selected = None;
+                }
                 self.task_scope = WorkListScope::Active;
                 self.list_cursor = None;
                 self.list_next = None;
@@ -592,6 +601,8 @@ impl Agents {
                     {
                         self.task_scope = scope;
                         self.tasks.clear();
+                        self.list_loaded = false;
+                        self.list_selected = None;
                         self.list_cursor = None;
                         self.list_next = None;
                         self.list_history.clear();
@@ -642,6 +653,9 @@ impl Agents {
                     self.pending = None;
                     self.pending_usage = None;
                     self.providers.clear();
+                    self.tasks.clear();
+                    self.list_loaded = false;
+                    self.list_selected = None;
                     self.selected = None;
                     self.task = None;
                     self.clear_progress();
@@ -755,6 +769,9 @@ impl Agents {
                         })
                 {
                     self.pending = None;
+                    if self.pane == Pane::List {
+                        self.list_selected = Some(task_id.clone());
+                    }
                     self.selected = Some(task_id);
                     self.task = None;
                     self.clear_progress();
@@ -1496,6 +1513,7 @@ impl Agents {
                 self.retry = None;
                 self.prompt.clear();
                 self.criteria.clear();
+                self.list_selected = Some(task_id.clone());
                 self.selected = Some(task_id);
                 self.task = None;
                 self.clear_progress();
@@ -1585,6 +1603,7 @@ impl Agents {
                     self.list_cursor = cursor;
                 }
                 self.tasks = tasks;
+                self.list_loaded = true;
                 self.list_next = next_cursor;
                 self.scope_counts = scope_counts;
                 self.status.clear();
@@ -1898,12 +1917,13 @@ impl Agents {
             visible(
                 "agents-status",
                 self.warning
-                    || pending
+                    || pending && !reader
                     || self.retry.is_some()
-                    || self
-                        .task
-                        .as_ref()
-                        .is_some_and(|t| t.status == WorkStatus::CancelRequested),
+                    || !reader
+                        && self
+                            .task
+                            .as_ref()
+                            .is_some_and(|t| t.status == WorkStatus::CancelRequested),
             ),
             visible(
                 "agents-usage-status",
@@ -2061,6 +2081,7 @@ impl Agents {
             visible("agents-list-pagination", active && !compose && !reader),
             visible("agents-usage", active && usage && !compose && !reader),
             visible("agents-task-list", active && work && !compose && !reader),
+            visible("agents-attention", active && work && !compose && !reader),
             visible(
                 "agents-task-scope-field",
                 active && work && !compose && !reader,
@@ -2240,7 +2261,13 @@ impl Agents {
             text(
                 "agents-task-title",
                 self.task.as_ref().map_or_else(
-                    || "Loading task…".into(),
+                    || {
+                        if self.warning {
+                            "Task unavailable".into()
+                        } else {
+                            "Loading task…".into()
+                        }
+                    },
                     |t| {
                         t.title
                             .clone()
@@ -2636,8 +2663,18 @@ impl Agents {
         ]);
         view.lists.push(ListBinding {
             id: "agents-tasks",
-            empty_message: if pending {
+            context: Some(format!(
+                "{}:{}:{}",
+                self.project,
+                self.task_scope.value(),
+                self.list_cursor.as_deref().unwrap_or("")
+            )),
+            empty_message: if self.warning {
+                "Tasks unavailable. Refresh to recover the authoritative list."
+            } else if pending {
                 "Loading tasks…"
+            } else if !self.list_loaded {
+                "Tasks have not been loaded. Refresh to check this scope."
             } else {
                 match self.task_scope {
                     WorkListScope::Active => {
@@ -2654,10 +2691,7 @@ impl Agents {
                 .iter()
                 .map(|t| RowView {
                     id: t.task_id.clone(),
-                    label: t
-                        .title
-                        .clone()
-                        .unwrap_or_else(|| format!("Task {}", &t.task_id[..8])),
+                    label: triage::task_title(t.title.as_deref(), &t.task_id),
                     glyph: if t.mode == WorkMode::Implement {
                         "↗"
                     } else {
@@ -2667,9 +2701,13 @@ impl Agents {
                     icon: RowIcon::Symbol,
                     kind_label: "Coding task",
                     parent: None,
-                    secondary: String::new(),
+                    secondary: t
+                        .retry_event
+                        .as_ref()
+                        .map_or_else(String::new, triage::retry_budget),
                     depth: 0,
-                    selected: self.selected.as_ref() == Some(&t.task_id),
+                    selected: self.list_selected.as_ref().or(self.selected.as_ref())
+                        == Some(&t.task_id),
                     expanded: None,
                     action: RowAction::OpenAgentTask {
                         task_id: t.task_id.clone(),
@@ -2677,15 +2715,20 @@ impl Agents {
                     toggle: None,
                     summary: Some(RowSummary {
                         badge: self.task_summary_badge(t),
-                        tag: t.agent_profile.clone(),
-                        time: timestamp(
-                            t.delivery
-                                .as_ref()
-                                .map(|d| d.updated_at.as_str())
-                                .or(t.updated_at.as_deref())
-                                .unwrap_or(&t.created_at),
-                            self.now_ms,
-                        ),
+                        tag: self
+                            .catalog
+                            .as_ref()
+                            .and_then(|catalog| {
+                                catalog
+                                    .profiles
+                                    .iter()
+                                    .find(|profile| profile.alias == t.agent_profile)
+                            })
+                            .map_or_else(
+                                || t.agent_profile.clone(),
+                                |profile| profile.label.clone(),
+                            ),
+                        time: triage::task_time(t, self.now_ms),
                     }),
                 })
                 .collect(),
@@ -2826,6 +2869,11 @@ impl Agents {
         self.project_workflow(view, compose, reader);
         self.project_delivery(view, active && work, reader, pending);
         self.project_stage_diagram(view, active && work && reader);
+        self.project_triage(
+            view,
+            active && work && reader,
+            active && work && !locked && !pending,
+        );
         self.project_history(view, active && work && reader);
         self.project_retry_event(view, reader);
     }

@@ -165,7 +165,7 @@ fn native_workflow_covers_all_thirteen_phases_loops_and_halts() {
                 .expect("plan revision loop");
             assert_eq!(branch.kind, FlowBranchKind::Loop);
             assert_eq!(branch.state, FlowStageState::Current);
-            assert!(branch.detail.contains("1/3"));
+            assert!(branch.detail.contains("Plan revisions 1"));
         }
         if phase == WorkWorkflowPhase::Repair {
             let branch = diagram
@@ -175,7 +175,7 @@ fn native_workflow_covers_all_thirteen_phases_loops_and_halts() {
                 .expect("repair loop");
             assert_eq!(branch.kind, FlowBranchKind::Loop);
             assert_eq!(branch.state, FlowStageState::Current);
-            assert!(branch.detail.contains("2/10"));
+            assert!(branch.detail.contains("Code revisions 2"));
         }
         if matches!(
             phase,

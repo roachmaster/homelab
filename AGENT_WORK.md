@@ -56,6 +56,57 @@ normal observed-main Jenkins run must now establish the complete final-source
 backend/browser/native gate before runtime activation. Private operation drafts
 remain inactive until that protected receipt exists.
 
+# Previous: Forge IDE Agents triage (UI-01 / UI-02) — 2026-11-25
+
+Implement a focused review PR on `feat/forge-ide-agents-triage`, starting from
+fresh `origin/main` 32588ab5. Surface the existing authoritative Needs attention
+scope, readable assignment rows, and a single Now / Why / Next task summary.
+Keep retry budget separate from revision count and worker readiness separate
+from main verification. Preserve native/Muse semantics, review and merge gates,
+full evidence, selection, keyboard focus and list position.
+
+Root owns typed component/YAML declarations, reusable presentation primitives,
+integration, qualification and the PR. Model and owned-fixture work use separate
+worktrees with bounded ownership; readers may audit without edits. Apply Design
+Forge UI, Design Forge IDE UX, Design Modern UI and Test Forge UI. No handwritten
+application HTML/CSS/JS, workflow-policy changes, unrelated screen work, live
+assignment mutations, deployment, main push or merge are authorized.
+
+Extend Rust tests and the fixed `make ui-qa` fixture journey for native/Muse,
+automatic retry versus operator action, keyboard/focus/scroll and desktop plus
+320/390px layouts. Capture and inspect fixture before/after inbox/detail images.
+Local Rust/browser prerequisite availability and hosted CI are being checked;
+report actual checks, source identity, blocked steps and unverified live behavior.
+Only the named feature branch is to be committed/pushed and opened for review.
+
+Implementation checkpoint: the Rust triage projection and authoritative scope
+shortcut, retained list selection/context, typed list/detail navigation primitive,
+YAML layouts and owned-fixture coverage are integrated. No backend policy or
+action guard changed. Local `make ui-qa-check` passes 37 tests; the script suite
+passes 129. The exact MAIN emitter passes the existing and extended deterministic
+input-presentation suite (a Node diagnostic, not generated/WASM/browser evidence).
+`make ui-qa` stopped at prerequisites: Cargo is absent, as are the locked browser
+dependencies. `make portal-style-check` likewise stopped at Cargo/rustfmt.
+No dependencies were installed and no real assignments were used. Fixture PNG
+capture and actual browser acceptance remain unverified. The feature branch is
+published as review PR #23. A read-only GitHub query confirmed both Rust CI and
+IDE browser acceptance are disabled_manually; no hosted run or status exists for
+the published source. That policy remains unchanged. Even when enabled, ordinary
+PR browser jobs skip the full journey. The connected tools provide no
+authenticated workflow-dispatch path.
+
+Formatting follow-up: the official Rust Playground formatter processed 16 changed
+Rust files with edition 2021, correcting 7. Child module declarations were
+temporarily opaque for single-file formatting and restored unchanged; no skip
+attribute was added to the repository. Independent review found no semantic or
+literal changes. Automatic approval review then blocked further external source
+uploads because that separate service was not explicitly authorized. That route
+was stopped; the remaining 2 files passed local formatting review. No toolchain
+was installed. This is not a Cargo formatting, native test, generation, WASM or
+browser gate. Those checks and source-bound before/after screenshots still need
+a prepared runner. Live portal verification remains for Dot after Leo approves
+the next step; no deployment or main change occurred.
+
 # Previous: Stabilize the event stream and measure bottlenecks — 2026-11-25
 
 User requests fixing the live event stream and identifying its bottlenecks and

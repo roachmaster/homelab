@@ -302,6 +302,10 @@ pub struct VisibilityBinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ListBinding {
     pub id: &'static str,
+    /// Opaque accepted list context for presentation-only focus/scroll retention.
+    /// Renderers compare it for equality; they do not interpret or persist it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     pub rows: Vec<RowView>,
     pub empty_message: String,
 }
@@ -420,6 +424,9 @@ pub struct MetricProperty {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    SelectAgentTaskScope {
+        value: String,
+    },
     AgentHistoryFirst {
         task_id: String,
         correlation_id: String,
