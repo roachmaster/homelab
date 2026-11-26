@@ -21,7 +21,8 @@ from work_config import PinnedRecipe,sha256_canonical,prepare_title
 from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_matches
 from work_store import ADVISORY_LOCK_SALT
 from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
-from work_events import COORDINATOR_ACTOR, insert_event
+from work_events import COORDINATOR_ACTOR, insert_event, operator_actor
+import unicodedata
 
 LOG=logging.getLogger('forge-workflow')
 _INHERIT_RETRY_EVENTS=object()
@@ -312,7 +313,8 @@ class WorkflowStore:
             if self.retry_events is not None:
                 self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
             return
-        if current_phase not in {'completed','cancelled','escalated'} and root is not None and root['status'] in {'cancelled','cancel_requested'}:
+        if (current_phase not in {'completed','cancelled','escalated'} and root is not None and root['status'] in {'cancelled','cancel_requested'}
+                and revival_floor(cursor,w['workflow_id']) is None):
             self._cancel_workflow(cursor,w,reason)
             return
         cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=false,phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
@@ -511,6 +513,10 @@ class WorkflowStore:
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
                 (w['workflow_id'],self.store.owner,project_alias,key,Json(intent),Json(dict(status='native_deadline_retried',receipt=receipt,**({'retry_event':event} if event is not None else {})))))
             return receipt
+
+    def revive_workflow(self,**request):
+        """Guarded, audited revival of a disabled+escalated workflow."""
+        return revive_workflow(self,**request)
 
     def _recover_native_timeouts(self):
         """Existing durable-event scan retries only reconciled deadline stops."""
@@ -1012,7 +1018,11 @@ class WorkflowStore:
             cursor.execute("SELECT t.*,a.phase AS attempt_phase,a.result_sha256,a.reservation_active,a.lease_expires_at,a.published_at,a.summary AS attempt_summary,a.outcome AS attempt_outcome FROM forge_agent.coding_tasks t LEFT JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id) WHERE t.owner_id=%s AND t.project_alias=%s AND t.workflow_id=%s ORDER BY t.created_at",(self.store.owner,w['project_alias'],w['workflow_id']))
             tasks=cursor.fetchall()
             root=next((t for t in tasks if t['id']==w['root_task_id']),None)
-            if root is not None and root['status'] in {'cancelled','cancel_requested'}:
+            floor=revival_floor(cursor,w['workflow_id'])
+            # A guarded revival keeps earlier cancelled tasks terminal; they are
+            # history, not a reason to cancel or escalate the revived workflow.
+            tasks=[t for t in tasks if not superseded_by_revival(t,floor)]
+            if root is not None and root['status'] in {'cancelled','cancel_requested'} and floor is None:
                 self._cancel_workflow(cursor,w,'Workflow root task was cancelled.')
                 continue
             try:self._current_policy(w)
@@ -1335,6 +1345,8 @@ class WorkflowCoordinator:
         return job is not None or external_changed or repaired
     def retry_native_timeout(self,**request):
         return self.store.retry_native_timeout(**request)
+    def revive_workflow(self,**request):
+        return self.store.revive_workflow(**request)
     def retry_peer_verdict(self,**request):
         return self.store.retry_peer_verdict(**request)
     def retry_preparation(self,**request):
@@ -1402,3 +1414,179 @@ class WorkflowStoreFactory:
         if not all(callable(getattr(flow.superseding_review,name,None)) for name in ('recover','correct','root_review_id')):
             raise TypeError('Superseding review requires a ready source-bound recovery port')
         return flow
+
+
+# Guarded revival of a disabled, escalated native workflow (issues #24/#27).
+# Revival acts on the workflow, never on tasks: cancelled tasks stay terminal.
+# It queues one implement continuation bound to the root's approved Plan
+# decision and frozen author recipe, re-checks the role grant, and journals an
+# audited decide action plus checkpoint events naming the actor and the prior
+# workflow state. Refusals are recorded with a typed reason.
+
+REVIVAL_POLICY = 'forge-native-revival-v1'
+REVIVAL_SOURCE_PREFIX = 'native-revival:'
+REVIVAL_LIMIT = 3
+REFUSAL_REASONS = frozenset({
+    'not_escalated',       # workflow is not disabled+escalated
+    'attempt_live',        # a writer, lease, queued/running task or action is live
+    'plan_not_approved',   # the root never received an approving Plan decision
+    'grant_not_covered',   # the caller's role grant does not cover the profile
+    'operator_cancelled',  # a person cancelled this work; never reopened
+    'revival_limit',       # bounded revivals per workflow already spent
+})
+
+
+def revival_floor(cursor, workflow_id):
+    """Return the timestamp of the latest completed revival, or None."""
+    cursor.execute("""SELECT max(created_at) AS floor FROM forge_agent.coding_workflow_actions
+      WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s""",
+        (workflow_id, REVIVAL_SOURCE_PREFIX + '%'))
+    row = cursor.fetchone()
+    return row['floor'] if row else None
+
+
+def superseded_by_revival(task, floor):
+    """A task cancelled before the latest revival is retained history only."""
+    return (floor is not None and task['status'] in {'cancelled', 'cancel_requested'}
+            and task['updated_at'] <= floor)
+
+
+def _validate(project_alias, workflow_id, idempotency_key, note):
+    if (not isinstance(project_alias, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', project_alias)
+            or not isinstance(workflow_id, UUID)
+            or not isinstance(idempotency_key, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', idempotency_key)
+            or not isinstance(note, str) or not note.strip() or len(note.encode()) > 1024
+            or any(unicodedata.category(c) == 'Cc' and c not in '\n\t' for c in note)):
+        raise Rejected(400, 'invalid_request')
+
+
+class Refused(Exception):
+    def __init__(self, reason, detail):
+        super().__init__(reason)
+        self.reason, self.detail = reason, detail
+
+
+def revive_workflow(flow, *, project_alias, workflow_id, idempotency_key, note, actor=None):
+    """Revive one disabled+escalated workflow or record why not.
+
+    Returns ``{'status':'revived',...}`` or ``{'status':'refused','reason':...}``.
+    """
+    _validate(project_alias, workflow_id, idempotency_key, note)
+    store = flow.store
+    store._require_project(project_alias)
+    actor = actor or operator_actor(store.owner)
+    key = REVIVAL_SOURCE_PREFIX + idempotency_key
+    intent = {'policy': REVIVAL_POLICY, 'workflow_id': str(workflow_id), 'project_alias': project_alias,
+              'idempotency_key': idempotency_key, 'note': note, 'actor': actor}
+    refusal = None
+    with flow._transaction() as cursor:
+        flow._project_lock(cursor, project_alias)
+        cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=%s AND owner_id=%s AND project_alias=%s FOR UPDATE',
+                       (workflow_id, store.owner, project_alias))
+        w = cursor.fetchone()
+        if not w:
+            raise Rejected(404, 'not_found')
+        cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",
+                       (workflow_id, key))
+        previous = cursor.fetchone()
+        if previous:
+            if previous['intent'] != intent:
+                raise Rejected(409, 'idempotency_conflict')
+            if previous['status'] != 'completed' or not previous['finish_receipt']:
+                raise Rejected(409, 'reconcile_required')
+            return dict(previous['finish_receipt']['receipt'])
+        prior = {'phase': w['phase'], 'enabled': w['enabled'], 'escalation_reason': w['escalation_reason']}
+        try:
+            receipt = _revive(flow, cursor, w, prior, key, intent, note, actor)
+        except Refused as refused:
+            refusal = refused
+        else:
+            return receipt
+    # Record the refusal in its own transaction so the audit row survives.
+    with flow._transaction() as cursor:
+        flow._project_lock(cursor, project_alias)
+        payload = {'stage': 'workflow_revival_refused', 'policy': REVIVAL_POLICY, 'workflow_id': str(workflow_id),
+                   'reason': refusal.reason, 'detail': refusal.detail[:512], 'prior_state': prior,
+                   'idempotency_key': idempotency_key}
+        insert_event(cursor, store.owner, project_alias, w['root_task_id'], 'checkpoint', payload, actor=actor)
+    return {'status': 'refused', 'reason': refusal.reason, 'detail': refusal.detail,
+            'workflow_id': str(workflow_id), 'prior_state': prior}
+
+
+def _revive(flow, cursor, w, prior, key, intent, note, actor):
+    store = flow.store
+    if w['enabled'] or w['phase'] != 'escalated':
+        raise Refused('not_escalated', 'Only a disabled, escalated workflow can be revived.')
+    cursor.execute("""SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t
+        ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id)
+        WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL))
+      OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested'))
+      OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) AS live""",
+        (w['workflow_id'],) * 3)
+    if cursor.fetchone()['live']:
+        raise Refused('attempt_live', 'An attempt, lease, queued task or pending action is still live; reconcile it first.')
+    cursor.execute("""SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t
+        ON(t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id)
+        WHERE t.workflow_id=%s AND e.event_kind IN('cancelled','cancel_requested')
+        AND(e.payload->>'cause'='operator_request' OR e.payload->'actor'->>'kind'='operator')) AS by_person""",
+        (w['workflow_id'],))
+    if cursor.fetchone()['by_person']:
+        raise Refused('operator_cancelled', 'A person cancelled work in this workflow; it is never reopened.')
+    cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE',
+                   (store.owner, w['project_alias'], w['root_task_id']))
+    root = cursor.fetchone()
+    plan = None
+    if root and root['plan_decision_id']:
+        cursor.execute('SELECT * FROM forge_agent.coding_plan_decisions WHERE owner_id=%s AND project_alias=%s AND decision_id=%s',
+                       (store.owner, w['project_alias'], root['plan_decision_id']))
+        plan = cursor.fetchone()
+    if not plan or plan['decision'] != 'resume' or plan['task_id'] != root['id']:
+        raise Refused('plan_not_approved', 'The workflow Plan was never approved; revival needs an approved Plan.')
+    cursor.execute("SELECT count(*) AS n FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE %s",
+                   (w['workflow_id'], REVIVAL_SOURCE_PREFIX + '%'))
+    if cursor.fetchone()['n'] >= REVIVAL_LIMIT:
+        raise Refused('revival_limit', 'This workflow already used its bounded revivals.')
+    cursor.execute('SAVEPOINT workflow_revival_grant')
+    cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='implement',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",
+                   (w['workflow_id'],))
+    try:
+        p = flow._snapshot(w)
+        flow._grant(cursor, w, p['author_profile'], 'implement')
+        flow._grant(cursor, w, p['reviewer_profile'], 'review')
+        profile = flow.config.profiles.get(p['author_profile'])
+        if profile is None or not profile.execution_enabled:
+            raise Rejected(403, 'denied')
+    except Rejected as error:
+        cursor.execute('ROLLBACK TO SAVEPOINT workflow_revival_grant')
+        raise Refused('grant_not_covered', 'The current grant does not cover the workflow profiles (' + error.code + ').') from None
+    cursor.execute('RELEASE SAVEPOINT workflow_revival_grant')
+    recipe = recipe_from_snapshot(p, 'author_implement')
+    cursor.execute("SELECT count(*) AS n FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND status IN('queued','running','cancel_requested')",
+                   (store.owner, w['project_alias']))
+    if cursor.fetchone()['n'] >= store.max_pending:
+        raise Rejected(503, 'queue_full')
+    task_id = uuid4()
+    receipt = {'status': 'revived', 'project_alias': w['project_alias'], 'workflow_id': str(w['workflow_id']),
+               'task_id': str(task_id), 'revision': 1, 'recipe_digest': recipe.digest,
+               'plan_decision_id': str(plan['decision_id']), 'prior_state': prior}
+    prompt = (root['prompt'] + '\n\nRevival note: the earlier attempts of this workflow were stopped by an escalation and '
+              'remain cancelled. Implement the approved Plan from the current base.\nOperator context: ' + note)
+    cursor.execute("""INSERT INTO forge_agent.coding_tasks(owner_id,project_alias,id,idempotency_key,intent_digest,base_revision,mode,
+        agent_profile,title,prompt,acceptance_criteria,pinned_recipe,recipe_digest,status,revision,auto_repair,review_required,
+        workflow_required,workflow_id,parent_task_id,repair_root_task_id,scope_plan_decision_id)
+      VALUES(%s,%s,%s,%s,%s,%s,'implement',%s,%s,%s,%s,%s,%s,'queued',1,%s,%s,true,%s,%s,%s,%s)""",
+        (store.owner, w['project_alias'], task_id, 'revival-' + str(task_id), sha256_canonical(dict(intent, task_id=str(task_id))),
+         root['base_revision'], p['author_profile'], prepare_title('Revive ' + root['title']), prompt[:65536],
+         root['acceptance_criteria'], Json(recipe.to_dict()), recipe.digest, root['auto_repair'], root['review_required'],
+         w['workflow_id'], root['id'], root['id'], plan['decision_id']))
+    cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
+                   (w['workflow_id'], store.owner, w['project_alias'], key, Json(intent), Json({'status': 'workflow_revived', 'receipt': receipt})))
+    audit = {'stage': 'workflow_revived', 'policy': REVIVAL_POLICY, 'workflow_id': str(w['workflow_id']),
+             'prior_state': prior, 'continuation_task_id': str(task_id), 'plan_decision_id': str(plan['decision_id']),
+             'idempotency_key': intent['idempotency_key']}
+    insert_event(cursor, store.owner, w['project_alias'], root['id'], 'checkpoint', audit, actor=actor)
+    insert_event(cursor, store.owner, w['project_alias'], task_id, 'queued',
+                 {k: receipt[k] for k in ('project_alias', 'task_id', 'revision', 'status', 'recipe_digest')} | {'status': 'queued'},
+                 actor=actor, first=True)
+    cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
+    return receipt
