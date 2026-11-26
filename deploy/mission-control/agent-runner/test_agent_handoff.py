@@ -7,6 +7,7 @@ module would duplicate their cases in the trusted backend inventory.
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from threading import Barrier
 from types import SimpleNamespace
 import unittest
@@ -63,9 +64,9 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         self.coordinator = self.service.workflow_worker
         self.handoff_port = self.coordinator.store.execution_policy.author_handoff
 
-    def advertise(self, *, author=True, reviewer=True, backup=True):
+    def advertise(self, *, author=True, reviewer=True, backup=True, source_modes=None):
         profiles = []
-        for alias, modes in (("agy-v2", ["plan", "implement"]),
+        for alias, modes in (("agy-v2", source_modes or ["plan", "implement"]),
                              ("codex-author", ["plan", "implement"]),
                              ("codex-v2", ["review"])):
             if alias == "codex-author" and not author or alias == "codex-v2" and not reviewer:
@@ -105,7 +106,8 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         return self.rows("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'provider-author-handoff:%%'")[0][0]
 
     def workflow_counts(self, task_id):
-        return self.rows("SELECT plan_revisions,code_revisions FROM forge_agent.coding_workflows WHERE root_task_id=%s", (task_id,))[0]
+        workflow = self.get(task_id)["workflow"]
+        return workflow["plan_revisions"], workflow["code_revisions"]
 
     def test_approved_implementation_keeps_plan_workspace_original_authority_and_budgets(self):
         _, plan, original = self.implementation()
@@ -115,6 +117,9 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         self.stop_quota_attempt(original)
         receipt = self.handoff_port.handoff(self.command(original))
         self.assertEqual(receipt["status"], "queued")
+        projected = self.get(original.task_id)["workflow"]
+        self.assertEqual(projected["author_profile"], "codex-author")
+        self.assertEqual(projected["reviewer_profile"], "codex-v2")
         resumed = self.claim("codex-author")
         self.assertIsNotNone(resumed)
         self.assertEqual(resumed.task_id, original.task_id)
@@ -185,14 +190,20 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         self.assertEqual(self.get(queued["task_id"])["workflow"]["phase"], "plan")
 
     def test_queued_implementation_after_approved_agy_plan_keeps_the_plan_source(self):
-        self.submit("global-quota-source")
-        quota = self.claim("agy-v2")
-        self.stop_quota_attempt(quota)
         self.submit("approved-plan-queued-implementation")
         # Freeze the intended fixture state before running the source-bound
         # handoff explicitly; no background worker exists in this database.
         with patch.object(self.handoff_port, "run_once", return_value=None):
             plan, _critic = self.finish_plan_round()
+        # The quota must follow this actual Plan success. An older quota is
+        # correctly closed by the successful AGY turn and cannot authorize it.
+        self.submit("global-quota-source")
+        self.cluster.admin_exec("DELETE FROM forge_agent.coding_worker_grants WHERE agent_profile='agy-v2' AND mode='implement'", owner=False)
+        quota = self.claim("agy-v2")
+        self.assertEqual(quota.mode, "plan")
+        self.assertNotEqual(quota.task_id, plan.task_id)
+        self.stop_quota_attempt(quota)
+        self.cluster.grant_worker("mission-control", "homelab", "agy-v2", modes=("implement",))
         detail = self.get(plan.task_id)
         self.assertEqual(detail["mode"], "implement")
         self.assertEqual(detail["status"], "queued")
@@ -205,6 +216,41 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         self.assertEqual(resumed.resume_workspace_digest, "b" * 64)
         self.assertEqual(self.db.read_plan(resumed)["plan_attempt_id"], plan.attempt_id)
         self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_attempts WHERE task_id=%s AND agent_profile='agy-v2'", (plan.task_id,)), [(1,)])
+
+    def test_queued_plan_revision_hands_off_without_rewriting_the_revise_decision(self):
+        self.submit("plan-awaiting-independent-revision")
+        original = self.claim("agy-v2")
+        frozen = self.frozen(original)
+        self.publish(original, "AGY Plan awaiting independent feedback.")
+        self.coordinator.run_once()
+        critic = self.claim("codex-v2")
+        target = self.db.read_review_target(critic)
+        # Establish the genuine current quota after the successful Plan turn,
+        # while its reviewer is still active and no author revision is queued.
+        self.submit("quota-after-plan-before-revision")
+        quota = self.claim("agy-v2")
+        self.stop_quota_attempt(quota)
+        verdict = self.verdict(critic, "revise")
+        self.publish(critic, verdict)
+        with patch.object(self.handoff_port, "run_once", return_value=None):
+            self.coordinator.run_once()
+        detail = self.get(original.task_id)
+        self.assertEqual(detail["status"], "queued")
+        self.assertEqual(detail["workflow"]["phase"], "plan_revision")
+        counts = self.workflow_counts(original.task_id)
+        self.handoff_port.handoff(self.command(original, quota_attempt=quota.attempt_id))
+        revised = self.claim("codex-author")
+        self.assertEqual(revised.task_id, original.task_id)
+        self.assertEqual(revised.mode, "plan")
+        self.assertEqual(revised.resume_attempt_id, original.attempt_id)
+        feedback = self.db.read_workflow_feedback(revised)
+        self.assertEqual(feedback["target_json"], target["target_json"])
+        self.assertEqual(feedback["target_sha256"], target["target_sha256"])
+        self.assertEqual(feedback["verdict_json"], verdict)
+        self.assertIn("author_handoff", feedback)
+        self.assertEqual(self.workflow_counts(original.task_id), counts)
+        self.assertEqual(counts, (1, 0))
+        self.assertEqual(self.frozen(original), frozen)
 
     def test_linked_repair_keeps_partial_workspace_plan_and_exact_feedback(self):
         _admitted, parent, critic, _checks = self.checked_implementation(linked=True)
@@ -227,8 +273,14 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         self.assertEqual(resumed.feedback_sha256, child.feedback_sha256)
         self.assertEqual(resumed.resume_attempt_id, child.attempt_id)
         self.assertEqual(resumed.resume_workspace_digest, "c" * 64)
-        self.assertEqual(self.db.read_workflow_feedback(resumed), feedback)
-        self.assertEqual(self.db.read_feedback(resumed), source_feedback)
+        handed_feedback = self.db.read_workflow_feedback(resumed)
+        handed_source = self.db.read_feedback(resumed)
+        for key, value in feedback.items():
+            self.assertEqual(handed_feedback[key], value)
+        for key, value in source_feedback.items():
+            self.assertEqual(handed_source[key], value)
+        self.assertIn("author_handoff", handed_feedback)
+        self.assertIn("author_handoff", handed_source)
         self.assertEqual(self.db.read_plan(resumed), approved)
         self.assertEqual(self.workflow_counts(parent.task_id), counts)
         self.assertEqual(self.frozen(child), frozen)
@@ -452,9 +504,7 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         self.stop_quota_attempt(reviewer)
         with self.assertRaises(Rejected):
             self.handoff_port.handoff(self.command(reviewer))
-        with self.coordinator.store._transaction(read_only=True) as cursor:
-            cursor.execute("SELECT snapshot FROM forge_agent.coding_workflows WHERE root_task_id=%s", (author.task_id,))
-            snapshot = cursor.fetchone()["snapshot"]
+        snapshot = self.rows("SELECT snapshot FROM forge_agent.coding_workflows WHERE root_task_id=%s", (author.task_id,))[0][0]
         class SameReviewerCatalog:
             def resolve_handoff(_self, _source, mode):
                 return "codex-v2", self.config.catalog().resolve("codex-v2", mode)
@@ -490,6 +540,70 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         self.assertEqual(self.workflow_counts(original.task_id), (1, 0))
         self.assertEqual(self.frozen(original), frozen)
         self.assertIsNone(self.claim("agy-v2"))
+
+    def test_codex_quota_respects_reported_reset_without_bouncing_back_to_agy(self):
+        self.submit()
+        original = self.claim("agy-v2")
+        self.stop_quota_attempt(original)
+        self.handoff_port.handoff(self.command(original))
+        codex = self.claim("codex-author")
+        self.stop_quota_attempt(codex, reset=1256)
+        self.coordinator.run_once()
+        self.assertIsNone(self.claim("codex-author"))
+        self.assertIsNone(self.claim("agy-v2"))
+        wait = self.rows("SELECT intent FROM forge_agent.coding_workflow_actions WHERE source_key=%s",
+                         ("provider-quota-wait:" + codex.attempt_id,))[0][0]
+        self.assertEqual(wait["wait_source"], "provider_reported_reset")
+        self.assertEqual(wait["diagnostic"]["retry_after_seconds"], 1256)
+        clock = SimpleNamespace(now=lambda _tz: datetime.now(UTC) + timedelta(seconds=1257), fromisoformat=datetime.fromisoformat)
+        with patch("work_provider_model_route.datetime", clock):
+            self.coordinator.run_once()
+        resumed = self.claim("codex-author")
+        self.assertIsNotNone(resumed)
+        self.assertEqual(resumed.agent_profile, "codex-author")
+        self.assertEqual(resumed.resume_attempt_id, codex.attempt_id)
+        self.assertEqual(resumed.resume_workspace_digest, "c" * 64)
+        self.assertEqual(self.delegation_count(), 1)
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_attempts WHERE task_id=%s AND agent_profile='agy-v2'", (original.task_id,)), [(1,)])
+
+    def test_codex_unknown_quota_reset_uses_local_backoff_and_twenty_episode_attempts(self):
+        self.submit()
+        original = self.claim("agy-v2")
+        self.stop_quota_attempt(original)
+        self.handoff_port.handoff(self.command(original))
+        current = self.claim("codex-author")
+        counts = self.workflow_counts(original.task_id)
+        clock = SimpleNamespace(now=lambda _tz: datetime.now(UTC) + timedelta(seconds=901), fromisoformat=datetime.fromisoformat)
+        for ordinal in range(21):
+            proof = make_stop_proof(current.unit_name)
+            self.db.publish(current, "quota_blocked", None, None,
+                "Codex reported exhausted included usage without a reset timestamp.", proof)
+            self.db.reconcile(current, "c" * 64, proof)
+            self.coordinator.run_once()
+            wait = self.rows("SELECT intent FROM forge_agent.coding_workflow_actions WHERE source_key=%s",
+                             ("provider-quota-wait:" + current.attempt_id,))[0][0]
+            self.assertEqual(wait["wait_source"], "local_quota_retry_backoff")
+            self.assertIsNone(wait["diagnostic"]["retry_after_seconds"])
+            self.assertEqual(wait["reset_resumes_used"], min(ordinal, 20))
+            self.assertIsNone(self.claim("codex-author"))
+            self.assertIsNone(self.claim("agy-v2"))
+            with patch("work_provider_model_route.datetime", clock):
+                self.coordinator.run_once()
+            next_attempt = self.claim("codex-author")
+            if ordinal < 20:
+                self.assertIsNotNone(next_attempt, ordinal)
+                self.assertEqual(next_attempt.resume_attempt_id, current.attempt_id)
+                self.assertEqual(next_attempt.recipe, current.recipe)
+                current = next_attempt
+            else:
+                self.assertIsNone(next_attempt)
+        detail = self.get(original.task_id)
+        self.assertEqual(detail["status"], "quota_blocked")
+        self.assertNotEqual(detail["workflow"]["phase"], "escalated")
+        self.assertEqual(self.workflow_counts(original.task_id), counts)
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'provider-quota-resume:%%'"), [(20,)])
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_retry_event_admissions"), [(0,)])
+        self.assertEqual(self.delegation_count(), 1)
 
     def test_delegated_candidate_requires_exact_checks_independent_review_and_merge_gates(self):
         _, _, original = self.implementation()
