@@ -24,6 +24,7 @@ class BackendSuitesTests(unittest.TestCase):
             ("deploy/mission-control/agent-driver", "test_*.py"),
             ("deploy/mission-control/agent-runner", "test_*.py"),
             ("deploy/mission-control/studio", "test_*.py"),
+            ("deploy/mission-control/mcp-postgres", "test_*.py"),
         ))
 
     def test_build_assets_dir_takes_the_last_assets_line(self):
