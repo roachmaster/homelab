@@ -74,6 +74,9 @@ def validate_branch_scope(scope,*,candidate_commit,expected_main):
     raise ValueError('Invalid workflow branch scope')
 
 
+# Manifest-return rounds per workflow before the loop is stopped (manifest-return-loop defect).
+MANIFEST_RETURN_LIMIT=3
+
 class ExternalWorkflowStore:
     def __init__(self,config,catalog,*,recovery_grant_provider=None,plan_override_grant_provider=None):
         self.config,self.catalog=config,catalog
@@ -620,6 +623,23 @@ class ExternalWorkflowStore:
             except ValueError:
                 return self._revise(cursor,w,'code',{'summary':'Return the exact candidate JSON manifest with version,candidate_commit,candidate_tree,base_revision,summary (and optional source_branch). Preserve your existing branch and completed work.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
             if manifest['base_revision']!=task['base_revision']:
+                # Bound the manifest-return loop: an identical manifest returned
+                # again (or too many return rounds) terminates with a recorded
+                # reason instead of queueing another identical implement task.
+                returned={k:manifest[k] for k in ('candidate_commit','candidate_tree','base_revision')}
+                history=w['state'].get('manifest_returns',{'rounds':0,'last':None})
+                recorded=w['state'].get('candidate') or {}
+                repeated=(history.get('last')==returned
+                          or (recorded.get('author_candidate_commit',recorded.get('candidate_commit'))==manifest['candidate_commit']
+                              and recorded.get('integration_base')==manifest['base_revision']))
+                if repeated or history.get('rounds',0)>=MANIFEST_RETURN_LIMIT:
+                    w['state']['manifest_returns']={'rounds':history.get('rounds',0),'last':returned,'stopped':True}
+                    self._escalate(cursor,w,('The author returned the identical candidate manifest at base '+manifest['base_revision'] if repeated
+                                             else 'The bounded manifest-return budget is exhausted at base '+manifest['base_revision'])
+                                   +' although base '+task['base_revision']+' was requested. Manifest-return loop stopped; the candidate and all tasks are retained.',
+                                   cancel_children=False)
+                    return True
+                w['state']['manifest_returns']={'rounds':history.get('rounds',0)+1,'last':returned}
                 return self._revise(cursor,w,'code',{'summary':'Return the exact candidate manifest at the originally supplied base '+task['base_revision']+'. Preserve the existing implementation.','findings':[]},artifact,retry_kind='feedback_delivery',source_id='artifact:'+artifact['assignment_id'],evidence_digest=artifact['sha256'])
             request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':manifest['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
             identity_protocol=w['state'].get('identity_protocol','legacy-v1')
