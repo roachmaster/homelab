@@ -10,6 +10,7 @@ from uuid import UUID
 from work_feedback import validate_feedback
 from work_candidate_source import linked_candidate_input
 from work_context_recovery_contract import validate_recovery_note
+from work_author_handoff_context import BuildAuthorHandoffContext, parse_author_handoff
 
 MAX_FEEDBACK_BYTES = 64 * 1024
 DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -63,6 +64,7 @@ class ReviewContext:
     finding_ids: tuple[str, ...]
     legacy_resume_note: str = ""
     build: object | None = None
+    author_handoff: BuildAuthorHandoffContext | None = None
 
 
 def validate_context(lease, workspace, envelope):
@@ -72,12 +74,14 @@ def validate_context(lease, workspace, envelope):
     if envelope is None:
         _require(expected_id is None and expected_digest is None)
         return None
-    _require(isinstance(envelope, dict) and set(envelope) == {
-        "feedback", "feedback_json", "legacy_resume_note"})
+    _require(isinstance(envelope, dict) and set(envelope) in ({
+        "feedback", "feedback_json", "legacy_resume_note"}, {
+        "feedback", "feedback_json", "legacy_resume_note", "author_handoff"}))
     note = envelope["legacy_resume_note"]
     _text(note, 2048, empty=True)
     feedback, raw = envelope["feedback"], envelope["feedback_json"]
     if feedback is None:
+        _require("author_handoff" not in envelope)
         _require(raw is None and expected_id is None and expected_digest is None)
         if not note:
             return None
@@ -99,8 +103,17 @@ def validate_context(lease, workspace, envelope):
         typed = validate_feedback(parsed)
     except (ValueError, TypeError, KeyError, UnicodeError):
         raise ReviewContextError() from None
+    handoff = None
+    if "author_handoff" in envelope:
+        try:
+            handoff = parse_author_handoff(envelope["author_handoff"], lease, typed["agent_profile"], kind="build")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise ReviewContextError() from None
+        _require(typed["agent_profile"] != lease["agent_profile"]
+                 and handoff.parent_attempt_id == typed["parent_attempt_id"]
+                 and handoff.feedback_workspace_digest == typed["workspace_digest"])
     _require(typed["feedback_id"] == expected_id and typed["task_id"] == lease["task_id"]
-             and typed["agent_profile"] == lease["agent_profile"]
+             and (typed["agent_profile"] == lease["agent_profile"] or handoff is not None)
              and typed["disposition"] == "repair")
     expected_plan = lease.get("plan_decision_id") or lease.get("scope_plan_decision_id")
     if expected_plan is not None:
@@ -119,10 +132,20 @@ def validate_context(lease, workspace, envelope):
         # algorithms or silently change their historical bytes.
         actual_digest = workspace.source_digest() if candidate_input else workspace.digest()
     _require(workspace.task_id == lease["task_id"]
-             and workspace.base_revision == lease["base_revision"]
-             and actual_digest == typed["workspace_digest"])
+             and workspace.base_revision == lease["base_revision"])
+    if handoff is not None:
+        # The packet describes the original reviewed source. A stopped author
+        # may already have made partial repairs before losing quota. The trusted
+        # handoff binds that immutable packet to the current reconciliation
+        # snapshot; verify the actual current workspace with its native digest.
+        _require(workspace.digest() == handoff.resume_workspace_digest)
+    else:
+        _require(actual_digest == typed["workspace_digest"])
     if lease.get("resume_attempt_id") is not None:
-        if digest_kind == "candidate_tree":
+        if handoff is not None:
+            _require(handoff.parent_attempt_id == typed["parent_attempt_id"]
+                     and handoff.resume_attempt_id == lease["resume_attempt_id"])
+        elif digest_kind == "candidate_tree":
             # A fresh/current native reconciliation receipt was already
             # verified by WorkspaceProvider. The immutable candidate input can
             # still originate from the parent's older author attempt; only
@@ -144,7 +167,7 @@ def validate_context(lease, workspace, envelope):
         elif isinstance(value, str):
             _require(SECRET.search(value) is None)
     ids = [finding["finding_id"] for finding in typed["findings"]]
-    return ReviewContext(encoded, expected_digest, expected_id, tuple(ids), note)
+    return ReviewContext(encoded, expected_digest, expected_id, tuple(ids), note, author_handoff=handoff)
 
 
 class ReviewContextProvider:

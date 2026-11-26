@@ -94,7 +94,7 @@ class PeerFeedbackRecovery(FeedbackRecovery):
                         != target['approved_plan']['content']):
                 return False
             lease = {key: str(attempt[key]) if attempt[key] is not None else None for key in
-                ('task_id', 'workflow_id', 'workflow_feedback_review_id', 'workflow_feedback_sha256',
+                ('task_id', 'attempt_id', 'workflow_id', 'workflow_feedback_review_id', 'workflow_feedback_sha256',
                  'repair_source_review_id')}
             lease.update(mode=task['mode'], agent_profile=task['agent_profile'],
                 parent_task_id=str(task['parent_task_id']), base_revision=task['base_revision'])
@@ -102,6 +102,8 @@ class PeerFeedbackRecovery(FeedbackRecovery):
                 str(packet['feedback_id']), tuple(item['finding_id'] for item in feedback['findings']))
             envelope = {key: peer[key] for key in
                 ('target_json', 'target_sha256', 'verdict_json', 'verdict_sha256')}
+            if target['author_profile'] != task['agent_profile']:
+                envelope['author_handoff'] = self._handoff_feedback(cursor, w, task, attempt, kind='peer')
             validated = validate_workflow_feedback(lease, envelope,
                 plan_context=dict(plan_attempt_id=str(plan['plan_attempt_id']), plan_sha256=plan['plan_sha256']),
                 feedback_context=context)
