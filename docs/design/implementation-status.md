@@ -4,8 +4,12 @@ Updated 25 November 2026.
 Active navigation is **Agents, Workbench, Home and Design**,
 with Agents as the default admitted view. Chat is temporarily inactive;
 Mail remains retired. Their PostgreSQL history and supported inert local
-snapshots remain preserved. The current source browser contract is **ABI15**; the
-native HTTP protocol remains version1.
+snapshots remain preserved. The current source browser contract is **ABI16**
+(adding correlation-scoped Jenkins CI/CD stages, persistent per-agent cached
+branch state, interactive stage dots, and bounded Errors/Tests/Console stage
+inspection via `ide.work.cicd.stage_log` backed by migration 39); the
+native HTTP protocol remains version 1. Live deployment and migration 39
+activation remain separate authorized rollout steps.
 
 Source now includes an opt-in [content identity protocol](../architecture/content-identity.md)
 and its UML data, component and sequence views. Canonical SHA-256 source manifests,

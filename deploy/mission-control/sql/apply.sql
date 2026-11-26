@@ -344,4 +344,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=40)
 \ir migrations/0040_provider_author_handoff.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(40,'provider_author_handoff');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=41) AS apply_0041
+\gset
+\if :apply_0041
+\ir migrations/0041_agent_branch_and_cicd_stages.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(41,'agent_branch_and_cicd_stages');
+\endif
 COMMIT;

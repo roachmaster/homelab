@@ -24,6 +24,7 @@ TABLES = (
     "post_merge_verification_grants", "post_merge_verifications", "post_merge_remediations",
     "delivery_projects", "delivery_capability_grants", "delivery_lineages", "delivery_ledger",
     "delivery_post_merge_links", "delivery_task_lineages", "delivery_project_main_heads", "delivery_operations",
+    "agent_branch_state", "jenkins_stage_results", "jenkins_stage_log_chunks",
 )
 GRANT = SQL_DIR / "management/grant-muse-read-access.sql"
 VERIFY = SQL_DIR / "management/verify.sql"

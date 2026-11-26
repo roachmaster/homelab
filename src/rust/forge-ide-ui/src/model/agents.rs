@@ -1,6 +1,7 @@
 //! Owned coding-task and usage UI state. Network/DOM work stays at typed ports.
 use super::*;
 use crate::markdown::render_markdown;
+mod cicd;
 mod delivery;
 mod history;
 mod pipeline_diagram;
@@ -74,6 +75,7 @@ pub(super) struct Agents {
     history_loaded: bool,
     history_request: Option<history::HistoryRequest>,
     stage_trace: stage_diagram::StageTrace,
+    cicd: cicd::CicdState,
     result: String,
     result_digest: Option<String>,
     result_attempt: Option<String>,
@@ -136,6 +138,7 @@ impl Agents {
         self.active = false;
         self.watch = None;
         self.clock_watch = None;
+        self.cicd.clear();
     }
     pub fn open(
         &mut self,
@@ -334,6 +337,9 @@ impl Agents {
         self.events_more = false;
         self.progress.clear();
         self.clear_stage_trace();
+        if self.task.is_none() {
+            self.cicd.clear();
+        }
     }
     fn keep_progress(&mut self, events: Vec<WorkLogEvent>) {
         let attempt = self
@@ -396,6 +402,9 @@ impl Agents {
                 self.watch = Some(watch.clone());
                 effects.push(UiEffect::AgentsWatch { watch });
             }
+        }
+        if self.cicd.matches_request(id) {
+            self.cicd.fail_network(id);
         }
         if self
             .pending_usage
@@ -1079,6 +1088,71 @@ impl Agents {
             {
                 self.selected_usage = Some(agent_profile);
             }
+            UiEvent::SelectCicdRun {
+                task_id,
+                correlation_id,
+                run_id,
+            } if work => {
+                if let Some(task) = self.task.as_ref().filter(|t| t.task_id == task_id) {
+                    self.cicd
+                        .select_run(task, &correlation_id, &run_id, id, effects);
+                }
+            }
+            UiEvent::SelectCicdStage {
+                task_id,
+                correlation_id,
+                run_id,
+                stage_id,
+            } if work => {
+                if let Some(task) = self.task.as_ref().filter(|t| t.task_id == task_id) {
+                    self.cicd
+                        .select_stage(task, &correlation_id, &run_id, &stage_id, id, effects);
+                }
+            }
+            UiEvent::SelectCicdStageView {
+                task_id,
+                correlation_id,
+                run_id,
+                stage_id,
+                view,
+            } if work => {
+                if let Some(task) = self.task.as_ref().filter(|t| t.task_id == task_id) {
+                    self.cicd.select_view(
+                        task,
+                        cicd::CicdStageRef {
+                            correlation_id: &correlation_id,
+                            run_id: &run_id,
+                            stage_id: &stage_id,
+                        },
+                        view,
+                        id,
+                        effects,
+                    );
+                }
+            }
+            UiEvent::CicdStageLogPage {
+                task_id,
+                correlation_id,
+                run_id,
+                stage_id,
+                view,
+                cursor,
+            } if work => {
+                if let Some(task) = self.task.as_ref().filter(|t| t.task_id == task_id) {
+                    self.cicd.request_page(
+                        task,
+                        cicd::CicdStageRef {
+                            correlation_id: &correlation_id,
+                            run_id: &run_id,
+                            stage_id: &stage_id,
+                        },
+                        view,
+                        cursor,
+                        id,
+                        effects,
+                    );
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -1334,6 +1408,10 @@ impl Agents {
         aux: String,
         effects: &mut Vec<UiEffect>,
     ) {
+        if self.cicd.matches_request(response.request_id()) {
+            self.cicd.complete(response, self.task.as_ref());
+            return;
+        }
         let Some(request) = self
             .pending
             .as_ref()
@@ -1371,6 +1449,7 @@ impl Agents {
                 profiles,
                 worker_status,
                 observed_at,
+                agent_branches,
                 ..
             } => {
                 self.catalog = Some(WorkCatalog {
@@ -1378,6 +1457,7 @@ impl Agents {
                     profiles,
                     worker_status,
                     observed_at,
+                    agent_branches,
                 });
                 let c = self.catalog.as_ref().expect("stored catalog");
                 if !c.projects.iter().any(|p| p.alias == self.project) {
@@ -1467,6 +1547,7 @@ impl Agents {
                     self.clear_progress();
                 }
                 self.status = task.status.label().into();
+                self.cicd.sync_task(&task);
                 self.task = Some(*task);
                 if let Some(manifest) = manifest {
                     if self.result_digest.as_ref() != Some(&manifest.sha256)
@@ -1698,6 +1779,7 @@ impl Agents {
                     self.get(id, effects);
                 }
             }
+            WorkResponse::WorkCicdStageLogPage { .. } => {}
         }
     }
     fn complete_usage(&mut self, response: UsageResponse, id: String, effects: &mut Vec<UiEffect>) {
@@ -2116,6 +2198,16 @@ impl Agents {
             }),
         });
         project_pipeline_diagram(view, review);
+        cicd::CicdState::project_overview(
+            view,
+            active,
+            !compose && !reader,
+            &self.project,
+            self.catalog.as_ref(),
+            self.now_ms,
+        );
+        self.cicd
+            .project_reader(view, active, reader, self.task.as_ref(), self.now_ms);
         view.texts.extend([
             text("agents-status", &self.status),
             text("agents-usage-status", &self.usage_status),
@@ -2797,7 +2889,8 @@ fn rekey(mut request: WorkRequest, id: String) -> WorkRequest {
         | WorkRequest::WorkPlanDecide { request_id, .. }
         | WorkRequest::WorkReviewDecide { request_id, .. }
         | WorkRequest::WorkRepair { request_id, .. }
-        | WorkRequest::WorkPublicationRetry { request_id, .. } => *request_id = id,
+        | WorkRequest::WorkPublicationRetry { request_id, .. }
+        | WorkRequest::WorkCicdStageLog { request_id, .. } => *request_id = id,
     };
     request
 }

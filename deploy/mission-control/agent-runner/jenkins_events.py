@@ -302,6 +302,8 @@ class JenkinsEventEmit:
     reconciled: bool = False
     completion_time_estimated: bool = False
     started_at: str | None = None
+    action_id: str | None = None
+    branch_scope: str | None = None
 
     def __post_init__(self):
         validate_identifier(self.project_alias, "project_alias")
@@ -336,6 +338,15 @@ class JenkinsEventEmit:
             validate_correlation_id(self.correlation_id)
         if self.actor is not None:
             validate_actor(self.actor)
+        if self.action_id is not None:
+            if not isinstance(self.action_id, str) or not UUID36_RE.fullmatch(self.action_id):
+                raise ValueError("Invalid Jenkins action_id")
+        if self.branch_scope is not None:
+            if (not isinstance(self.branch_scope, str)
+                    or (self.branch_scope not in {"main", "detached"}
+                        and (".." in self.branch_scope
+                             or not re.fullmatch(r"branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?", self.branch_scope)))):
+                raise ValueError("Invalid Jenkins branch_scope")
         for flag in ("backfilled", "reconciled", "completion_time_estimated"):
             if type(getattr(self, flag)) is not bool:
                 raise ValueError(f"Invalid Jenkins {flag} flag")
@@ -387,7 +398,7 @@ class JenkinsEventEmit:
                 raise ValueError("stage_completed requires build_number, stage_name, and stage_status")
 
     def semantic_payload(self) -> dict:
-        return {
+        payload = {
             "project_alias": self.project_alias,
             "jenkins_instance": self.jenkins_instance,
             "job_name": self.job_name,
@@ -411,6 +422,11 @@ class JenkinsEventEmit:
             "completion_time_estimated": self.completion_time_estimated,
             "started_at": self.started_at,
         }
+        if self.action_id is not None:
+            payload["action_id"] = self.action_id
+        if self.branch_scope is not None:
+            payload["branch_scope"] = self.branch_scope
+        return payload
 
     def payload_sha256(self) -> str:
         return sha256_canonical(self.semantic_payload())
@@ -445,6 +461,8 @@ class JenkinsEventEmit:
             ("correlation_id", self.correlation_id),
             ("actor", self.actor),
             ("started_at", self.started_at),
+            ("action_id", self.action_id),
+            ("branch_scope", self.branch_scope),
         )
         for key, value in optional:
             if value is not None:
@@ -486,6 +504,8 @@ class JenkinsEventRecord:
     reconciled: bool = False
     completion_time_estimated: bool = False
     started_at: str | None = None
+    action_id: str | None = None
+    branch_scope: str | None = None
 
     def observation_key(self) -> str:
         if self.build_number is not None:
@@ -520,6 +540,8 @@ class JenkinsEventRecord:
             "reconciled": self.reconciled,
             "completion_time_estimated": self.completion_time_estimated,
             "started_at": self.started_at,
+            **({"action_id": self.action_id} if self.action_id is not None else {}),
+            **({"branch_scope": self.branch_scope} if self.branch_scope is not None else {}),
         }
 
 

@@ -397,18 +397,42 @@ function renderFlowDiagram(binding){
     parts.nodeSig=null;parts.branchSig=null;parts.hopSig=null;
     return;
   }
-  parts.empty.hidden=true;parts.header.hidden=false;parts.track.hidden=false;parts.trace.hidden=false;
+  parts.empty.hidden=true;parts.header.hidden=false;parts.track.hidden=false;parts.trace.hidden=!binding.trace_label&&!hopList.length;
   parts.trackLabel.textContent=binding.track_label||'';
   if(binding.current_badge)paintBadge(parts.currentBadge,binding.current_badge);
   parts.summary.textContent=binding.summary||'';
   const nodeSig=JSON.stringify(nodes);
   if(parts.nodeSig!==nodeSig){
+    const priorSteps=new Map([...parts.track.children].filter(x=>x.dataset?.stageKey).map(x=>[x.dataset.stageKey,x]));
     const items=[];
     for(let i=0;i<nodes.length;i++){
-      const node=nodes[i];const st=flowState(node.state);
-      const step=document.createElement('li');step.className='fg-flow-step';step.dataset.state=st;
-      const card=document.createElement('div');card.className='fg-flow-node';card.dataset.stageId=String(node.id||'');card.dataset.state=st;
-      if(node.current)card.setAttribute('aria-current','step');
+      const node=nodes[i];const st=flowState(node.state);const stageId=String(node.id||'');
+      const interactive=!!(node.action&&typeof node.action==='object');
+      const key=(interactive?'btn:':'div:')+stageId;
+      let step=priorSteps.get(key);let card;
+      if(step&&step.firstElementChild){
+        card=step.firstElementChild;
+        step.className='fg-flow-step';step.dataset.state=st;
+        while(step.children.length>1)step.lastElementChild.remove();
+        card.replaceChildren();
+      }else{
+        step=document.createElement('li');step.className='fg-flow-step';step.dataset.state=st;step.dataset.stageKey=key;
+        card=document.createElement(interactive?'button':'div');
+        if(interactive){card.type='button';card.addEventListener('click',()=>sendAction(card));}
+        step.append(card);
+      }
+      card.className=interactive?'fg-flow-node fg-flow-dot-button':'fg-flow-node';
+      card.dataset.stageId=stageId;card.dataset.state=st;
+      if(node.current)card.setAttribute('aria-current','step');else card.removeAttribute('aria-current');
+      if(interactive){
+        const sel=node.selected===true;
+        card.dataset.selected=String(sel);
+        card.setAttribute('aria-pressed',String(sel));
+        actionByElement.set(card,node.action);
+        focusKeyByElement.set(card,binding.id+':stage:'+stageId);
+      }else{
+        delete card.dataset.selected;card.removeAttribute('aria-pressed');
+      }
       const head=document.createElement('div');head.className='fg-flow-node-head';
       const marker=document.createElement('span');marker.className='fg-flow-marker';marker.setAttribute('aria-hidden','true');marker.textContent=FLOW_MARKERS[st]||'○';
       const label=document.createElement('span');label.className='fg-flow-label';label.textContent=node.label||'';
@@ -417,13 +441,15 @@ function renderFlowDiagram(binding){
         const count=document.createElement('span');count.className='fg-flow-count';count.textContent=node.count_label;head.append(count);
       }
       card.append(head);
+      if(node.metrics_label){
+        const metrics=document.createElement('span');metrics.className='fg-flow-metrics';metrics.textContent=node.metrics_label;card.append(metrics);
+      }
       if(node.detail){
         const detail=document.createElement('span');detail.className='fg-flow-detail';detail.textContent=node.detail;card.append(detail);
       }
       if(node.time){
         const time=document.createElement('time');time.className='fg-flow-time';paintTime(time,node.time);card.append(time);
       }
-      step.append(card);
       if(i<nodes.length-1){
         const next=nodes[i+1];const nextSt=flowState(next.state);
         const edge=nextSt==='current'||(st==='completed'&&next.current)?'active':st==='completed'&&nextSt==='completed'?'traversed':(nextSt==='warning'||nextSt==='error'||nextSt==='cancelled')?'alert':'upcoming';
@@ -433,7 +459,9 @@ function renderFlowDiagram(binding){
       }
       items.push(step);
     }
-    parts.track.replaceChildren(...items);parts.nodeSig=nodeSig;
+    const sameOrder=parts.track.children.length===items.length&&items.every((el,idx)=>parts.track.children[idx]===el);
+    if(!sameOrder)parts.track.replaceChildren(...items);
+    parts.nodeSig=nodeSig;
   }
   parts.branches.hidden=!branchList.length;
   const branchSig=JSON.stringify(branchList);
@@ -1255,7 +1283,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==15 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==16 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));

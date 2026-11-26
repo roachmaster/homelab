@@ -621,6 +621,10 @@ class ExternalWorkflowStore:
             identity_protocol=w['state'].get('identity_protocol','legacy-v1')
             if identity_protocol not in ('legacy-v1','content-v2'):raise ValueError('Invalid frozen identity protocol')
             if identity_protocol=='content-v2':request['identity_protocol']=identity_protocol
+            profile_cfg = getattr(self.config, 'profiles', {}).get(w['author_profile'])
+            expected_branch = getattr(profile_cfg, 'branch', None)
+            request.update(agent_profile=w['author_profile'], root_task_id=str(w['root_task_id']))
+            if expected_branch is not None:request['expected_agent_branch']=expected_branch
             if manifest.get('source_branch') is not None:
                 request['source_branch']=manifest['source_branch']
             prepare_key=artifact['sha256']

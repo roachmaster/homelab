@@ -23,6 +23,7 @@ SET LOCAL search_path = pg_catalog;
 \ir verify-native-jenkins.sql
 \ir verify-native-delivery.sql
 \ir verify-jenkins-events.sql
+\ir verify-cicd-stages.sql
 -- Verify M28 additions before excluding only its known catalog additions.
 \ir verify-delivery.sql
 \ir verify-post-merge.sql

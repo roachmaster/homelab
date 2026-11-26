@@ -16,6 +16,7 @@ import stat
 import threading
 import time
 
+from work_agent_branch import BranchOwnershipConflictError
 from work_executor import WorkspaceLease, WorkspaceBusyError
 from work_publication_clients import DIGEST, SHA, PublicationError, SourceIntegrationConflict, uuid
 from work_publication_checks import VerificationFailure
@@ -288,13 +289,15 @@ class ReviewedCandidateProvider:
 class ReviewWorker:
     """One leased verification; SQL alone admits repair/publication successors."""
     def __init__(self, config, store, snapshots, git, checks, candidates, *, stop=None,
-                 policy_decider=decide_repair, hosted_checks=None, native_ci=None, repair_sources=None):
+                 policy_decider=decide_repair, hosted_checks=None, native_ci=None, repair_sources=None,
+                 branch_provider=None):
         self.config, self.store, self.snapshots, self.git = config, store, snapshots, git
         self.checks, self.candidates, self.policy_decider = checks, candidates, policy_decider
         self.stop = stop if stop is not None else threading.Event()
         self.hosted_checks = hosted_checks
         self.native_ci = native_ci
         self.repair_sources = repair_sources
+        self.branch_provider = branch_provider
 
     def _finish(self, job, outcome):
         if job.get('retry_policy')=='event-v1' and 'retry_observation' not in outcome:
@@ -378,6 +381,16 @@ class ReviewWorker:
             with self._locked(job):
                 require_lease()
                 check_job = verification_job(job)
+                if self.branch_provider is not None and self.branch_provider.persistent_enabled:
+                    stage = "acquire_branch"
+                    reservation = self.branch_provider.acquire(job, review_id=job["review_id"])
+                    if reservation is not None:
+                        check_job = {
+                            **check_job,
+                            "agent_profile": reservation.agent_profile,
+                            "branch_name": reservation.branch_name,
+                            "reservation_epoch": reservation.reservation_epoch,
+                        }
                 stage = "quiesce"
                 self.checks.quiesce(check_job)
                 if job.get("source_review_id") is not None and job.get("candidate_commit") is not None:
@@ -501,7 +514,7 @@ class ReviewWorker:
         except Exception as error:
             if not lost.is_set():
                 code = ("workspace_busy" if isinstance(error, WorkspaceBusyError) else
-                        error.code if isinstance(error, PublicationError) else "review_unavailable")
+                        error.code if isinstance(error, (PublicationError, BranchOwnershipConflictError)) else "review_unavailable")
                 uncertain = code in {"prior_verification_scope_unstopped", "verification_scope_unstopped",
                                      "native_branch_requires_reconcile"}
                 try:

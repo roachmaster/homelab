@@ -16,6 +16,7 @@ import threading
 import time
 from uuid import UUID, uuid5
 
+from work_agent_branch import BranchOwnershipConflictError, PERSISTENT_BRANCH_POLICY
 from work_executor import unit_name
 from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory, contract_for_config
 from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFactory,
@@ -73,7 +74,7 @@ def native_check_accounting(commands, receipt):
 class NativeJenkinsVerification:
     def __init__(self, config, store, git, candidates, delivery, supervisor, *, client=None, stop=None,
                  clock=time.monotonic, wait=None, timeout=3600, cleanup_timeout=45,
-                 emitter=None, event_lookup=None, jenkins_instance=None,identity_provider=None):
+                 emitter=None, event_lookup=None, jenkins_instance=None,identity_provider=None, branch_provider=None):
         self.config, self.store, self.git, self.candidates = config, store, git, candidates
         self.delivery, self.supervisor = delivery, supervisor
         self._reconciliation_warnings = {}
@@ -82,6 +83,7 @@ class NativeJenkinsVerification:
             raise TypeError('Selected content identity provider is unavailable')
         self.identities=identity_provider
         self.client = client
+        self.branch_provider = branch_provider
         # The lifecycle emitter is injected by the publication worker factory
         # from validated configuration. A verification constructed WITHOUT an
         # emitter emits nothing; the projection reads stage_data_unavailable
@@ -324,38 +326,96 @@ class NativeJenkinsVerification:
             raise PublicationError('native_branch_scope_inactive')
         head = sha(job['candidate_commit'])
         self.git.verify(repository, head)
-        selected = {**job, 'branch_publication_id': scope['review_id']}
-        receipt = {'version': 'forge-native-branch-v1', 'scope': scope,
-            'candidate_commit': head, 'branch_publication_id': scope['review_id'],
-            'branch': branch_name(selected)}
         path = self.delivery.config.state_root / 'branches' / (scope['review_id'] + '.json')
         existing = path.exists()
-        if existing:
-            if json.loads(read_private(path, owner=os.geteuid())) != receipt:
-                raise PublicationError('native_branch_identity_changed')
-        remote = self.git.remote_head(selected)
-        if remote not in {None, head}:
-            raise PublicationError('native_branch_identity_changed')
-        if remote != head:
+        reservation = None
+        if (self.branch_provider is not None and self.branch_provider.persistent_enabled
+                and hasattr(self.store, 'native_agent_branch_published')):
+            reservation = self.branch_provider.acquire(
+                {**job, 'workflow_id': scope['workflow_id'], 'correlation_id': scope['correlation_id']},
+                review_id=scope['review_id'],
+            )
+        if reservation is not None:
+            selected = {
+                **job,
+                'branch_publication_id': scope['review_id'],
+                'agent_profile': reservation.agent_profile,
+                'branch_name': reservation.branch_name,
+            }
+            receipt = {
+                'version': 'forge-native-branch-v2',
+                'scope': scope,
+                'candidate_commit': head,
+                'branch_publication_id': scope['review_id'],
+                'branch': reservation.branch_name,
+                'agent_profile': reservation.agent_profile,
+                'reservation_epoch': reservation.reservation_epoch,
+            }
             if existing:
-                # The first push could have succeeded and lost its ACK. Only
-                # an exact remote observation can finish this durable intent.
-                raise PublicationError('native_branch_requires_reconcile')
-            durable_json(path, receipt)
-            if self.stop.is_set() or stop is not None and stop.is_set() or not self.store.review_renew(job):
-                raise PublicationError('native_branch_scope_inactive')
-            try:
-                self.git.push(selected, repository, head)
-            except Exception:
+                if json.loads(read_private(path, owner=os.geteuid())) != receipt:
+                    raise PublicationError('native_branch_identity_changed')
+            remote = self.git.remote_head(selected)
+            allowed_remote = {None, head}
+            for known in (reservation.head_commit_sha, reservation.active_candidate_commit):
+                if known is not None:
+                    allowed_remote.add(known)
+            if remote not in allowed_remote:
+                raise PublicationError('native_branch_identity_changed')
+            if remote != head:
+                if existing:
+                    raise PublicationError('native_branch_requires_reconcile')
+                durable_json(path, receipt)
+                if self.stop.is_set() or stop is not None and stop.is_set() or not self.store.review_renew(job):
+                    raise PublicationError('native_branch_scope_inactive')
+                try:
+                    self.git.push(
+                        selected, repository, head,
+                        expected_remote_head=remote,
+                        reservation=reservation,
+                        pull_requests=self.client,
+                    )
+                except BranchOwnershipConflictError:
+                    raise
+                except Exception:
+                    if self.git.remote_head(selected) != head:
+                        raise PublicationError('native_branch_requires_reconcile') from None
                 if self.git.remote_head(selected) != head:
-                    raise PublicationError('native_branch_requires_reconcile') from None
-            if self.git.remote_head(selected) != head:
-                raise PublicationError('native_branch_requires_reconcile')
-        elif not existing:
-            # A branch with no parent intent cannot be adopted implicitly.
-            raise PublicationError('native_branch_identity_changed')
-        event_path = path.with_suffix('.event.json')
-        event = self.store.native_branch_published(job, receipt)
+                    raise PublicationError('native_branch_requires_reconcile')
+            elif not existing:
+                raise PublicationError('native_branch_identity_changed')
+            event_path = path.with_suffix('.event.json')
+            event = self.store.native_agent_branch_published(job, receipt)
+        else:
+            selected = {**job, 'branch_publication_id': scope['review_id']}
+            receipt = {'version': 'forge-native-branch-v1', 'scope': scope,
+                'candidate_commit': head, 'branch_publication_id': scope['review_id'],
+                'branch': branch_name(selected)}
+            if existing:
+                if json.loads(read_private(path, owner=os.geteuid())) != receipt:
+                    raise PublicationError('native_branch_identity_changed')
+            remote = self.git.remote_head(selected)
+            if remote not in {None, head}:
+                raise PublicationError('native_branch_identity_changed')
+            if remote != head:
+                if existing:
+                    # The first push could have succeeded and lost its ACK. Only
+                    # an exact remote observation can finish this durable intent.
+                    raise PublicationError('native_branch_requires_reconcile')
+                durable_json(path, receipt)
+                if self.stop.is_set() or stop is not None and stop.is_set() or not self.store.review_renew(job):
+                    raise PublicationError('native_branch_scope_inactive')
+                try:
+                    self.git.push(selected, repository, head)
+                except Exception:
+                    if self.git.remote_head(selected) != head:
+                        raise PublicationError('native_branch_requires_reconcile') from None
+                if self.git.remote_head(selected) != head:
+                    raise PublicationError('native_branch_requires_reconcile')
+            elif not existing:
+                # A branch with no parent intent cannot be adopted implicitly.
+                raise PublicationError('native_branch_identity_changed')
+            event_path = path.with_suffix('.event.json')
+            event = self.store.native_branch_published(job, receipt)
         if (not isinstance(event, dict) or set(event) != {'event_id', 'correlation_id'}
                 or uid(event['correlation_id']) != scope['correlation_id']):
             raise PublicationError('native_branch_event_unconfirmed')
@@ -382,6 +442,16 @@ class NativeJenkinsVerification:
                 or source.get('branch_publication_id') != original
                 or self._read(binding['request']['action_id']) != binding):
             raise PublicationError('native_branch_identity_changed')
+        if source.get('version') == 'forge-native-branch-v2':
+            selected = {
+                **job,
+                'branch_publication_id': uid(original),
+                'agent_profile': source['agent_profile'],
+                'branch_name': source['branch'],
+            }
+            if source.get('branch') != branch_name(selected, self.config):
+                raise PublicationError('native_branch_identity_changed')
+            return selected
         selected = {**job, 'branch_publication_id': uid(original)}
         if source.get('branch') != branch_name(selected):
             raise PublicationError('native_branch_identity_changed')
@@ -526,7 +596,15 @@ class NativeJenkinsVerification:
             publication['event_id'] = uid(event['event_id'])
             if publication.get('scope') != scope or publication.get('candidate_commit') != head:
                 raise PublicationError('native_branch_identity_changed')
+        persistent_branch = None
+        if self.branch_provider is not None and self.branch_provider.persistent_enabled:
+            branch_scope_info = self.branch_provider.resolve_scope_for_job(job)
+            if branch_scope_info is not None:
+                persistent_branch = self.branch_provider.branch_for_profile(
+                    scope['project_alias'], branch_scope_info['agent_profile']
+                )
         source_branch = (publication['branch'] if self.contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} and publication is not None
+                         else persistent_branch if persistent_branch is not None
                          else 'main' if head == expected_main
                          else publication['branch'] if publication is not None else None)
         branch_scope = derive_branch_scope(
@@ -710,7 +788,10 @@ class NativeJenkinsVerification:
             self._directory(request['action_id']), action_id=request['action_id'],
             project_alias=request['project_alias'], jenkins_instance=self.jenkins_instance,
             job_name=self.delivery.config.jenkins_job,
-            commit_sha=request['candidate_commit'], event_lookup=self.event_lookup)
+            commit_sha=request['candidate_commit'], event_lookup=self.event_lookup,
+            correlation_id=binding['scope'].get('correlation_id'),
+            branch=request.get('source_branch'),
+            branch_scope=request.get('branch_scope'))
         tracker.reconcile()
         return tracker
 
@@ -725,6 +806,88 @@ class NativeJenkinsVerification:
         except (OSError, ValueError):
             LOG.warning('Lifecycle cancellation observation unreadable for action %s',
                         binding['request']['action_id'])
+
+    def _persist_stage_artifacts(self, binding, result):
+        """Best-effort persistence of redacted per-stage test/error/log evidence and cache status."""
+        request = binding.get('request', {})
+        scope = binding.get('scope', {})
+        action_id = request.get('action_id')
+        if not action_id:
+            return
+        receipt = result.get('receipt') if isinstance(result, dict) else None
+        if not isinstance(receipt, dict):
+            return
+        results_root = getattr(self.delivery.config, 'results_root', None)
+        full_receipt = receipt
+        receipt_sha = receipt.get('check_receipt_sha256')
+        log_bytes = None
+        if results_root is not None:
+            try:
+                result_path = results_root / (action_id + '.json')
+                if result_path.is_file():
+                    raw_res = result_path.read_bytes()
+                    full_receipt = json.loads(raw_res.decode('utf-8'))
+                    receipt_sha = hashlib.sha256(raw_res).hexdigest()
+            except (OSError, ValueError, UnicodeError):
+                pass
+            try:
+                log_path = results_root / (action_id + '.log')
+                if log_path.is_file():
+                    log_bytes = log_path.read_bytes()
+            except OSError:
+                pass
+        if not isinstance(receipt_sha, str) or len(receipt_sha) != 64:
+            receipt_sha = hashlib.sha256(canonical(full_receipt)).hexdigest()
+
+        # Update persistent agent branch cache hit/miss status if available.
+        if (self.branch_provider is not None and self.branch_provider.persistent_enabled
+                and isinstance(full_receipt.get('cache'), dict)):
+            raw_cache_st = full_receipt['cache'].get('restore_status') or full_receipt['cache'].get('status')
+            cache_st = 'hit_main' if raw_cache_st == 'hit_main_seed' else raw_cache_st
+            if cache_st in {'hit_branch', 'hit_main', 'miss', 'disabled'}:
+                try:
+                    source_pub = binding.get('source_publication') or {}
+                    profile = source_pub.get('agent_profile')
+                    branch = source_pub.get('branch') or request.get('source_branch')
+                    if profile is None and hasattr(self.store, 'task_branch_scope'):
+                        info = self.store.task_branch_scope(scope['project_alias'], scope['task_id'])
+                        if isinstance(info, dict):
+                            profile = info.get('agent_profile')
+                    if profile and branch and branch != 'main':
+                        self.branch_provider.record_sync(
+                            scope['project_alias'], profile,
+                            branch_name=branch, cache_status=cache_st,
+                            last_task_id=scope.get('task_id'),
+                            last_correlation_id=scope.get('correlation_id'),
+                        )
+                except Exception:
+                    LOG.warning('Agent branch cache status update deferred for action %s', action_id)
+
+        if not callable(getattr(type(self.store), 'record_jenkins_stage_evidence', None)):
+            return
+        try:
+            from work_cicd_artifacts import extract_stage_evidence_from_receipt
+            branch_scope = request.get('branch_scope') or 'detached'
+            pipeline_scope = 'main' if branch_scope == 'main' else 'branch'
+            entries = extract_stage_evidence_from_receipt(
+                full_receipt,
+                log_bytes,
+                project_alias=scope['project_alias'],
+                action_id=action_id,
+                correlation_id=scope['correlation_id'],
+                task_id=scope.get('task_id'),
+                job_name=self.delivery.config.jenkins_job,
+                build_number=receipt.get('build_number'),
+                commit_sha=request['candidate_commit'],
+                branch_name=request.get('source_branch'),
+                branch_scope=branch_scope,
+                pipeline_scope=pipeline_scope,
+                receipt_sha256=receipt_sha,
+            )
+            for evidence, chunks in entries:
+                self.store.record_jenkins_stage_evidence(evidence, chunks)
+        except Exception:
+            LOG.warning('Jenkins stage evidence persistence deferred for action %s', action_id)
 
     def run(self, job, repository, stop):
         self.prepare_identity(job,repository)
@@ -748,6 +911,7 @@ class NativeJenkinsVerification:
                 if tracker is not None:
                     tracker.observe(result)
                 if result['status'] in {'passed', 'failed'}:
+                    self._persist_stage_artifacts(binding, result)
                     report = self._report(binding, result)
                     if not report.cleanup_confirmed:
                         cleanup = self._cancel_wait(binding)
@@ -951,7 +1115,7 @@ class NativeJenkinsVerification:
 
 def create_native_jenkins(config, store, git, candidates, supervisor, *, client=None, stop=None,
                           delivery_factory=DeliveryProviderFactory, emitter=None, event_lookup=None,
-                          jenkins_instance=None,identity_provider=None):
+                          jenkins_instance=None,identity_provider=None, branch_provider=None):
     raw = json.loads(read_private(config.jenkins_delivery_config))
     selected = DeliveryConfig.parse(raw)
     contract = contract_for_config(selected)
@@ -975,4 +1139,4 @@ def create_native_jenkins(config, store, git, candidates, supervisor, *, client=
     delivery = delivery_factory(selected).create()
     return NativeJenkinsVerification(config, store, git, candidates, delivery, supervisor, client=client, stop=stop,
                                      emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance,
-                                     identity_provider=identity_provider)
+                                     identity_provider=identity_provider, branch_provider=branch_provider)

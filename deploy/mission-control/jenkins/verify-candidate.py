@@ -321,7 +321,8 @@ class StageEmitter:
                  timeout_seconds=STAGE_EMIT_TIMEOUT_SECONDS,
                  max_attempts=STAGE_EMIT_MAX_ATTEMPTS,
                  total_budget_seconds=STAGE_EMIT_TOTAL_BUDGET_SECONDS,
-                 connection_factory=HTTPConnection, clock=time.monotonic, log=None):
+                 connection_factory=HTTPConnection, clock=time.monotonic, log=None,
+                 correlation_id=None, branch=None, branch_scope=None):
         self._action_id = action_id
         self._project_alias = project_alias
         self._commit_sha = commit_sha
@@ -329,6 +330,9 @@ class StageEmitter:
         self._build_number = build_number
         self._job_name = job_name
         self._logical_names = tuple(logical_names)
+        self._correlation_id = correlation_id
+        self._branch = branch
+        self._branch_scope = branch_scope
         self._token_paths = tuple(token_paths)
         self._host, self._port = host, port
         self._timeout, self._max_attempts = float(timeout_seconds), int(max_attempts)
@@ -425,6 +429,14 @@ class StageEmitter:
         }
         if stage_status is not None:
             wire['stage_status'] = stage_status
+        if self._correlation_id is not None:
+            wire['correlation_id'] = self._correlation_id
+        if self._action_id is not None and len(str(self._action_id)) == 36 and str(self._action_id).count('-') == 4:
+            wire['action_id'] = self._action_id
+        if self._branch is not None:
+            wire['branch'] = self._branch
+        if self._branch_scope is not None:
+            wire['branch_scope'] = self._branch_scope
         payload = _stage_canonical_json(wire)
         for _attempt in range(self._max_attempts):
             if self._elapsed >= self._budget:
@@ -478,7 +490,10 @@ def build_stage_emitter(action, request, config):
         action_id=action, project_alias=request['project_alias'],
         commit_sha=request['candidate_commit'], jenkins_instance=instance,
         build_number=int(raw_build), job_name=job_name,
-        logical_names=logical_names), None
+        logical_names=logical_names,
+        correlation_id=request.get('correlation_id'),
+        branch=request.get('source_branch'),
+        branch_scope=request.get('branch_scope')), None
 
 
 def profile_coverage(profile, branch_scope):

@@ -30,7 +30,12 @@ Working rules that go with it:
 - Agents **can** build and test locally; each agent manages their own
   local cache.
 - Trunk-based development: each agent creates **one** feature branch and
-  never changes it, always rebasing with main before pushing.
+  never changes it, always rebasing with main before pushing. In source
+  (`branch_policy = "persistent-agent-v1"`, migration `0039`), each admitted
+  agent profile defaults to `forge/agent/<profile-slug>` with exclusive
+  active-workflow reservation in `forge_agent.agent_branch_state`, compare-and-swap
+  pushes, and correlation-scoped Jenkins CI/CD stage/console/test inspection in
+  the portal (ABI 16). Live activation remains a separate authorized step.
 - A branch merges when its in-memory stages pass. Out-of-memory tests
   never gate a branch.
 
