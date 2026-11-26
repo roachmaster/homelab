@@ -22,7 +22,10 @@ BEGIN
   ('forge_coding_reconciler_api.review_claim(text)','bea9f804d670dc5c905b85dc60d660853d811083851b7fd7a1adae0348d9415e'),
   ('forge_coding_worker_api.claim(text,uuid,text[])','25030544388d1d4fe200b3d68542375073c2f960279a759fcaf24bf5fd0ac5af')
  )x(signature,sha256) LOOP
-  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
+  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN
+  SELECT encode(sha256(convert_to(jsonb_build_array(replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,forge_agent._coding_author_handoff_legacy_source(p.oid,p.prosrc))),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
+  INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
+  ELSIF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
   SELECT encode(sha256(convert_to(jsonb_build_array(replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,p.prosrc)),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex')
   INTO actual FROM pg_proc p WHERE p.oid=expected.signature::regprocedure;
   ELSE
