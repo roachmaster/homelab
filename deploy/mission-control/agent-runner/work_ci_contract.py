@@ -7,7 +7,7 @@ import ast
 from dataclasses import dataclass
 import ast
 import re
-from work_ci_phases import ALL_FEATURES, EVENT_PROFILE, FEATURE_VARIANTS, event_phases_for_scope
+from work_ci_phases import ALL_FEATURES, CiPhase, EVENT_PROFILE, FEATURE_VARIANTS, event_phases_for_scope
 
 LEGACY_PROFILE = 'forge-sdlc-jenkins-v1'
 SCOPED_PROFILE = 'forge-sdlc-jenkins-v2'
@@ -420,6 +420,295 @@ def _extract_event_gate_policy(fn_node, constants):
     return frozenset(v3_paths), frozenset(v3_prefixes)
 
 
+def _verify_ci_phase_class(cls_node):
+    if (not isinstance(cls_node, ast.ClassDef) or cls_node.bases or cls_node.keywords
+            or len(cls_node.decorator_list) != 1):
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+    decorator = cls_node.decorator_list[0]
+    if not (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == 'dataclass' and not decorator.args
+            and len(decorator.keywords) == 1 and decorator.keywords[0].arg == 'frozen'
+            and isinstance(decorator.keywords[0].value, ast.Constant)
+            and decorator.keywords[0].value.value is True):
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+    body = list(cls_node.body)
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        body = body[1:]
+    fields = []
+    for stmt in body:
+        if not (isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.simple):
+            raise ValueError('Installed verifier policy does not match active CI gate contract')
+        if stmt.value is None:
+            fields.append((stmt.target.id, False, None))
+        else:
+            try:
+                default = _eval_pure_constant(stmt.value)
+            except (ValueError, SyntaxError, TypeError):
+                raise ValueError('Installed verifier policy does not match active CI gate contract') from None
+            fields.append((stmt.target.id, True, default))
+    expected = [
+        ('phase_id', False, None),
+        ('kind', False, None),
+        ('argv', False, None),
+        ('logical_gate', True, 'check'),
+    ]
+    if fields != expected:
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+
+
+def _build_ci_phase(pos_args, kw_args):
+    names = ('phase_id', 'kind', 'argv', 'logical_gate')
+    if len(pos_args) > len(names):
+        raise ValueError('Invalid CiPhase arguments')
+    bound = {}
+    for name, value in zip(names, pos_args):
+        bound[name] = value
+    for key, value in kw_args:
+        if key not in names or key in bound:
+            raise ValueError('Invalid CiPhase keyword argument')
+        bound[key] = value
+    bound.setdefault('logical_gate', 'check')
+    if set(bound) != set(names):
+        raise ValueError('Missing CiPhase field')
+    if (not isinstance(bound['phase_id'], str)
+            or not isinstance(bound['kind'], str)
+            or not isinstance(bound['argv'], tuple)
+            or not all(isinstance(arg, str) for arg in bound['argv'])
+            or not isinstance(bound['logical_gate'], str)):
+        raise ValueError('Invalid CiPhase field type')
+    return CiPhase(bound['phase_id'], bound['kind'], bound['argv'], bound['logical_gate'])
+
+
+def _evaluate_verifier_event_phases(fn_node, constants, branch_scope):
+    """Pure, bounded, non-executing AST evaluation of verifier event_phases_for_scope."""
+    if (not isinstance(fn_node, ast.FunctionDef) or fn_node.decorator_list
+            or fn_node.args.posonlyargs or len(fn_node.args.args) != 1
+            or fn_node.args.vararg is not None or fn_node.args.kwonlyargs
+            or fn_node.args.kwarg is not None or fn_node.args.defaults):
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+    param_name = fn_node.args.args[0].arg
+    max_steps = 4096
+    max_collection = 256
+    steps = [0]
+    env = {}
+
+    def tick():
+        steps[0] += 1
+        if steps[0] > max_steps:
+            raise ValueError('Verifier event_phases_for_scope exceeded static evaluation budget')
+
+    def lookup(name):
+        if name == param_name:
+            raise ValueError('Unsupported direct use of branch_scope in event_phases_for_scope')
+        if name in env:
+            return env[name]
+        if name in constants:
+            return constants[name]
+        raise ValueError('Unknown symbol in verifier event_phases_for_scope')
+
+    def eval_expr(node):
+        tick()
+        if isinstance(node, ast.Constant):
+            if type(node.value) not in {str, int, bool, type(None)}:
+                raise ValueError('Unsupported constant in verifier event_phases_for_scope')
+            return node.value
+        if isinstance(node, ast.Name):
+            return lookup(node.id)
+        if isinstance(node, (ast.List, ast.Tuple)):
+            items = []
+            for elt in node.elts:
+                if isinstance(elt, ast.Starred):
+                    unpacked = eval_expr(elt.value)
+                    if not isinstance(unpacked, (tuple, list)):
+                        raise ValueError('Unsupported starred expression in verifier event_phases_for_scope')
+                    if len(items) + len(unpacked) > max_collection:
+                        raise ValueError('Verifier phase collection exceeded static bound')
+                    items.extend(unpacked)
+                else:
+                    if len(items) + 1 > max_collection:
+                        raise ValueError('Verifier phase collection exceeded static bound')
+                    items.append(eval_expr(elt))
+            return list(items) if isinstance(node, ast.List) else tuple(items)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = eval_expr(node.left)
+            right = eval_expr(node.right)
+            if isinstance(left, str) and isinstance(right, str):
+                if len(left) + len(right) > 4096:
+                    raise ValueError('Verifier string expression exceeded static bound')
+                return left + right
+            if isinstance(left, tuple) and isinstance(right, tuple):
+                if len(left) + len(right) > max_collection:
+                    raise ValueError('Verifier tuple expression exceeded static bound')
+                return left + right
+            if isinstance(left, list) and isinstance(right, list):
+                if len(left) + len(right) > max_collection:
+                    raise ValueError('Verifier list expression exceeded static bound')
+                return left + right
+            raise ValueError('Unsupported binary addition in verifier event_phases_for_scope')
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            operand = eval_expr(node.operand)
+            if not isinstance(operand, bool):
+                raise ValueError('Non-boolean negation in verifier event_phases_for_scope')
+            return not operand
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+            is_and = isinstance(node.op, ast.And)
+            for value_node in node.values:
+                val = eval_expr(value_node)
+                if not isinstance(val, bool):
+                    raise ValueError('Non-boolean condition in verifier event_phases_for_scope')
+                if is_and and not val:
+                    return False
+                if not is_and and val:
+                    return True
+            return is_and
+        if isinstance(node, ast.Compare) and len(node.ops) == 1 and len(node.comparators) == 1:
+            op = node.ops[0]
+            left_node, right_node = node.left, node.comparators[0]
+            left_is_scope = isinstance(left_node, ast.Name) and left_node.id == param_name
+            right_is_scope = isinstance(right_node, ast.Name) and right_node.id == param_name
+            if left_is_scope or right_is_scope:
+                if left_is_scope and right_is_scope:
+                    raise ValueError('Unsupported scope self-comparison in verifier event_phases_for_scope')
+                if not isinstance(op, (ast.Eq, ast.NotEq)):
+                    raise ValueError('Unsupported scope predicate in verifier event_phases_for_scope')
+                other = eval_expr(right_node if left_is_scope else left_node)
+                if other != 'main':
+                    raise ValueError('Unsupported branch_scope target in verifier event_phases_for_scope')
+                return (branch_scope == 'main') if isinstance(op, ast.Eq) else (branch_scope != 'main')
+            left = eval_expr(left_node)
+            right = eval_expr(right_node)
+            if isinstance(op, ast.Eq):
+                return left == right
+            if isinstance(op, ast.NotEq):
+                return left != right
+            if isinstance(op, ast.In):
+                if not isinstance(right, (tuple, list, set, frozenset, str)):
+                    raise ValueError('Unsupported membership test in verifier event_phases_for_scope')
+                return left in right
+            if isinstance(op, ast.NotIn):
+                if not isinstance(right, (tuple, list, set, frozenset, str)):
+                    raise ValueError('Unsupported membership test in verifier event_phases_for_scope')
+                return left not in right
+            raise ValueError('Unsupported comparison in verifier event_phases_for_scope')
+        if isinstance(node, ast.IfExp):
+            cond = eval_expr(node.test)
+            if not isinstance(cond, bool):
+                raise ValueError('Non-boolean conditional expression in verifier event_phases_for_scope')
+            return eval_expr(node.body) if cond else eval_expr(node.orelse)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == 'CiPhase':
+                if any(isinstance(arg, ast.Starred) for arg in node.args):
+                    raise ValueError('Unsupported starred CiPhase argument')
+                if any(kw.arg is None for kw in node.keywords):
+                    raise ValueError('Unsupported CiPhase keyword unpacking')
+                pos_args = [eval_expr(arg) for arg in node.args]
+                kw_args = [(kw.arg, eval_expr(kw.value)) for kw in node.keywords]
+                return _build_ci_phase(pos_args, kw_args)
+            if node.func.id == 'tuple':
+                if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
+                    raise ValueError('Unsupported tuple() call in verifier event_phases_for_scope')
+                arg = eval_expr(node.args[0])
+                if not isinstance(arg, (list, tuple)):
+                    raise ValueError('Unsupported tuple() argument in verifier event_phases_for_scope')
+                return tuple(arg)
+            raise ValueError('Unsupported call in verifier event_phases_for_scope')
+        raise ValueError('Unsupported expression in verifier event_phases_for_scope')
+
+    def bind_name(name, value):
+        if name in {param_name, 'CiPhase', 'tuple'}:
+            raise ValueError('Illegal assignment target in verifier event_phases_for_scope')
+        env[name] = value
+
+    def exec_block(stmts, *, allow_docstring=False):
+        for index, stmt in enumerate(stmts):
+            tick()
+            if (allow_docstring and index == 0 and isinstance(stmt, ast.Expr)
+                    and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str)):
+                continue
+            if isinstance(stmt, ast.Assign):
+                if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+                    raise ValueError('Unsupported assignment in verifier event_phases_for_scope')
+                bind_name(stmt.targets[0].id, eval_expr(stmt.value))
+            elif isinstance(stmt, ast.Expr):
+                call = stmt.value
+                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and isinstance(call.func.value, ast.Name)
+                        and call.func.attr in {'append', 'extend'}
+                        and len(call.args) == 1 and not call.keywords
+                        and not isinstance(call.args[0], ast.Starred)):
+                    raise ValueError('Unsupported statement in verifier event_phases_for_scope')
+                target = env.get(call.func.value.id)
+                if not isinstance(target, list):
+                    raise ValueError('Unsupported list mutation in verifier event_phases_for_scope')
+                arg = eval_expr(call.args[0])
+                if call.func.attr == 'append':
+                    if len(target) + 1 > max_collection:
+                        raise ValueError('Verifier phase list exceeded static bound')
+                    target.append(arg)
+                else:
+                    if not isinstance(arg, (tuple, list)):
+                        raise ValueError('Unsupported extend argument in verifier event_phases_for_scope')
+                    if len(target) + len(arg) > max_collection:
+                        raise ValueError('Verifier phase list exceeded static bound')
+                    target.extend(arg)
+            elif isinstance(stmt, ast.For):
+                if stmt.orelse:
+                    raise ValueError('Unsupported for-else in verifier event_phases_for_scope')
+                iterable = eval_expr(stmt.iter)
+                if not isinstance(iterable, (tuple, list)) or len(iterable) > max_collection:
+                    raise ValueError('Unsupported loop iterable in verifier event_phases_for_scope')
+                for item in iterable:
+                    if isinstance(stmt.target, ast.Name):
+                        bind_name(stmt.target.id, item)
+                    elif (isinstance(stmt.target, ast.Tuple)
+                            and all(isinstance(elt, ast.Name) for elt in stmt.target.elts)):
+                        if not isinstance(item, (tuple, list)) or len(item) != len(stmt.target.elts):
+                            raise ValueError('Loop unpacking mismatch in verifier event_phases_for_scope')
+                        for elt, value in zip(stmt.target.elts, item):
+                            bind_name(elt.id, value)
+                    else:
+                        raise ValueError('Unsupported loop target in verifier event_phases_for_scope')
+                    returned, value = exec_block(stmt.body)
+                    if returned:
+                        return True, value
+            elif isinstance(stmt, ast.If):
+                cond = eval_expr(stmt.test)
+                if not isinstance(cond, bool):
+                    raise ValueError('Non-boolean if condition in verifier event_phases_for_scope')
+                returned, value = exec_block(stmt.body if cond else stmt.orelse)
+                if returned:
+                    return True, value
+            elif isinstance(stmt, ast.Return):
+                if stmt.value is None:
+                    raise ValueError('Empty return in verifier event_phases_for_scope')
+                return True, eval_expr(stmt.value)
+            else:
+                raise ValueError('Unsupported statement in verifier event_phases_for_scope')
+        return False, None
+
+    returned, result = exec_block(fn_node.body, allow_docstring=True)
+    if not returned or not isinstance(result, tuple) or not all(isinstance(p, CiPhase) for p in result):
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+    return result
+
+
+def _verify_event_checks_dispatch(checks_fn):
+    if not isinstance(checks_fn, ast.FunctionDef):
+        raise ValueError('Installed verifier policy does not match active CI gate contract')
+    for stmt in checks_fn.body:
+        if isinstance(stmt, ast.If) and _is_event_profile_guard(stmt.test):
+            calls_event_phases = any(
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'event_phases_for_scope'
+                for node in ast.walk(stmt)
+            )
+            if calls_event_phases:
+                return
+    raise ValueError('Installed verifier policy does not match active CI gate contract')
+
+
 def _verify_contract_policy_parity(contract, verifier_source):
     """Pure static AST check proving an installed verifier matches this gate contract."""
     if not isinstance(contract, CiGateContract):
@@ -440,6 +729,7 @@ def _verify_contract_policy_parity(contract, verifier_source):
 
     constants = {}
     functions = {}
+    classes = {}
     for stmt in module.body:
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             try:
@@ -448,6 +738,8 @@ def _verify_contract_policy_parity(contract, verifier_source):
                 pass
         elif isinstance(stmt, ast.FunctionDef):
             functions[stmt.name] = stmt
+        elif isinstance(stmt, ast.ClassDef):
+            classes[stmt.name] = stmt
 
     gate_fn = functions.get('profile_protected_gate_path')
     if gate_fn is None:
@@ -486,18 +778,15 @@ def _verify_contract_policy_parity(contract, verifier_source):
         v3_paths, v3_prefixes = _extract_event_gate_policy(gate_fn, constants)
         if v3_paths != V3_PROTECTED_PATHS or v3_prefixes != frozenset(V3_PROTECTED_PREFIXES):
             raise ValueError('Installed verifier policy does not match active CI gate contract')
+        _verify_ci_phase_class(classes.get('CiPhase'))
+        _verify_event_checks_dispatch(functions.get('checks_for_scope'))
         phase_fn = functions.get('event_phases_for_scope')
         if phase_fn is None:
             raise ValueError('Installed verifier policy does not match active CI gate contract')
-        static_phases = frozenset(
-            node.args[0].value
-            for node in ast.walk(phase_fn)
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == 'CiPhase' and node.args
-                and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str))
-        )
-        if static_phases != V3_STATIC_PHASE_IDS:
-            raise ValueError('Installed verifier policy does not match active CI gate contract')
+        for scope in ('main', 'detached', 'branch/parity-check'):
+            verifier_phases = _evaluate_verifier_event_phases(phase_fn, constants, scope)
+            if verifier_phases != event_phases_for_scope(scope):
+                raise ValueError('Installed verifier policy does not match active CI gate contract')
         return
 
     raise ValueError('Unsupported Jenkins verification profile')
