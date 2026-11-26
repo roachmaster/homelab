@@ -301,7 +301,7 @@ class AuthorHandoffSchemaTest(unittest.TestCase):
                 self.assertEqual(snapshot(), before)
                 with closing(cluster.connect('postgres')) as connection, connection.cursor() as cursor:
                     cursor.execute('SELECT max(version) FROM forge_agent.schema_migrations')
-                    self.assertEqual(cursor.fetchone(), (47,))
+                    self.assertEqual(cursor.fetchone(), (48,))
             finally:
                 cluster.stop()
 
