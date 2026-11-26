@@ -1,4 +1,17 @@
-# Current: Restore bounded embedded documentation rendering — 2026-11-26
+# Current: Match portal host admission to generated UI ABI16 — 2026-11-26
+
+The user authorizes fixing verified deployment blockers. Jenkins100 and a clean
+local full browser gate on source908fbab1 fail at the first owned Agents fixture:
+Assets::load still requires ABI15 while the actual generator/WASM use ABI16.
+Make host admission strict to ABI16, retain all manifest/file integrity checks,
+and update native synthetic fixtures to the current ABI. Cover stale15, future17
+and malformed ABI rejection before remote effects, plus actual generated assets
+through the fixed full browser gate. Use pinned existing CI toolchain/browser
+prerequisites without installation/security changes or fixture credential logs.
+Root owns publication/deployment review; source work stays in this isolated908
+worktree with Cargo and QA evidence outside tracked source paths.
+
+# Previous: Restore bounded embedded documentation rendering — 2026-11-26
 
 The user authorizes fixing deployment blockers. Jenkins99 on main a55a17f8
 failed while building the web host: the 38 KiB implementation document uses
