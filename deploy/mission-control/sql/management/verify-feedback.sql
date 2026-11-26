@@ -277,7 +277,9 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  SELECT jsonb_build_array(p.prosrc,p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_agent.coding_immutable_record()'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  END IF;
  IF actual IS DISTINCT FROM $function0$["\nBEGIN RAISE EXCEPTION 'Immutable coding evidence' USING ERRCODE='P0009'; END;",false,["search_path=pg_catalog, pg_temp"],"v",["forge_agent_owner=X/forge_agent_owner"]]$function0$::jsonb THEN RAISE EXCEPTION 'Feedback function drift: forge_agent.coding_immutable_record()';END IF;
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=40) THEN
+ SELECT jsonb_build_array(forge_agent._retry_legacy_source(p.oid,forge_agent._coding_author_handoff_legacy_source(p.oid,p.prosrc)),p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
+ ELSIF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
  SELECT jsonb_build_array(forge_agent._retry_legacy_source(p.oid,p.prosrc),p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  ELSE
  SELECT jsonb_build_array(p.prosrc,p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure AND p.proowner='forge_agent_owner'::regrole;

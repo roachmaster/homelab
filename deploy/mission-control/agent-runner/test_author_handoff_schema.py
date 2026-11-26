@@ -1,10 +1,13 @@
 """M40 grants only a source-bound Codex author; original authority stays frozen."""
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
 from uuid import uuid4
 
@@ -126,6 +129,73 @@ class AuthorHandoffSchemaTest(unittest.TestCase):
             self.insert(cursor, intent)
             cursor.execute('SELECT forge_agent.coding_workflow_author_profile(%s)', (intent['workflow_id'],))
             self.assertEqual(cursor.fetchone()[0], self.target_profile)
+
+    def test_queued_plan_revision_keeps_the_new_revise_decision(self):
+        quota, _ = self.stop_quota()
+        self.fixture.submit()
+        plan, _critic = self.fixture.finish_plan_round('revise')
+        receipt = self.rows('SELECT receipt_id FROM forge_agent.coding_reconciliation_receipts WHERE attempt_id=%s ORDER BY created_at DESC LIMIT 1', (plan.attempt_id,))[0][0]
+        intent = self.intent(plan.task_id, quota, own_lease=plan, receipt=str(receipt))
+        self.assertEqual(intent['source_status'], 'queued')
+        self.assertEqual(intent['source_mode'], 'plan')
+        self.assertIsNotNone(intent['plan_decision_id'])
+        with closing(self.cluster.connect('forge_agent')) as connection, connection, connection.cursor() as cursor:
+            cursor.execute("SET LOCAL forge.coding_owner='mission-control'")
+            self.insert(cursor, intent)
+            cursor.execute('SELECT forge_agent.coding_workflow_author_profile(%s)', (intent['workflow_id'],))
+            self.assertEqual(cursor.fetchone()[0], self.target_profile)
+
+    def test_stale_agy_claim_cursor_cannot_claim_a_concurrently_handed_off_codex_task(self):
+        quota, _ = self.stop_quota()
+        _, admitted = self.fixture.submit()
+        intent = self.intent(admitted['task_id'], quota)
+        original = self.rows("SELECT pg_get_functiondef('forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure)")[0][0]
+        lock_key = 202611260040
+        paused = original.replace('    LOOP\n        SELECT t.*',
+            '    LOOP\n        PERFORM pg_advisory_lock(' + str(lock_key) + ');\n        PERFORM pg_advisory_unlock(' + str(lock_key) + ');\n        SELECT t.*', 1)
+        self.assertNotEqual(paused, original)
+        self.cluster.admin_exec(paused)
+        connected = threading.Event()
+        worker_pid = []
+        def claim():
+            with closing(self.cluster.connect('forge_coding_worker')) as connection, connection, connection.cursor() as cursor:
+                worker_pid.append(connection.get_backend_pid())
+                cursor.execute("SET LOCAL forge.coding_owner='mission-control'")
+                connected.set()
+                cursor.execute('SELECT forge_coding_worker_api.claim(%s,%s,%s)', ('workflow-worker', self.fixture.incarnation, ['agy-v2']))
+                return cursor.fetchone()[0]
+        try:
+            with closing(self.cluster.connect('postgres')) as lock_connection, lock_connection.cursor() as lock_cursor:
+                lock_cursor.execute('SELECT pg_advisory_lock(%s)', (lock_key,))
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(claim)
+                    try:
+                        self.assertTrue(connected.wait(3))
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            waiting = self.rows("SELECT wait_event FROM pg_stat_activity WHERE pid=%s", (worker_pid[0],))
+                            if waiting == [('advisory',)]:
+                                break
+                            time.sleep(0.01)
+                        else:
+                            self.fail('Worker did not reach the controlled outer-cursor pause')
+                        with closing(self.cluster.connect('forge_agent')) as connection, connection, connection.cursor() as cursor:
+                            cursor.execute("SET LOCAL forge.coding_owner='mission-control'")
+                            self.insert(cursor, intent)
+                            recipe = self.catalog.resolve(self.target_profile, 'plan')
+                            cursor.execute('UPDATE forge_agent.coding_tasks SET agent_profile=%s,pinned_recipe=%s,recipe_digest=%s,revision=revision+1 WHERE id=%s',
+                                (self.target_profile, Json(recipe.to_dict()), recipe.digest, admitted['task_id']))
+                    finally:
+                        lock_cursor.execute('SELECT pg_advisory_unlock(%s)', (lock_key,))
+                    self.assertIsNone(future.result(timeout=5), 'AGY must not claim a recipe that moved to Codex after its outer snapshot')
+        finally:
+            self.cluster.admin_exec(original)
+        profiles = [dict(alias=p.alias, backend=p.backend, model=p.model, modes=['plan', 'review', 'implement']) for p in self.fixture.config.profiles.values()]
+        selected = self.catalog.profile(self.target_profile)
+        profiles.append(dict(alias=selected.alias, backend=selected.backend, model=selected.model, modes=['plan', 'implement']))
+        import work_policy
+        self.fixture.db.advertise('workflow-worker', self.fixture.incarnation, [dict(alias='homelab', base_revision='a' * 40)], profiles, work_policy.POLICY_DIGEST)
+        self.assertEqual(self.fixture.claim(self.target_profile).task_id, admitted['task_id'])
 
     def test_forged_model_overlay_cannot_change_frozen_scope_or_review_policy(self):
         quota, _ = self.stop_quota()

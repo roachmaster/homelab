@@ -116,10 +116,11 @@ BEGIN
    AND own_attempt.finished_at IS NOT NULL AND own_attempt.published_at<=r.created_at AND r.created_at<=a.created_at
    AND r.workspace_digest=i->>'source_workspace_digest'
    AND (to_jsonb(own_attempt.plan_decision_id) IS NOT DISTINCT FROM nullif(i->'plan_decision_id','null'::jsonb)
-    OR(i->>'source_status'='queued' AND i->>'source_mode'='implement' AND own_attempt.pinned_recipe->>'mode'='plan'
+    OR(i->>'source_status'='queued' AND own_attempt.pinned_recipe->>'mode'='plan'
     AND EXISTS(SELECT FROM forge_agent.coding_plan_decisions pd
      WHERE(pd.owner_id,pd.project_alias,pd.task_id,pd.plan_attempt_id)=(w.owner_id,w.project_alias,w.root_task_id,own_attempt.attempt_id)
-     AND pd.decision_id=(i->>'plan_decision_id')::uuid AND pd.decision='resume')))
+     AND pd.decision_id=(i->>'plan_decision_id')::uuid
+     AND pd.decision=CASE i->>'source_mode' WHEN 'implement' THEN 'resume' WHEN 'plan' THEN 'revise' END)))
    AND to_jsonb(own_attempt.scope_plan_decision_id) IS NOT DISTINCT FROM nullif(i->'scope_plan_decision_id','null'::jsonb)
    AND to_jsonb(own_attempt.feedback_id) IS NOT DISTINCT FROM nullif(i->'feedback_id','null'::jsonb)
    AND to_jsonb(own_attempt.feedback_sha256) IS NOT DISTINCT FROM nullif(i->'feedback_sha256','null'::jsonb)
@@ -232,6 +233,32 @@ BEGIN
    $new$(f.feedback_json::jsonb->>'workspace_digest' IS DISTINCT FROM a.resume_workspace_digest AND forge_agent._coding_author_feedback_proof(a.attempt_id,'build') IS NULL)$new$,
    $old$f.feedback_json::jsonb->>'workspace_digest' IS DISTINCT FROM a.resume_workspace_digest$old$),$new$||coalesce((SELECT jsonb_build_object('author_handoff',proof) FROM(SELECT forge_agent._coding_author_feedback_proof(a.attempt_id,'build') AS proof) x WHERE proof IS NOT NULL),'{}'::jsonb)$new$,'');
  END IF;
+ IF p_oid='forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure THEN
+  RETURN replace(replace(replace(p_source,$new$SELECT t.owner_id, t.project_alias, t.id,t.revision,t.agent_profile,t.recipe_digest
+        FROM forge_agent.coding_tasks t$new$,$old$SELECT t.owner_id, t.project_alias, t.id
+        FROM forge_agent.coding_tasks t$old$),$new$          AND t.id = v_candidate.id
+          AND t.revision = v_candidate.revision
+          AND t.agent_profile = v_candidate.agent_profile
+          AND t.recipe_digest = v_candidate.recipe_digest
+          AND t.status = 'queued'$new$,$old$          AND t.id = v_candidate.id
+          AND t.status = 'queued'$old$),$new$        -- Revalidate the selected worker after locking the exact queued row.
+        -- A handoff cannot let an outer cursor claim another provider's recipe.
+        IF NOT(v_task.agent_profile=ANY(p_allowed_profiles)) OR NOT EXISTS(
+            SELECT FROM forge_agent.coding_worker_readiness r
+            JOIN forge_agent.coding_worker_grants g ON(g.worker_role,g.owner_id,g.project_alias,g.agent_profile,g.mode)=
+                (r.worker_role,r.owner_id,v_task.project_alias,v_task.agent_profile,v_task.mode)
+            WHERE r.worker_role=session_user AND r.owner_id=v_task.owner_id
+              AND r.worker_id=p_worker_id AND r.incarnation=p_incarnation
+              AND r.observed_at>clock_timestamp()-interval '90 seconds'
+              AND r.policy_digest=v_task.pinned_recipe->>'policy_digest'
+              AND EXISTS(SELECT FROM jsonb_array_elements(r.profiles) AS configured(profile)
+                WHERE profile->>'alias'=v_task.agent_profile
+                  AND profile->>'backend'=v_task.pinned_recipe->>'backend'
+                  AND profile->>'model'=v_task.pinned_recipe->>'model' AND profile->'modes' ? v_task.mode)
+        ) THEN CONTINUE;END IF;
+
+$new$,'');
+ END IF;
  RETURN p_source;
 END;
 $fn$;
@@ -265,5 +292,44 @@ BEGIN
   replacement:=left(source,length(source)-1)||format($patch$||coalesce((SELECT jsonb_build_object('author_handoff',proof) FROM(SELECT forge_agent._coding_author_feedback_proof(a.attempt_id,%L) AS proof) x WHERE proof IS NOT NULL),'{}'::jsonb);$patch$,kind);
   EXECUTE replace(definition,source,replacement);
  END LOOP;
+
+ definition:=pg_get_functiondef('forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure);
+ source:=$old$SELECT t.owner_id, t.project_alias, t.id
+        FROM forge_agent.coding_tasks t$old$;
+ replacement:=$new$SELECT t.owner_id, t.project_alias, t.id,t.revision,t.agent_profile,t.recipe_digest
+        FROM forge_agent.coding_tasks t$new$;
+ IF position(source in definition)=0 THEN RAISE EXCEPTION 'Unexpected claim-candidate source';END IF;
+ definition:=replace(definition,source,replacement);
+ source:=$old$          AND t.id = v_candidate.id
+          AND t.status = 'queued'$old$;
+ replacement:=$new$          AND t.id = v_candidate.id
+          AND t.revision = v_candidate.revision
+          AND t.agent_profile = v_candidate.agent_profile
+          AND t.recipe_digest = v_candidate.recipe_digest
+          AND t.status = 'queued'$new$;
+ IF position(source in definition)=0 THEN RAISE EXCEPTION 'Unexpected locked-claim source';END IF;
+ definition:=replace(definition,source,replacement);
+ source:=$old$        IF EXISTS (
+            SELECT 1
+            FROM forge_agent.coding_attempts a$old$;
+ replacement:=$new$        -- Revalidate the selected worker after locking the exact queued row.
+        -- A handoff cannot let an outer cursor claim another provider's recipe.
+        IF NOT(v_task.agent_profile=ANY(p_allowed_profiles)) OR NOT EXISTS(
+            SELECT FROM forge_agent.coding_worker_readiness r
+            JOIN forge_agent.coding_worker_grants g ON(g.worker_role,g.owner_id,g.project_alias,g.agent_profile,g.mode)=
+                (r.worker_role,r.owner_id,v_task.project_alias,v_task.agent_profile,v_task.mode)
+            WHERE r.worker_role=session_user AND r.owner_id=v_task.owner_id
+              AND r.worker_id=p_worker_id AND r.incarnation=p_incarnation
+              AND r.observed_at>clock_timestamp()-interval '90 seconds'
+              AND r.policy_digest=v_task.pinned_recipe->>'policy_digest'
+              AND EXISTS(SELECT FROM jsonb_array_elements(r.profiles) AS configured(profile)
+                WHERE profile->>'alias'=v_task.agent_profile
+                  AND profile->>'backend'=v_task.pinned_recipe->>'backend'
+                  AND profile->>'model'=v_task.pinned_recipe->>'model' AND profile->'modes' ? v_task.mode)
+        ) THEN CONTINUE;END IF;
+
+$new$||source;
+ IF position(source in definition)=0 THEN RAISE EXCEPTION 'Unexpected post-lock claim source';END IF;
+ EXECUTE replace(definition,source,replacement);
 END;
 $upgrade$;
