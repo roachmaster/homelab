@@ -512,7 +512,15 @@ class WorkflowStore:
     def _recover_native_timeouts(self):
         """Existing durable-event scan retries only reconciled deadline stops."""
         with self.store._transaction(read_only=True) as cursor:
-            cursor.execute("""SELECT t.project_alias,t.id,t.revision,r.receipt_id,a.attempt_id
+            cursor.execute("SELECT to_regprocedure('forge_agent.coding_workflow_author_handoff(uuid)') IS NOT NULL AS available")
+            # An allowed historical escalation is still recoverable. The active
+            # role helper returns NULL for that phase; the verified handoff
+            # receipt retains the selected author without rewriting authority.
+            # Select a constant expression before parsing the scan so older
+            # schemas never reference a function that they do not contain.
+            author = ("coalesce(forge_agent.coding_workflow_author_handoff(w.workflow_id)->'intent'->>'target_profile',w.snapshot->>'author_profile')"
+                      if cursor.fetchone()['available'] else "w.snapshot->>'author_profile'")
+            cursor.execute(f"""SELECT t.project_alias,t.id,t.revision,r.receipt_id,a.attempt_id
               FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w
               ON(w.owner_id,w.project_alias,w.workflow_id)=(t.owner_id,t.project_alias,t.workflow_id)
               JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)
@@ -525,7 +533,7 @@ class WorkflowStore:
               AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL
               AND a.finished_at>=a.deadline_at AND r.created_at>=a.deadline_at
               AND a.pinned_recipe->>'policy_digest'=ANY(%s)
-              AND t.agent_profile=w.snapshot->>'author_profile'
+              AND t.agent_profile={author}
               AND EXISTS(SELECT 1 FROM forge_agent.coding_events e WHERE(e.owner_id,e.project_alias,e.task_id)=(t.owner_id,t.project_alias,t.id)
                 AND e.event_kind='needs_reconcile' AND e.payload->>'attempt_id'=a.attempt_id::text
                 AND e.payload->>'reason' IN('deadline_exceeded','stopped_without_publication') AND e.created_at>=a.deadline_at)
