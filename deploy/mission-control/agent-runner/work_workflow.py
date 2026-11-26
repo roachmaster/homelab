@@ -21,7 +21,7 @@ from work_config import PinnedRecipe,sha256_canonical,prepare_title
 from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_matches
 from work_store import ADVISORY_LOCK_SALT
 from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
-from work_events import COORDINATOR_ACTOR, insert_event, operator_actor
+from work_events import COORDINATOR_ACTOR, insert_event, operator_actor, escalation_cause
 import unicodedata
 
 LOG=logging.getLogger('forge-workflow')
@@ -302,7 +302,8 @@ class WorkflowStore:
         if self.retry_events is not None:
             self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
 
-    def _escalate(self,cursor,w,reason):
+    def _escalate(self,cursor,w,reason,*,cause=None):
+        code=escalation_cause(reason,cause)
         reason=reason[:2048]
         cursor.execute("SELECT status FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],w['root_task_id']))
         root=cursor.fetchone()
@@ -328,7 +329,7 @@ class WorkflowStore:
             affected_target='cancelled' if affected_task['status']=='queued' else 'cancel_requested'
             insert_event(cursor,self.store.owner,affected_task['project_alias'],affected_task['id'],affected_target,
                          {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
-                          'workflow_id':str(w['workflow_id'])},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
+                          'workflow_id':str(w['workflow_id']),'escalation_cause':code},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
         if self.retry_events is not None:
             self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
@@ -1282,7 +1283,8 @@ class WorkflowStore:
                     self.retry_events.bind_review(cursor,review['source_review_id'],retry_event['event_id'],'peer-revision.'+source)
 
         if decision=='escalate' or event_exhausted or(review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
-            self._escalate(cursor,w,verdict['summary']);receipt={'status':'escalated','workflow_id':str(w['workflow_id'])}
+            self._escalate(cursor,w,verdict['summary'],cause='review_verdict' if decision=='escalate' else 'retry_exhausted' if event_exhausted else 'budget_exhausted')
+            receipt={'status':'escalated','workflow_id':str(w['workflow_id'])}
         elif review['target_kind']=='plan':
             mode='implement' if decision=='approve' else 'plan';self._grant(cursor,w,p['author_profile'],mode)
             note=verdict['summary']
