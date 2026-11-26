@@ -70,6 +70,7 @@ fn agent(retry: bool) -> AgentsNavigationSnapshot {
             acceptance_criteria: criteria,
             auto_repair: false,
             workflow_policy_digest: None,
+            workflow_policy_id: None,
             idempotency_key: "same-saved-key".into(),
         }),
     }

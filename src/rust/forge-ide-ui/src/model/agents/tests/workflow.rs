@@ -3,6 +3,8 @@ use super::*;
 fn policy() -> WorkWorkflowPolicy {
     WorkWorkflowPolicy {
         policy_digest: "c".repeat(64),
+        policy_id: None,
+        policy_generation: None,
         author_profile: "agy-primary".into(),
         reviewer_profile: "codex-primary".into(),
         max_plan_revisions: 3,

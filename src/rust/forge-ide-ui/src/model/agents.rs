@@ -733,6 +733,9 @@ impl Agents {
                             workflow_policy_digest: self
                                 .workflow_policy()
                                 .map(|p| p.policy_digest.clone()),
+                            workflow_policy_id: self
+                                .workflow_policy()
+                                .and_then(|p| p.policy_id.clone()),
                         },
                         effects,
                     );
