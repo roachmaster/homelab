@@ -3,6 +3,8 @@
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
+\ir verify-author-handoff.sql
+
 -- Validate M33 review lineage before exact predecessor normalization.
 \ir verify-superseding-reviews.sql
 
