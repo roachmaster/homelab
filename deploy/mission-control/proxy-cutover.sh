@@ -137,20 +137,29 @@ PY
     printf 'reconciled %s expired assignment(s) through the proxy\n' "$result"
 }
 
-# Callers the proxy API cannot serve yet: the coordinator stores and
-# the Jenkins/usage/chat/mail stores run multi-statement transactions
-# with interleaved Python logic, which the single-operation proxy API
-# cannot carry. They are still direct today, so cutover would strand
-# them. This list blocks cutover until each store migrates; remove an
-# entry only when its migration lands with tests proving it operates
-# through the proxy with direct access disabled.
+# Caller paths the proxy API cannot serve yet: these methods still
+# execute statements the proxy translator refuses (row locking,
+# savepoints, LISTEN, and multi-statement transaction flows with
+# interleaved Python callbacks), so they run direct today and
+# cutover would strand them. The set is measured exactly by
+# test_forge_pg_proxy.ProxyMigrationGuardTest (an AST scan feeding
+# every literal statement to proxy_statements.translate); the guard
+# fails if a listed method's statements become translatable or an
+# unlisted one regresses, so this list cannot silently go stale.
+# Remove an entry only when the guard shows its statements gone
+# AND tests prove the path operates through the proxy with direct
+# access disabled. usage_store is deliberately absent: every one
+# of its statements translates (the guard proves it), so it is
+# carried by the shared queue_store.connect() selection like the
+# migrated coordinator reads.
 UNMIGRATED_CALLERS=(
-    'queue_store (forge-agent-runner: direct psycopg2)'
-    'WorkStore (work_store.py: direct psycopg2)'
-    'jenkins_store (jenkins_store.py: direct psycopg2)'
-    'usage_store (usage_store.py: direct psycopg2)'
-    'chat_history_store (chat_history_store.py: direct psycopg2)'
-    'mail_store (mail_store.py: direct psycopg2)'
+    'WorkStore decide/control endpoints (work_store.py: plan_decide, review_decide, accept, resume, repair, publication_retry, _control_task)'
+    'coordinator workflow engine (work_workflow.py: process, validate, _apply_verdict, _escalate, _cancel_workflow, retry_peer_verdict, retry_preparation, retry_native_timeout, defer_source_readiness, _admit_reviewer, _code_review_source, _verify_peer_recovery_source)'
+    'owner control flows (work_owner_control.py: resume, review_decide; work_owner_reverification.py: recover)'
+    'queue_store locked run/workspace paths (queue_store.py: _lock_owned_run, restore_workspace, _workspace_history, _workspace_tab, _workspace_history_marker, _seed_workspace_history, listen)'
+    'jenkins_store delivery paths (jenkins_store.py: claim_next, renew_lease, complete_delivery, fail_delivery, list_deliveries, list_events, listen)'
+    'chat_history_store locked chat paths (chat_history_store.py: lock_chat, open_chat, expire_due, _remove)'
+    'mail_store locked thread paths (mail_store.py: lock_thread, open_thread, archive_manual)'
 )
 
 unit_config_value() {

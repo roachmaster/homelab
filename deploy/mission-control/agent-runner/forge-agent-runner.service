@@ -10,13 +10,17 @@ Group=forge_agent
 ExecStart=/usr/bin/python3 -B /opt/homelab-forge/agent-runner/runner.py
 LoadCredential=runner.token:/etc/homelab-forge/agent-runner/token
 LoadCredential=forge.token:/etc/homelab-forge/web/llama.token
-# Proxy transport (rollout step 2): point the runner at the proxy
-# instead of direct Postgres. The token file is the coordinator
-# caller's token from the proxy rollout; the runner reads it through
-# its proxy-group membership.
-Environment=FORGE_PG_PROXY_URL=http://127.0.0.1:18087
-Environment=FORGE_PG_PROXY_TOKEN_FILE=/etc/homelab-forge/forge-pg-proxy/tokens/coordinator.token
-Environment=FORGE_PG_PROXY_CALLER=coordinator
+# NO proxy transport yet: queue_store.connect() selects the proxy
+# for every coordinator store when FORGE_PG_PROXY_URL is set, but
+# the coordinator's decide/control flows still execute statements
+# the proxy cannot carry (SELECT ... FOR UPDATE and friends — see
+# UNMIGRATED_CALLERS in proxy-cutover.sh, measured exactly by
+# test_forge_pg_proxy.ProxyMigrationGuardTest). Setting the URL
+# here would switch the deployed runner onto paths that raise
+# UnsupportedStatement at runtime (round-6 finding 1). The runner
+# stays on direct Postgres until those flows migrate; switching
+# this unit is a deliberate deployment step taken only when
+# proxy-cutover.sh's caller-routing check can pass.
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true

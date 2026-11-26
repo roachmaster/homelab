@@ -1441,8 +1441,16 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
     list_tasks via the readq-backed reads; WorkflowStore.claim via the
     workflow_action_lease composite). C3c2: WorkStore.cancel goes
     through the pre-existing coding_workflow_cancel composite, which
-    the original implement built but never wired; the remaining locked
-    flows (submit/decide/repair/...) still use FOR UPDATE reads.
+    the original implement built but never wired. The remaining
+    locked flows — WorkStore's decide/control endpoints
+    (plan_decide/review_decide/accept/resume/repair/
+    publication_retry) and the work_workflow coordinator engine —
+    still execute FOR UPDATE statements the proxy cannot carry;
+    they are measured exactly by
+    test_forge_pg_proxy.ProxyMigrationGuardTest, listed in
+    proxy-cutover.sh's UNMIGRATED_CALLERS, and the deployed runner
+    unit does not select the proxy until they migrate (round-6
+    finding 1).
     """
 
     def setUp(self):

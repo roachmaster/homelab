@@ -1234,5 +1234,143 @@ class ProxyTokenLayoutTest(unittest.TestCase):
         self.assertIn("chmod 0640 \"$token_file\"", self.script)
 
 
+class ProxyMigrationGuardTest(unittest.TestCase):
+    """Round-6 finding 1: the deployed runner must not be switched
+    to the proxy while coordinator paths still execute statements
+    the proxy cannot carry, and the unmigrated set is measured,
+    not asserted from memory.
+
+    The measurement: parse each coordinator module, feed every
+    literal SQL statement (constants, f-strings, and simple
+    name-bound assignments) passed to execute()/executemany() to
+    proxy_statements.translate, and collect the methods whose
+    statements raise UnsupportedStatement. The result must equal
+    UNMIGRATED exactly — a method that migrates drops out and
+    fails the test until the allowlist (and proxy-cutover.sh's
+    UNMIGRATED_CALLERS) is updated, and a regression that adds an
+    untranslatable statement anywhere else fails it too."""
+
+    UNMIGRATED = {
+        "work_store.py": {
+            "_control_task", "accept", "plan_decide",
+            "publication_retry", "repair", "resume", "review_decide"},
+        "work_workflow.py": {
+            "_admit_reviewer", "_apply_verdict", "_cancel_workflow",
+            "_code_review_source", "_escalate",
+            "_verify_peer_recovery_source", "defer_source_readiness",
+            "process", "retry_native_timeout", "retry_peer_verdict",
+            "retry_preparation", "validate"},
+        "work_owner_control.py": {"resume", "review_decide"},
+        "work_owner_reverification.py": {"recover"},
+        "queue_store.py": {
+            "_lock_owned_run", "_seed_workspace_history",
+            "_workspace_history", "_workspace_history_marker",
+            "_workspace_tab", "listen", "restore_workspace"},
+        "jenkins_store.py": {
+            "claim_next", "complete_delivery", "fail_delivery",
+            "list_deliveries", "list_events", "listen",
+            "renew_lease"},
+        "usage_store.py": set(),
+        "chat_history_store.py": {
+            "_remove", "expire_due", "lock_chat", "open_chat"},
+        "mail_store.py": {"archive_manual", "lock_thread",
+                          "open_thread"},
+    }
+
+    @staticmethod
+    def _literal(node, env):
+        import ast
+        if isinstance(node, ast.Constant) \
+                and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.JoinedStr):
+            parts = []
+            for value in node.values:
+                if isinstance(value, ast.Constant):
+                    parts.append(str(value.value))
+                else:
+                    parts.append("%s")
+            return "".join(parts)
+        if isinstance(node, ast.Name):
+            return env.get(node.id)
+        return None
+
+    @classmethod
+    def _untranslatable_methods(cls, path):
+        import ast
+        from proxy_statements import UnsupportedStatement, translate
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        found = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef,
+                                     ast.AsyncFunctionDef)):
+                continue
+            env = {}
+            for child in ast.walk(node):
+                if isinstance(child, ast.Assign) \
+                        and len(child.targets) == 1 \
+                        and isinstance(child.targets[0], ast.Name):
+                    value = cls._literal(child.value, env)
+                    if value is not None:
+                        env[child.targets[0].id] = value
+            for child in ast.walk(node):
+                if isinstance(child, ast.Call) \
+                        and isinstance(child.func, ast.Attribute) \
+                        and child.func.attr in ("execute", "executemany") \
+                        and child.args:
+                    sql = cls._literal(child.args[0], env)
+                    if not sql or not sql.strip():
+                        continue
+                    try:
+                        translate(sql, ())
+                    except UnsupportedStatement:
+                        found.add(node.name)
+                    except Exception:
+                        # A parameter-shape error means the shape
+                        # is translatable; only UnsupportedStatement
+                        # marks a statement the proxy cannot carry.
+                        pass
+        return found
+
+    def test_untranslatable_statements_match_the_unmigrated_list(self):
+        import os
+        here = os.path.dirname(os.path.abspath(__file__))
+        for module, expected in sorted(self.UNMIGRATED.items()):
+            with self.subTest(module=module):
+                self.assertEqual(
+                    self._untranslatable_methods(
+                        os.path.join(here, module)),
+                    expected)
+
+    def test_cutover_script_lists_the_same_modules(self):
+        import os
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, os.pardir, "proxy-cutover.sh"),
+                  encoding="utf-8") as handle:
+            script = handle.read()
+        start = script.index("UNMIGRATED_CALLERS=(")
+        block = script[start:script.index("\n)", start)]
+        for module, methods in sorted(self.UNMIGRATED.items()):
+            if methods:
+                self.assertIn(module, block)
+
+    def test_deployed_runner_unit_does_not_select_the_proxy(self):
+        # The runner stays on direct Postgres until the unmigrated
+        # paths above are gone: queue_store.connect() would select
+        # the proxy for every coordinator store if the unit set
+        # FORGE_PG_PROXY_URL, and their FOR UPDATE flows would fail
+        # at runtime.
+        import os
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "forge-agent-runner.service"),
+                  encoding="utf-8") as handle:
+            unit = handle.read()
+        for line in unit.splitlines():
+            self.assertFalse(
+                line.startswith("Environment=FORGE_PG_PROXY"),
+                line)
+
+
 if __name__ == "__main__":
     unittest.main()
