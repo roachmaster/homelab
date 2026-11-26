@@ -148,16 +148,28 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 before=snapshot()
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                # Migration 0040 (pg_proxy_preparation) grants each caller
-                # role SELECT on its allowlisted read tables; the expected
-                # post-upgrade ACL adds those entries (in grant order) to
-                # the M31 ACL before the M41 revocation below rewrites
-                # forge_agent's entry in place. Migration 0041
-                # (pg_proxy_cutover) intentionally revokes direct table
-                # writes (INSERT/UPDATE/DELETE/TRUNCATE) for forge_agent,
+                # Preparation stage: apply.sql stops at migration
+                # 0040 (pg_proxy_preparation), which grants each
+                # caller role SELECT on its allowlisted read tables;
+                # the expected ACL adds exactly those entries (in
+                # grant order) to the M31 ACL, and nothing else about
+                # the M31 history changes. (Round-6 finding 7: this
+                # test previously asserted the CUTOVER state here
+                # although the fixture only applies preparation.)
+                preparation=dict(before)
+                preparation['old_relation_acl']=[
+                    (schema,name,owner,_with_proxy_reads(relacl,_PROXY_READERS.get(schema+'.'+name,set())))
+                    for schema,name,owner,relacl in before['old_relation_acl']
+                ]
+                self.assertEqual(snapshot(),preparation)
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(40,)])
+                # Cutover stage: migration 0041 (pg_proxy_cutover),
+                # applied only via apply-cutover.sql, intentionally
+                # revokes direct table writes
+                # (INSERT/UPDATE/DELETE/TRUNCATE) for forge_agent,
                 # forge_coding_worker, forge_coding_reconciler and
-                # muse_events; everything else about the M31 history must
-                # survive the upgrade byte-identical.
+                # muse_events on top of the preparation ACL.
+                DisposablePostgresCluster.apply_cutover(cluster)
                 expected=dict(before)
                 expected['old_relation_acl']=[
                     (schema,name,owner,_cutover_acl(_with_proxy_reads(relacl,_PROXY_READERS.get(schema+'.'+name,set()))))

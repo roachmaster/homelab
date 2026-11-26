@@ -41,52 +41,20 @@ def snapshot(*conversations, selected=0, bookmark=None):
     ]}, "workbench": bookmark, "workbench_open": bookmark is not None}
 
 
-@unittest.skipUnless(os.environ.get("FORGE_DISABLE_DISPOSABLE_POSTGRES") != "1" and os.geteuid() != 0 and (POSTGRES_BIN / "initdb").is_file(),
-                     "Disposable PostgreSQL 16 integration requires its binaries and a non-root user; DB tests run only on main")
-class WorkspaceStoreTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        temporary = TemporaryDirectory(prefix="forge-test-pg-")
-        cls.addClassCleanup(temporary.cleanup)
-        cls.root = Path(temporary.name)
-        cls.data = cls.root / "data"
+class RunnerPrivilegeDriftMixin:
+    """The verify-runner-privileges.sql drift machinery, shared by
+    the preparation-stage and cutover-stage fixtures. The verifier
+    is stage-aware (it detects cutover from forge_agent's INSERT
+    privilege on forge_external_workflow.workflows), so each stage's
+    fixture asserts its own exact matrix (self.ALLOWED): drift in
+    either direction — a missing required privilege or a forbidden
+    one appearing — must fail verification. Round-6 finding 7: the
+    preparation fixture previously asserted the cutover matrix."""
 
-        def command(name, *args):
-            subprocess.run([POSTGRES_BIN / name, *map(str, args)], capture_output=True,
-                           check=True, timeout=40)
-
-        def stop_server():
-            if (cls.data / "postmaster.pid").exists():
-                command("pg_ctl", "-D", cls.data, "-m", "immediate", "-w", "stop")
-
-        command("initdb", "-D", cls.data, "--username=postgres", "--auth=trust", "--no-locale", "--encoding=UTF8")
-        cls.addClassCleanup(stop_server)
-        command("pg_ctl", "-D", cls.data, "-l", cls.root / "postgres.log", "-o",
-                f"-k {cls.root} -c listen_addresses=", "-w", "start")
-        psql = ("-h", cls.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1")
-        command("psql", *psql, "-d", "postgres", "-f", SQL / "provision.sql")
-        command("psql", *psql, "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner",
-                "-f", SQL / "apply.sql", "-f", SQL / "apply.sql",
-                "-f", SQL / "management/grant-runner.sql", "-f", SQL / "management/verify.sql")
-        command("psql", "-h", cls.root, "-U", "forge_agent", "-X", "-v", "ON_ERROR_STOP=1",
-                "-d", "forge_agent", "-f", SQL / "management/verify-runner-privileges.sql")
+    ALLOWED = {}
 
     def connect(self, user="forge_agent"):
         return psycopg2.connect(host=str(self.root), dbname="forge_agent", user=user, connect_timeout=2)
-
-    def setUp(self):
-        application = patch.object(store, "connect", self.connect)
-        application.start()
-        self.addCleanup(application.stop)
-        with self.connect("postgres") as connection, connection.cursor() as cursor:
-            cursor.execute("""TRUNCATE forge_agent.ide_workspace_history, forge_agent.conversations,
-                                      forge_agent.gpu_worker_readiness CASCADE""")
-        connection.close()
-
-    def worker(self, call, *parameters):
-        with closing(self.connect("forge_gpu_worker")) as connection, connection, connection.cursor() as cursor:
-            cursor.execute("SELECT forge_agent_worker_api." + call, parameters)
-            return cursor.fetchone()[0]
 
     def run_sql_script(self, script_path, user="postgres"):
         return subprocess.run(
@@ -115,15 +83,7 @@ class WorkspaceStoreTest(unittest.TestCase):
         self.assert_sql_verification(script, user="forge_agent")
         self.assert_sql_verification(script, error="Expected current_user forge_agent")
 
-        # Post-cutover (M41) forge_agent keeps SELECT only on these
-        # tables; the proxy is the only writer. The drift subtests
-        # below revoke/grants each privilege against this matrix.
-        allowed = {
-            "mail_threads": {"SELECT"},
-            "mail_messages": {"SELECT"},
-            "inference_results": {"SELECT"},
-            "gpu_worker_readiness": {"SELECT"},
-        }
+        allowed = self.ALLOWED
         for table, privileges in allowed.items():
             for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
                 required = privilege in privileges
@@ -161,6 +121,61 @@ class WorkspaceStoreTest(unittest.TestCase):
         finally:
             self.admin_exec("GRANT USAGE ON SCHEMA forge_agent TO forge_agent")
         self.assert_sql_verification(script, user="forge_agent")
+
+
+@unittest.skipUnless(os.environ.get("FORGE_DISABLE_DISPOSABLE_POSTGRES") != "1" and os.geteuid() != 0 and (POSTGRES_BIN / "initdb").is_file(),
+                     "Disposable PostgreSQL 16 integration requires its binaries and a non-root user; DB tests run only on main")
+class WorkspaceStoreTest(RunnerPrivilegeDriftMixin, unittest.TestCase):
+    # This fixture applies apply.sql only, which stops at migration
+    # 40 (preparation): forge_agent keeps its direct writes on the
+    # mail/inference tables until the cutover migration revokes
+    # them. The matrix is the verifier's preparation stage.
+    ALLOWED = {
+        "mail_threads": {"SELECT", "INSERT", "UPDATE"},
+        "mail_messages": {"SELECT", "INSERT"},
+        "inference_results": {"SELECT", "DELETE"},
+        "gpu_worker_readiness": {"SELECT"},
+    }
+    @classmethod
+    def setUpClass(cls):
+        temporary = TemporaryDirectory(prefix="forge-test-pg-")
+        cls.addClassCleanup(temporary.cleanup)
+        cls.root = Path(temporary.name)
+        cls.data = cls.root / "data"
+
+        def command(name, *args):
+            subprocess.run([POSTGRES_BIN / name, *map(str, args)], capture_output=True,
+                           check=True, timeout=40)
+
+        def stop_server():
+            if (cls.data / "postmaster.pid").exists():
+                command("pg_ctl", "-D", cls.data, "-m", "immediate", "-w", "stop")
+
+        command("initdb", "-D", cls.data, "--username=postgres", "--auth=trust", "--no-locale", "--encoding=UTF8")
+        cls.addClassCleanup(stop_server)
+        command("pg_ctl", "-D", cls.data, "-l", cls.root / "postgres.log", "-o",
+                f"-k {cls.root} -c listen_addresses=", "-w", "start")
+        psql = ("-h", cls.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1")
+        command("psql", *psql, "-d", "postgres", "-f", SQL / "provision.sql")
+        command("psql", *psql, "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner",
+                "-f", SQL / "apply.sql", "-f", SQL / "apply.sql",
+                "-f", SQL / "management/grant-runner.sql", "-f", SQL / "management/verify.sql")
+        command("psql", "-h", cls.root, "-U", "forge_agent", "-X", "-v", "ON_ERROR_STOP=1",
+                "-d", "forge_agent", "-f", SQL / "management/verify-runner-privileges.sql")
+
+    def setUp(self):
+        application = patch.object(store, "connect", self.connect)
+        application.start()
+        self.addCleanup(application.stop)
+        with self.connect("postgres") as connection, connection.cursor() as cursor:
+            cursor.execute("""TRUNCATE forge_agent.ide_workspace_history, forge_agent.conversations,
+                                      forge_agent.gpu_worker_readiness CASCADE""")
+        connection.close()
+
+    def worker(self, call, *parameters):
+        with closing(self.connect("forge_gpu_worker")) as connection, connection, connection.cursor() as cursor:
+            cursor.execute("SELECT forge_agent_worker_api." + call, parameters)
+            return cursor.fetchone()[0]
 
     def test_runner_verification_uses_effective_public_and_inherited_privileges(self):
         script = SQL / "management/verify-runner-privileges.sql"
@@ -1447,3 +1462,53 @@ class WorkspaceStoreTest(unittest.TestCase):
                 dao.set_retention(chat_id, revision, {"kind": "long_term"})
         self.assertEqual(expired.exception.status, 404)
         self.assertEqual(dao.open_chat(chat_id)["summary"]["revision"], revision)
+
+
+@unittest.skipUnless(os.environ.get("FORGE_DISABLE_DISPOSABLE_POSTGRES") != "1" and os.geteuid() != 0 and (POSTGRES_BIN / "initdb").is_file(),
+                     "Disposable PostgreSQL 16 integration requires its binaries and a non-root user; DB tests run only on main")
+class WorkspaceStoreCutoverTest(RunnerPrivilegeDriftMixin, unittest.TestCase):
+    """The cutover stage of the same drift machinery: this fixture
+    applies migration 41 (pg_proxy_cutover) via apply-cutover.sql
+    on top of the preparation fixture, so forge_agent keeps SELECT
+    only — the proxy is the only writer. Round-6 finding 7: this
+    matrix was previously asserted against a preparation-only
+    fixture, where it cannot hold."""
+
+    ALLOWED = {
+        "mail_threads": {"SELECT"},
+        "mail_messages": {"SELECT"},
+        "inference_results": {"SELECT"},
+        "gpu_worker_readiness": {"SELECT"},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        temporary = TemporaryDirectory(prefix="forge-test-pg-cutover-")
+        cls.addClassCleanup(temporary.cleanup)
+        cls.root = Path(temporary.name)
+        cls.data = cls.root / "data"
+
+        def command(name, *args):
+            subprocess.run([POSTGRES_BIN / name, *map(str, args)], capture_output=True,
+                           check=True, timeout=40)
+
+        def stop_server():
+            if (cls.data / "postmaster.pid").exists():
+                command("pg_ctl", "-D", cls.data, "-m", "immediate", "-w", "stop")
+
+        command("initdb", "-D", cls.data, "--username=postgres", "--auth=trust", "--no-locale", "--encoding=UTF8")
+        cls.addClassCleanup(stop_server)
+        command("pg_ctl", "-D", cls.data, "-l", cls.root / "postgres.log", "-o",
+                f"-k {cls.root} -c listen_addresses=", "-w", "start")
+        psql = ("-h", cls.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1")
+        command("psql", *psql, "-d", "postgres", "-f", SQL / "provision.sql")
+        command("psql", *psql, "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner",
+                "-f", SQL / "apply.sql", "-f", SQL / "apply.sql",
+                "-f", SQL / "management/grant-runner.sql", "-f", SQL / "management/verify.sql")
+        # Cutover: migration 41 only, through its dedicated entry
+        # point, then the stage-aware grants re-apply.
+        command("psql", *psql, "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner",
+                "-f", SQL / "apply-cutover.sql", "-f", SQL / "management/grant-runner.sql",
+                "-f", SQL / "management/verify.sql")
+        command("psql", "-h", cls.root, "-U", "forge_agent", "-X", "-v", "ON_ERROR_STOP=1",
+                "-d", "forge_agent", "-f", SQL / "management/verify-runner-privileges.sql")
