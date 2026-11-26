@@ -229,3 +229,8 @@ SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=46) AS h
 \if :has_failure_cause
 GRANT EXECUTE ON FUNCTION forge_coding_worker_api.publish_with_cause(uuid,uuid,text,jsonb,jsonb,text,jsonb,text) TO forge_coding_worker;
 \endif
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=47) AS has_deadline_extension_events
+\gset
+\if :has_deadline_extension_events
+GRANT EXECUTE ON FUNCTION forge_coding_worker_api.renew_deadline(uuid,uuid,text) TO forge_coding_worker;
+\endif
