@@ -16,6 +16,11 @@ BEGIN
  'constraints',(SELECT jsonb_agg(jsonb_build_array(k.conname,k.contype,k.convalidated,k.condeferrable,k.condeferred,pg_get_constraintdef(k.oid,false)) ORDER BY k.conname) FROM pg_constraint k WHERE k.conrelid=c.oid),
  'indexes',(SELECT jsonb_agg(jsonb_build_array(ic.relname,i.indisvalid,i.indisready,pg_get_indexdef(i.indexrelid)) ORDER BY ic.relname) FROM pg_index i JOIN pg_class ic ON ic.oid=i.indexrelid WHERE i.indrelid=c.oid),
  'triggers',(SELECT jsonb_agg(jsonb_build_array(t.tgname,t.tgenabled,pg_get_triggerdef(t.oid,false)) ORDER BY t.tgname) FROM pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal))::text INTO actual FROM pg_class c WHERE c.oid='forge_agent.coding_workflow_reviews'::regclass;
+ -- M49 widened only the gate check to also accept named contracts; verify the exact
+ -- widened expression by restoring the predecessor text before the shape compare.
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=49 AND name='gate_contract_names') THEN
+  actual:=replace(actual,$m49new$~ '^([0-9a-f]{64}|forge-sdlc-jenkins-v[1-3]:(main|detached|branch/[a-z0-9]([a-z0-9._-]{0,56}[a-z0-9])?))$'::text$m49new$,$m49old$~ '^[0-9a-f]{64}$'::text$m49old$);
+ END IF;
  IF actual IS DISTINCT FROM expected_shape THEN RAISE EXCEPTION 'Superseding review table or guard drift';END IF;
  SELECT jsonb_build_array(pg_get_userbyid(p.proowner),p.prosecdef,p.proconfig,ARRAY(SELECT unnest(p.proacl::text[]) ORDER BY 1))::text INTO actual FROM pg_proc p WHERE p.oid=to_regprocedure('forge_agent.coding_review_supersession_guard()');
  IF actual IS DISTINCT FROM '["forge_agent_owner", false, ["search_path=pg_catalog, pg_temp"], ["forge_agent_owner=X/forge_agent_owner"]]' THEN RAISE EXCEPTION 'Superseding review guard authority drift';END IF;
