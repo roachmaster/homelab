@@ -52,3 +52,20 @@ archived separately in Muse's long-term storage as `forge-history-export/`
 - `archive/repair-main-verification-50f9892e.yaml` - Repair failing main verification 50f9892e03dac5318295bd886a32ea5770c46c9a.
 - `archive/repair-main-verification-06007c2a.yaml` - Repair failing main verification 06007c2a3450227a2216feb3ca8acc36f086dd9b.
 
+
+## Status after the PR 29 bottleneck check - 2026-11-25
+
+Checked against PR 29 (the backup/main consolidation) at Leonardo's
+direction. Each YAML carries a status_update_2026_11_25 field with detail.
+
+- Complete, do not resubmit: branch-cleanup.
+- Implemented in PR 29 source, pending qualification and rollout - file
+  only remaining gaps: agent-branch-setup, portal-correlation-stages.
+- Still to address: base-refresh-override, failure-cause,
+  agent-failure-output-discarded, attempt-deadline, review-cascade,
+  lease-mislabel, m27-pins, defect-flow, backlog-flow,
+  backlog-recipe-resolution, drive-snapshot-pipeline-stage, and the
+  proxy (candidate in review; cutover deferred to the backlog item).
+- Added by this check: workflow-recovery-revival (issues #24/#27),
+  manifest-return-loop, dispatch-digest-diagnosis.
+- Archive unchanged: the five stale-tip verification repairs.
