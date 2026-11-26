@@ -1,4 +1,4 @@
--- M41: Postgres proxy cutover. The proxy is now the only writer.
+-- M43: Postgres proxy cutover. The proxy is now the only writer.
 -- Revokes the muse_events mutating EXECUTE and the direct table
 -- writes for the caller roles and muse_events. Preserves SELECT,
 -- function EXECUTE, schema USAGE, and the muse_events read-only
@@ -13,7 +13,7 @@
 -- must still apply this migration, so the revokes are conditional
 -- on the role existing. The post-cutover verifiers fail loudly if
 -- muse_events later appears holding a mutating EXECUTE.
-DO $m41_muse_events$
+DO $m43_muse_events$
 BEGIN
  IF to_regrole('muse_events') IS NOT NULL THEN
   REVOKE EXECUTE ON FUNCTION forge_external_agent_api.advertise(text,text,text) FROM muse_events;
@@ -27,7 +27,7 @@ BEGIN
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_agent FROM muse_events;
  END IF;
 END
-$m41_muse_events$;
+$m43_muse_events$;
 
 -- Direct table writes revoked for the caller roles.
 -- SELECT, function EXECUTE, and schema USAGE are preserved.

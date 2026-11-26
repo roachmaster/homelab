@@ -12,7 +12,7 @@ from psycopg2.extras import Json, RealDictCursor, register_uuid
 
 from work_retry_policy import AGENT_RETRY_LIMIT
 from queue_store import Rejected
-from work_events import insert_event, require_actor, require_cancel_cause
+from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
     DEFAULT_MAX_PENDING,
@@ -1348,6 +1348,62 @@ class WorkStore:
             cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
             return receipt
 
+    def handoff_author(self, command, *, target_profile, recipe, workspace_digest, _authority):
+        """Change only future execution under the selected handoff authority.
+
+        The caller has locked and verified the stopped source and atomically
+        staged its delegation action. No public Resume or approval path can
+        supply this authority, and existing queued work keeps its workspace.
+        """
+        from work_agent_handoff import AuthorHandoff, BoundAuthorHandoffAuthority
+        if (not isinstance(command, AuthorHandoff)
+                or not isinstance(_authority, BoundAuthorHandoffAuthority)
+                or not isinstance(recipe, PinnedRecipe)
+                or target_profile != _authority.target_profile
+                or recipe.digest != _authority.recipe_digest
+                or workspace_digest != _authority.workspace_digest):
+            raise Rejected(403, "denied")
+        self._require_project(command.project_alias)
+        with self._transition_transaction(_authority) as cursor:
+            cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE (owner_id,project_alias,id)=(%s,%s,%s) FOR UPDATE",
+                (self.owner, command.project_alias, command.task_id))
+            task = cursor.fetchone()
+            if task is None:
+                raise Rejected(404, "not_found")
+            self._require_transition_authority(cursor, task, _authority, "author_handoff")
+            if (task["cancelled_at"] is not None or task["workflow_review_id"] is not None
+                    or recipe.mode != task["mode"] or recipe.backend != "codex"
+                    or recipe.generation_token_limit is not None
+                    or command.expected_revision >= MAX_REVISION):
+                raise Rejected(409, "not_reviewable")
+            if task["status"] == "quota_blocked":
+                cursor.execute("SELECT count(*) AS pending FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND status IN ('queued','running','cancel_requested')",
+                    (self.owner, command.project_alias))
+                if cursor.fetchone()["pending"] >= self._max_pending:
+                    raise Rejected(503, "queue_full")
+            elif task["resume_workspace_digest"] != workspace_digest:
+                raise Rejected(409, "reconcile_required")
+            cursor.execute("""
+                UPDATE forge_agent.coding_tasks SET status='queued',revision=revision+1,
+                  agent_profile=%s,pinned_recipe=%s,recipe_digest=%s,resume_workspace_digest=%s,
+                  updated_at=clock_timestamp()
+                WHERE (owner_id,project_alias,id,revision)=(%s,%s,%s,%s)
+                RETURNING revision
+            """, (target_profile, Json(recipe.to_dict()), recipe.digest, workspace_digest,
+                  self.owner, command.project_alias, command.task_id, command.expected_revision))
+            changed = cursor.fetchone()
+            if changed is None:
+                raise Rejected(409, "revision_conflict")
+            receipt = dict(project_alias=command.project_alias, task_id=str(command.task_id),
+                base_revision=command.expected_revision, revision=changed["revision"],
+                status="queued", recipe_digest=recipe.digest)
+            insert_event(cursor, self.owner, command.project_alias, command.task_id, "resumed",
+                dict(base_revision=command.expected_revision, revision=changed["revision"],
+                    agent_profile=target_profile, recipe_digest=recipe.digest,
+                    workspace_digest=workspace_digest, reason="provider_author_handoff"),
+                actor=COORDINATOR_ACTOR)
+            return receipt
+
     @contextmanager
     def _transition_transaction(self,authority=None):
         if authority is None:
@@ -1356,7 +1412,8 @@ class WorkStore:
             from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority
             from work_reviewer_correction import BoundReviewerCorrectionAuthority
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority)) or authority.store is not self:
+            from work_agent_handoff import BoundAuthorHandoffAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 
@@ -1405,6 +1462,11 @@ class WorkStore:
         w = rows[0] if rows else None
         if w is None:return None
         p=w["snapshot"]
+        cursor.execute("SELECT to_regprocedure('forge_agent.coding_workflow_author_handoff(uuid)') IS NOT NULL AS available")
+        if cursor.fetchone()['available']:
+            cursor.execute('SELECT forge_agent.coding_workflow_author_handoff(%s) AS handoff',(w['workflow_id'],))
+            handed=cursor.fetchone()['handoff']
+            if handed is not None:p=handed['intent']['effective_snapshot']
         limits={key:p[key] for key in ('max_plan_revisions','max_code_revisions')}
         rows = _read_query(cursor, "retry_policy_checkpoint",
                            {"owner_id": self._owner, "project_alias": w["project_alias"],

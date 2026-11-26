@@ -582,6 +582,10 @@ def profile_protected_gate_path(path, profile):
             'deploy/mission-control/agent-runner/work_provider_model_route.py',
             'deploy/mission-control/agent-runner/work_provider_cooldown.py',
             'deploy/mission-control/agent-runner/work_quota_diagnostics.py',
+            'deploy/mission-control/agent-runner/work_agent_handoff.py',
+            'deploy/mission-control/agent-runner/work_author_handoff_context.py',
+            'deploy/mission-control/agent-runner/work_peer_context.py',
+            'deploy/mission-control/agent-runner/work_review_context.py',
             'deploy/mission-control/agent-runner/work_external_recovery.py',
             'deploy/mission-control/agent-runner/work_external_plan_override.py',
             'deploy/mission-control/agent-runner/work_external_workflow.py',
@@ -589,12 +593,15 @@ def profile_protected_gate_path(path, profile):
             'deploy/mission-control/sql/management/verify-retry-events.sql',
             'deploy/mission-control/sql/management/verify-delivery-lineage.sql',
             'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
+            'deploy/mission-control/sql/management/verify-author-handoff.sql',
         } or path.startswith('deploy/mission-control/sql/migrations/0031_')
             or path.startswith('deploy/mission-control/sql/fragments/0031_')
             or path.startswith('deploy/mission-control/sql/migrations/0032_')
             or path.startswith('deploy/mission-control/sql/fragments/0032_')
             or path.startswith('deploy/mission-control/sql/migrations/0033_')
-            or path.startswith('deploy/mission-control/sql/fragments/0033_'))
+            or path.startswith('deploy/mission-control/sql/fragments/0033_')
+            or path.startswith('deploy/mission-control/sql/migrations/0040_')
+            or path.startswith('deploy/mission-control/sql/fragments/0040_'))
         or profile in {SCOPED_PROFILE,EVENT_PROFILE} and path in V2_PROTECTED_PATHS)
 
 

@@ -1,4 +1,45 @@
-# Current: Stabilize the event stream and measure bottlenecks — 2026-11-25
+# Current: Durable AGY-to-Codex quota handoff — 2026-11-26
+
+The user authorizes adding an automatic handoff to Codex when AGY quota blocks
+work. Root owns integration, typed handoff/transition ports, qualification and
+delivery. Separate writers own catalog configuration, additive SQL delegation,
+and immutable peer-feedback compatibility. Each uses an isolated worktree.
+
+Start from verified main f43a4cc6. Keep original workflow snapshots, approved
+Plans, stopped-source receipts, task/workspace identity, feedback and per-event
+retry counters. A completed, source-bound delegation action selects the future
+Codex author while the original reviewer remains independent. The Codex author
+profile is distinct from the reviewer profile; reviewer sessions remain fresh.
+Never reuse an AGY conversation in Codex, grant approval through a handoff,
+manufacture CI, reset budgets, invoke paid-credit fallbacks or poll account APIs.
+
+Cover both published quota-stopped authors and unleased queued work with a
+genuine unresolved quota source for its selected AGY model. Serialize handoff
+against claim/cancellation, require fresh selected Codex/reviewer readiness, and
+commit delegation, task recipe and checkpoint atomically. Retain normal peer
+review, exact-source Jenkins and automatic merge. New configuration is optional;
+unconfigured workflows retain their existing behavior.
+
+Live activation requires matched schema, scoped grants, sealed runtime/config
+and clean worker ownership; source publication alone is not activation proof.
+Record actual test, publication, recovery and running-source evidence separately.
+
+Candidate checkpoint: thirty actual handoff tests and six historical controls
+passed, including M32 upgrades, original 49-character review escalation, Opus
+continuation, queued Plan revisions, partial repairs, twenty-per-event deadline
+and Codex quota boundaries. Three delegated-author recovery regressions failed
+before the correction and passed afterward. M40's nine schema tests include a
+deterministic claim-cursor race that fails on M39 and passes on M40.
+
+The first full local gate stopped on historical source-hash assertions, not a
+handoff behavior failure. The explicit M40 qualification overlay preserves all
+34 historical maps and all 39 predecessor migration files. Forty-seven combined
+boundary/parity/CI-contract checks passed against the finalized source. The
+normal observed-main Jenkins run must now establish the complete final-source
+backend/browser/native gate before runtime activation. Private operation drafts
+remain inactive until that protected receipt exists.
+
+# Previous: Stabilize the event stream and measure bottlenecks — 2026-11-25
 
 User requests fixing the live event stream and identifying its bottlenecks and
 errors. Root owns integration, scoped operational recovery, final qualification

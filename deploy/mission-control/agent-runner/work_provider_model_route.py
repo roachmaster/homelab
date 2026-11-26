@@ -99,10 +99,16 @@ class BoundProviderModelAuthority:
 
 class ExecutionPolicyProvider:
     """Ready DB application port; original snapshot is never mutated or replaced."""
-    def __init__(self,flow):self.flow=flow
+    def __init__(self,flow,*,author_handoff_factory=None):
+        from work_agent_handoff import AgentHandoffFactory
+        self.flow=flow
+        self.author_handoff=(author_handoff_factory or AgentHandoffFactory)(flow,self.model_snapshot).create()
+        if not all(callable(getattr(self.author_handoff,name,None))for name in('effective','run_once','handles_quota')):
+            raise TypeError('Expected ready author-handoff provider')
     def handles_quota(self,workflow,task):
+        if self.author_handoff.handles_quota(workflow,task):return True
         profile=self.flow.catalog.profile(task['agent_profile'])
-        return bool(profile and profile.backend=='antigravity' and profile.backup_models
+        return bool(profile and profile.backend=='antigravity' and (profile.backup_models or profile.quota_handoff_profile)
             and task['agent_profile']==workflow['snapshot']['author_profile'] and task['mode']in{'plan','implement'}
             and task['workflow_review_id']is None and task.get('attempt_outcome')=='quota_blocked'
             and parse_quota_summary(task.get('attempt_summary'))is not None)
@@ -110,7 +116,7 @@ class ExecutionPolicyProvider:
         """React only to actual published quota outcomes; never probe an account."""
         flow=self.flow
         with flow.store._transaction(read_only=True)as cursor:
-            cursor.execute("SELECT t.id,t.project_alias,t.latest_attempt_id,t.revision,t.agent_profile,t.pinned_recipe->>'model' AS model, "
+            cursor.execute("SELECT t.id,t.project_alias,t.workflow_id,t.latest_attempt_id,t.revision,t.agent_profile,t.pinned_recipe->>'model' AS model, "
                 "r.receipt_id FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w "
                 "ON(w.owner_id,w.project_alias,w.workflow_id)=(t.owner_id,t.project_alias,t.workflow_id) "
                 "JOIN LATERAL(SELECT receipt_id FROM forge_agent.coding_reconciliation_receipts r "
@@ -123,6 +129,14 @@ class ExecutionPolicyProvider:
             rows=cursor.fetchall()
         for row in rows:
             profile=flow.catalog.profile(row['agent_profile'])
+            targets={p.quota_handoff_profile for p in flow.config.profiles.values() if p.quota_handoff_profile}
+            if profile is not None and profile.backend=='codex' and row['agent_profile'] in targets:
+                command=ModelRoute(row['project_alias'],row['id'],row['latest_attempt_id'],row['revision'],row['receipt_id'],
+                    row['model'],'provider-quota-'+str(row['latest_attempt_id']),'Continue the same delegated Codex author after a bounded quota wait.')
+                try:self._wait_or_resume(command,author_handoff=True)
+                except Rejected as error:
+                    if error.status not in (403,409,503):raise
+                continue
             if profile is None or not profile.backup_models:continue
             model=profile.backup_models[0]
             command=ModelRoute(row['project_alias'],row['id'],row['latest_attempt_id'],row['revision'],row['receipt_id'],
@@ -133,7 +147,8 @@ class ExecutionPolicyProvider:
                 elif row['model']==model:self._wait_or_resume(command)
             except Rejected as error:
                 if error.status not in (403,409,503):raise
-    def _wait_or_resume(self,command):
+        self.author_handoff.run_once()
+    def _wait_or_resume(self,command,*,author_handoff=False):
         """A backup cannot trigger another model route; wait for its reported reset."""
         from work_workflow import recipe_from_snapshot,_ready_for_recipe
         flow=self.flow;store=flow.store
@@ -148,6 +163,8 @@ class ExecutionPolicyProvider:
             if(not w or not w['enabled'] or w['phase']not in {'plan','plan_revision','implement','repair'}):raise Rejected(409,'not_reviewable')
             flow._current_policy(w);p=self.effective(w,cursor=cursor)
             recipe=recipe_from_snapshot(p,'author_'+task['mode'])
+            if author_handoff and (recipe.backend!='codex' or p['author_profile']==w['snapshot']['author_profile']):
+                raise Rejected(403,'denied')
             if(task['agent_profile']!=p['author_profile']or recipe.model!=command.model or task['pinned_recipe']!=recipe.to_dict()):raise Rejected(409,'result_mismatch')
             cursor.execute("SELECT 1 FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s "
                 "AND mode IN('plan','implement') AND id<>%s AND created_at>%s LIMIT 1",
@@ -158,13 +175,18 @@ class ExecutionPolicyProvider:
             cursor.execute('SELECT * FROM forge_agent.coding_reconciliation_receipts WHERE(owner_id,project_alias,task_id,attempt_id,receipt_id)=(%s,%s,%s,%s,%s)',
                 (store.owner,command.project_alias,task['id'],command.attempt_id,command.reconciliation_receipt_id));rec=cursor.fetchone()
             diagnostic=parse_quota_summary(attempt['summary'])if attempt else None
+            if diagnostic is None and author_handoff and attempt and attempt['outcome']=='quota_blocked':
+                diagnostic=dict(version=1,code='provider_quota_exhausted',
+                    error_sha256=hashlib.sha256((attempt['summary'] or '').encode()).hexdigest(),retry_after_seconds=None)
             if(not attempt or not rec or not diagnostic or rec['task_revision']!=task['revision']
                 or attempt['outcome']!='quota_blocked' or not attempt['published_at']or attempt['phase']!='stopped'
                 or attempt['reservation_active']or attempt['lease_expires_at']is not None or attempt['result_sha256']is not None
                 or attempt['recipe_digest']!=recipe.digest or rec['stop_proof'].get('scope_stopped')is not True
                 or rec['stop_proof'].get('unit_name')!=attempt['unit_name']or rec['stop_proof'].get('source')!='systemd'):
                 raise Rejected(409,'reconcile_required')
-            delay=diagnostic['retry_after_seconds'];ready_at=attempt['finished_at']+timedelta(seconds=delay)if delay else None
+            delay=diagnostic['retry_after_seconds']
+            retry_delay=delay or (900 if author_handoff else None)
+            ready_at=attempt['finished_at']+timedelta(seconds=retry_delay)if retry_delay else None
             cursor.execute("SELECT a.attempt_id FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t "
                 "ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) "
                 "WHERE t.owner_id=%s AND t.project_alias=%s AND t.workflow_id=%s AND a.agent_profile=%s "
@@ -182,6 +204,8 @@ class ExecutionPolicyProvider:
                 model=recipe.model,diagnostic=diagnostic,ready_at=ready_at.isoformat()if ready_at else None,
                 reconciliation_receipt_id=str(command.reconciliation_receipt_id),episode_id=episode,
                 reset_resumes_used=used,reset_resume_limit=20)
+            if author_handoff:
+                intent['wait_source']='provider_reported_reset' if delay else 'local_quota_retry_backoff'
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) "
                 "VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s) ON CONFLICT DO NOTHING RETURNING action_id",
                 (w['workflow_id'],store.owner,command.project_alias,wait_key,Json(intent),Json(dict(status='provider_quota_wait',approval_granted=False))))
@@ -200,7 +224,8 @@ class ExecutionPolicyProvider:
             authority=BoundProviderModelAuthority(store,cursor,w['workflow_id'],task['id'],command.attempt_id,task['revision'],_ADMISSION)
             receipt=store.resume(project_alias=command.project_alias,task_id=command.task_id,expected_revision=command.expected_revision,
                 idempotency_key='provider-reset-'+str(command.attempt_id),agent_profile=p['author_profile'],reconciliation_receipt_id=command.reconciliation_receipt_id,
-                note='The same AGY backup reported its quota reset; continue the unchanged approved task and Plan.',allowed_modes={'plan','implement'},
+                note=('Continue the same delegated Codex author after the recorded quota wait; provider reset is not assumed.' if author_handoff
+                    else 'The same AGY backup reported its quota reset; continue the unchanged approved task and Plan.'),allowed_modes={'plan','implement'},
                 resolve_recipe=lambda _:recipe,_authority=authority,actor=COORDINATOR_ACTOR)
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt)VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
                 (w['workflow_id'],store.owner,command.project_alias,'provider-quota-resume:'+str(command.attempt_id),Json(intent),Json(dict(status='provider_quota_resumed',receipt=receipt))))
@@ -208,6 +233,10 @@ class ExecutionPolicyProvider:
         if cursor is None:
             with self.flow.store._transaction(read_only=True) as current:
                 return self.effective(workflow,cursor=current)
+        source=self.model_snapshot(workflow,cursor=cursor)
+        return self.author_handoff.effective(workflow,source,cursor=cursor)
+
+    def model_snapshot(self,workflow,*,cursor):
         cursor.execute("SELECT source_key,intent,finish_receipt FROM forge_agent.coding_workflow_actions "
             "WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s AND kind='decide' "
             "AND status='completed' AND source_key LIKE 'provider-model-route:%%' ORDER BY created_at,action_id LIMIT 2",
@@ -231,8 +260,9 @@ class ExecutionPolicyProvider:
 
 
 class ExecutionPolicyFactory:
-    def __init__(self,flow):self.flow=flow
-    def create(self):return ExecutionPolicyProvider(self.flow)
+    def __init__(self,flow,*,author_handoff_factory=None):
+        self.flow,self.author_handoff_factory=flow,author_handoff_factory
+    def create(self):return ExecutionPolicyProvider(self.flow,author_handoff_factory=self.author_handoff_factory)
 
 
 class ProviderModelRouteRecovery:

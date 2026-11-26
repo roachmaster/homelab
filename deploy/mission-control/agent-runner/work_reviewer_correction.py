@@ -81,7 +81,7 @@ class ReviewerCorrectionProvider:
     def _source(self, cursor, w, peer, source, critic, result, error):
         """Every binding is rechecked before an authority can be constructed."""
         from work_workflow import recipe_from_snapshot
-        p = w['snapshot']
+        p = self.flow._snapshot(w)
         recipe = recipe_from_snapshot(p, 'reviewer_review')
         author_recipe = recipe_from_snapshot(p, 'author_implement')
         if (not isinstance(error, IncompleteApprovalError) or peer['target_kind'] != 'code'

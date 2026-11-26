@@ -331,7 +331,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 39)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 40)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -470,7 +470,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 39)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 40)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -530,7 +530,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 39)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 40)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -590,7 +590,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 39)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 40)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -931,7 +931,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.cluster.admin_exec(drift)
                 result = self.cluster.run_sql_script(script)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("Unattended AGY function drift: forge_coding_worker_api.claim", result.stderr)
+                self.assertIn("Author handoff function drift: forge_coding_worker_api.claim(text,uuid,text[])", result.stderr)
             finally:
                 self.cluster.admin_exec(function)
         self.cluster.apply_and_verify()
@@ -971,7 +971,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
     def test_fresh_reapply_roles_and_untrusted_event_storage_have_no_coding_effect(self):
         self.cluster.apply_and_verify()
         self.event()
-        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(39,)])
+        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(40,)])
         self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_hosted_checks"), [(0,)])
         self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_workflow_actions"), [(0,)])
         for role in ("forge_gpu_worker", "forge_coding_worker", "forge_coding_reconciler"):
@@ -1102,12 +1102,19 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                                      'forge_coding_worker_api.report_progress(uuid,uuid,integer,text,text)',
                                  }]
                 def snapshot():
-                    # M31 pins the complete replacement definitions separately;
-                    # reverse only its exact known native source amendments when
-                    # comparing this M26 historical function inventory.
+                    # Validate the complete M40 replacement before reversing its
+                    # exact known amendments. M31's strict historical normalizer
+                    # then receives the predecessor body it actually qualifies.
+                    # Neither normalization admits arbitrary function drift.
+                    normalized_source="p.prosrc"
+                    if self.execute("SELECT to_regprocedure('forge_agent._coding_author_handoff_legacy_source(oid,text)') IS NOT NULL",cluster=cluster)[0][0]:
+                        verified=cluster.run_sql_script(SQL_DIR/"management/verify-author-handoff.sql")
+                        self.assertEqual(verified.returncode,0,verified.stdout+verified.stderr)
+                        normalized_source="forge_agent._coding_author_handoff_legacy_source(p.oid,p.prosrc)"
                     definition="pg_get_functiondef(p.oid)"
                     if self.execute("SELECT to_regprocedure('forge_agent._retry_legacy_source(oid,text)') IS NOT NULL",cluster=cluster)[0][0]:
-                        definition="replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._retry_legacy_source(p.oid,p.prosrc))"
+                        normalized_source="forge_agent._retry_legacy_source(p.oid,"+normalized_source+")"
+                        definition="replace(pg_get_functiondef(p.oid),p.prosrc,"+normalized_source+")"
                     return (
                         self.execute("SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=26 ORDER BY version", cluster=cluster),
                         {table:self.execute("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM forge_agent."+table+" t", cluster=cluster) for table in previous_tables},
@@ -1125,7 +1132,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 for table in ("jenkins_events", "jenkins_event_deliveries", "jenkins_observations"):
                     self.assertEqual(self.execute("SELECT has_table_privilege('muse_events',%s,'SELECT'),has_table_privilege('muse_events',%s,'INSERT,UPDATE,DELETE')",
                         ("forge_agent."+table,"forge_agent."+table),cluster=cluster), [(True, False)])
-                self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(39,)])
+                self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(40,)])
             finally: cluster.stop()
 
 

@@ -541,7 +541,16 @@ class WorkflowStore:
     def _recover_native_timeouts(self):
         """Existing durable-event scan retries only reconciled deadline stops."""
         with self.store._transaction(read_only=True) as cursor:
-            candidates = _read_query(cursor, "sweep_needs_reconcile",
+            # An allowed historical escalation is still recoverable. The active
+            # role helper returns NULL for that phase; the verified handoff
+            # receipt retains the selected author without rewriting authority.
+            # Probe for the handoff function before running the scan so older
+            # schemas never parse a statement referencing a function they do
+            # not contain: the probe selects the named read variant.
+            probe = _read_query(cursor, "author_handoff_available", {})
+            sweep = ("sweep_needs_reconcile_handoff" if probe[0]["available"]
+                     else "sweep_needs_reconcile")
+            candidates = _read_query(cursor, sweep,
                                      {"owner_id": self.store.owner,
                                       "project_aliases": list(self.store.allowed_projects),
                                       "policy_digests": [x[0] for x in NATIVE_POLICIES.values()],

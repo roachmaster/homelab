@@ -153,7 +153,7 @@ PY
 # carried by the shared queue_store.connect() selection like the
 # migrated coordinator reads.
 UNMIGRATED_CALLERS=(
-    'WorkStore decide/control endpoints (work_store.py: plan_decide, review_decide, accept, resume, repair, publication_retry, _control_task)'
+    'WorkStore decide/control endpoints (work_store.py: plan_decide, review_decide, accept, resume, repair, publication_retry, _control_task, handoff_author, _workflow_projection)'
     'coordinator workflow engine (work_workflow.py: process, validate, _apply_verdict, _escalate, _cancel_workflow, retry_peer_verdict, retry_preparation, retry_native_timeout, defer_source_readiness, _admit_reviewer, _code_review_source, _verify_peer_recovery_source)'
     'owner control flows (work_owner_control.py: resume, review_decide; work_owner_reverification.py: recover)'
     'queue_store locked run/workspace paths (queue_store.py: _lock_owned_run, restore_workspace, _workspace_history, _workspace_tab, _workspace_history_marker, _seed_workspace_history, listen)'

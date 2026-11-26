@@ -153,7 +153,7 @@ class SupersedingReviewProvider:
     def _validated(self, cursor, w, peer, source, critic, result, *, legacy):
         from work_workflow import recipe_from_snapshot, _ready_for_recipe, NATIVE_POLICIES
         self.flow._current_policy(w)
-        p = w['snapshot']
+        p = self.flow._snapshot(w)
         if any(not self.flow.config.profiles[profile].execution_enabled
                 for profile in (p['author_profile'], p['reviewer_profile'])):
             raise Rejected(403, 'denied')

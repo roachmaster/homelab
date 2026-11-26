@@ -552,8 +552,11 @@ class ProxyReadTest(unittest.TestCase):
         # Structural guard: every named read declares exactly the
         # parameters its SQL uses, and (except the two GPU readiness
         # queries — gpu_worker_readiness has no owner column, it is
-        # global worker state) one of them is owner-scoped.
-        exceptions = {"gpu_ready_models", "gpu_worker_ready"}
+        # global worker state — and the author-handoff capability
+        # probe, which reads only the schema catalog and returns no
+        # table data) one of them is owner-scoped.
+        exceptions = {"gpu_ready_models", "gpu_worker_ready",
+                      "author_handoff_available"}
         for name, (sql, params) in proxy.READ_QUERIES.items():
             declared = {param[0] for param in params}
             used = set(re.findall(r"%\(([a-z0-9_]+)\)s", sql))
@@ -1252,7 +1255,8 @@ class ProxyMigrationGuardTest(unittest.TestCase):
 
     UNMIGRATED = {
         "work_store.py": {
-            "_control_task", "accept", "plan_decide",
+            "_control_task", "_workflow_projection", "accept",
+            "handoff_author", "plan_decide",
             "publication_retry", "repair", "resume", "review_decide"},
         "work_workflow.py": {
             "_admit_reviewer", "_apply_verdict", "_cancel_workflow",

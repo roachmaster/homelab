@@ -10,6 +10,7 @@ from work_feedback import parse_feedback_json
 from work_context_recovery_contract import POLICY, RECOVERY_SUMMARY, LEGACY_SUMMARY, make_recovery_note
 from work_retry_policy import AGENT_RETRY_LIMIT
 from work_events import CONTEXT_RECOVERY_ACTOR, insert_event
+from work_author_handoff_context import parse_author_handoff
 
 MAX_RECOVERIES = AGENT_RETRY_LIMIT
 BACKOFF_SECONDS = 60
@@ -33,6 +34,32 @@ class FeedbackRecovery:
         return (review['verification'].get('checks_passed') is False
             and review['verification'].get('integration_base') == feedback['integration_base']
             and isinstance(review['verification'].get('delivery_failure', {}).get('build'), dict))
+
+    def _handoff_feedback(self, cursor, w, task, attempt, *, kind):
+        """Acquire database-verified provenance, never synthesize an override.
+
+        The caller has already verified the effective workflow and exact stopped
+        source. Older schemas and ordinary workflows never call the M40 port.
+        """
+        if self.flow._snapshot(w)['author_profile'] == w['snapshot']['author_profile']:
+            return None
+        cursor.execute('SELECT forge_agent.coding_workflow_author_feedback(%s,%s) AS proof',
+            (attempt['attempt_id'], kind))
+        row = cursor.fetchone()
+        return row['proof'] if row else None
+
+    def _handoff_lease(self, cursor, task, attempt):
+        """Reconstruct the stopped lease from source rows, including its parent."""
+        cursor.execute('SELECT attempt_id FROM forge_agent.coding_attempts WHERE '
+            '(owner_id,project_alias,task_id,attempt_no)=(%s,%s,%s,%s)',
+            (self.store.owner, task['project_alias'], task['id'], attempt['attempt_no'] - 1))
+        previous = cursor.fetchone()
+        lease = {name: str(attempt[name]) if attempt[name] is not None else None for name in
+            ('task_id', 'attempt_id', 'workflow_id', 'feedback_id', 'feedback_sha256',
+             'workflow_feedback_review_id', 'workflow_feedback_sha256', 'resume_workspace_digest')}
+        lease.update(agent_profile=task['agent_profile'],
+            resume_attempt_id=str(previous['attempt_id']) if previous else None)
+        return lease
 
     def retry(self, *, project_alias, task_id, expected_revision, reconciliation_receipt_id,
               idempotency_key):
@@ -79,7 +106,7 @@ class FeedbackRecovery:
                     or (w['phase'] != 'escalated' and not w['enabled'])):
                 raise Rejected(409, 'not_reviewable')
             self.flow._current_policy(w)
-            p = w['snapshot']
+            p = self.flow._snapshot(w)
             recipe = recipe_from_snapshot(p, 'author_implement')
             if any(profile not in self.flow.config.profiles or not self.flow.config.profiles[profile].execution_enabled
                     for profile in (p['author_profile'], p['reviewer_profile'])):
@@ -130,13 +157,22 @@ class FeedbackRecovery:
             cursor.execute('SELECT * FROM forge_agent.coding_feedback WHERE feedback_id=%s AND owner_id=%s AND project_alias=%s AND task_id=%s',
                 (task['feedback_id'], self.store.owner, project_alias, task_id))
             packet = cursor.fetchone()
+            handoff = None
             try:
                 feedback = parse_feedback_json(packet['feedback_json'], task['feedback_sha256'])
+                if feedback['agent_profile'] != task['agent_profile']:
+                    raw_handoff = self._handoff_feedback(cursor, w, task, attempt, kind='build')
+                    handoff = parse_author_handoff(raw_handoff, self._handoff_lease(cursor, task, attempt),
+                        feedback['agent_profile'], kind='build')
+                    if (handoff.parent_attempt_id != feedback['parent_attempt_id']
+                            or handoff.feedback_workspace_digest != feedback['workspace_digest']
+                            or handoff.resume_workspace_digest != rec['workspace_digest']):
+                        raise ValueError('Feedback handoff source mismatch')
                 valid_packet = (packet['feedback_sha256'] == task['feedback_sha256']
                     and feedback['workspace_digest_kind'] == 'native_receipt' and feedback['disposition'] == 'repair'
                     and feedback['feedback_id'] == str(task['feedback_id']) and feedback['task_id'] == str(task_id)
-                    and feedback['agent_profile'] == task['agent_profile']
-                    and feedback['workspace_digest'] == rec['workspace_digest']
+                    and (feedback['agent_profile'] == task['agent_profile'] or handoff is not None)
+                    and (feedback['workspace_digest'] == rec['workspace_digest'] or handoff is not None)
                     and feedback['plan_decision_id'] == str(task['plan_decision_id'] or task['scope_plan_decision_id'])
                     and feedback['integration_base'] == task['base_revision'])
             except (ValueError, TypeError, KeyError, AttributeError):
@@ -156,7 +192,7 @@ class FeedbackRecovery:
                     or review['scope_plan_decision_id'] != task['scope_plan_decision_id']
                     or review['candidate_commit'] != feedback['candidate_commit']
                     or review['gate_manifest_sha256'] != feedback['gate_manifest_sha256']
-                    or review['workspace_digest'] != rec['workspace_digest']
+                    or review['workspace_digest'] != (handoff.feedback_workspace_digest if handoff else rec['workspace_digest'])
                     or review['verification'].get('cleanup_confirmed') is not True
                     or not self._validate_failure_context(cursor, w, task, attempt, rec,
                         feedback, packet, review, source)):

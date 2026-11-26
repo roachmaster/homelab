@@ -1,0 +1,32 @@
+{
+  "owner": "mission-control",
+  "allowed_projects": ["homelab"],
+  "allowed_modes": ["plan", "implement", "review"],
+  "profiles": {
+    "agy-primary": {
+      "backend": "antigravity",
+      "model": "Gemini 4 Neon (High)",
+      "resource_profile": "forge-coding-agy-unattended-v1",
+      "backup_models": ["claude-opus-5-5-high"],
+      "quota_handoff_profile": "codex-author"
+    },
+    "codex-author": {
+      "backend": "codex",
+      "model": "gpt-6.1-sol",
+      "resource_profile": "forge-coding-v10",
+      "label": "Codex author"
+    },
+    "codex-primary": {
+      "backend": "codex",
+      "model": "gpt-6.1-sol",
+      "resource_profile": "forge-coding-v10",
+      "label": "Independent Codex reviewer"
+    }
+  },
+  "project_workflows": {
+    "homelab": {
+      "author_profile": "agy-primary",
+      "reviewer_profile": "codex-primary"
+    }
+  }
+}

@@ -74,6 +74,8 @@ publish "$directory/work_retry_continuation.py" "$target/work_retry_continuation
 publish "$directory/work_quota_diagnostics.py" "$target/work_quota_diagnostics.py"
 publish "$directory/work_provider_model_route.py" "$target/work_provider_model_route.py"
 publish "$directory/work_provider_cooldown.py" "$target/work_provider_cooldown.py"
+publish "$directory/work_agent_handoff.py" "$target/work_agent_handoff.py"
+publish "$directory/work_author_handoff_context.py" "$target/work_author_handoff_context.py"
 publish "$directory/work_config.py" "$target/work_config.py"
 publish "$directory/work_external_policy.py" "$target/work_external_policy.py"
 publish "$directory/work_external.py" "$target/work_external.py"

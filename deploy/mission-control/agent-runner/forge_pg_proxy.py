@@ -1365,6 +1365,63 @@ READ_QUERIES = {
         [("owner_id", "text", True), ("project_aliases", "text[]", True),
          ("policy_digests", "text[]", True),
          ("allow_any_retry", "boolean", True)]),
+    # work_workflow: schema capability probe for the provider author
+    # handoff function (migration 0040). Reads only the catalog and
+    # returns no table data, so it declares no owner parameter; the
+    # caller uses it to select the sweep variant a schema can parse.
+    "author_handoff_available": (
+        "SELECT to_regprocedure("
+        "'forge_agent.coding_workflow_author_handoff(uuid)') "
+        "IS NOT NULL AS available",
+        []),
+    # work_workflow: sweep_needs_reconcile on a schema carrying the
+    # author handoff function: the verified handoff receipt's target
+    # profile supersedes the snapshot author without rewriting it.
+    "sweep_needs_reconcile_handoff": (
+        "SELECT t.project_alias, t.id, t.revision, r.receipt_id, "
+        "a.attempt_id FROM forge_agent.coding_tasks t "
+        "JOIN forge_agent.coding_workflows w "
+        "ON (w.owner_id, w.project_alias, w.workflow_id) = "
+        "(t.owner_id, t.project_alias, t.workflow_id) "
+        "JOIN forge_agent.coding_attempts a "
+        "ON (a.owner_id, a.project_alias, a.task_id, a.attempt_id) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id) "
+        "JOIN forge_agent.coding_reconciliation_receipts r "
+        "ON (r.owner_id, r.project_alias, r.task_id, r.attempt_id, "
+        "r.task_revision) = "
+        "(t.owner_id, t.project_alias, t.id, t.latest_attempt_id, t.revision) "
+        "WHERE t.owner_id = %(owner_id)s "
+        "AND t.project_alias = ANY(%(project_aliases)s) "
+        "AND t.workflow_required AND t.mode = 'implement' "
+        "AND t.status IN ('needs_reconcile', 'failed') "
+        "AND w.phase IN ('implement', 'repair', 'escalated') "
+        "AND (w.enabled OR w.phase = 'escalated') "
+        "AND (w.phase <> 'escalated' OR w.escalation_reason IN "
+        "('Agent stopped: needs_reconcile', 'Agent stopped: failed')) "
+        "AND t.cancelled_at IS NULL AND t.workflow_review_id IS NULL "
+        "AND a.result_sha256 IS NULL AND a.phase = 'stopped' "
+        "AND NOT a.reservation_active AND a.lease_expires_at IS NULL "
+        "AND a.finished_at >= a.deadline_at "
+        "AND r.created_at >= a.deadline_at "
+        "AND a.pinned_recipe->>'policy_digest' = ANY(%(policy_digests)s) "
+        "AND t.agent_profile = coalesce(forge_agent.coding_workflow_author_handoff(w.workflow_id)->'intent'->>'target_profile', w.snapshot->>'author_profile') "
+        "AND EXISTS (SELECT 1 FROM forge_agent.coding_events e "
+        "WHERE (e.owner_id, e.project_alias, e.task_id) = "
+        "(t.owner_id, t.project_alias, t.id) "
+        "AND e.event_kind = 'needs_reconcile' "
+        "AND e.payload->>'attempt_id' = a.attempt_id::text "
+        "AND e.payload->>'reason' IN "
+        "('deadline_exceeded', 'stopped_without_publication') "
+        "AND e.created_at >= a.deadline_at) "
+        "AND NOT EXISTS (SELECT 1 FROM forge_agent.coding_workflow_actions x "
+        "WHERE x.workflow_id = w.workflow_id AND x.kind = 'decide' "
+        "AND (x.source_key = 'native-deadline-retry:' || a.attempt_id::text "
+        "OR (%(allow_any_retry)s AND "
+        "x.source_key LIKE 'native-deadline-retry:%%'))) "
+        "ORDER BY r.created_at DESC LIMIT 64",
+        [("owner_id", "text", True), ("project_aliases", "text[]", True),
+         ("policy_digests", "text[]", True),
+         ("allow_any_retry", "boolean", True)]),
     # work_workflow: escalated code reviews awaiting a peer verdict.
     "sweep_escalated_reviews": (
         "SELECT r.workflow_review_id, r.target_sha256, r.source_revision, "
@@ -1511,7 +1568,7 @@ CALLER_ALLOWLISTS = {
         },
         "op": {"coding_task_insert", "coding_task_update", "coding_workflow_insert", "coding_workflow_update", "coding_workflow_review_insert", "coding_workflow_review_update", "coding_workflow_action_insert", "coding_workflow_action_update", "coding_event_insert", "coding_control_receipt_insert", "coding_review_insert", "coding_review_insert_copy", "coding_review_update", "coding_plan_decision_insert", "coding_review_policy_upsert", "coding_review_budget_insert", "coding_worker_grant_insert", "coding_usage_refresh_request_insert", "ide_conversation_insert", "ide_conversation_delete", "ide_run_insert", "ide_run_update", "ide_run_delete", "ide_message_insert", "ide_tool_call_insert", "ide_tool_call_update", "ide_tool_call_update_by_run", "ide_tool_result_insert", "ide_run_event_insert", "ide_workspace_tab_insert", "ide_workspace_tab_update", "ide_workspace_tab_delete", "ide_workspace_history_insert", "ide_workspace_history_update", "ide_chat_insert", "ide_chat_update", "mail_thread_insert", "mail_thread_update", "mail_message_insert", "jenkins_event_insert", "jenkins_event_delivery_insert", "jenkins_event_delivery_update", "jenkins_observation_insert", "inference_result_delete", "ext_workflow_insert", "ext_workflow_update", "ext_task_insert", "ext_context_insert", "ext_review_insert", "ext_review_update", "ext_action_insert", "ext_action_update", "ext_plan_approve_override_insert", "ext_workflow_cancel", "coding_workflow_cancel", "workflow_action_lease", "ide_run_admit", "ide_run_claim_next", "ide_tool_started", "ide_tool_finished", "ide_interrupt_conversation_runs", "ide_tool_calls_mark_outcome_unknown", "ide_run_cancel", "workflow_retry_allowance_amend"},
         "read": "*",
-        "readq": {"action_source_count", "attempt_reservation", "attempt_result_content", "attempts_leased", "blocked_witnessed", "coding_events_after", "deadline_retry_actions", "deadline_retry_count", "gpu_ready_models", "gpu_worker_ready", "ide_chat_source", "ide_chats_visible", "ide_tabs_beyond_offset", "inference_ready_runs", "jenkins_next_sequence", "mail_page", "mail_thread_messages", "max_infrastructure_retries", "max_review_no", "merge_commit_by_project", "merge_head", "message_totals", "needs_reconcile_witnessed", "publication_required_green", "published_with_green", "recent_completed_transcripts", "result_chunks_page", "resume_receipt", "retry_policy_checkpoint", "review_root_tasks", "review_with_max_rounds", "run_chat_mail", "run_detail", "run_events_after", "run_fingerprint_by_conversation", "run_fingerprint_by_mail", "run_has_chat_or_mail", "run_last_error", "run_mail_source", "run_messages_with_source_prompt", "run_queue_totals", "sibling_failure", "stale_distributed_runs", "sweep_escalated_reviews", "sweep_handoff_reviews", "sweep_needs_reconcile", "sweep_orphan_tasks", "sweep_publication_failures", "sweep_retry_policy_workflows", "task_receipt_by_idempotency", "task_root", "tasks_page", "tasks_with_attempts", "usage_refresh_pending", "verification_retries_sum", "worker_readiness_catalog", "worker_readiness_fresh", "workflow_action_by_receipt_review", "workflow_actions_by_source_or_policy", "workflow_actions_by_source_or_policy_exists", "workflow_actions_by_source_or_policy_request", "workflow_busy", "workflow_root_task", "workflow_with_budget", "workflows_open", "writer_active"},
+        "readq": {"action_source_count", "attempt_reservation", "attempt_result_content", "attempts_leased", "blocked_witnessed", "coding_events_after", "deadline_retry_actions", "deadline_retry_count", "gpu_ready_models", "gpu_worker_ready", "ide_chat_source", "ide_chats_visible", "ide_tabs_beyond_offset", "inference_ready_runs", "jenkins_next_sequence", "mail_page", "mail_thread_messages", "max_infrastructure_retries", "max_review_no", "merge_commit_by_project", "merge_head", "message_totals", "needs_reconcile_witnessed", "publication_required_green", "published_with_green", "recent_completed_transcripts", "result_chunks_page", "resume_receipt", "retry_policy_checkpoint", "review_root_tasks", "review_with_max_rounds", "run_chat_mail", "run_detail", "run_events_after", "run_fingerprint_by_conversation", "run_fingerprint_by_mail", "run_has_chat_or_mail", "run_last_error", "run_mail_source", "run_messages_with_source_prompt", "run_queue_totals", "sibling_failure", "stale_distributed_runs", "sweep_escalated_reviews", "sweep_handoff_reviews", "author_handoff_available", "sweep_needs_reconcile", "sweep_needs_reconcile_handoff", "sweep_orphan_tasks", "sweep_publication_failures", "sweep_retry_policy_workflows", "task_receipt_by_idempotency", "task_root", "tasks_page", "tasks_with_attempts", "usage_refresh_pending", "verification_retries_sum", "worker_readiness_catalog", "worker_readiness_fresh", "workflow_action_by_receipt_review", "workflow_actions_by_source_or_policy", "workflow_actions_by_source_or_policy_exists", "workflow_actions_by_source_or_policy_request", "workflow_busy", "workflow_root_task", "workflow_with_budget", "workflows_open", "writer_active"},
         "notify": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_external_delivery", "forge_jenkins_events", "forge_coding_usage_refresh"},
         "subscribe": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_agent_results", "forge_jenkins_events"},
     },
