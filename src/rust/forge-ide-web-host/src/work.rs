@@ -246,6 +246,7 @@ pub(crate) fn failed(header: &Header, code: Failure) -> Result<(u16, Bytes), Rej
         event: WorkReply::WorkFailed {
             request_id: header.request_id().to_owned(),
             code,
+            reason: None,
         },
     };
     Ok((

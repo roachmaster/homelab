@@ -1585,6 +1585,42 @@ impl WorkFailure {
         }
     }
 }
+/// Optional refinement of a `result_mismatch` or `denied` submit failure.
+///
+/// It names only which part of the caller's own submission was stale or not
+/// granted, so the operator can tell what to refresh without a digest diff.
+/// Clients that read only `code` keep working.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkFailureReason {
+    BaseStale,
+    PolicyStale,
+    PolicyMissing,
+    PolicyNotApplicable,
+    WorkflowMode,
+    WorkflowProfile,
+    ModeNotGranted,
+    ProfileNotGranted,
+    ProfileDisabled,
+    ProfileModeNotAllowed,
+}
+impl WorkFailureReason {
+    /// The failure code this reason may refine.
+    pub fn code(self) -> WorkFailure {
+        match self {
+            Self::BaseStale
+            | Self::PolicyStale
+            | Self::PolicyMissing
+            | Self::PolicyNotApplicable
+            | Self::WorkflowMode
+            | Self::WorkflowProfile => WorkFailure::ResultMismatch,
+            Self::ModeNotGranted
+            | Self::ProfileNotGranted
+            | Self::ProfileDisabled
+            | Self::ProfileModeNotAllowed => WorkFailure::Denied,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkResponse {
@@ -1737,6 +1773,8 @@ pub enum WorkResponse {
     WorkFailed {
         request_id: String,
         code: WorkFailure,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<WorkFailureReason>,
     },
 }
 pub type WorkReply = WorkResponse;
@@ -1772,7 +1810,12 @@ impl WorkResponse {
                 && base.checked_add(1) == Some(revision)
         };
         match (self, request) {
-            (Self::WorkFailed { code, .. }, _) => http_status == code.status(),
+            (Self::WorkFailed { code, reason, .. }, _) => {
+                http_status == code.status()
+                    && reason.is_none_or(|reason| {
+                        reason.code() == *code && matches!(request, WorkRequest::WorkSubmit { .. })
+                    })
+            }
             (
                 Self::WorkCatalog {
                     projects,
@@ -2229,6 +2272,62 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failure_reasons_are_optional_bounded_and_tied_to_their_code() {
+        let wire = serde_json::json!({
+            "kind": "work_failed",
+            "request_id": "r",
+            "code": "result_mismatch",
+            "reason": "policy_stale",
+        });
+        let failed: WorkResponse = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(
+            failed,
+            WorkResponse::WorkFailed {
+                request_id: "r".into(),
+                code: WorkFailure::ResultMismatch,
+                reason: Some(WorkFailureReason::PolicyStale),
+            }
+        );
+        assert_eq!(serde_json::to_value(&failed).unwrap(), wire);
+        let legacy = WorkResponse::WorkFailed {
+            request_id: "r".into(),
+            code: WorkFailure::ResultMismatch,
+            reason: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&legacy).unwrap(),
+            serde_json::json!({"kind": "work_failed", "request_id": "r", "code": "result_mismatch"})
+        );
+        let mut unknown = wire;
+        unknown["reason"] = "other_profile_digest".into();
+        assert!(serde_json::from_value::<WorkResponse>(unknown).is_err());
+        for (reason, code) in [
+            (WorkFailureReason::BaseStale, WorkFailure::ResultMismatch),
+            (
+                WorkFailureReason::PolicyMissing,
+                WorkFailure::ResultMismatch,
+            ),
+            (
+                WorkFailureReason::WorkflowProfile,
+                WorkFailure::ResultMismatch,
+            ),
+            (WorkFailureReason::ProfileDisabled, WorkFailure::Denied),
+            (WorkFailureReason::ModeNotGranted, WorkFailure::Denied),
+        ] {
+            assert_eq!(reason.code(), code);
+        }
+        // A reason refines only submit replies with its own code.
+        let events = WorkRequest::WorkEvents {
+            request_id: "r".into(),
+            project_alias: "p".into(),
+            task_id: "00000000-0000-0000-0000-000000000000".into(),
+            after_sequence: 0,
+            limit: 50,
+        };
+        assert!(legacy.valid_for(&events, 409));
+        assert!(!failed.valid_for(&events, 409));
+    }
     #[test]
     fn configured_backends_have_stable_wire_names_and_labels() {
         for (backend, wire, label) in [

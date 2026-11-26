@@ -1775,7 +1775,7 @@ impl Agents {
                 self.result_complete = complete;
                 self.schedule(id, effects);
             }
-            WorkResponse::WorkFailed { code, .. } => {
+            WorkResponse::WorkFailed { code, reason, .. } => {
                 self.retry = if code == WorkFailure::Unavailable && request.is_mutation() {
                     Some(request)
                 } else {
@@ -1785,7 +1785,9 @@ impl Agents {
                 self.status = if self.retry.is_some() {
                     "Request outcome unknown. Retry checks the same saved intent.".into()
                 } else {
-                    work_failure(code).into()
+                    reason
+                        .map_or_else(|| work_failure(code), work_failure_reason)
+                        .into()
                 };
                 if matches!(
                     code,
@@ -3194,6 +3196,33 @@ fn work_failure(code: WorkFailure) -> &'static str {
         }
         WorkFailure::ResultMismatch => {
             "The accepted result changed. Refresh before reading another page."
+        }
+    }
+}
+
+fn work_failure_reason(reason: WorkFailureReason) -> &'static str {
+    match reason {
+        WorkFailureReason::BaseStale => {
+            "The project base moved. Refresh the catalog and resubmit on the current base."
+        }
+        WorkFailureReason::PolicyStale => {
+            "The workflow policy changed. Refresh the catalog and resubmit."
+        }
+        WorkFailureReason::PolicyMissing => {
+            "This project requires its workflow policy. Refresh the catalog and resubmit."
+        }
+        WorkFailureReason::PolicyNotApplicable => {
+            "No workflow policy applies to this project. Resubmit without one."
+        }
+        WorkFailureReason::WorkflowMode => "This project's workflow does not accept this mode.",
+        WorkFailureReason::WorkflowProfile => {
+            "This project's workflow requires its configured author profile."
+        }
+        WorkFailureReason::ModeNotGranted => "This mode is not authorized.",
+        WorkFailureReason::ProfileNotGranted => "This agent profile is not authorized.",
+        WorkFailureReason::ProfileDisabled => "This agent profile is disabled for execution.",
+        WorkFailureReason::ProfileModeNotAllowed => {
+            "This agent profile cannot run tasks in this mode."
         }
     }
 }

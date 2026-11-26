@@ -240,6 +240,7 @@ fn unavailable_mutation_is_unknown_and_snapshot_restores_without_automatic_execu
         UiEvent::Work(WorkResponse::WorkFailed {
             request_id: "send".into(),
             code: WorkFailure::Unavailable,
+            reason: None,
         }),
         "failed",
     );
@@ -1519,4 +1520,56 @@ fn nonexecutable_provider_setup_diagnostic_is_visible_without_invented_quota() {
         Some(badge("Not reported", BadgeTone::Neutral))
     );
     assert!(card.quotas.is_empty());
+}
+
+#[test]
+fn submit_rejection_reason_names_what_to_refresh() {
+    for (code, reason, status, message) in [
+        (
+            WorkFailure::ResultMismatch,
+            Some(WorkFailureReason::BaseStale),
+            409,
+            "The project base moved. Refresh the catalog and resubmit on the current base.",
+        ),
+        (
+            WorkFailure::ResultMismatch,
+            Some(WorkFailureReason::PolicyStale),
+            409,
+            "The workflow policy changed. Refresh the catalog and resubmit.",
+        ),
+        (
+            WorkFailure::Denied,
+            Some(WorkFailureReason::ProfileDisabled),
+            403,
+            "This agent profile is disabled for execution.",
+        ),
+        (
+            WorkFailure::Denied,
+            None,
+            403,
+            "This project, profile or mode is not authorized.",
+        ),
+    ] {
+        let mut agents = ready();
+        draft(&mut agents);
+        step(
+            &mut agents,
+            UiEvent::SendAgentTask {
+                idempotency_key: KEY.into(),
+            },
+            "send",
+        );
+        step(
+            &mut agents,
+            UiEvent::Work(WorkResponse::WorkFailed {
+                request_id: "send".into(),
+                code,
+                reason,
+            }),
+            "failed",
+        );
+        assert_eq!(code.status(), status);
+        assert_eq!(agents.status, message, "{reason:?}");
+        assert!(agents.retry.is_none());
+    }
 }
