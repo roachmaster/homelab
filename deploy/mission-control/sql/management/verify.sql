@@ -28,6 +28,7 @@ SET LOCAL search_path = pg_catalog;
 \ir verify-delivery.sql
 \ir verify-post-merge.sql
 \ir verify-identity-catalog.sql
+\ir verify-typed-renew.sql
 
 DO $verify$
 DECLARE

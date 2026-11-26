@@ -216,3 +216,10 @@ GRANT SELECT ON forge_agent.coding_identity_catalog TO forge_agent;
 GRANT SELECT,INSERT ON forge_agent.coding_task_identities TO forge_agent;
 GRANT EXECUTE ON FUNCTION forge_agent.coding_identity_register(text,text,text,text,jsonb,text) TO forge_agent;
 \endif
+
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=45) AS has_typed_renew
+\gset
+\if :has_typed_renew
+GRANT EXECUTE ON FUNCTION forge_coding_worker_api.renew_status(uuid,uuid,text) TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_attempt_deadline_extensions TO forge_agent;
+\endif
