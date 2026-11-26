@@ -121,6 +121,36 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
                     self.cluster.admin_exec(*revoke.split("; "), owner="DROP ROLE" not in revoke)
                 self.assert_verifies()
 
+    def test_jenkins_reader_acl_items_allow_only_select_without_grant_option(self):
+        self.fixture_mcp_reader()
+        self.fixture_reader()
+        self.assert_verifies()
+        self.cluster.admin_exec("CREATE ROLE other_reader", owner=False)
+        try:
+            for table in ("jenkins_events", "jenkins_event_deliveries", "jenkins_observations"):
+                for role, privilege, grant_option in (
+                    ("homelab_mcp", "UPDATE", False),
+                    ("muse_events", "UPDATE", False),
+                    ("homelab_mcp", "SELECT", True),
+                    ("other_reader", "SELECT", False),
+                ):
+                    with self.subTest(table=table, role=role, privilege=privilege,
+                                      grant_option=grant_option):
+                        grant = f"GRANT {privilege} ON forge_agent.{table} TO {role}"
+                        revoke = f"REVOKE {privilege} ON forge_agent.{table} FROM {role}"
+                        if grant_option:
+                            grant += " WITH GRANT OPTION"
+                            revoke = f"REVOKE GRANT OPTION FOR SELECT ON forge_agent.{table} FROM {role}"
+                        self.cluster.admin_exec(grant)
+                        try:
+                            self.assert_rejected()
+                        finally:
+                            self.cluster.admin_exec(revoke)
+                        # Both authorized readers retain their original SELECT.
+                        self.assert_verifies()
+        finally:
+            self.cluster.admin_exec("DROP ROLE other_reader", owner=False)
+
     def test_existing_reads_and_role_attributes_survive_reapply_and_provision(self):
         self.fixture_reader()
         role_query = (
