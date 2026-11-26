@@ -518,8 +518,20 @@ def profile_gate_manifest(profile, branch_scope, protected, helper_digest):
             for p in event_phases_for_scope(branch_scope)]
     return hashlib.sha256(canonical(policy)).hexdigest()
 
+
+def gate_contract_name(profile, branch_scope):
+    """Named gate contract accepted in place of the legacy manifest digest.
+
+    The name binds the verification profile (which fixes the check plan) and
+    the validated branch scope. The verifier itself is still pinned by
+    verifier_sha256 and the source by candidate commit/tree, so no canonical
+    JSON has to be reproduced byte-for-byte by the requester."""
+    return profile + ':' + branch_scope
+
 SHA = re.compile('[0-9a-f]{40}')
 DIGEST = re.compile('[0-9a-f]{64}')
+GATE_CONTRACT_RE = re.compile(
+    r'forge-sdlc-jenkins-v[1-3]:(?:main|detached|branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?)')
 BRANCH_NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
 BRANCH_SLUG_RE = re.compile(r'[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
 BRANCH_SCOPE_RE = re.compile(r'branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
@@ -3240,9 +3252,12 @@ def _execute_locked(action, config, *, cache_port):
     for key in ('candidate_commit', 'candidate_tree', 'expected_main'):
         if not isinstance(request[key], str) or not SHA.fullmatch(request[key]):
             raise ValueError('Invalid CI source')
-    for key in ('gate_manifest_sha256', 'bundle_sha256'):
-        if not isinstance(request[key], str) or not DIGEST.fullmatch(request[key]):
-            raise ValueError('Invalid CI digest')
+    if not isinstance(request['bundle_sha256'], str) or not DIGEST.fullmatch(request['bundle_sha256']):
+        raise ValueError('Invalid CI digest')
+    # The gate is either the legacy manifest digest or a named gate contract.
+    gate_value = request['gate_manifest_sha256']
+    if not isinstance(gate_value, str) or not (DIGEST.fullmatch(gate_value) or GATE_CONTRACT_RE.fullmatch(gate_value)):
+        raise ValueError('Invalid CI digest')
     if request['verification_profile'] != config['verification_profile'] or request['project_alias'] not in config['projects']:
         raise ValueError('CI scope denied')
     # Fail-closed branch scope validation before any cache or build slot filesystem access.
@@ -3397,7 +3412,10 @@ def _execute_locked(action, config, *, cache_port):
             helper_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
             if helper_digest != config['verifier_sha256']:
                 raise PrepareSourceError('verifier_digest_mismatch')
-            manifest = profile_gate_manifest(config['verification_profile'], branch_scope, protected, helper_digest)
+            if DIGEST.fullmatch(request['gate_manifest_sha256']):
+                manifest = profile_gate_manifest(config['verification_profile'], branch_scope, protected, helper_digest)
+            else:
+                manifest = gate_contract_name(config['verification_profile'], branch_scope)
             if manifest != request['gate_manifest_sha256']:
                 os.write(fd, (
                     'FORGE_GATE_MANIFEST_MISMATCH profile=' + config['verification_profile']
