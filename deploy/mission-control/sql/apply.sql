@@ -386,4 +386,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=47)
 \ir migrations/0047_deadline_extension_events.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(47,'deadline_extension_events');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=48) AS apply_0048
+\gset
+\if :apply_0048
+\ir migrations/0048_retry_source_key.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(48,'retry_source_key');
+\endif
 COMMIT;
