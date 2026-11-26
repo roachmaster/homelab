@@ -32,6 +32,7 @@ SET LOCAL search_path = pg_catalog;
 \ir verify-failure-cause.sql
 \ir verify-deadline-extension-events.sql
 \ir verify-retry-source-key.sql
+\ir verify-gate-contract-names.sql
 
 DO $verify$
 DECLARE
