@@ -612,7 +612,7 @@ class WorkStore:
                                (UUID(delivery_admission['operation_id']),delivery_admission['generation'],
                                 UUID(delivery_admission['lease_token']),intent_digest))
             trusted_main=self._delivery_head(cursor,project_alias)
-            if trusted_main is not None and trusted_main!=base_revision:raise Rejected(409,"result_mismatch")
+            if trusted_main is not None and trusted_main!=base_revision:raise Rejected(409,"result_mismatch","base_stale")
             workflow=resolve_workflow()
             if workflow is not None:
                 cursor.execute("""SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head FROM forge_agent.coding_workflow_actions a
@@ -621,7 +621,7 @@ class WorkStore:
                  ORDER BY a.updated_at DESC,a.action_id DESC LIMIT 1""",(self._owner,project_alias))
                 merged=cursor.fetchone()
                 trusted_head=trusted_main or (merged["head"] if merged else None)
-                if trusted_head is not None and trusted_head!=base_revision:raise Rejected(409,'result_mismatch')
+                if trusted_head is not None and trusted_head!=base_revision:raise Rejected(409,'result_mismatch','base_stale')
                 auto_repair=True
             recipe = resolve_recipe()
             if (not isinstance(recipe, PinnedRecipe)

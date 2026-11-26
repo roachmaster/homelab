@@ -47,6 +47,24 @@ CONFLICT_CODES = frozenset({
     "stale_reconciliation",
     "result_mismatch",
 })
+# Bounded refinements of result_mismatch / denied for submissions. They name
+# only the caller's own stale or ungranted input, never another profile's
+# grant or policy. Current values are discoverable through ide.work.catalog
+# (project base_revision and workflow/external_workflow policy_digest).
+SUBMIT_MISMATCH_REASONS = frozenset({
+    "base_stale",             # base_revision is not the current trusted head
+    "policy_stale",           # workflow_policy_digest differs from the current policy
+    "policy_missing",         # the project runs a workflow; no digest was presented
+    "policy_not_applicable",  # a digest was presented but no workflow applies
+    "workflow_mode",          # workflow submissions must start in plan mode
+    "workflow_profile",       # profile is not the workflow's author profile
+})
+SUBMIT_DENIED_REASONS = frozenset({
+    "mode_not_granted",       # mode is not in the configured allowed modes
+    "profile_not_granted",    # profile is not (or no longer) configured
+    "profile_disabled",       # profile is configured but execution is disabled
+    "profile_mode_not_allowed",  # external profile cannot run this mode/auto-repair
+})
 
 
 class Destination(Enum):
@@ -244,16 +262,16 @@ class WorkService:
     def submit(self, command):
         self._require_project(command.project_alias)
         if command.mode not in self._config.allowed_modes:
-            raise Rejected(403, "denied")
+            raise Rejected(403, "denied", "mode_not_granted")
         if command.agent_profile not in self._config.profiles:
-            raise Rejected(403, "denied")
+            raise Rejected(403, "denied", "profile_not_granted")
 
         def resolve_recipe():
             profile = self._config.profiles[command.agent_profile]
             if not profile.execution_enabled:
-                raise Rejected(403, "denied")
+                raise Rejected(403, "denied", "profile_disabled")
             if profile.is_external and (command.mode not in EXTERNAL_MODES or command.auto_repair):
-                raise Rejected(403, "denied")
+                raise Rejected(403, "denied", "profile_mode_not_allowed")
             try:
                 return self._catalog.resolve(command.agent_profile, command.mode)
             except KeyError:
@@ -284,18 +302,17 @@ class WorkService:
         if selected.is_external:
             policy=self._config.external_workflows.get(project)
             if policy is not None:
-                if mode!='plan' or profile!=policy.author_profile or digest!=policy.snapshot(self._catalog)['policy_digest']:
-                    raise Rejected(409,'result_mismatch')
+                _require_workflow_submission(mode,profile,policy.author_profile,digest,
+                                             policy.snapshot(self._catalog)['policy_digest'])
             elif digest is not None:
-                raise Rejected(409, "result_mismatch")
+                raise Rejected(409, "result_mismatch", "policy_not_applicable")
             return None
         policy=self._config.project_workflows.get(project)
         if policy is None:
-            if digest is not None:raise Rejected(409,"result_mismatch")
+            if digest is not None:raise Rejected(409,"result_mismatch","policy_not_applicable")
             return None
         snapshot=policy.snapshot(self._catalog,self._config.repair_policy)
-        if digest!=snapshot["policy_digest"] or mode!="plan" or profile!=policy.author_profile:
-            raise Rejected(409,"result_mismatch")
+        _require_workflow_submission(mode,profile,policy.author_profile,digest,snapshot["policy_digest"])
         return snapshot
 
     def get(self, command):
@@ -876,6 +893,28 @@ def decode(route, correlation, body):
     raise Rejected(400, "invalid_request")
 
 
+def _require_workflow_submission(mode, profile, author_profile, digest, current_digest):
+    """Admit only a plan by the author profile carrying the current policy."""
+    if mode != "plan":
+        raise Rejected(409, "result_mismatch", "workflow_mode")
+    if profile != author_profile:
+        raise Rejected(409, "result_mismatch", "workflow_profile")
+    if digest is None:
+        raise Rejected(409, "result_mismatch", "policy_missing")
+    if digest != current_digest:
+        raise Rejected(409, "result_mismatch", "policy_stale")
+
+
+def failure_reason(code, error):
+    """Return the bounded public reason for a failure code, if any."""
+    reason = getattr(error, "reason", None)
+    if code == "result_mismatch" and reason in SUBMIT_MISMATCH_REASONS:
+        return reason
+    if code == "denied" and reason in SUBMIT_DENIED_REASONS:
+        return reason
+    return None
+
+
 def failed(correlation, error):
     if correlation is None:
         return error.status, {"error": "invalid_request"}
@@ -892,6 +931,9 @@ def failed(correlation, error):
     else:
         code = "unavailable"
     status = 503 if code == "unavailable" else error.status
+    reason = failure_reason(code, error)
+    if reason is not None:
+        return status, common.envelope("work_failed", correlation, code=code, reason=reason)
     return status, common.envelope("work_failed", correlation, code=code)
 
 
