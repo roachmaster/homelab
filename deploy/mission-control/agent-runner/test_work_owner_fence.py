@@ -234,8 +234,10 @@ class OwnerContinuationFenceTest(unittest.TestCase):
             c.rollback()
         with closing(self.cluster.connect('postgres')) as c,c.cursor() as q:
             q.execute("SELECT pg_get_functiondef('forge_agent._coding_owner_continuation_fenced(uuid)'::regprocedure)")
-            definition=q.fetchone()[0];self.assertEqual(definition.count(' RETURN true;'),1)
-            q.execute(definition.replace(' RETURN true;',' RETURN false;'))
+            # Body-only edits are covered by migrations/tests, not digest pins; a
+            # replacement that drops SECURITY DEFINER changes the catalog shape.
+            definition=q.fetchone()[0];self.assertEqual(definition.count('SECURITY DEFINER'),1)
+            q.execute(definition.replace('SECURITY DEFINER','SECURITY INVOKER'))
             with self.assertRaises(psycopg2.Error):q.execute((SQL_DIR/'management/verify-owner-continuation.sql').read_text())
             c.rollback()
 
