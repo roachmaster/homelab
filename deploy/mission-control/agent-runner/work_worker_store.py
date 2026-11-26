@@ -462,6 +462,31 @@ class WorkerDB:
             raise ValueError(f"invalid renew status: {status!r}")
         return status
 
+    def renew_deadline(self, lease, progress_signal=None):
+        """Typed renewal plus the current deadline (M47).
+
+        Returns ``{"status", "deadline_at", "extended"}`` where deadline_at is
+        an aware datetime when renewed. Before M47 returns None so the caller
+        falls back to renew_status().
+        """
+        if progress_signal is not None and progress_signal not in self.PROGRESS_SIGNALS:
+            raise ValueError(f"invalid progress signal: {progress_signal!r}")
+        attempt_id, attempt_token = _extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT to_regprocedure('forge_coding_worker_api.renew_deadline(uuid,uuid,text)') IS NOT NULL")
+            if not cursor.fetchone()[0]:
+                return None
+            cursor.execute("SELECT forge_coding_worker_api.renew_deadline(%s, %s, %s)",
+                           (attempt_id, attempt_token, progress_signal))
+            result = cursor.fetchone()[0]
+        if not isinstance(result, dict) or result.get("status") not in self.RENEW_STATUSES:
+            raise ValueError(f"invalid renew result: {result!r}")
+        deadline = result.get("deadline_at")
+        if deadline is not None:
+            from datetime import datetime
+            deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+        return {"status": result["status"], "deadline_at": deadline, "extended": result.get("extended") is True}
+
     def checkpoint(self, lease, summary):
         attempt_id, attempt_token = _extract_attempt_creds(lease)
         sanitized_summary = _validate_summary(summary)

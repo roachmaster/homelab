@@ -1,6 +1,7 @@
 """Factory-wired native coding worker; PostgreSQL remains the queue authority."""
 
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from dataclasses import fields, is_dataclass, replace
 import hashlib
 import logging
@@ -31,6 +32,17 @@ from work_cli_transport import CliDiagnosticReporter
 
 LOG = logging.getLogger("forge-coding-worker")
 FEEDBACK_INTEGRITY_SUMMARY = "Review feedback integrity could not be verified; explicit review is required."
+def _accepts(function, name):
+    """Whether a runner's run() names an optional hook. Only an explicit
+    parameter counts: wrappers taking **kwargs may forward them elsewhere."""
+    import inspect
+    try:
+        parameters = inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in parameters and parameters[name].kind is not inspect.Parameter.VAR_KEYWORD
+
+
 CANCELLED_STOP_SUMMARY = "The task or its workflow was cancelled; the agent scope was stopped."
 DEADLINE_STOP_SUMMARY = "The attempt reached its deadline without recent progress; the agent scope was stopped."
 RENEW_STATUSES = frozenset({"renewed", "lease_expired", "deadline_exceeded", "task_cancelled", "task_gone"})
@@ -292,6 +304,20 @@ class CodingWorker:
         cancelled = threading.Event()
 
         progressed = threading.Event()
+        # Any agent output (Codex included) is a liveness signal that lets a
+        # nearly due deadline be extended (M45); the database deadline is
+        # mirrored here so the executor's local wall bound can follow it.
+        produced = threading.Event()
+        deadline_state = {"deadline_at": None}
+
+        def report_activity():
+            produced.set()
+
+        def deadline_hint():
+            current = deadline_state["deadline_at"]
+            if current is None:
+                return None
+            return (current - datetime.now(timezone.utc)).total_seconds()
         # Why the lease ended, so a cancellation or a deadline is never
         # reported as "lease lost" (typed renewal, M45).
         stop_cause = {"cause": "lease_lost", "summary": None}
@@ -310,14 +336,23 @@ class CodingWorker:
             return result
 
         def renewed():
-            typed = getattr(self.store, "renew_status", None)
+            progress_signal = "progress_report" if progressed.is_set() else ("output" if produced.is_set() else None)
             status = None
-            if callable(typed):
-                status = typed(lease, "progress_report" if progressed.is_set() else None)
+            extended = getattr(self.store, "renew_deadline", None)
+            if callable(extended):
+                result = extended(lease, progress_signal)
+                if isinstance(result, dict):
+                    status = result.get("status")
+                    if status == "renewed" and result.get("deadline_at") is not None:
+                        deadline_state["deadline_at"] = result["deadline_at"]
+            typed = getattr(self.store, "renew_status", None)
+            if status is None and callable(typed):
+                status = typed(lease, progress_signal)
             if not isinstance(status, str) or status not in RENEW_STATUSES:
                 status = "renewed" if self.store.renew(lease) else "lease_expired"
             if status == "renewed":
                 progressed.clear()
+                produced.clear()
                 return True
             if status == "task_cancelled":
                 cancelled.set()
@@ -384,6 +419,9 @@ class CodingWorker:
                     # stays unchanged and retains terminal-result reporting.
                     reporter = report_progress if lease["recipe"]["backend"] == "antigravity" else None
                     arguments = {"report_progress": reporter}
+                    for name, hook in (("report_activity", report_activity), ("deadline_hint", deadline_hint)):
+                        if _accepts(self.runner.run, name):
+                            arguments[name] = hook
                     if lease.get("workflow_review_id") is not None:
                         try:
                             if self.peer_contexts is None:
