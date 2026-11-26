@@ -34,7 +34,7 @@ DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
 CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects", "identity_protocol"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
-PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled", "backup_models"}
+PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled", "backup_models", "quota_handoff_profile"}
 
 
 def canonical_json_bytes(value):
@@ -125,6 +125,7 @@ class WorkProfile:
     label: str | None = None
     execution_enabled: bool | None = None
     backup_models: tuple[str, ...] = ()
+    quota_handoff_profile: str | None = None
 
     def __post_init__(self):
         validate_identifier(self.alias, "profile alias")
@@ -138,6 +139,10 @@ class WorkProfile:
             raise ValueError('Invalid provider backup models')
         for model in self.backup_models:validate_model(model)
         object.__setattr__(self,'backup_models',tuple(self.backup_models))
+        if self.quota_handoff_profile is not None:
+            validate_identifier(self.quota_handoff_profile, "quota handoff profile")
+            if self.backend != "antigravity" or self.quota_handoff_profile == self.alias:
+                raise ValueError("Invalid quota handoff source profile")
         validate_identifier(self.resource_profile, "resource profile")
         if self.resource_profile == AGY_POLICY_ID:
             native_policy_digest(self.resource_profile, self.backend)
@@ -233,6 +238,21 @@ class WorkCatalog:
         if not copied or len(copied) > MAX_PROFILES:
             raise ValueError("Work catalog must define between 1 and 64 profiles")
         self._profiles = MappingProxyType(copied)
+        for profile in copied.values():
+            if profile.quota_handoff_profile is None:
+                continue
+            target = copied.get(profile.quota_handoff_profile)
+            if (target is None or target.backend != "codex" or not target.execution_enabled
+                    or profile.resource_profile not in NATIVE_POLICIES
+                    or target.resource_profile not in NATIVE_POLICIES):
+                raise ValueError("Quota handoff requires an enabled native Codex profile")
+            for mode in ("plan", "implement"):
+                # Resolving the target pins the existing immutable native policy;
+                # the optional handoff selection never alters a recipe digest.
+                recipe = self.resolve(target.alias, mode)
+                if recipe.version != 2 or not native_policy_matches(
+                        recipe.resource_profile, recipe.backend, recipe.policy_digest):
+                    raise ValueError("Quota handoff requires current immutable execution policy")
 
     @property
     def allowed_profiles(self):
@@ -247,8 +267,23 @@ class WorkCatalog:
         profile = self.profile(profile_alias)
         if profile is None or model not in profile.backup_models:
             raise KeyError('Unavailable provider backup')
-        selected = replace(profile, model=model, backup_models=())
+        selected = replace(profile, model=model, backup_models=(), quota_handoff_profile=None)
         return WorkCatalog({profile_alias: selected}).resolve(profile_alias, mode)
+
+    def resolve_handoff(self, profile_alias, mode):
+        """Resolve an explicit cross-agent author selection without effects.
+
+        This returns a target alias and pinned recipe, not authority to resume a
+        task. The coordinator still needs genuine stopped-source evidence and
+        the original workflow's separate reviewer before admitting a handoff.
+        """
+        if mode not in {"plan", "implement"}:
+            raise ValueError("Quota handoff supports author modes only")
+        source = self.profile(profile_alias)
+        if source is None or source.quota_handoff_profile is None:
+            raise KeyError("Unavailable quota handoff")
+        target = source.quota_handoff_profile
+        return target, self.resolve(target, mode)
 
     def profile(self, alias):
         return self._profiles.get(alias) if isinstance(alias, str) else None
@@ -435,7 +470,14 @@ class WorkConfig:
         object.__setattr__(self, "profiles", MappingProxyType(copied_profiles))
         object.__setattr__(self, "project_labels", MappingProxyType(copied_labels))
         object.__setattr__(self,"repair_policy",repair_policy)
+        # Validate optional cross-profile selections even when no project has
+        # opted into automatic workflows yet. Configuration fails before I/O.
+        WorkCatalog(copied_profiles)
         object.__setattr__(self,"project_workflows",freeze_workflows(self.project_workflows,projects,copied_profiles,modes))
+        for policy in self.project_workflows.values():
+            target = copied_profiles[policy.author_profile].quota_handoff_profile
+            if target == policy.reviewer_profile:
+                raise ValueError("Quota handoff author and reviewer must be distinct profiles")
         object.__setattr__(self,"external_workflows",freeze_external_workflows(self.external_workflows,projects,copied_profiles,modes))
         if type(self.delivery_enabled) is not bool or not isinstance(self.delivery_repair_projects, (tuple, list, set, frozenset)):
             raise ValueError('Invalid delivery automation configuration')
@@ -512,6 +554,7 @@ def parse_work_config(raw):
             label=spec.get("label"),
             execution_enabled=spec.get("execution_enabled"),
             backup_models=spec.get("backup_models", ()),
+            quota_handoff_profile=spec.get("quota_handoff_profile"),
         )
     raw_project_labels = raw.get("project_labels", {})
     if not isinstance(raw_project_labels, dict):
