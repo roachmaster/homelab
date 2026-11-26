@@ -924,7 +924,7 @@ CODEX_AUTHOR_HANDOFF_SQL_PATHS = frozenset(('deploy/mission-control/sql/apply.sq
  'deploy/mission-control/sql/management/verify-retry-events.sql',
  'deploy/mission-control/sql/management/verify.sql',
  'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql'))
-CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': 'bbcf7619b221fffdc50a9846a22380babb793f6b659dcf3b5afbab36d981547d',
+CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': 'd8f915ee38fd31ec9d8d28aa90fbcd852af2312c97b667995740a4a59b2ebe4f',
  'deploy/mission-control/agent-runner/README.md': '191b5987f5a3b619e34e1eb7d1a2a11220e56f6edfc21d1953c70ff52e9df62a',
  'deploy/mission-control/agent-runner/quota-handoff-config.example.json': 'f4c2a2841f0cea15b6739c6b965566a26b476242a7b4947ebf7e4a083b9172aa',
  'deploy/mission-control/agent-runner/setup-runner.sh': 'bcaab70bf4f2dc87a396a2ce03ef4a26868d6599bd93427a1d15a4e8892c97e0',
