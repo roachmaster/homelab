@@ -10,6 +10,34 @@ The full database history (event stream, tasks, workflows, reviews) is
 archived separately in Muse's long-term storage as `forge-history-export/`
 (pg_dump plus per-table JSONL) - this directory is only the work queue.
 
+## Reconciliation after branch consolidation — 26 November 2026
+
+This directory preserves collection-time requests. The original YAML prompts,
+acceptance criteria and `resubmit` flags remain unchanged. Before filing work,
+compare them with [the current system picture](../docs/design/implementation-status.md#preserved-work-queue-and-planning-direction)
+and [the delivery roadmap](../docs/roadmap/forge-framework.md).
+
+- The requested branch cleanup is complete: the consolidated source is in
+  `backup/main` / draft PR29, and the task/development refs were deleted after
+  their committed tips were preserved. `main` and remote `feature/muse` remain.
+- Persistent per-agent branches and correlation CI stage/log inspection exist in
+  consolidated source (ABI16/schema41), pending qualification and rollout. Review
+  the saved instructions and acceptance criteria for remaining gaps before
+  resubmitting either feature wholesale.
+- Related source recovery fixes do not, by themselves, establish that every saved
+  base-refresh, deadline, failure-cause or review defect is resolved. Reproduce
+  each current gap and retain its exact evidence.
+- Defect/backlog workflows, the proxy scope and its deferred only-writer cutover,
+  and the verified-main Drive snapshot request remain separately scoped planning
+  inputs. The queue does not establish their implementation or deployment.
+- The five archived verification repairs are tied to superseded main commits;
+  retain them without resubmission. Verify the current source instead.
+
+The local read-only check observed schema40 and an intentionally stopped,
+boot-disabled event/API runner; other coding/delivery workers remained active.
+Neither this reconciliation nor the saved reset plan performs a database reset
+or submits any task.
+
 ## Layout
 
 - `features/` - feature work still needed; resubmit these.
@@ -20,7 +48,7 @@ archived separately in Muse's long-term storage as `forge-history-export/`
 
 ## Index
 
-### Features still needed
+### Features at collection
 
 - `features/postgres-proxy.yaml` - Build the Postgres proxy microservice (forge-pg-proxy): a simple CRUD pass-through that becomes the only write
 - `features/defect-flow.yaml` - Create a first-class defect flow in Forge. Today every submitted task is a feature-style work item; there is n

@@ -15,6 +15,11 @@ a documentation pass, not a deployment, service-start, test-qualification or
 workflow-policy change. Review links, YAML and contract references, then publish
 the notes through the existing PR.
 
+Documentation review reconciles the newly published resubmission queue from
+main 4bf1d230 without changing its original task YAMLs. Runtime read-only
+observations, 25 added/changed local link checks and YAML parsing are recorded in this
+pass; application code and previously recorded test results are not requalified.
+
 # Previous: Consolidate local development and remaining feat/fix branches — 2026-11-26
 
 User authorizes merging every local development branch plus remote
