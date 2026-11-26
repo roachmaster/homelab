@@ -101,6 +101,7 @@ V3_PROTECTED_PREFIXES = (
     'deploy/mission-control/sql/fragments/0033_',
     'deploy/mission-control/sql/migrations/0040_',
     'deploy/mission-control/sql/fragments/0040_',
+    'deploy/mission-control/sql/migrations/0041_',
 )
 
 
@@ -794,5 +795,6 @@ def _verify_contract_policy_parity(contract, verifier_source):
 
 def verify_verifier_policy_parity(source_or_contract, profile_or_source):
     if isinstance(source_or_contract, CiGateContract):
+        _verify_source_policy_parity(profile_or_source, source_or_contract.profile)
         return _verify_contract_policy_parity(source_or_contract, profile_or_source)
     return _verify_source_policy_parity(source_or_contract, profile_or_source)

@@ -1,4 +1,20 @@
-# Current: Durable AGY-to-Codex quota handoff — 2026-11-26
+# Current: Consolidate task branches into backup/main — 2026-11-26
+
+User authorizes merging all remote `forge/task-*` branches into the existing
+`backup/main` branch, then deleting those task branches. The source branches and
+exact tips are retained in `docs/reports/task-branch-consolidation-20261126.json`.
+All 32 task tips must remain ancestors of the published backup before deletion.
+Main, unrelated branches and task worktrees remain preserved.
+
+The merge combines persistent agent branches and CI stage reporting with the
+newer content identity and author handoff code, retaining superseding integrated
+plan-override and terminal-settlement implementations. The task migration uses
+0041; applied migration files 0001 through 0040 remain unchanged. Targeted backend
+integration: 129 tests passed. Historical source-fingerprint checks fail against
+the combined source; this archival integration is not a release qualification.
+No deployment is performed. The event runner remains stopped and boot-disabled.
+
+# Previous: Durable AGY-to-Codex quota handoff — 2026-11-26
 
 The user authorizes adding an automatic handoff to Codex when AGY quota blocks
 work. Root owns integration, typed handoff/transition ports, qualification and

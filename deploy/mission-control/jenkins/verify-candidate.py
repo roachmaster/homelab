@@ -634,7 +634,8 @@ def profile_protected_gate_path(path, profile):
             or path.startswith('deploy/mission-control/sql/migrations/0033_')
             or path.startswith('deploy/mission-control/sql/fragments/0033_')
             or path.startswith('deploy/mission-control/sql/migrations/0040_')
-            or path.startswith('deploy/mission-control/sql/fragments/0040_'))
+            or path.startswith('deploy/mission-control/sql/fragments/0040_')
+            or path.startswith('deploy/mission-control/sql/migrations/0041_'))
         or profile in {SCOPED_PROFILE,EVENT_PROFILE} and path in V2_PROTECTED_PATHS)
 
 
@@ -3669,7 +3670,8 @@ def _execute_locked(action, config, *, cache_port):
                     'reason': reason,
                     'elapsed_ms': int((time.monotonic() - prep_started) * 1000),
                 })
-            failure = 'verification_unavailable'
+            failure = (error.reason if isinstance(error, PrepareSourceError)
+                       and error.reason == 'gate_manifest_mismatch' else 'verification_unavailable')
             if cache_port.enabled and publish_outcome.status == 'not_run':
                 publish_outcome = CachePublishOutcome(status='skipped_failed', reason='verification_unavailable')
         finally:

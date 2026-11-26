@@ -48,7 +48,7 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
-                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(40,)])
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(41,)])
                 self.assertEqual(self.rows(cluster,'SELECT count(*) FROM forge_agent.delivery_lineage_handoffs'),[(0,)])
                 self.assertEqual(self.rows(cluster,"SELECT has_table_privilege('muse_events','forge_agent.delivery_lineage_handoffs','SELECT')"),[(False,)])
                 # verify.sql itself starts BEGIN READ ONLY and pins the exact
