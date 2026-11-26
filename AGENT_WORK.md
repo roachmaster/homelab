@@ -1,3 +1,22 @@
+# Current: Restore bounded embedded documentation rendering — 2026-11-26
+
+The user authorizes fixing deployment blockers. Jenkins99 on main a55a17f8
+failed while building the web host: the 38 KiB implementation document uses
+an adapter whose selected reply renderer permits only 32 KiB of HTML output.
+Expose and reuse the existing bounded document/file renderer for trusted
+embedded documentation. Preserve reply limits, HTML escaping, external-only
+untrusted links, file input/output/work limits and fixed local reader routes.
+Work in an isolated a55 worktree; root reviews publication/deployment separately.
+Check the actual embedded document, external library consumer, sanitizer/bounds,
+formatting and host build with Cargo output outside the source tree.
+
+Validation on code checkpoint41d05701: workspace formatting passed; all156 UI
+library tests, two public renderer consumer tests, six document adapter tests,
+and the public host fixed-document HTTP consumer test passed. The actual host
+all-features build passed offline/locked. These checks reuse
+`/mnt/data/homelab-build/task-consolidation-target`; full exact-source Jenkins
+qualification and deployment remain root-owned follow-up work.
+
 # Current: Qualify and deploy merged main, migrate DB, restore portal — 2026-11-26
 
 User authorizes starting Jenkins verification, fixing failures, deploying the
