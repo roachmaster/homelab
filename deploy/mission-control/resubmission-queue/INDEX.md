@@ -22,3 +22,6 @@ Task definitions collected from the Forge database on Mission Control on 2026-11
 - `backlog-flow.yaml` - resubmit: yes - status at collection: drafted-never-filed - backlog-flow
 - `backlog-recipe-resolution.yaml` - resubmit: yes - status at collection: drafted-never-filed - backlog-recipe-resolution
 - `agent-failure-output-discarded.yaml` - resubmit: yes - status at collection: drafted-never-filed - Preserve agent output when an attempt fails instead of discarding it
+- `workflow-recovery-revival.yaml` - resubmit: yes - status at collection: drafted-never-filed - Restore a sanctioned revival path for disabled, escalated workflows (issues #24/#27)
+- `manifest-return-loop.yaml` - resubmit: yes - status at collection: drafted-never-filed - Stop the external-workflow manifest-return loop
+- `dispatch-digest-diagnosis.yaml` - resubmit: yes - status at collection: drafted-never-filed - Make dispatch result_mismatch diagnosable: stale base vs stale digest vs revoked grant
