@@ -1196,7 +1196,7 @@ STRICT_VERIFIER_FILES = {
     "verify-external-workflows.sql",
     "verify-feedback.sql",
     "verify-autonomy.sql",
-    "verify-identity-catalog.sql",
+    "verify-identity-catalog.sql", "verify-typed-renew.sql",
 }
 
 
