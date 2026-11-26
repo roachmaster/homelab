@@ -22,7 +22,8 @@ root and an operator's approval.
 | File | Purpose |
 |---|---|
 | `mcp_server.py` | Server: MCP Streamable HTTP (JSON responses) at `POST /mcp`, plus `GET /healthz`. Python 3 stdlib + `psycopg2`. |
-| `mcp_auth.py` | Bearer-token check, token-file loader, failed-attempt limiter. `BearerTokenAuth` is the seam for adding OAuth 2.1 later. |
+| `mcp_auth.py` | Static bearer-token check, token-file loader, failed-attempt limiter. |
+| `mcp_oauth.py` | OAuth 2.1 authorization server (code + PKCE S256, refresh rotation, revocation), `DualAuth`, and a root-only CLI for clients, grants and the operator password. |
 | `sql_guard.py` | Defense-in-depth check that a query is one read-only statement. |
 | `mcp_tokens.py` | Root-only CLI: `create`, `list`, `revoke`. |
 | `homelab-mcp.service` | Hardened systemd unit. |
@@ -77,7 +78,7 @@ root and an operator's approval.
 
 Known limits:
 - Bearer tokens work with agents and CLIs that let you set a header: Claude Code, Cursor, Codex and scripts.
-- Hosted connectors that only support OAuth (claude.ai and ChatGPT web connectors) cannot use this server until OAuth is added.
+- Hosted connectors that only support OAuth (Gemini custom apps, claude.ai, ChatGPT) use the OAuth layer below with a pre-registered client; there is no dynamic client registration.
 - Only one scope exists, so all tokens see the same tables.
 
 ## Install on Mission Control (root, not yet done)
@@ -224,10 +225,38 @@ checks the following:
 These tests need `/usr/lib/postgresql/16/bin` and a non-root user. The suite is
 registered in `backend-suites.py`.
 
-## Adding OAuth later
+## OAuth 2.1 (Gemini custom apps and other hosted connectors)
 
-`McpApp` depends only on an object with `authenticate(headers) -> Principal | None`.
-To add OAuth 2.1, implement a resource-server authenticator that validates
-access tokens. Then serve `/.well-known/oauth-protected-resource` and add
-`resource_metadata` to the `WWW-Authenticate` challenge. Static tokens can stay
-as a second authenticator for scripts.
+Enable with `"oauth": {"enabled": true}` in `server.json` (issuer defaults to
+`https://mcp.thedevex.com`). Static `hmcp_` tokens keep working unchanged; `/mcp`
+accepts either a static token or an OAuth access token (`hmcpat_...`), and both
+map to the same read-only scope and database role.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /.well-known/oauth-protected-resource` (and `/mcp` suffix) | RFC 9728 metadata; also advertised in the 401 `WWW-Authenticate` `resource_metadata` parameter. |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 metadata. No `registration_endpoint`: clients are pre-registered. |
+| `GET/POST /oauth/authorize` | Validates client, redirect URI (Google `oauth-redirect{,-sandbox,-test}.googleusercontent.com` `/r/` and `/a/` prefixes only), `response_type=code`, PKCE `S256` (required) and `scope=read`; shows a read-only consent page; the operator signs in with the single operator password (scrypt hash, CSRF cookie + HMAC field, lockout after 5 failures). Redirects with a single-use code valid 60 s. |
+| `POST /oauth/token` | `authorization_code` (code, redirect_uri, PKCE verifier, client secret via `client_secret_post` or `client_secret_basic`) and `refresh_token`. Access tokens last 1 h, refresh tokens 90 days and rotate on every use; replaying a used refresh token or code revokes the whole grant. |
+| `POST /oauth/revoke` | RFC 7009. Revoking a refresh token revokes its grant; always 200 after client auth. |
+
+State: client records (secret SHA-256 only) in `/etc/homelab-forge/mcp/oauth-clients.json`,
+the operator scrypt hash in `/etc/homelab-forge/mcp/operator.json` (both
+root:homelab_mcp 0640), and hashed codes/grants/tokens in
+`/var/lib/homelab-forge/mcp/oauth.sqlite3` (systemd `StateDirectory`, 0700).
+
+```sh
+sudo ./mcp_oauth.py operator set-password --generate /root/homelab-mcp-operator-password.txt
+sudo ./mcp_oauth.py client create --name gemini --secret-file /root/homelab-mcp-gemini-oauth-client.txt
+sudo ./mcp_oauth.py client list
+sudo ./mcp_oauth.py grant list
+sudo ./mcp_oauth.py grant revoke <grant_id>          # or: grant revoke-client <client_id>
+sudo ./mcp_oauth.py client revoke <client_id>
+```
+
+The CLI prints only ids; secrets go to new 0600 files and are never echoed.
+
+Gemini: Settings, Connected Apps, Custom apps, Add a custom app; URL
+`https://mcp.thedevex.com/mcp`; under Advanced features, Show more, paste the
+client id and secret from the client file; approve the consent page with the
+operator password.
