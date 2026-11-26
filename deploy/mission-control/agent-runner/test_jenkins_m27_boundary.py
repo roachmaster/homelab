@@ -1186,25 +1186,27 @@ CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '7ac6f7204526cfed34553e3
 # as accepted on main; the files
 # below carry the proxy merge's reviewed deltas (migration renumber 0040/0041
 # -> 0042/0043 on feature/muse, then 0042/0043 -> 0050/0051 in the
-# backup/main merge: stage gates, proxy coordinator reads and
+# backup/main merge, then 0050/0051 -> 0051/0052 in the 2026-11-26
+# backup/main merge (backup/main took 0050 for
+# delivery_receipt_source_key): stage gates, proxy coordinator reads and
 # owner-control guards),
 # so this context heads the qualification chain for exactly those files.
 PG_PROXY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': '97348b5db6d9c5eac164bb54e5c6c134ba6a61116e108595fcc56f95a1a16535',
-    'deploy/mission-control/agent-runner/test_work_event_attribution.py': '24dae0276e1dd3bd138e03e81ab11a3e15ac48d60d7c483548356096e44958e3',
+    'deploy/mission-control/agent-runner/test_work_event_attribution.py': '8073b11dd2d4c86b7fb0fd21c735b98feab31108e8e115f0f5ac877e9c5191c6',
     'deploy/mission-control/agent-runner/work_owner_control.py': '38a3edda0caec8f079deb6533592f48786254038f3016423754b15ff652185a0',
     'deploy/mission-control/agent-runner/work_owner_reverification.py': '28c6f3314a4f93ab007299cca3234452bc84f0de72022c9726506930b3bd11b6',
     'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
     'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
     'deploy/mission-control/agent-runner/work_worker.py': 'c3330f2c16fa34f6d5a6af745afa4cdee14d58c03fc4739a3036ef02770e510a',
     'deploy/mission-control/agent-runner/work_worker_config.py': '28047ea7d4dcbec448b72fc147817d1b369a2fd91188f46d9ba971330740fc6c',
-    'deploy/mission-control/sql/management/grant-external-workflows.sql': 'a9f357e9be0ca35e1937bec891ab083dc60d26880e286d5ecd9ed7746bd2f1b2',
-    'deploy/mission-control/sql/management/grant-runner.sql': 'c95f8f803f33adad0097ccc4182ecda75bb58551afa29a2805e8c1d4bdfbdad0',
-    'deploy/mission-control/sql/management/verify-external-agent.sql': '9560443e115696a2642de73a8c1265b4bd777538ff3e3ad9339fffed6ced472d',
-    'deploy/mission-control/sql/management/verify-external-workflows.sql': '0c9c5fad23fa9d0388b039e56342e232aa2306651043bc2e757c8a2d75d16a55',
-    'deploy/mission-control/sql/management/verify-jenkins-events.sql': '5edddae564d066abaa6f8ed9de89ee3afa76989ac73e9c455e317669e7c3094b',
-    'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '5f1525a86af2f104736ebd00d20cc2552d4962715b324960285ce855bfc76c53',
-    'deploy/mission-control/sql/management/verify-task-events.sql': 'b107d6e4ee22913d42119296f92fd4412ad4bf15c1f2817db326edf629436d3d',
+    'deploy/mission-control/sql/management/grant-external-workflows.sql': '5141a9a32a3522791744322491eda993f9b5c04e4a4d774f3d4f78e3ca77cc02',
+    'deploy/mission-control/sql/management/grant-runner.sql': 'c2caa79d187b457aacb1fd368e7bb0f6938aa3e4bb4170b74c6b1f924e966be3',
+    'deploy/mission-control/sql/management/verify-external-agent.sql': 'c7ea747bd57acd93421eb71f6e5c4fd3726ca3d9ff0d4d7626521fad6881cfe1',
+    'deploy/mission-control/sql/management/verify-external-workflows.sql': '38c8962fbd86f0079fe9a481c7e36fd35733e972a45f70dd34754b986d4601ad',
+    'deploy/mission-control/sql/management/verify-jenkins-events.sql': 'dfb5790002f7ee1bd0a9662aedeec079acf4929c13a26efcb460dc98418394b6',
+    'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '066f20b3fd8943b51c8ba4f8b002b3a922c2ed834eba1196702ebc93448a8298',
+    'deploy/mission-control/sql/management/verify-task-events.sql': 'dcd9c2b26b6445fe5476732681fb42cc7400366607c51a6c8a8fd5f7ea3ffe88',
 }
 PG_PROXY_GUARD_AST_SHA256 = {
     'work_owner_control.py::_owner_source_history': 'f71a44834f5108ae24224c80f74f9f1d469b619356ef74618ff55e60657f5493',
@@ -1370,7 +1372,7 @@ STRICT_VERIFIER_FILES = {
     "verify-external-workflows.sql",
     "verify-feedback.sql",
     "verify-autonomy.sql",
-    "verify-identity-catalog.sql", "verify-typed-renew.sql", "verify-failure-cause.sql", "verify-deadline-extension-events.sql", "verify-retry-source-key.sql", "verify-gate-contract-names.sql",
+    "verify-identity-catalog.sql", "verify-typed-renew.sql", "verify-failure-cause.sql", "verify-deadline-extension-events.sql", "verify-retry-source-key.sql", "verify-gate-contract-names.sql", "verify-delivery-receipt-source-key.sql",
 }
 
 

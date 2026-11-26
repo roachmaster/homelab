@@ -245,7 +245,7 @@ check_ready() {
         ready=false
     fi
     if migration_applied 51 pg_proxy_cutover; then
-        printf 'NOT READY: cutover migration (51) is already applied.\n'
+        printf 'NOT READY: cutover migration (52) is already applied.\n'
         ready=false
     fi
     if [[ "$ready" == true ]]; then
@@ -321,7 +321,7 @@ printf 'quiescent: no caller sessions, leased assignments, or leased runs\n'
 # run afterwards, so a later re-provision cannot restore them.
 psql_as postgres forge_agent -c 'SET ROLE forge_agent_owner' \
     -f "$directory/sql/apply-cutover.sql"
-printf 'cutover migration (51) applied\n'
+printf 'cutover migration (52) applied\n'
 
 # Rotate the SCRAM credentials so the old ones stop working. The new
 # values are written to root-only files and never printed; the

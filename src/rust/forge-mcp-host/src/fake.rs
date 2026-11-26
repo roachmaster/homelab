@@ -4,7 +4,7 @@
 //! nothing.
 
 use forge_mcp::{
-    EventView, McError, McRequest, McResponse, MissionControlPort, WorkflowView, WorkView,
+    EventView, McError, McRequest, McResponse, MissionControlPort, WorkView, WorkflowView,
 };
 
 pub struct FakePort;
@@ -24,7 +24,13 @@ impl MissionControlPort for FakePort {
                 enabled: true,
             })),
             McRequest::EventsList { limit } => {
-                let kinds = ["submitted", "review_decided", "started", "queued", "progress"];
+                let kinds = [
+                    "submitted",
+                    "review_decided",
+                    "started",
+                    "queued",
+                    "progress",
+                ];
                 let events = (0..limit.min(5))
                     .map(|i| EventView {
                         sequence: 2000 - i as u64,

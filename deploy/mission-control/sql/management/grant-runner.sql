@@ -240,7 +240,7 @@ GRANT EXECUTE ON FUNCTION forge_coding_worker_api.renew_deadline(uuid,uuid,text)
 -- place; re-apply the cutover revocation instead.
 DO $grant_runner_cutover$
 BEGIN
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_cutover') THEN
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_agent FROM forge_agent, forge_coding_worker, forge_coding_reconciler;
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_workflow FROM forge_agent, forge_coding_worker, forge_coding_reconciler;
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_agent FROM forge_agent, forge_coding_worker, forge_coding_reconciler;

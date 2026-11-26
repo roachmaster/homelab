@@ -10,16 +10,16 @@ use forge_mcp::{
 };
 use rmcp::model::{
     CallToolRequestParam, CallToolResult, Content, GetPromptRequestParam, GetPromptResult,
-    Implementation, ListPromptsResult, ListResourcesResult, ListToolsResult,
-    PaginatedRequestParam, Prompt, PromptMessage, PromptMessageContent, PromptMessageRole,
-    ProtocolVersion, ReadResourceRequestParam, ReadResourceResult, Resource, ResourceContents,
-    ServerCapabilities, ServerInfo, Tool, ToolAnnotations,
+    Implementation, ListPromptsResult, ListResourcesResult, ListToolsResult, PaginatedRequestParam,
+    Prompt, PromptMessage, PromptMessageContent, PromptMessageRole, ProtocolVersion,
+    ReadResourceRequestParam, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
+    ServerInfo, Tool, ToolAnnotations,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{json, Map, Value};
 
-use crate::{Backend, input_schema};
+use crate::{input_schema, Backend};
 
 #[derive(Clone)]
 pub struct McpServer {
@@ -28,7 +28,9 @@ pub struct McpServer {
 
 impl McpServer {
     pub fn new(backend: Backend) -> Self {
-        Self { backend: Arc::new(backend) }
+        Self {
+            backend: Arc::new(backend),
+        }
     }
 
     async fn execute(&self, request: McRequest) -> Result<forge_mcp::McResponse, McError> {
@@ -80,7 +82,10 @@ impl ServerHandler for McpServer {
                 tool
             })
             .collect();
-        Ok(ListToolsResult { tools, next_cursor: None })
+        Ok(ListToolsResult {
+            tools,
+            next_cursor: None,
+        })
     }
 
     async fn call_tool(
@@ -137,7 +142,10 @@ impl ServerHandler for McpServer {
             },
             None,
         );
-        Ok(ListResourcesResult { resources: vec![recent], next_cursor: None })
+        Ok(ListResourcesResult {
+            resources: vec![recent],
+            next_cursor: None,
+        })
     }
 
     async fn read_resource(
@@ -149,11 +157,18 @@ impl ServerHandler for McpServer {
         let mc_request = if uri == "forge://events/recent" {
             McRequest::EventsList { limit: 50 }
         } else if let Some(id) = uri.strip_prefix("forge://workflows/") {
-            McRequest::WorkflowGet { workflow_id: id.to_owned() }
+            McRequest::WorkflowGet {
+                workflow_id: id.to_owned(),
+            }
         } else if let Some(id) = uri.strip_prefix("forge://tasks/") {
-            McRequest::WorkGet { task_id: id.to_owned() }
+            McRequest::WorkGet {
+                task_id: id.to_owned(),
+            }
         } else {
-            return Err(McpError::invalid_params(format!("unknown resource {uri}"), None));
+            return Err(McpError::invalid_params(
+                format!("unknown resource {uri}"),
+                None,
+            ));
         };
         match self.execute(mc_request).await {
             Ok(response) => {
@@ -187,7 +202,10 @@ impl ServerHandler for McpServer {
             arguments: None,
             icons: None,
         };
-        Ok(ListPromptsResult { prompts: vec![prompt], next_cursor: None })
+        Ok(ListPromptsResult {
+            prompts: vec![prompt],
+            next_cursor: None,
+        })
     }
 
     async fn get_prompt(
@@ -205,7 +223,9 @@ impl ServerHandler for McpServer {
             description: Some("Forge task authoring format.".into()),
             messages: vec![PromptMessage {
                 role: PromptMessageRole::User,
-                content: PromptMessageContent::Text { text: TASK_AUTHORING_PROMPT.into() },
+                content: PromptMessageContent::Text {
+                    text: TASK_AUTHORING_PROMPT.into(),
+                },
             }],
         })
     }

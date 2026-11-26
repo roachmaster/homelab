@@ -5,7 +5,7 @@
 //! and dispatch grants decide.
 
 use forge_mcp::{
-    EventView, McError, McRequest, McResponse, MissionControlPort, WorkflowView, WorkView,
+    EventView, McError, McRequest, McResponse, MissionControlPort, WorkView, WorkflowView,
 };
 use serde_json::{json, Value};
 
@@ -18,16 +18,22 @@ pub struct LivePort {
 
 impl LivePort {
     pub fn new(pg_dsn: Option<String>, dispatch_url: String, token: Option<String>) -> Self {
-        Self { pg_dsn, dispatch_url, token, http: reqwest::Client::new() }
+        Self {
+            pg_dsn,
+            dispatch_url,
+            token,
+            http: reqwest::Client::new(),
+        }
     }
 
     async fn pg(&self) -> Result<tokio_postgres::Client, McError> {
         let dsn = self.pg_dsn.as_deref().ok_or_else(|| McError::Unavailable {
             detail: "no Postgres DSN configured for reads".into(),
         })?;
-        let (client, connection) =
-            tokio_postgres::connect(dsn, tokio_postgres::NoTls).await.map_err(|e| {
-                McError::Unavailable { detail: format!("postgres connect: {e}") }
+        let (client, connection) = tokio_postgres::connect(dsn, tokio_postgres::NoTls)
+            .await
+            .map_err(|e| McError::Unavailable {
+                detail: format!("postgres connect: {e}"),
             })?;
         tokio::spawn(async move {
             let _ = connection.await;
@@ -55,11 +61,12 @@ impl LivePort {
             .json(&body)
             .send()
             .await
-            .map_err(|e| McError::Unavailable { detail: format!("dispatch send: {e}") })?;
-        let value: Value = resp
-            .json()
-            .await
-            .map_err(|e| McError::Unavailable { detail: format!("dispatch reply: {e}") })?;
+            .map_err(|e| McError::Unavailable {
+                detail: format!("dispatch send: {e}"),
+            })?;
+        let value: Value = resp.json().await.map_err(|e| McError::Unavailable {
+            detail: format!("dispatch reply: {e}"),
+        })?;
         // Dispatch reports domain rejections in-band. result_mismatch is
         // deliberately NOT collapsed further here: until the dispatch
         // contract distinguishes stale base / stale digest / revoked
@@ -89,7 +96,9 @@ impl MissionControlPort for LivePort {
                         &[&task_id],
                     )
                     .await
-                    .map_err(|e| McError::Unavailable { detail: format!("work_get: {e}") })?;
+                    .map_err(|e| McError::Unavailable {
+                        detail: format!("work_get: {e}"),
+                    })?;
                 let row = rows.into_iter().next().ok_or(McError::NotFound {
                     what: format!("task {task_id}"),
                 })?;
@@ -126,13 +135,17 @@ impl MissionControlPort for LivePort {
                         &[&workflow_id],
                     )
                     .await
-                    .map_err(|e| McError::Unavailable { detail: format!("workflow_get: {e}") })?;
+                    .map_err(|e| McError::Unavailable {
+                        detail: format!("workflow_get: {e}"),
+                    })?;
                 let row = rows.into_iter().next().ok_or(McError::NotFound {
                     what: format!("workflow {workflow_id}"),
                 })?;
                 Ok(McResponse::Workflow(WorkflowView {
                     workflow_id,
-                    phase: row.get::<_, Option<String>>(0).unwrap_or_else(|| "unknown".into()),
+                    phase: row
+                        .get::<_, Option<String>>(0)
+                        .unwrap_or_else(|| "unknown".into()),
                     enabled: row.get(1),
                 }))
             }
@@ -145,7 +158,9 @@ impl MissionControlPort for LivePort {
                         &[&(limit as i64)],
                     )
                     .await
-                    .map_err(|e| McError::Unavailable { detail: format!("events_list: {e}") })?;
+                    .map_err(|e| McError::Unavailable {
+                        detail: format!("events_list: {e}"),
+                    })?;
                 let events = rows
                     .iter()
                     .map(|row| EventView {
@@ -179,7 +194,10 @@ impl MissionControlPort for LivePort {
                     .to_owned();
                 Ok(McResponse::Submitted { task_id })
             }
-            McRequest::WorkCancel { task_id, expected_revision } => {
+            McRequest::WorkCancel {
+                task_id,
+                expected_revision,
+            } => {
                 let body = json!({
                     "kind": "work_cancel",
                     "request_id": uuid::Uuid::new_v4().to_string(),
@@ -203,7 +221,9 @@ impl MissionControlPort for LivePort {
                     "idempotency_key": decide.idempotency_key,
                 });
                 self.dispatch("ide.work.plan.decide", body).await?;
-                Ok(McResponse::Decided { task_id: decide.task_id })
+                Ok(McResponse::Decided {
+                    task_id: decide.task_id,
+                })
             }
         }
     }
