@@ -13,6 +13,7 @@ for direct INSERTs and fails the build if one appears.
 from psycopg2.extras import Json
 
 from queue_store import Rejected
+from work_failure_cause import FAILURE_CAUSES
 
 ACTOR_KINDS = frozenset({
     "operator",  # a person, via the portal or CLI
@@ -37,6 +38,9 @@ CAUSES = {
         "operator_request", "workflow_cancelled", "budget_exhausted",
         "superseded",
     }),
+    # Failed events (M46): the worker attaches the cause at publish time;
+    # any Python producer must name one too.
+    "failed": FAILURE_CAUSES,
 }
 
 NEGATIVE_KINDS = frozenset(CAUSES)
