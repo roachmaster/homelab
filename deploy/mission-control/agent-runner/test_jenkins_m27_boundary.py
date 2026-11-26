@@ -939,7 +939,7 @@ CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': 'd8f915ee38fd31ec9d8d28a
  'deploy/mission-control/agent-runner/test_work_author_handoff_context.py': '59eb04a7dc65b0ed1322c3bd3e24e2d1cae938bcb5c4b16cf4e5146cb7cc4ba7',
  'deploy/mission-control/agent-runner/test_work_muse_intake.py': '9bcf53cc86dca4150601866bc6e6d2f8413d16f184952b261f96bc41e0464272',
  'deploy/mission-control/agent-runner/test_work_owner_fence.py': '27723ca8bb40a4a0c55708a5ddadc4b58b825de077c343c2e6fe1534421be9da',
- 'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': '30025f31a0f8d3dbafd95f9c3db5a4ae592b26d267c9ec7abc4a1349ddd585a9',
+ 'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': 'a8e421d5e61fd17c19055c591ed4e3a1bdc69f0eac047aa8a4263b6743370380',
  'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': '3adbdc87b3604cf94e8ebdb7932583182a8b3b978a226977177095847a3dec72',
  'deploy/mission-control/agent-runner/work_agent_handoff.py': 'd47d6f46ec0d7813c7a857da5e503d9663544dba6b31c3418f7fc0638986c0c7',
  'deploy/mission-control/agent-runner/work_author_handoff_context.py': '7f28a0865ca1c5685b27a7392a57d4e565102fafb2a9350c5424b8bffda0e21a',
