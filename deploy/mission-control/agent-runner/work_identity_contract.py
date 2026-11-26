@@ -4,7 +4,8 @@ CONTENT_AUTHORITY_PATHS=frozenset('deploy/mission-control/agent-runner/'+name fo
     'work_artifact_identity.py','work_artifact_source.py','work_identity_contract.py',
     'work_native_identity.py','work_external_identity.py','work_native_ci_reprepare.py','work_identity_store.py',
     'work_native_ci_postfix.py','work_native_ci_postfix_proof.py',
-    'work_quota_diagnostics.py','work_provider_model_route.py','work_provider_cooldown.py'))
+    'work_quota_diagnostics.py','work_provider_model_route.py','work_provider_cooldown.py',
+    'work_agent_handoff.py','work_author_handoff_context.py','work_peer_context.py','work_review_context.py'))
 
 
 def content_policy_path(path,legacy_protects):

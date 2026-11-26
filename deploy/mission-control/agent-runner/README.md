@@ -1,5 +1,9 @@
 # Forge agent runner
 
+[AGY quota handoff to Codex](../../../docs/architecture/agent-quota-handoff.md)
+describes optional source-bound author delegation, retained Plans/workspaces,
+independent review and required schema/configuration rollout.
+
 Mission Control runs `forge-agent-runner.service` as the `forge_agent` account.
 The service listens on `127.0.0.1:18083`. In legacy mode it uses the private
 tunnel on `127.0.0.1:18082` to send inference requests to Forge GPU. In dispatch
