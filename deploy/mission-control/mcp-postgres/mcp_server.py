@@ -35,7 +35,7 @@ from sql_guard import WORD, GuardError, check_read_only  # noqa: E402
 
 SERVER_NAME = "homelab-mcp-postgres"
 SERVER_VERSION = "0.1.0"
-PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 MAX_BODY_BYTES = 64 * 1024
 MCP_PATH = "/mcp"
 LOG = logging.getLogger("homelab-mcp")
@@ -577,7 +577,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Referrer-Policy", "same-origin")
         self.send_header("Content-Security-Policy",
                          f"default-src 'none'; style-src 'unsafe-inline'; form-action {sources}; "
                          "frame-ancestors 'none'; base-uri 'none'")
