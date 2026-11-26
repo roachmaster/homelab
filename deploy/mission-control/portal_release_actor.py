@@ -98,6 +98,9 @@ ARTIFACT_COMMANDS = [
 ]
 SHA40 = re.compile('[0-9a-f]{40}')
 SHA64 = re.compile('[0-9a-f]{64}')
+# The CI gate is a legacy manifest digest or a named contract '<profile>:<branch_scope>'.
+GATE_REF = re.compile(
+    r'[0-9a-f]{64}|forge-sdlc-jenkins-v[1-3]:(?:main|detached|branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?)')
 
 
 def canonical(value):
@@ -435,7 +438,7 @@ class PortalReleaseActor:
             if not isinstance(job[name], str) or str(UUID(job[name])) != job[name]:
                 raise ValueError('Invalid release UUID')
         for name, pattern in (('commit_sha', SHA40), ('tree_sha', SHA40),
-                              ('ci_receipt_sha256', SHA64), ('gate_manifest_sha256', SHA64)):
+                              ('ci_receipt_sha256', SHA64), ('gate_manifest_sha256', GATE_REF)):
             if not isinstance(job[name], str) or not pattern.fullmatch(job[name]):
                 raise ValueError('Invalid release source digest')
         return dict(job)
