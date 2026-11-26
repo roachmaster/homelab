@@ -1,4 +1,4 @@
-"""Private operator recovery DTO/CLI. No HTTP route and no model execution."""
+"""Private operator recovery DTO/CLI (infrastructure retry; `revive` for guarded workflow revival). No HTTP route and no model execution."""
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -106,7 +106,34 @@ class NativeReviewerGrantScope:
         return scope()
 
 
+def revive_main(argv):
+    """Operator entry point for the guarded revival of one disabled+escalated native workflow.
+
+    It only calls the coordinator's existing revive_workflow: every guard there
+    (escalated, nothing live, never person-cancelled, approved Plan, bounded
+    revivals, current grants) still decides; a refusal is audited and exits 3.
+    """
+    parser=argparse.ArgumentParser(prog='work_external_recovery.py revive',description=revive_main.__doc__)
+    parser.add_argument('--config',required=True)
+    parser.add_argument('--project',required=True)
+    parser.add_argument('--workflow',type=UUID,required=True)
+    parser.add_argument('--idempotency-key',required=True)
+    parser.add_argument('--note',required=True)
+    parser.add_argument('--execute',action='store_true',required=True)
+    args=parser.parse_args(argv)
+    if os.geteuid()!=0:raise RuntimeError('The private operator command requires root; it acquires only scoped real forge_agent mutations')
+    from work_config import load_work_config
+    from work_api import WorkServiceFactory
+    service=WorkServiceFactory(load_work_config(args.config),lambda:peer_connect('forge_agent')).create()
+    if service is None or service.workflow_worker is None:raise RuntimeError('Configured native workflow coordinator is unavailable')
+    result=service.workflow_worker.revive_workflow(project_alias=args.project,workflow_id=args.workflow,idempotency_key=args.idempotency_key,note=args.note)
+    print(json.dumps(result,sort_keys=True,default=str))
+    return 0 if result.get('status')=='revived' else 3
+
+
 def main():
+    import sys
+    if sys.argv[1:2]==['revive']:raise SystemExit(revive_main(sys.argv[2:]))
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config',required=True)
     parser.add_argument('--project',required=True)
