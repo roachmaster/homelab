@@ -181,6 +181,25 @@ def _summary(row):
     return item
 
 
+def _public_deadline_extension(payload):
+    """Bounded projection of a recorded deadline extension (M47), else None."""
+    if (not isinstance(payload, dict) or payload.get("stage") != "deadline_extended"
+            or set(payload) != {"stage", "attempt_id", "extension_no", "previous_deadline", "new_deadline", "signal", "actor"}
+            or not _projection_actor(payload, "worker")):
+        return None
+    try:
+        valid = (str(UUID(payload["attempt_id"])) == payload["attempt_id"]
+                 and type(payload["extension_no"]) is int and 1 <= payload["extension_no"] <= 64
+                 and payload["signal"] in {"progress_report", "checkpoint", "output"}
+                 and all(isinstance(payload[k], str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", payload[k])
+                         for k in ("previous_deadline", "new_deadline")))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not valid:
+        return None
+    return {k: payload[k] for k in ("attempt_id", "extension_no", "previous_deadline", "new_deadline", "signal")}
+
+
 def _public_failure(payload):
     """Cause code and bounded summary of a failed event (M46), else None."""
     if not isinstance(payload, dict):
@@ -1498,6 +1517,10 @@ class WorkStore:
                         item["external_progress"] = external
                     elif flow is not None:
                         item["workflow_progress"] = flow
+                    else:
+                        extension = _public_deadline_extension(payload)
+                        if extension is not None and extension["attempt_id"] in owned_attempts:
+                            item["deadline_extension"] = extension
                 elif row["event_kind"] == "failed":
                     failure = _public_failure(row["payload"])
                     if failure is not None:
