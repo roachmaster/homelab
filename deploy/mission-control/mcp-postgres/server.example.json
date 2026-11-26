@@ -13,5 +13,6 @@
   "max_response_bytes": 1000000,
   "max_concurrent_queries": 4,
   "trust_cf_connecting_ip": true,
-  "rate_limit": {"failures": 10, "window_seconds": 60, "lockout_seconds": 300, "global_failures_per_minute": 120}
+  "rate_limit": {"failures": 10, "window_seconds": 60, "lockout_seconds": 300, "global_failures_per_minute": 120},
+  "oauth": {"enabled": true, "issuer": "https://mcp.thedevex.com"}
 }

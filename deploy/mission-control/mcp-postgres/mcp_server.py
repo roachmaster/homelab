@@ -2,8 +2,9 @@
 """Homelab MCP server: read-only PostgreSQL tools over MCP Streamable HTTP.
 
 Listens on loopback only. Cloudflare Tunnel routes mcp.thedevex.com here and
-does no authentication; every MCP request must carry a static bearer token
-created with mcp_tokens.py. See README.md.
+does no authentication; every MCP request must carry a bearer token: a static
+token created with mcp_tokens.py, or (when "oauth.enabled") an access token
+from the built-in OAuth 2.1 authorization server in mcp_oauth.py. See README.md.
 """
 
 import argparse
@@ -21,11 +22,15 @@ from pathlib import Path
 import sys
 import threading
 import time
+from http.cookies import CookieError, SimpleCookie
+from urllib.parse import parse_qsl, urlsplit
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mcp_auth import BearerTokenAuth, FailureLimiter  # noqa: E402
+import mcp_oauth  # noqa: E402
+from mcp_oauth import DualAuth, OAuthError, OAuthServer  # noqa: E402
 from sql_guard import WORD, GuardError, check_read_only  # noqa: E402
 
 SERVER_NAME = "homelab-mcp-postgres"
@@ -52,7 +57,11 @@ DEFAULTS = {
     "trust_cf_connecting_ip": True,
     "rate_limit": {"failures": 10, "window_seconds": 60, "lockout_seconds": 300,
                    "global_failures_per_minute": 120},
+    "oauth": mcp_oauth.DEFAULT_OAUTH,
 }
+CSRF_COOKIE = "__Host-hmcp_csrf"
+WELL_KNOWN_PRM = ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp")
+WELL_KNOWN_AS = "/.well-known/oauth-authorization-server"
 
 TOOLS = [
     {
@@ -146,6 +155,19 @@ def load_config(path):
     if unknown:
         raise ConfigError(f"unknown config keys: {', '.join(sorted(unknown))}")
     config = {**DEFAULTS, **raw, "rate_limit": {**DEFAULTS["rate_limit"], **raw.get("rate_limit", {})}}
+    oauth = raw.get("oauth", {})
+    if not isinstance(oauth, dict) or set(oauth) - set(mcp_oauth.DEFAULT_OAUTH):
+        raise ConfigError("oauth must be an object with known keys only")
+    config["oauth"] = {**mcp_oauth.DEFAULT_OAUTH, **oauth,
+                       "login_rate_limit": {**mcp_oauth.DEFAULT_OAUTH["login_rate_limit"],
+                                            **oauth.get("login_rate_limit", {})}}
+    issuer = urlsplit(str(config["oauth"]["issuer"]))
+    if config["oauth"]["enabled"] and (issuer.scheme != "https" or not issuer.netloc or issuer.path not in ("", "/")):
+        raise ConfigError("oauth.issuer must be an https origin with no path")
+    for key in ("code_ttl_seconds", "access_ttl_seconds", "refresh_ttl_days"):
+        value = config["oauth"][key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ConfigError(f"oauth.{key} must be a positive integer")
     host, _, port = config["listen"].rpartition(":")
     try:
         if not ipaddress.ip_address(host.strip("[]")).is_loopback:
@@ -245,11 +267,13 @@ class PostgresBackend:
 
 
 class McpApp:
-    def __init__(self, config, auth, backend, limiter):
+    def __init__(self, config, auth, backend, limiter, oauth=None):
         self.config = config
-        self.auth = auth
+        self.oauth = oauth
+        self.auth = DualAuth(auth, oauth) if oauth is not None else auth
         self.backend = backend
         self.limiter = limiter
+        self.login_limiter = FailureLimiter(**config["oauth"]["login_rate_limit"])
         self.slots = threading.BoundedSemaphore(config["max_concurrent_queries"])
         # Per-process key: cursors are short-lived and intentionally die with a restart.
         self.cursor_key = secrets.token_bytes(32)
@@ -511,7 +535,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(421 if host else 400, {"error": "invalid_host"}, {"Connection": "close"})
             return False
         origin = self.headers.get("Origin")
-        if origin is not None and origin.lower().rstrip("/") not in self.app.config["allowed_origins"]:
+        allowed = self.app.config["allowed_origins"]
+        if self.app.oauth is not None and self.path.startswith("/oauth/"):
+            allowed = allowed | {self.app.oauth.issuer.lower()}
+        if origin is not None and origin.lower().rstrip("/") not in allowed:
             self.send_json(403, {"error": "origin_not_allowed"}, {"Connection": "close"})
             return False
         return True
@@ -527,7 +554,11 @@ class Handler(BaseHTTPRequestHandler):
         if principal is None:
             self.app.limiter.record_failure(key)
             presented = bool(self.headers.get("Authorization"))
-            challenge = 'Bearer realm="homelab-mcp"' + (', error="invalid_token"' if presented else "")
+            challenge = 'Bearer realm="homelab-mcp"'
+            if self.app.oauth is not None:
+                challenge += f', resource_metadata="{self.app.oauth.resource_metadata_url()}"'
+            if presented:
+                challenge += ', error="invalid_token"'
             LOG.warning("auth failure key=%s presented=%s", key, presented)
             self.send_json(401, {"error": "invalid_token" if presented else "missing_token"},
                            {"WWW-Authenticate": challenge})
@@ -535,11 +566,169 @@ class Handler(BaseHTTPRequestHandler):
         self.app.limiter.record_success(key)
         return principal
 
+    # --- OAuth endpoints -------------------------------------------------------
+    def send_page(self, status, page, extra=None):
+        self.consume_request_body()
+        data = page.encode()
+        sources = self.app.oauth.form_action_sources() if self.app.oauth is not None else "'self'"
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy",
+                         f"default-src 'none'; style-src 'unsafe-inline'; form-action {sources}; "
+                         "frame-ancestors 'none'; base-uri 'none'")
+        for key, value in (extra or {}).items():
+            self.send_header(key, value)
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_redirect(self, location, extra=None):
+        headers = {"Location": location, "Referrer-Policy": "no-referrer", **(extra or {})}
+        self.send_json(302, None, headers)
+
+    @staticmethod
+    def error_page(message):
+        import html as _html
+        return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>Homelab MCP</title></head>"
+                f"<body style=\"font:16px system-ui;max-width:28rem;margin:3rem auto\"><h1>Authorization error</h1>"
+                f"<p>{_html.escape(message)}</p></body></html>")
+
+    @staticmethod
+    def parse_params(raw):
+        """Parse a urlencoded query or form. Duplicate parameters are rejected (RFC 6749 3.1)."""
+        try:
+            pairs = parse_qsl(raw.decode("utf-8"), keep_blank_values=True, max_num_fields=64)
+        except (UnicodeDecodeError, ValueError):
+            return None
+        params = {}
+        for key, value in pairs:
+            if key in params:
+                return None
+            params[key] = value
+        return params
+
+    def csrf_cookie(self):
+        try:
+            cookie = SimpleCookie(self.headers.get("Cookie") or "")
+        except CookieError:
+            return None
+        morsel = cookie.get(CSRF_COOKIE)
+        value = morsel.value if morsel else None
+        return value if value and len(value) == 43 else None
+
+    def oauth_authorize(self, params, post):
+        oauth = self.app.oauth
+        if params is None:
+            self.send_page(400, self.error_page("Malformed or duplicate parameters."))
+            return
+        try:
+            request, error = oauth.validate_authorize(params)
+        except ValueError as problem:
+            self.send_page(400, self.error_page(str(problem)))
+            return
+        if error is not None:
+            self.send_redirect(oauth.error_redirect(request, error))
+            return
+        cookie = self.csrf_cookie()
+        if not post:
+            cookie = cookie or secrets.token_urlsafe(32)
+            set_cookie = f"{CSRF_COOKIE}={cookie}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=900"
+            self.send_page(200, oauth.consent_page(request, params, oauth.csrf_value(cookie, params)),
+                           {"Set-Cookie": set_cookie})
+            return
+        supplied = params.get("csrf") or ""
+        if not cookie or not hmac.compare_digest(supplied, oauth.csrf_value(cookie, params)):
+            self.send_page(403, self.error_page("Your session expired. Go back to the app and start again."))
+            return
+        clear = {"Set-Cookie": f"{CSRF_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"}
+        if params.get("decision") == "deny":
+            self.send_redirect(oauth.error_redirect(request, OAuthError("access_denied", "the operator denied access")),
+                               clear)
+            return
+        key = self.client_key()
+        wait = self.app.login_limiter.retry_after(key)
+        if wait:
+            self.send_page(429, self.error_page(f"Too many failed sign-in attempts. Try again in {wait} seconds."),
+                           {"Retry-After": str(wait)})
+            return
+        if params.get("decision") != "allow" or not oauth.check_password(params.get("password")):
+            self.app.login_limiter.record_failure(key)
+            LOG.warning("oauth operator login failed key=%s client=%s", key, request.client["client_id"])
+            self.send_page(401, oauth.consent_page(request, params, oauth.csrf_value(cookie, params),
+                                                   "Incorrect password."))
+            return
+        self.app.login_limiter.record_success(key)
+        LOG.info("oauth authorization granted client=%s scope=%s", request.client["client_id"], request.scope)
+        self.send_redirect(oauth.code_redirect(request), clear)
+
+    def oauth_post(self, route):
+        content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        body, _ = self.consume_request_body()
+        if body is None:
+            self.send_json(413, {"error": "invalid_request", "error_description": "request body not accepted"},
+                           {"Connection": "close"})
+            return
+        if content_type != "application/x-www-form-urlencoded":
+            if route == "/oauth/authorize":
+                self.send_page(415, self.error_page("Unsupported form encoding."))
+            else:
+                self.send_json(400, {"error": "invalid_request",
+                                     "error_description": "use application/x-www-form-urlencoded"},
+                               {"Pragma": "no-cache"})
+            return
+        params = self.parse_params(body)
+        if route == "/oauth/authorize":
+            self.oauth_authorize(params, post=True)
+            return
+        no_store = {"Pragma": "no-cache"}
+        if params is None:
+            self.send_json(400, {"error": "invalid_request", "error_description": "malformed or duplicate parameters"},
+                           no_store)
+            return
+        key = self.client_key()
+        wait = self.app.limiter.retry_after(key)
+        if wait:
+            self.send_json(429, {"error": "slow_down"}, {**no_store, "Retry-After": str(wait)})
+            return
+        try:
+            if route == "/oauth/token":
+                result = self.app.oauth.token(self.headers, params)
+                LOG.info("oauth token issued grant_type=%s", params.get("grant_type"))
+                self.send_json(200, result, no_store)
+            else:
+                self.app.oauth.revoke(self.headers, params)
+                self.send_json(200, None, no_store)
+        except OAuthError as error:
+            extra = dict(no_store)
+            if error.error == "invalid_client":
+                self.app.limiter.record_failure(key)
+                if getattr(error, "basic", False):
+                    extra["WWW-Authenticate"] = 'Basic realm="homelab-mcp"'
+            LOG.warning("oauth %s rejected: %s (%s)", route, error.error, error.description)
+            self.send_json(error.status, error.body(), extra)
+        except mcp_oauth.sqlite3.Error:
+            LOG.exception("oauth state database error")
+            self.send_json(500, {"error": "server_error"}, no_store)
+
     def do_GET(self):
         if not self.admit():
             return
+        route = self.path.split("?")[0]
         if self.path == "/healthz":
             self.send_json(200, {"status": "ok"})
+        elif self.app.oauth is not None and route in WELL_KNOWN_PRM:
+            self.send_json(200, self.app.oauth.protected_resource_metadata(), {"Cache-Control": "max-age=300"})
+        elif self.app.oauth is not None and route == WELL_KNOWN_AS:
+            self.send_json(200, self.app.oauth.authorization_server_metadata(), {"Cache-Control": "max-age=300"})
+        elif self.app.oauth is not None and route == "/oauth/authorize":
+            query = urlsplit(self.path).query
+            self.oauth_authorize(self.parse_params(query.encode()), post=False)
         elif self.path.split("?")[0] == MCP_PATH:
             # No server-initiated stream is offered; the spec permits 405 here.
             if self.authenticate() is not None:
@@ -554,7 +743,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.admit():
             return
-        if self.path.split("?")[0] != MCP_PATH:
+        route = self.path.split("?")[0]
+        if self.app.oauth is not None and route in ("/oauth/token", "/oauth/revoke", "/oauth/authorize"):
+            self.oauth_post(route)
+            return
+        if route != MCP_PATH:
             self.send_json(404, {"error": "not_found"})
             return
         principal = self.authenticate()
@@ -606,7 +799,17 @@ class Server(ThreadingHTTPServer):
 def build_app(config):
     auth = BearerTokenAuth(config["token_file"])
     limiter = FailureLimiter(**config["rate_limit"])
-    return McpApp(config, auth, PostgresBackend(config["dsn"], config["statement_timeout_ms"]), limiter)
+    oauth = None
+    if config["oauth"]["enabled"]:
+        try:
+            oauth = OAuthServer(config["oauth"])
+        except (OSError, mcp_oauth.sqlite3.Error) as error:
+            # Static tokens keep working even if the OAuth state store is unavailable.
+            LOG.error("OAuth disabled: cannot open state database: %s", error)
+        else:
+            for problem in oauth.problems():
+                LOG.warning("OAuth: %s", problem)
+    return McpApp(config, auth, PostgresBackend(config["dsn"], config["statement_timeout_ms"]), limiter, oauth)
 
 
 def main(argv=None):

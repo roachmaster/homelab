@@ -9,14 +9,18 @@ from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+import re
 import threading
+import time
 import unittest
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import mcp_auth  # noqa: E402
 from mcp_auth import BearerTokenAuth, FailureLimiter, Principal  # noqa: E402
+import mcp_oauth  # noqa: E402
 import mcp_server  # noqa: E402
 from sql_guard import GuardError, check_read_only  # noqa: E402
 
@@ -404,6 +408,323 @@ class HttpServerTest(unittest.TestCase):
         self.assertEqual(self.rpc("ping")[0], 200)
         cli(self.file, "revoke", self.token.split("_")[1])
         self.assertEqual(self.rpc("ping")[0], 401)
+
+
+
+def oauth_cli(directory, *args, check=True, stdin=None):
+    env = {**os.environ, "HOMELAB_MCP_TOKENS_ALLOW_NONROOT": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+    base = [sys.executable, str(HERE / "mcp_oauth.py"), "--clients-file", str(directory / "clients.json"),
+            "--operator-file", str(directory / "operator.json"), "--state-db", str(directory / "oauth.sqlite3")]
+    return subprocess.run(base + list(args), capture_output=True, text=True, env=env, check=check, timeout=60,
+                          input=stdin)
+
+
+REDIRECT = "https://oauth-redirect-test.googleusercontent.com/r/test-project"
+
+
+class RedirectAllowlistTest(unittest.TestCase):
+    def test_prefix_matching(self):
+        ok = mcp_oauth.redirect_uri_allowed
+        for uri in ("https://oauth-redirect.googleusercontent.com/r/p1", "https://oauth-redirect.googleusercontent.com/a/p",
+                    "https://oauth-redirect-sandbox.googleusercontent.com/r/x?y=1", REDIRECT,
+                    "https://oauth-redirect-test.googleusercontent.com/a/app-123"):
+            self.assertTrue(ok(uri), uri)
+        for uri in ("http://oauth-redirect.googleusercontent.com/r/p", "https://oauth-redirect.googleusercontent.com/r/",
+                    "https://oauth-redirect.googleusercontent.com/x/p", "https://oauth-redirect.googleusercontent.com.evil.com/r/p",
+                    "https://evil.com/r/p", "https://oauth-redirect.googleusercontent.com@evil.com/r/p",
+                    "https://oauth-redirect.googleusercontent.com:444/r/p", "https://OAUTH-redirect.googleusercontent.com/r/p",
+                    "https://oauth-redirect.googleusercontent.com/r/../../evil", "https://oauth-redirect.googleusercontent.com/r/%2e%2e/x",
+                    "https://oauth-redirect.googleusercontent.com/r/p#frag", "https://oauth-redirect.googleusercontent.com/r/p q",
+                    "https://oauth-redirect.googleusercontent.com/r\\@evil.com", "//evil.com/r/p", "", None,
+                    "https://oauth-redirect.googleusercontent.com/rr/p"):
+            self.assertFalse(ok(uri), uri)
+
+
+class OAuthHttpTest(unittest.TestCase):
+    def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name)
+        self.file = self.dir / "tokens.json"
+        self.static_token = cli(self.file, "create", "--name", "grok").stdout.strip()
+        self.client_id = oauth_cli(self.dir, "client", "create", "--name", "gemini",
+                                   "--secret-file", str(self.dir / "client.txt")).stdout.strip()
+        lines = dict(line.split("=", 1) for line in (self.dir / "client.txt").read_text().split())
+        self.assertEqual(lines["client_id"], self.client_id)
+        self.secret = lines["client_secret"]
+        self.assertEqual((self.dir / "client.txt").stat().st_mode & 0o777, 0o600)
+        oauth_cli(self.dir, "operator", "set-password", "--generate", str(self.dir / "pw.txt"))
+        self.password = (self.dir / "pw.txt").read_text().strip()
+        self.assertNotIn(self.password, (self.dir / "operator.json").read_text())
+        self.assertNotIn(self.secret, (self.dir / "clients.json").read_text())
+        config_path = self.dir / "server.json"
+        config_path.write_text(json.dumps({
+            "listen": "127.0.0.1:0", "allowed_hosts": [HOST], "token_file": str(self.file), "max_rows": 120,
+            "oauth": {"enabled": True, "issuer": "https://mcp.test", "clients_file": str(self.dir / "clients.json"),
+                      "operator_file": str(self.dir / "operator.json"), "state_db": str(self.dir / "oauth.sqlite3"),
+                      "login_rate_limit": {"failures": 3, "window_seconds": 60, "lockout_seconds": 300}}}))
+        config = mcp_server.load_config(config_path)
+        self.backend = FakeBackend()
+        self.clock = [time.time()]
+        oauth = mcp_oauth.OAuthServer(config["oauth"], clock=lambda: self.clock[0])
+        app = mcp_server.McpApp(config, BearerTokenAuth(self.file), self.backend,
+                                FailureLimiter(**config["rate_limit"]), oauth)
+        self.server = mcp_server.Server(("127.0.0.1", 0), app)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(lambda: (self.server.shutdown(), self.server.server_close()))
+
+    def http(self, method, path, body=None, headers=None, connection=None):
+        own = connection is None
+        connection = connection or http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=20)
+        sent = {"Host": HOST, **(headers or {})}
+        if isinstance(body, dict):
+            body = urlencode(body).encode()
+            sent.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        connection.request(method, path, body=body, headers=sent)
+        response = connection.getresponse()
+        data = response.read()
+        if own:
+            connection.close()
+        return response.status, {k.lower(): v for k, v in response.getheaders()}, data
+
+    def token_call(self, form, basic=False, path="/oauth/token"):
+        headers = {}
+        form = dict(form)
+        if basic:
+            raw = f"{self.client_id}:{self.secret}".encode()
+            headers["Authorization"] = "Basic " + base64.b64encode(raw).decode()
+        else:
+            form.update(client_id=self.client_id, client_secret=self.secret)
+        status, headers, data = self.http("POST", path, form, headers)
+        return status, headers, (json.loads(data) if data else None)
+
+    def authorize(self, verifier="v" * 50, redirect=REDIRECT, password=None, extra=None):
+        params = {"response_type": "code", "client_id": self.client_id, "redirect_uri": redirect,
+                  "code_challenge": mcp_oauth.s256(verifier), "code_challenge_method": "S256",
+                  "scope": "read", "state": "st-123", **(extra or {})}
+        status, headers, page = self.http("GET", "/oauth/authorize?" + urlencode(params))
+        self.assertEqual(status, 200, page[:300])
+        self.assertIn("form-action", headers["content-security-policy"])
+        cookie = headers["set-cookie"].split(";")[0]
+        self.assertIn("Secure", headers["set-cookie"])
+        csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', page.decode()).group(1)
+        form = {**params, "csrf": csrf, "decision": "allow",
+                "password": self.password if password is None else password}
+        return self.http("POST", "/oauth/authorize", form,
+                         {"Cookie": cookie, "Origin": "https://mcp.test"})
+
+    def code_for(self, verifier="v" * 50):
+        status, headers, _ = self.authorize(verifier)
+        self.assertEqual(status, 302)
+        location = headers["location"]
+        self.assertTrue(location.startswith(REDIRECT + "?"), location)
+        query = dict(parse_qsl(urlsplit(location).query))
+        self.assertEqual(query["state"], "st-123")
+        return query["code"]
+
+    def exchange(self, code, verifier="v" * 50, redirect=REDIRECT, basic=False):
+        return self.token_call({"grant_type": "authorization_code", "code": code, "redirect_uri": redirect,
+                                "code_verifier": verifier}, basic=basic)
+
+    def mcp(self, token, method="tools/list", params=None):
+        body = {"jsonrpc": "2.0", "id": 1, "method": method}
+        if params is not None:
+            body["params"] = params
+        status, headers, data = self.http("POST", "/mcp", json.dumps(body).encode(), {
+            "Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+        return status, headers, (json.loads(data) if data else None)
+
+    def test_metadata_documents(self):
+        for path in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"):
+            status, _, data = self.http("GET", path)
+            body = json.loads(data)
+            self.assertEqual(status, 200)
+            self.assertEqual((body["resource"], body["authorization_servers"], body["scopes_supported"]),
+                             ("https://mcp.test/mcp", ["https://mcp.test"], ["read"]))
+        status, _, data = self.http("GET", "/.well-known/oauth-authorization-server")
+        body = json.loads(data)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["issuer"], "https://mcp.test")
+        self.assertEqual(body["authorization_endpoint"], "https://mcp.test/oauth/authorize")
+        self.assertEqual(body["token_endpoint"], "https://mcp.test/oauth/token")
+        self.assertEqual(body["revocation_endpoint"], "https://mcp.test/oauth/revoke")
+        self.assertEqual(body["code_challenge_methods_supported"], ["S256"])
+        self.assertEqual(body["grant_types_supported"], ["authorization_code", "refresh_token"])
+        self.assertEqual(body["token_endpoint_auth_methods_supported"], ["client_secret_post", "client_secret_basic"])
+        self.assertNotIn("registration_endpoint", body)
+
+    def test_unauthenticated_mcp_points_to_resource_metadata(self):
+        status, headers, _ = self.http("POST", "/mcp", b'{"x":1}', {"Content-Type": "application/json"})
+        self.assertEqual(status, 401)
+        self.assertEqual(headers["www-authenticate"], 'Bearer realm="homelab-mcp", resource_metadata='
+                         '"https://mcp.test/.well-known/oauth-protected-resource"')
+        status, headers, _ = self.mcp(mcp_oauth.ACCESS_PREFIX + "A" * 43)
+        self.assertEqual(status, 401)
+        self.assertTrue(headers["www-authenticate"].endswith(', error="invalid_token"'))
+
+    def test_pkce_happy_path_dual_auth_and_static_token(self):
+        code = self.code_for()
+        status, headers, body = self.exchange(code)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertEqual((body["token_type"], body["expires_in"], body["scope"]), ("Bearer", 3600, "read"))
+        self.assertTrue(body["access_token"].startswith("hmcpat_"))
+        self.assertTrue(body["refresh_token"].startswith("hmcprt_"))
+        status, _, result = self.mcp(body["access_token"])
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result["result"]["tools"]), 3)
+        status, _, result = self.mcp(body["access_token"], "tools/call",
+                                     {"name": "query", "arguments": {"sql": "SELECT 1"}})
+        self.assertFalse(result["result"]["isError"])
+        self.assertEqual(self.mcp(self.static_token)[0], 200)
+        db = (self.dir / "oauth.sqlite3").read_bytes()
+        for secret in (code, body["access_token"], body["refresh_token"], self.secret):
+            self.assertNotIn(secret.encode(), db)
+
+    def test_basic_client_auth_and_wrong_secret(self):
+        status, _, body = self.exchange(self.code_for(), basic=True)
+        self.assertEqual(status, 200, body)
+        status, headers, body = self.http("POST", "/oauth/token", {"grant_type": "authorization_code"},
+                                          {"Authorization": "Basic " + base64.b64encode(
+                                              f"{self.client_id}:wrong".encode()).decode()})
+        self.assertEqual(status, 401)
+        self.assertEqual(json.loads(body)["error"], "invalid_client")
+        self.assertIn("Basic", headers["www-authenticate"])
+
+    def test_bad_verifier_and_code_single_use(self):
+        code = self.code_for()
+        status, _, body = self.exchange(code, verifier="w" * 50)
+        self.assertEqual((status, body["error"]), (400, "invalid_grant"))
+        status, _, body = self.exchange(code)
+        self.assertEqual((status, body["error"]), (400, "invalid_grant"))
+
+    def test_code_reuse_revokes_issued_tokens(self):
+        code = self.code_for()
+        status, _, body = self.exchange(code)
+        self.assertEqual(status, 200)
+        status, _, again = self.exchange(code)
+        self.assertEqual((status, again["error"]), (400, "invalid_grant"))
+        self.assertEqual(self.mcp(body["access_token"])[0], 401)
+
+    def test_code_expires_and_redirect_must_match(self):
+        code = self.code_for()
+        status, _, body = self.exchange(code, redirect="https://oauth-redirect-test.googleusercontent.com/r/other")
+        self.assertEqual((status, body["error"]), (400, "invalid_grant"))
+        code = self.code_for()
+        self.clock[0] += 61
+        self.assertEqual(self.exchange(code)[2]["error"], "invalid_grant")
+
+    def test_bad_redirect_and_client_never_redirect(self):
+        for redirect in ("https://evil.example/r/x", "https://oauth-redirect.googleusercontent.com.evil.com/r/x"):
+            params = {"response_type": "code", "client_id": self.client_id, "redirect_uri": redirect,
+                      "code_challenge": mcp_oauth.s256("v" * 50), "code_challenge_method": "S256"}
+            status, headers, _ = self.http("GET", "/oauth/authorize?" + urlencode(params))
+            self.assertEqual(status, 400)
+            self.assertNotIn("location", headers)
+        params = {"response_type": "code", "client_id": "hmcpc_0000000000000000", "redirect_uri": REDIRECT,
+                  "code_challenge": mcp_oauth.s256("v" * 50), "code_challenge_method": "S256"}
+        self.assertEqual(self.http("GET", "/oauth/authorize?" + urlencode(params))[0], 400)
+
+    def test_pkce_required_and_s256_only(self):
+        base = {"response_type": "code", "client_id": self.client_id, "redirect_uri": REDIRECT, "state": "s"}
+        for extra in ({}, {"code_challenge": "v" * 50, "code_challenge_method": "plain"},
+                      {"code_challenge": mcp_oauth.s256("v" * 50)},
+                      {"code_challenge": mcp_oauth.s256("v" * 50), "code_challenge_method": "S256", "scope": "write"},
+                      {"code_challenge": mcp_oauth.s256("v" * 50), "code_challenge_method": "S256",
+                       "response_type": "token"}):
+            status, headers, _ = self.http("GET", "/oauth/authorize?" + urlencode({**base, **extra}))
+            self.assertEqual(status, 302, extra)
+            query = dict(parse_qsl(urlsplit(headers["location"]).query))
+            self.assertIn(query["error"], ("invalid_request", "invalid_scope", "unsupported_response_type"))
+            self.assertEqual(query["state"], "s")
+            self.assertNotIn("code", query)
+
+    def test_login_csrf_deny_and_lockout(self):
+        status, _, page = self.authorize(password="wrong-password-123")
+        self.assertEqual(status, 401)
+        self.assertIn(b"Incorrect password", page)
+        params = {"response_type": "code", "client_id": self.client_id, "redirect_uri": REDIRECT,
+                  "code_challenge": mcp_oauth.s256("v" * 50), "code_challenge_method": "S256", "state": "x"}
+        status, _, _ = self.http("POST", "/oauth/authorize", {**params, "csrf": "0" * 64, "decision": "allow",
+                                                              "password": self.password},
+                                 {"Cookie": "__Host-hmcp_csrf=" + "a" * 43})
+        self.assertEqual(status, 403)
+        status, _, _ = self.http("POST", "/oauth/authorize", {**params, "password": self.password, "decision": "allow"})
+        self.assertEqual(status, 403)
+        status, _, _ = self.http("POST", "/oauth/authorize", {**params, "csrf": "x"},
+                                 {"Origin": "https://evil.example"})
+        self.assertEqual(status, 403)
+        status, headers, _ = self.authorize(extra={"state": "x"}, password="")
+        status, headers, _ = self.http("GET", "/oauth/authorize?" + urlencode(params))
+        cookie = headers["set-cookie"].split(";")[0]
+        csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', _.decode()).group(1)
+        status, headers, _ = self.http("POST", "/oauth/authorize", {**params, "csrf": csrf, "decision": "deny"},
+                                       {"Cookie": cookie})
+        self.assertEqual(status, 302)
+        self.assertIn("error=access_denied", headers["location"])
+        self.authorize(password="wrong-again-12345")
+        status, _, _ = self.authorize()
+        self.assertEqual(status, 429)
+
+    def test_refresh_rotation_and_reuse_detection(self):
+        _, _, first = self.exchange(self.code_for())
+        status, _, second = self.token_call({"grant_type": "refresh_token", "refresh_token": first["refresh_token"]})
+        self.assertEqual(status, 200, second)
+        self.assertNotEqual(second["refresh_token"], first["refresh_token"])
+        self.assertEqual(self.mcp(second["access_token"])[0], 200)
+        status, _, reused = self.token_call({"grant_type": "refresh_token", "refresh_token": first["refresh_token"]})
+        self.assertEqual((status, reused["error"]), (400, "invalid_grant"))
+        self.assertEqual(self.mcp(second["access_token"])[0], 401)
+        status, _, body = self.token_call({"grant_type": "refresh_token", "refresh_token": second["refresh_token"]})
+        self.assertEqual((status, body["error"]), (400, "invalid_grant"))
+
+    def test_access_token_expires(self):
+        _, _, body = self.exchange(self.code_for())
+        self.clock[0] += 3601
+        self.assertEqual(self.mcp(body["access_token"])[0], 401)
+
+    def test_revoke(self):
+        _, _, body = self.exchange(self.code_for())
+        status, headers, _ = self.token_call({"token": body["access_token"]}, path="/oauth/revoke")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertEqual(self.mcp(body["access_token"])[0], 401)
+        status, _, fresh = self.token_call({"grant_type": "refresh_token", "refresh_token": body["refresh_token"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.token_call({"token": fresh["refresh_token"], "token_type_hint": "refresh_token"},
+                                         path="/oauth/revoke")[0], 200)
+        self.assertEqual(self.mcp(fresh["access_token"])[0], 401)
+        self.assertEqual(self.token_call({"grant_type": "refresh_token",
+                                          "refresh_token": fresh["refresh_token"]})[2]["error"], "invalid_grant")
+        self.assertEqual(self.token_call({"token": "unknown"}, path="/oauth/revoke")[0], 200)
+        status, _, _ = self.http("POST", "/oauth/revoke", {"token": "x", "client_id": self.client_id,
+                                                           "client_secret": "nope"})
+        self.assertEqual(status, 401)
+
+    def test_cli_grants_and_client_revoke(self):
+        _, _, body = self.exchange(self.code_for())
+        listing = json.loads(oauth_cli(self.dir, "grant", "list", "--json").stdout)
+        self.assertEqual(len(listing), 1)
+        oauth_cli(self.dir, "grant", "revoke", listing[0]["grant_id"])
+        self.assertEqual(self.mcp(body["access_token"])[0], 401)
+        _, _, body = self.exchange(self.code_for())
+        oauth_cli(self.dir, "client", "revoke", self.client_id)
+        self.assertEqual(self.mcp(body["access_token"])[0], 401)
+        self.assertEqual(self.mcp(self.static_token)[0], 200)
+        clients = oauth_cli(self.dir, "client", "list").stdout
+        self.assertIn("revoked", clients)
+        self.assertNotIn(self.secret, clients)
+
+    def test_secret_file_is_never_overwritten_and_not_printed(self):
+        result = oauth_cli(self.dir, "client", "create", "--name", "x", "--secret-file",
+                           str(self.dir / "client.txt"), check=False)
+        self.assertNotEqual(result.returncode, 0)
+        result = oauth_cli(self.dir, "client", "create", "--name", "x", "--secret-file", str(self.dir / "c2.txt"))
+        secret = (self.dir / "c2.txt").read_text().split("client_secret=")[1].strip()
+        self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_oauth_disabled_by_default(self):
+        self.assertFalse(mcp_server.DEFAULTS["oauth"]["enabled"])
 
 
 class ConfigTest(unittest.TestCase):
