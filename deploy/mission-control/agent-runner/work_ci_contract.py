@@ -87,6 +87,7 @@ V3_PROTECTED_PATHS = frozenset({
     'deploy/mission-control/sql/management/verify-retry-events.sql',
     'deploy/mission-control/sql/management/verify-delivery-lineage.sql',
     'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
+    'deploy/mission-control/sql/management/verify-author-handoff.sql',
 })
 
 

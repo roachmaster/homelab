@@ -593,6 +593,7 @@ def profile_protected_gate_path(path, profile):
             'deploy/mission-control/sql/management/verify-retry-events.sql',
             'deploy/mission-control/sql/management/verify-delivery-lineage.sql',
             'deploy/mission-control/sql/management/verify-superseding-reviews.sql',
+            'deploy/mission-control/sql/management/verify-author-handoff.sql',
         } or path.startswith('deploy/mission-control/sql/migrations/0031_')
             or path.startswith('deploy/mission-control/sql/fragments/0031_')
             or path.startswith('deploy/mission-control/sql/migrations/0032_')
