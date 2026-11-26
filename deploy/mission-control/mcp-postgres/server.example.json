@@ -1,0 +1,14 @@
+{
+  "listen": "127.0.0.1:8791",
+  "allowed_hosts": ["mcp.thedevex.com", "127.0.0.1:8791"],
+  "allowed_origins": [],
+  "token_file": "/etc/homelab-forge/mcp/tokens.json",
+  "dsn": "host=/var/run/postgresql dbname=forge_agent user=homelab_mcp",
+  "max_rows": 500,
+  "statement_timeout_ms": 5000,
+  "max_cell_chars": 2000,
+  "max_response_bytes": 1000000,
+  "max_concurrent_queries": 4,
+  "trust_cf_connecting_ip": true,
+  "rate_limit": {"failures": 10, "window_seconds": 60, "lockout_seconds": 300, "global_failures_per_minute": 120}
+}
