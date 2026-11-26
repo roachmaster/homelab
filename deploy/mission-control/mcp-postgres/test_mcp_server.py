@@ -1,6 +1,7 @@
 """Tests for the Homelab MCP server, token CLI, SQL guard and read-only database role."""
 
 from datetime import UTC, datetime, timedelta
+import base64
 import http.client
 import json
 import os
@@ -25,7 +26,7 @@ HOST = "mcp.test"
 
 
 def cli(token_file, *args, check=True):
-    env = {**os.environ, "HOMELAB_MCP_TOKENS_ALLOW_NONROOT": "1"}
+    env = {**os.environ, "HOMELAB_MCP_TOKENS_ALLOW_NONROOT": "1", "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run([sys.executable, str(HERE / "mcp_tokens.py"), "--file", str(token_file), *args],
                           capture_output=True, text=True, env=env, check=check, timeout=30)
 
@@ -125,6 +126,7 @@ class TokenCliAndAuthTest(unittest.TestCase):
         if os.geteuid() == 0:
             self.skipTest("running as root")
         env = {k: v for k, v in os.environ.items() if k != "HOMELAB_MCP_TOKENS_ALLOW_NONROOT"}
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         result = subprocess.run([sys.executable, str(HERE / "mcp_tokens.py"), "--file", str(self.file), "list"],
                                 capture_output=True, text=True, env=env, timeout=30)
         self.assertNotEqual(result.returncode, 0)
@@ -151,13 +153,18 @@ class FailureLimiterTest(unittest.TestCase):
 
 
 class FakeBackend:
-    def __init__(self):
-        self.calls = []
+    """Serves 250 rows, honouring limit/offset like the real backend."""
 
-    def run(self, sql, params, limit):
-        self.calls.append((sql, params, limit))
-        rows = [(i, f"row {i}", datetime(2026, 1, 1, tzinfo=UTC)) for i in range(limit + 5)]
-        return ["id", "label", "at"], rows[:limit], True
+    def __init__(self, total=250):
+        self.calls = []
+        self.total = total
+
+    def run(self, sql, params, limit, offset=0, server_side=False):
+        self.calls.append((sql, params, limit, offset, server_side))
+        if params and "offset" in params:
+            offset = params["offset"]
+        rows = [(i, f"row {i}", datetime(2026, 1, 1, tzinfo=UTC)) for i in range(offset, min(self.total, offset + limit + 1))]
+        return ["id", "label", "at"], rows[:limit], len(rows) > limit
 
 
 class HttpServerTest(unittest.TestCase):
@@ -169,7 +176,7 @@ class HttpServerTest(unittest.TestCase):
         config_path = Path(directory.name) / "server.json"
         config_path.write_text(json.dumps({
             "listen": "127.0.0.1:0", "allowed_hosts": [HOST], "allowed_origins": ["https://allowed.example"],
-            "token_file": str(self.file), "max_rows": 3,
+            "token_file": str(self.file), "max_rows": 120,
             "rate_limit": {"failures": 4, "window_seconds": 60, "lockout_seconds": 300,
                            "global_failures_per_minute": 1000}}))
         config = mcp_server.load_config(config_path)
@@ -242,19 +249,92 @@ class HttpServerTest(unittest.TestCase):
         self.assertEqual({tool["name"] for tool in body["result"]["tools"]}, {"query", "list_tables", "describe_table"})
         self.assertEqual(self.rpc("nope")[2]["error"]["code"], -32601)
 
+    def query(self, **arguments):
+        status, _, body = self.rpc("tools/call", {"name": "query", "arguments": arguments})
+        self.assertEqual(status, 200)
+        return body["result"]
+
     def test_query_tool(self):
-        status, _, body = self.rpc("tools/call", {"name": "query", "arguments": {"sql": "SELECT 1"}})
-        result = body["result"]
+        result = self.query(sql="SELECT 1")
         self.assertFalse(result["isError"])
-        self.assertEqual(result["structuredContent"]["row_count"], 3)
-        self.assertTrue(result["structuredContent"]["truncated"])
-        self.assertEqual(result["structuredContent"]["rows"][0]["at"], "2026-01-01T00:00:00+00:00")
-        self.assertEqual(json.loads(result["content"][0]["text"]), result["structuredContent"])
-        self.assertEqual(self.backend.calls[-1], ("SELECT 1", None, 3))
-        self.rpc("tools/call", {"name": "query", "arguments": {"sql": "SELECT 1", "max_rows": 2}})
-        self.assertEqual(self.backend.calls[-1][2], 2)
-        self.rpc("tools/call", {"name": "query", "arguments": {"sql": "SELECT 1", "max_rows": 99}})
-        self.assertEqual(self.backend.calls[-1][2], 3)
+        page = result["structuredContent"]
+        self.assertEqual((page["row_count"], page["offset"], page["page_size"], page["has_more"]), (100, 0, 100, True))
+        self.assertTrue(page["next_cursor"])
+        self.assertEqual(page["rows"][0]["at"], "2026-01-01T00:00:00+00:00")
+        self.assertEqual(json.loads(result["content"][0]["text"]), page)
+        self.assertEqual(self.backend.calls[-1], ("SELECT 1", None, 100, 0, True))
+        self.query(sql="SELECT 1", page_size=7)
+        self.assertEqual(self.backend.calls[-1][2], 7)
+        self.query(sql="SELECT 1", page_size=9999)
+        self.assertEqual(self.backend.calls[-1][2], 120)
+        self.assertTrue(self.query(sql="SELECT 1", max_rows=5)["isError"])
+
+    def test_query_pagination_walks_all_rows(self):
+        seen, cursor, pages = [], None, 0
+        while True:
+            arguments = {"sql": "SELECT * FROM t ORDER BY id", "page_size": 60}
+            if cursor:
+                arguments["cursor"] = cursor
+            page = self.query(**arguments)["structuredContent"]
+            seen += [row["id"] for row in page["rows"]]
+            pages += 1
+            cursor = page["next_cursor"]
+            if not cursor:
+                self.assertFalse(page["has_more"])
+                break
+        self.assertEqual((seen, pages), (list(range(250)), 5))
+
+    def test_cursor_is_bound_and_tamper_proof(self):
+        cursor = self.query(sql="SELECT 1", page_size=10)["structuredContent"]["next_cursor"]
+        self.assertFalse(self.query(sql="SELECT 1", page_size=10, cursor=cursor)["isError"])
+        self.assertEqual(self.backend.calls[-1][3], 10)
+        for arguments in ({"sql": "SELECT 2", "page_size": 10}, {"sql": "SELECT 1", "page_size": 11}):
+            with self.subTest(arguments=arguments):
+                result = self.query(**arguments, cursor=cursor)
+                self.assertTrue(result["isError"])
+                self.assertIn("does not match", result["content"][0]["text"])
+        payload, mac = cursor.split(".")
+        forged = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        forged["o"] = 200
+        forged_payload = base64.urlsafe_b64encode(json.dumps(forged, separators=(",", ":")).encode()).rstrip(b"=").decode()
+        for bad in (f"{forged_payload}.{mac}", "garbage", "a.b", "x" * 600, 5):
+            with self.subTest(bad=str(bad)[:20]):
+                self.assertTrue(self.query(sql="SELECT 1", page_size=10, cursor=bad)["isError"])
+        # Another token cannot replay this token's cursor.
+        other = cli(self.file, "create", "--name", "other").stdout.strip()
+        _, _, body = self.rpc("tools/call", {"name": "query", "arguments": {
+            "sql": "SELECT 1", "page_size": 10, "cursor": cursor}}, token=other)
+        self.assertTrue(body["result"]["isError"])
+
+    def test_cursor_expires(self):
+        app = self.server.app
+        app.config["cursor_ttl_seconds"] = -1
+        cursor = self.query(sql="SELECT 1", page_size=10)["structuredContent"]["next_cursor"]
+        result = self.query(sql="SELECT 1", page_size=10, cursor=cursor)
+        self.assertIn("expired", result["content"][0]["text"])
+
+    def test_explain_and_show_are_single_page(self):
+        page = self.query(sql="SHOW server_version", page_size=10)["structuredContent"]
+        self.assertEqual(self.backend.calls[-1][4], False)
+        self.assertTrue(page["has_more"])
+        self.assertIsNone(page["next_cursor"])
+
+    def test_response_size_cut_still_paginates(self):
+        self.server.app.config["max_response_bytes"] = 2000
+        page = self.query(sql="SELECT 1", page_size=100)["structuredContent"]
+        self.assertLess(page["row_count"], 100)
+        following = self.query(sql="SELECT 1", page_size=100, cursor=page["next_cursor"])["structuredContent"]
+        self.assertEqual(following["offset"], page["row_count"])
+        self.assertEqual(following["rows"][0]["id"], page["row_count"])
+
+    def test_list_tables_pagination(self):
+        def call(**arguments):
+            return self.rpc("tools/call", {"name": "list_tables", "arguments": arguments})[2]["result"]
+        first = call(page_size=100)["structuredContent"]
+        self.assertEqual(self.backend.calls[-1][1]["limit"], 101)
+        second = call(page_size=100, cursor=first["next_cursor"])["structuredContent"]
+        self.assertEqual((second["offset"], second["rows"][0]["id"]), (100, 100))
+        self.assertTrue(call(page_size=100, schema="x", cursor=first["next_cursor"])["isError"])
 
     def test_guard_rejection_is_tool_error_without_database_call(self):
         status, _, body = self.rpc("tools/call", {"name": "query", "arguments": {"sql": "DELETE FROM t"}})
@@ -302,9 +382,10 @@ class ConfigTest(unittest.TestCase):
             config = json.loads((HERE / "server.example.json").read_text())
             path.write_text(json.dumps({**config, "token_file": str(tokens)}))
             check = [sys.executable, str(HERE / "mcp_server.py"), "--config", str(path), "--check-config"]
-            self.assertEqual(subprocess.run(check, capture_output=True, timeout=30).returncode, 2)
+            env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+            self.assertEqual(subprocess.run(check, capture_output=True, timeout=30, env=env).returncode, 2)
             cli(tokens, "create", "--name", "x")
-            result = subprocess.run(check, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(check, capture_output=True, text=True, timeout=30, env=env)
             self.assertEqual((result.returncode, result.stdout.strip()), (0, "config ok"))
 
 
@@ -378,6 +459,46 @@ class ReadOnlyRoleIntegrationTest(unittest.TestCase):
     def test_statement_timeout(self):
         with self.assertRaisesRegex(mcp_server.ToolError, "57014"):
             self.backend.run("SELECT pg_sleep(5)", None, 1)
+
+    def test_server_side_pagination(self):
+        sql = "SELECT i, 'v' || i AS label FROM generate_series(1, 23) AS i ORDER BY i DESC"
+        columns, rows, more = self.backend.run(sql, None, 10, 0, True)
+        self.assertEqual((columns, [r[0] for r in rows], more), (["i", "label"], list(range(23, 13, -1)), True))
+        _, rows, more = self.backend.run(sql, None, 10, 20, True)
+        self.assertEqual(([r[0] for r in rows], more), ([3, 2, 1], False))
+        _, rows, more = self.backend.run(sql, None, 10, 100, True)
+        self.assertEqual((rows, more), ([], False))
+        for variant in (sql + ";", sql + " -- trailing; comment", "WITH x AS (" + sql + ") SELECT * FROM x",
+                        "VALUES (1), (2), (3)", "TABLE forge_agent.coding_tasks"):
+            with self.subTest(variant=variant[:40]):
+                self.backend.run(variant, None, 2, 1, True)
+        with self.assertRaisesRegex(mcp_server.ToolError, "25006|42501"):
+            self.backend.run("SELECT * FROM forge_agent.conversations", None, 2, 1, True)
+
+    def test_paged_tools_end_to_end(self):
+        app = mcp_server.McpApp({**mcp_server.DEFAULTS, "max_rows": 1000}, None, self.backend, None)
+        principal = Principal("a" * 12, "t", frozenset({"read"}))
+        arguments = {"sql": "SELECT g FROM generate_series(1, 7) g ORDER BY g", "page_size": 3}
+        seen = []
+        while True:
+            page = app.call_tool({"name": "query", "arguments": arguments}, principal)["structuredContent"]
+            seen += [row["g"] for row in page["rows"]]
+            if not page["next_cursor"]:
+                break
+            arguments = {**arguments, "cursor": page["next_cursor"]}
+        self.assertEqual(seen, list(range(1, 8)))
+        explain = app.call_tool({"name": "query", "arguments": {"sql": "EXPLAIN SELECT 1"}}, principal)
+        self.assertFalse(explain["isError"])
+        tables, arguments = [], {"schema": "forge_agent", "page_size": 5}
+        while True:
+            page = app.call_tool({"name": "list_tables", "arguments": arguments}, principal)["structuredContent"]
+            tables += [row["table_name"] for row in page["rows"]]
+            if not page["next_cursor"]:
+                break
+            arguments = {**arguments, "cursor": page["next_cursor"]}
+        self.assertEqual(tables, sorted(tables))
+        self.assertIn("coding_tasks", tables)
+        self.assertEqual(len(tables), len(set(tables)))
 
     def test_tools_end_to_end(self):
         app = mcp_server.McpApp({**mcp_server.DEFAULTS, "max_rows": 1000}, None, self.backend, None)

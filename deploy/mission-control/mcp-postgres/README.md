@@ -34,9 +34,26 @@ root and an operator's approval.
 
 | Tool | What it does |
 |---|---|
-| `query` | Runs one `SELECT`, `WITH`, `VALUES`, `TABLE`, `EXPLAIN` (without ANALYZE) or `SHOW` statement. Returns `{columns, rows, row_count, truncated}` as text and `structuredContent`. Optional `max_rows` can only lower the server cap (default 500). |
-| `list_tables` | Lists the tables and views the role can read, with an optional `schema` filter. |
+| `query` | Runs one `SELECT`, `WITH`, `VALUES`, `TABLE`, `EXPLAIN` (without ANALYZE) or `SHOW` statement and returns one page of rows. |
+| `list_tables` | Lists the tables and views the role can read, with an optional `schema` filter. Paginated the same way as `query`. |
 | `describe_table` | Lists the columns, types, nullability and defaults of one readable table. |
+
+### Pagination
+
+`query` and `list_tables` return a page object (as text and `structuredContent`):
+
+```json
+{"columns": ["id", "status"], "rows": [{"id": 1, "status": "done"}], "row_count": 100,
+ "offset": 0, "page_size": 100, "has_more": true, "next_cursor": "eyJ2Ijo…", "truncated": true}
+```
+
+- `page_size` defaults to 100 and is capped at `max_rows` (500).
+- When `has_more` is true, call the tool again with the **same arguments** plus `"cursor": "<next_cursor>"`. The last page has `next_cursor: null`.
+- Add an `ORDER BY` on a unique key; without one PostgreSQL may return rows in a different order on each call.
+- `SELECT`/`WITH`/`VALUES`/`TABLE` statements page through the unmodified statement with a server-side `DECLARE` cursor: `MOVE` skips to the offset and `page_size + 1` rows are fetched. No SQL is built around your statement. `EXPLAIN` and `SHOW` return one page only.
+- Each page runs in its own read-only transaction, so pages reflect the data at the time of each call.
+- Cursors are HMAC-signed with a per-process key and bound to the tool, the token, the exact SQL (or schema filter) and the page size. A tampered cursor, a cursor sent with different arguments or by another token, or one older than one hour (`cursor_ttl_seconds`) is rejected. Cursors stop working when the service restarts; start again without a cursor.
+- If a page would exceed `max_response_bytes`, fewer rows are returned and `next_cursor` continues from the first row not returned. Offsets are capped at `max_offset` (1,000,000).
 
 ## Security model
 
