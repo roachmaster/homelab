@@ -1016,6 +1016,55 @@ pub struct WorkLogEvent {
     /// Why a failed attempt failed (M46); absent on older events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<WorkEventFailure>,
+    /// A recorded attempt deadline extension (M47); checkpoint events only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline_extension: Option<WorkDeadlineExtension>,
+}
+/// The worker's progress signal let a nearly due attempt deadline move.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkDeadlineExtension {
+    pub attempt_id: String,
+    pub extension_no: u8,
+    pub previous_deadline: String,
+    pub new_deadline: String,
+    pub signal: WorkDeadlineSignal,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkDeadlineSignal {
+    ProgressReport,
+    Checkpoint,
+    Output,
+}
+impl WorkDeadlineSignal {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProgressReport => "progress report",
+            Self::Checkpoint => "checkpoint",
+            Self::Output => "agent output",
+        }
+    }
+}
+impl WorkDeadlineExtension {
+    pub fn is_valid(&self) -> bool {
+        fn utc_second(value: &str) -> bool {
+            let b = value.as_bytes();
+            b.len() == 20
+                && b.iter().enumerate().all(|(i, c)| match i {
+                    4 | 7 => *c == b'-',
+                    10 => *c == b'T',
+                    13 | 16 => *c == b':',
+                    19 => *c == b'Z',
+                    _ => c.is_ascii_digit(),
+                })
+        }
+        valid_chat_id(&self.attempt_id)
+            && (1..=64).contains(&self.extension_no)
+            && utc_second(&self.previous_deadline)
+            && utc_second(&self.new_deadline)
+            && self.previous_deadline < self.new_deadline
+    }
 }
 /// Machine-readable cause plus a bounded summary attached by the failing
 /// component when the attempt failed.
@@ -2017,6 +2066,13 @@ impl WorkResponse {
                             && e.failure
                                 .as_ref()
                                 .is_none_or(|f| e.kind == WorkEventKind::Failed && f.is_valid())
+                            && e.deadline_extension.as_ref().is_none_or(|x| {
+                                e.kind == WorkEventKind::Checkpoint
+                                    && x.is_valid()
+                                    && e.progress.is_none()
+                                    && e.external_progress.is_none()
+                                    && e.workflow_progress.is_none()
+                            })
                     })
                     && events
                         .iter()
@@ -2347,6 +2403,24 @@ mod tests {
         assert!(!long.is_valid());
     }
     #[test]
+    fn checkpoint_deadline_extension_is_optional_typed_and_bounded() {
+        let json = r#"{"event_id":"77777777-7777-4777-8777-777777777778","correlation_id":"99999999-9999-4999-8999-999999999999","sequence":6,"kind":"checkpoint","created_at":"2026-11-26T08:30:00Z","deadline_extension":{"attempt_id":"88888888-8888-4888-8888-888888888888","extension_no":1,"previous_deadline":"2026-11-26T08:32:00Z","new_deadline":"2026-11-26T08:42:00Z","signal":"output"}}"#;
+        let event: WorkLogEvent = serde_json::from_str(json).unwrap();
+        let extension = event.deadline_extension.as_ref().unwrap();
+        assert_eq!(extension.signal, WorkDeadlineSignal::Output);
+        assert!(extension.is_valid());
+        assert!(
+            serde_json::from_str::<WorkLogEvent>(&json.replace("\"output\"", "\"heartbeat\""))
+                .is_err()
+        );
+        let mut backwards = extension.clone();
+        backwards.new_deadline = "2026-11-26T08:00:00Z".into();
+        assert!(!backwards.is_valid());
+        let mut zero = extension.clone();
+        zero.extension_no = 0;
+        assert!(!zero.is_valid());
+    }
+    #[test]
     fn failure_reasons_are_optional_bounded_and_tied_to_their_code() {
         let wire = serde_json::json!({
             "kind": "work_failed",
@@ -2453,6 +2527,7 @@ mod tests {
                 external_progress: None,
                 workflow_progress: None,
                 failure: None,
+                deadline_extension: None,
                 sequence: 5,
                 kind: WorkEventKind::Checkpoint,
                 progress: None,

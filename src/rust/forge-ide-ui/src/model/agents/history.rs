@@ -122,6 +122,14 @@ impl Agents {
         if let Some(f) = event.failure.as_ref() {
             return format!("Failed ({}): {}", f.cause.label(), f.summary);
         }
+        if let Some(x) = event.deadline_extension.as_ref() {
+            return format!(
+                "Deadline extended to {} after {} (extension {})",
+                x.new_deadline,
+                x.signal.label(),
+                x.extension_no
+            );
+        }
         if let Some(p) = event.workflow_progress.as_ref() {
             if self
                 .task
