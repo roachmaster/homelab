@@ -1167,5 +1167,44 @@ class ProxyResultDecodingTest(unittest.TestCase):
              "settings": {"max_tokens": 8}})
 
 
+
+class ProxyTokenLayoutTest(unittest.TestCase):
+    """Round-6 finding 3: caller processes must be able to traverse
+    the proxy config directory and read their own token. Structural
+    assertions on setup-runner.sh, the script that creates the
+    layout (the live traversal is an install-time property)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import os
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "setup-runner.sh")
+        with open(path, encoding="utf-8") as handle:
+            cls.script = handle.read()
+
+    def test_config_directories_are_group_traversable(self):
+        # 0710 = traverse without listing for group members (the
+        # runner and workers join the proxy group for exactly this).
+        # The old 0700 config directory blocked every caller.
+        self.assertIn(
+            'install -d -o "$proxy_user" -g "$proxy_user" -m 0710 '
+            '"$proxy_config_directory"', self.script)
+        self.assertIn(
+            'install -d -o "$proxy_user" -g "$proxy_user" -m 0710 '
+            '"$proxy_config_directory/tokens"', self.script)
+        self.assertNotIn(
+            '-m 0700 "$proxy_config_directory"', self.script)
+
+    def test_token_files_are_group_scoped_per_caller(self):
+        self.assertIn("coordinator) echo forge_agent", self.script)
+        self.assertIn("worker|reconciler) echo lrocha", self.script)
+        # Group and mode are re-applied outside the creation branch,
+        # so pre-existing installs heal on the next setup run.
+        creation = self.script.index('if [[ ! -s "$token_file" ]]')
+        fixup = self.script.index('chown "$proxy_user:$(token_group_for')
+        self.assertGreater(fixup, creation)
+        self.assertIn("chmod 0640 \"$token_file\"", self.script)
+
+
 if __name__ == "__main__":
     unittest.main()

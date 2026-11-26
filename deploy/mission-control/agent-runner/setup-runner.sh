@@ -212,30 +212,53 @@ if ! getent passwd "$proxy_user" >/dev/null; then
     useradd --system --user-group --no-create-home --home-dir /nonexistent \
         --shell /usr/sbin/nologin "$proxy_user"
 fi
-install -d -o "$proxy_user" -g "$proxy_user" -m 0700 "$proxy_config_directory"
-install -d -o "$proxy_user" -g "$proxy_user" -m 0750 "$proxy_config_directory/tokens"
-# The agent-runner reads its caller tokens at rollout; membership in
-# the proxy group grants that read without widening the token files.
+# Both directories are group-traversable (0710: traverse, no list)
+# by the proxy group: the caller processes are members of it (below)
+# and must REACH their token files. At 0700 on the config directory
+# no group member could traverse it, so the runner and the workers
+# could not read the tokens this script creates for them (round-6
+# finding 3). The token files themselves are group-scoped per
+# caller (token_group_for), so traversal alone grants no read.
+install -d -o "$proxy_user" -g "$proxy_user" -m 0710 "$proxy_config_directory"
+install -d -o "$proxy_user" -g "$proxy_user" -m 0710 "$proxy_config_directory/tokens"
+# The agent-runner (forge_agent) and the coding/publication workers
+# (lrocha) join the proxy group for directory traversal only.
 if getent passwd forge_agent >/dev/null; then
     usermod -a -G "$proxy_user" forge_agent
 fi
-# The coding and publication workers run as lrocha and read their
-# caller token files at rollout (their database.proxy section points
-# at them); group membership grants that read without widening the
-# token files.
 if getent passwd lrocha >/dev/null; then
     usermod -a -G "$proxy_user" lrocha
 fi
+# The OS group that may READ each caller's token file: the group of
+# the process that presents it. The coordinator token is read by
+# the runner (forge_agent), the worker/reconciler tokens by the
+# workers (lrocha); the gpu worker presents its own deployed copy,
+# and the muse/operator tokens are read only by the proxy side, so
+# those three stay in the proxy group.
+token_group_for() {
+    case "$1" in
+        coordinator) echo forge_agent ;;
+        worker|reconciler) echo lrocha ;;
+        *) echo "$proxy_user" ;;
+    esac
+}
 for caller in coordinator worker reconciler gpu muse operator; do
     token_file="$proxy_config_directory/tokens/$caller.token"
     if [[ ! -s "$token_file" ]]; then
         temporary="$(mktemp "$proxy_config_directory/tokens/.token-XXXXXXXX")"
         trap 'rm -f -- "$temporary"' EXIT
         /usr/bin/python3 -c 'import secrets; print(secrets.token_hex(32))' > "$temporary"
-        install -o "$proxy_user" -g "$proxy_user" -m 0640 "$temporary" "$token_file"
+        install -o "$proxy_user" -g "$(token_group_for "$caller")" -m 0640 "$temporary" "$token_file"
         rm -f -- "$temporary"
         trap - EXIT
     fi
+    # Re-apply group and mode unconditionally: installs made before
+    # the per-caller groups existed carry the proxy group on every
+    # token, which the readers are not members of for file access.
+    if getent group "$(token_group_for "$caller")" >/dev/null; then
+        chown "$proxy_user:$(token_group_for "$caller")" "$token_file"
+    fi
+    chmod 0640 "$token_file"
 done
 if [[ ! -s "$proxy_config_directory/config.json" ]]; then
     install -o "$proxy_user" -g "$proxy_user" -m 0640 "$directory/forge-pg-proxy.json" "$proxy_config_directory/config.json"
