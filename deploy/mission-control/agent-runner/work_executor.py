@@ -779,12 +779,15 @@ def _agy_settings(config, *, implement, unattended):
     }}
 
 
+# The CLI's own print timeout is only the hard outer bound (same ceiling as the
+# systemd RuntimeMaxSec and M45 SQL). The executor's progress-aware deadline
+# (POLICY max_wall_seconds + recorded extensions) is what actually ends a run.
 def _agy_argv(binary, model, *, implement, unattended, conversation_id=None):
     argv = (str(binary), *(("--dangerously-skip-permissions",) if unattended else ()),
         "--settings", str(CHILD_STATE / "settings.json"),
         "--mode", "accept-edits" if implement else "plan", "--model", model,
         "--input-format", "stream-json", "--output-format", "stream-json",
-        "--print-timeout", str(POLICY["max_wall_seconds"]) + "s", "--disable-slash-commands")
+        "--print-timeout", str(EXTENDED_WALL_BOUND_SECONDS) + "s", "--disable-slash-commands")
     if conversation_id is not None:
         argv += ("--conversation", conversation_id)
     return argv
