@@ -74,7 +74,7 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
         # Either an explicit refusal or a no-op is safe when no reader exists.
         self.cluster.run_sql_script(GRANT)
         self.assertEqual(self.rows("SELECT to_regrole('muse_events')"), [(None,)])
-        self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations"), [(43,)])
+        self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations"), [(44,)])
         self.assertEqual(self.rows("SELECT to_regclass('forge_agent.coding_muse_intake')"), [(None,)])
         self.assertEqual(self.rows(
             "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
