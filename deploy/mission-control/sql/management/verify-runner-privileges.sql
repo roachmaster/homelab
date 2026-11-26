@@ -153,4 +153,27 @@ BEGIN
 END;
 $jenkins_runtime$;
 
+-- M39 is optional for a pre-upgrade backup check; exact read-only privileges after admission.
+DO $cicd_branch_runtime$
+DECLARE spec record;privilege_name text;
+BEGIN
+ IF to_regclass('forge_agent.agent_branch_state') IS NULL THEN RETURN;END IF;
+ FOR spec IN SELECT * FROM(VALUES
+  ('agent_branch_state',ARRAY['SELECT']),
+  ('jenkins_stage_results',ARRAY['SELECT']),
+  ('jenkins_stage_log_chunks',ARRAY['SELECT'])
+ )x(name,allowed) LOOP
+  FOREACH privilege_name IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
+   IF has_table_privilege(current_user,'forge_agent.'||spec.name,privilege_name) IS DISTINCT FROM(privilege_name=ANY(spec.allowed))
+    OR(privilege_name IN('SELECT','INSERT','UPDATE','REFERENCES') AND NOT privilege_name=ANY(spec.allowed)
+     AND has_any_column_privilege(current_user,'forge_agent.'||spec.name,privilege_name)) THEN
+    RAISE EXCEPTION 'Unexpected M39 runtime privilege: %',spec.name;END IF;
+  END LOOP;
+ END LOOP;
+ IF has_schema_privilege(current_user,'forge_external_delivery_api','USAGE, CREATE') THEN
+  RAISE EXCEPTION 'Unexpected runtime privilege on forge_external_delivery_api';
+ END IF;
+END;
+$cicd_branch_runtime$;
+
 COMMIT;

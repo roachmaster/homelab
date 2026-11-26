@@ -176,13 +176,71 @@ GRANT EXECUTE ON FUNCTION forge_agent.retry_event_resolve_open_scope(text,text,u
 GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.retry_event_resolve_open_scope(text,text,uuid) TO forge_coding_reconciler;
 \endif
 
--- M41 cutover: the proxy is the only writer. Re-running this file
+-- M41: persistent per-agent branch state, exclusive ownership, and CI/CD stage evidence.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=41) AS has_agent_branch_cicd
+\gset
+\if :has_agent_branch_cicd
+GRANT SELECT ON
+    forge_agent.agent_branch_state,
+    forge_agent.jenkins_stage_results,
+    forge_agent.jenkins_stage_log_chunks
+TO forge_agent;
+GRANT EXECUTE ON FUNCTION
+    forge_coding_reconciler_api.task_branch_scope(text, uuid),
+    forge_coding_reconciler_api.agent_branch_get(text, text),
+    forge_coding_reconciler_api.agent_branch_upsert(text, text, text, text, text, text, timestamptz, text, jsonb, text, uuid, uuid),
+    forge_coding_reconciler_api.agent_branch_acquire(text, text, text, text, text, uuid, uuid, uuid, uuid, uuid),
+    forge_coding_reconciler_api.agent_branch_verify_owner(text, text, text, uuid, bigint),
+    forge_coding_reconciler_api.agent_branch_record_publication(text, text, text, uuid, bigint, text, text, uuid),
+    forge_coding_reconciler_api.agent_branch_set_blocker(text, text, text, uuid, bigint, text),
+    forge_coding_reconciler_api.agent_branch_release(text, text, text, uuid, bigint, text, boolean, text),
+    forge_coding_reconciler_api.agent_branch_reconcilable_reservations(integer),
+    forge_coding_reconciler_api.review_claim_for_branch_policy(text),
+    forge_coding_reconciler_api.publication_claim_for_branch_policy(text),
+    forge_coding_reconciler_api.native_agent_branch_published(uuid, uuid, jsonb),
+    forge_coding_reconciler_api.record_jenkins_stage_evidence(jsonb, jsonb)
+TO forge_coding_reconciler;
+GRANT USAGE ON SCHEMA forge_external_delivery_api TO forge_coding_reconciler;
+GRANT EXECUTE ON FUNCTION
+    forge_external_delivery_api.agent_branch_acquire(text, text, text, text, text, uuid, uuid, uuid),
+    forge_external_delivery_api.agent_branch_verify_owner(text, text, text, uuid, bigint),
+    forge_external_delivery_api.agent_branch_upsert(text, text, text, text, text, text, text, timestamptz, text, jsonb, text, uuid, uuid),
+    forge_external_delivery_api.agent_branch_release(text, text, text, uuid, bigint, text, boolean, text)
+TO forge_coding_reconciler;
+\endif
+
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=44) AS has_identity_catalog
+\gset
+\if :has_identity_catalog
+GRANT SELECT ON forge_agent.coding_identity_catalog TO forge_agent;
+GRANT SELECT,INSERT ON forge_agent.coding_task_identities TO forge_agent;
+GRANT EXECUTE ON FUNCTION forge_agent.coding_identity_register(text,text,text,text,jsonb,text) TO forge_agent;
+\endif
+
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=45) AS has_typed_renew
+\gset
+\if :has_typed_renew
+GRANT EXECUTE ON FUNCTION forge_coding_worker_api.renew_status(uuid,uuid,text) TO forge_coding_worker;
+GRANT SELECT ON forge_agent.coding_attempt_deadline_extensions TO forge_agent;
+\endif
+
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=46) AS has_failure_cause
+\gset
+\if :has_failure_cause
+GRANT EXECUTE ON FUNCTION forge_coding_worker_api.publish_with_cause(uuid,uuid,text,jsonb,jsonb,text,jsonb,text) TO forge_coding_worker;
+\endif
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=47) AS has_deadline_extension_events
+\gset
+\if :has_deadline_extension_events
+GRANT EXECUTE ON FUNCTION forge_coding_worker_api.renew_deadline(uuid,uuid,text) TO forge_coding_worker;
+\endif
+-- M51 cutover: the proxy is the only writer. Re-running this file
 -- after cutover must not leave the direct writes above (or the
 -- muse_events mutating EXECUTE from grant-external-agent.sql) in
 -- place; re-apply the cutover revocation instead.
 DO $grant_runner_cutover$
 BEGIN
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=43 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_cutover') THEN
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_agent FROM forge_agent, forge_coding_worker, forge_coding_reconciler;
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_workflow FROM forge_agent, forge_coding_worker, forge_coding_reconciler;
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_agent FROM forge_agent, forge_coding_worker, forge_coding_reconciler;

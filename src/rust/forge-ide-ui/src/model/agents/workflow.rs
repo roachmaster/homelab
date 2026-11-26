@@ -10,19 +10,18 @@ impl Agents {
         {
             return task_badge(WorkStatus::Cancelled);
         }
-        if let Some(event) = task.retry_event.as_ref().filter(|event| {
-            matches!(
-                event.status,
-                WorkRetryStatus::Open | WorkRetryStatus::Exhausted
+        if let Some(delivery) = task.delivery.as_ref().filter(|_| {
+            task.workflow_phase.map_or_else(
+                || {
+                    task.status == WorkStatus::Completed
+                        && !task
+                            .workflow_required
+                            .unwrap_or(self.workflow_policy().is_some())
+                },
+                |phase| phase == WorkWorkflowPhase::Completed,
             )
         }) {
-            return retry_badge(event);
-        }
-        if let Some(delivery) = task.delivery.as_ref().filter(|_| {
-            task.status == WorkStatus::Completed
-                || task.workflow_phase == Some(WorkWorkflowPhase::Completed)
-        }) {
-            return delivery::delivery_badge(delivery);
+            return delivery::delivery_phase_badge(delivery);
         }
         if let Some(phase) = task.workflow_phase {
             if task.workflow_enabled == Some(false) && phase.is_processing() {
@@ -295,70 +294,25 @@ impl Agents {
 
     pub(super) fn project_retry_event(&self, view: &mut ViewModel, reader: bool) {
         let stopped = self.task.as_ref().is_some_and(|task| {
-            task.status == WorkStatus::Cancelled
-                || task
-                    .workflow
-                    .as_ref()
-                    .is_some_and(|workflow| workflow.phase == WorkWorkflowPhase::Cancelled)
-        });
-        let event = self.task.as_ref().and_then(|task| {
-            let candidates = [
-                task.retry_event.as_ref(),
-                task.workflow
-                    .as_ref()
-                    .and_then(|workflow| workflow.retry_event.as_ref()),
-                task.review
-                    .as_ref()
-                    .and_then(|review| review.retry_event.as_ref()),
-                task.delivery
-                    .as_ref()
-                    .and_then(|delivery| delivery.repair.retry_event.as_ref()),
-            ];
-            candidates
-                .into_iter()
-                .flatten()
-                .find(|event| {
-                    matches!(
-                        event.status,
-                        WorkRetryStatus::Open | WorkRetryStatus::Exhausted
-                    )
+            task.workflow
+                .as_ref()
+                .map_or(task.status == WorkStatus::Cancelled, |workflow| {
+                    workflow.phase == WorkWorkflowPhase::Cancelled
                 })
-                .or_else(|| candidates.into_iter().flatten().next())
         });
+        let event = self.task.as_ref().and_then(triage::task_retry_event);
         view.visibility
             .push(visible("agents-retry-event", reader && event.is_some()));
         view.texts.push(text(
             "agents-retry-event",
             event.map_or_else(String::new, |event| {
                 if stopped {
-                    format!("{} stopped · {} retries", event.kind.label(), event.used)
+                    format!("{} · Workflow stopped", triage::retry_budget(event))
                 } else {
-                    event.label()
+                    triage::retry_budget(event)
                 }
             }),
         ));
-        if let Some(event) = event.filter(|event| {
-            !stopped
-                && matches!(
-                    event.status,
-                    WorkRetryStatus::Open | WorkRetryStatus::Exhausted
-                )
-        }) {
-            if let Some(binding) = view
-                .badges
-                .iter_mut()
-                .find(|binding| binding.id == "agents-task-status")
-            {
-                binding.badge = retry_badge(event);
-            }
-            if let Some(binding) = view
-                .texts
-                .iter_mut()
-                .find(|binding| binding.id == "agents-task-status")
-            {
-                binding.text = event.label();
-            }
-        }
     }
 }
 

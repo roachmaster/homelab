@@ -1,11 +1,127 @@
 # Current Forge implementation
 
-Updated 25 November 2026.
-Active navigation is **Agents, Workbench, Home and Design**,
-with Agents as the default admitted view. Chat is temporarily inactive;
-Mail remains retired. Their PostgreSQL history and supported inert local
-snapshots remain preserved. The current source browser contract is **ABI15**; the
-native HTTP protocol remains version1.
+Reviewed **26 November 2026** against consolidated application source
+`0163a615` in [draft PR29](https://github.com/roachmaster/homelab/pull/29).
+Documentation changes do not attest a new build, deployment or successful task.
+
+## The system we are building
+
+Forge has two complementary layers. The reusable Rust framework supplies typed
+admission, explicit configuration, registrars, factories, providers and owned
+lifetimes. The concrete delivery application uses those boundaries to let an
+operator assign work, retain a public Plan, obtain independent review and move
+verified source through branch CI, merge, observed-main verification and trusted
+release. Application workflow policy belongs to the delivery application, not
+the framework core.
+
+The generated Rust/YAML portal is the operator surface. Rust/WASM owns browser
+intent; generated adapters own presentation and admitted I/O. The native web
+host admits requests. Python/PostgreSQL services own the durable coding workflow,
+worker leases, feedback, retry events and delivery receipts. Git is the current
+publication transport; canonical content identities describe source and frozen
+verification generations without making Git branch names the content identity.
+Jenkins produces independent verification evidence. A model response, UI badge,
+console log or webhook observation cannot approve its own work or authorize a
+release.
+
+```mermaid
+flowchart LR
+  UI[Generated portal and Rust/WASM] --> Host[Admitted native web host]
+  Host --> Source[Configured source agent]
+  Host --> API[Work/event API runner: stopped]
+  API <--> DB[(PostgreSQL: live schema40)]
+  Workers[Isolated coding and review workers] <--> DB
+  Delivery[Trusted publication and delivery workers] <--> DB
+  Delivery --> Git[Git candidates and pull requests]
+  Delivery --> CI[Jenkins verification receipts]
+  CI --> Delivery
+  Delivery --> Release[Guarded release path]
+```
+
+The diagram shows responsibilities, not a healthy request trace. Database-backed
+workers remain separate processes when the API runner is stopped. Native CLI
+authors and external database authors such as Muse have different execution
+contracts, while independent review, immutable feedback and trusted delivery
+remain shared requirements.
+
+## Current operating and source checkpoints
+
+| Layer | Checked or implemented state | Practical implication |
+| --- | --- | --- |
+| Mission Control, 26 November | `forge-agent-runner.service` is inactive/disabled. Coding, dedicated Codex author, Gemini, Grok, publication, external-delivery, web, source-agent and Jenkins services are active/enabled. | The event/API front door is intentionally stopped; other consumers were not stopped. Process state does not establish task progress, provider allowance or health. |
+| Database, read-only observation | Highest migration is **40**, `provider_author_handoff`; 39 is `terminal_retry_settlement`. | Schema41 branch/stage tables are not established by the observed live migration registry. This observation is not a full role/function audit. |
+| Installed release selection | Web ExecStart names `portal-auto-0070e78f…`; API/worker/publisher/external-delivery ExecStart paths select `codex-quota-handoff-0070e78f`. | These are configured source labels, not a new artifact-digest or browser qualification. |
+| Git/source | `main` advanced to `4bf1d230` with the preserved resubmission queue; consolidated `backup/main` is under draft PR29. `feature/muse` is retained separately. | Task/development branch names were retired after preserving their committed tips. Worktree files remain available; consolidation is not main promotion. |
+| Consolidated contract | **ABI16**, native HTTP protocol1, additive migration **41** (`agent_branch_and_cicd_stages`). Migrations 1–40 are unchanged. | Host, assets, WASM, schema and grants need a coordinated, qualified rollout. Source presence does not establish runtime activation. |
+
+The current portal navigation is **Agents, Workbench, Home and Design**. Chat is
+inactive and Mail retired as portal views; their PostgreSQL history and inert
+local snapshots remain preserved. Consolidated source adds an attention-focused
+Now / Why / Next task summary, persistent per-agent branch ownership, correlation
+CI/CD stages and bounded Errors/Tests/Console inspection through
+`ide.work.cicd.stage_log`.
+
+## Consolidated capabilities and next decisions
+
+| Capability | Present in source | Next evidence or decision |
+| --- | --- | --- |
+| Author/reviewer workflows | Separate configured author and independent reviewer, retained Plans, immutable feedback, source-bound AGY-to-Codex quota handoff | Qualify the combined source and preserve original workflow authority, workspace and budgets across any selected handoff. |
+| Branch ownership and CI visibility | One default `forge/agent/<profile-slug>` branch, exclusive workflow reservation, main synchronization, cache scope and correlation-stage/log projection | Apply schema41 only in an authorized rollout with matching services/grants. Prove stale-owner, open-PR, restart and paging behavior through the real path. |
+| Verification identity and recovery | Opt-in content-v2 manifests/policy generations; retained legacy bindings; private historical-CI pass and completion helpers | Verify actual source, process ownership and genuine receipts. Helpers do not authorize CI, reset event allowances or deploy themselves. |
+| Triage and Workbench | Needs attention, task detail/evidence disclosures, focus/scroll retention; admitted source inspection and opt-in managed writes | Complete current actual-WASM/browser and desktop/narrow visual acceptance. Recheck live write/Studio configuration before describing either as enabled. |
+| Other framework consumers | Durable Rust jobs, local tools, game simulation/assets/replay and static-web Studio service | Keep their contracts distinct from the Python/PostgreSQL delivery workflow; expand them when a concrete consumer and acceptance case require it. |
+
+The immediate direction is to make this integrated delivery loop understandable
+and qualified before adding a broader control plane. Follow the selected CI
+profile: fast in-memory evidence belongs to branch scope; database/browser
+acceptance belongs to main scope on the observed merged commit. Local disposable
+fixtures provide supplemental integration evidence, not a main-scoped receipt.
+Then qualify any coordinated rollout and prove one complete authored → reviewed →
+verified → merged → main-verified → deployed path with source-bound evidence.
+Restarting the deliberately stopped runner requires a separate operator action.
+
+Generic fleet scheduling, automatic peer discovery, a universal editor/LSP,
+framework-wide lifecycle automation, a queue/broker split and Kubernetes/K3s
+remain separate proposals or deferred work. This roadmap introduces none of
+those dependencies and does not change the native-systemd operating boundary.
+
+## Preserved work queue and planning direction
+
+The [resubmission queue](../../resubmission-queue/README.md) preserves task
+prompts and acceptance criteria collected before a planned database reset. Its
+saved task states and `resubmit` flags describe collection-time intent. They are
+not current completion, deployment or automatic-resubmission decisions. The
+read-only runtime check above still observed schema40; this documentation pass
+performs no database reset.
+
+| Saved work | Relation to the consolidated system | Planning treatment |
+| --- | --- | --- |
+| Branch cleanup | The requested task/development refs were merged and deleted; `main`, `backup/main` and remote `feature/muse` remain | Preserve the archived request; do not repeat the original 35-branch cleanup literally. |
+| Agent branch setup and portal correlation stages | Persistent per-agent ownership and correlation stage/log inspection are present in PR29 | Compare the original instruction, acceptance and rollout requirements against source/tests before filing remaining work; implementation is not live acceptance. |
+| External base-refresh override and failure/review/deadline/pin defects | Consolidated code contains related integration/recovery mechanisms | Reproduce the original failure against current code and retained evidence; record the actual gap instead of declaring every saved defect fixed or replaying superseded assumptions. |
+| Defect and backlog workflows | Saved feature requests for dedicated filing, deferral and promotion paths | Treat as product work requiring a scoped design and acceptance case, distinct from the existing per-event repair loop. |
+| PostgreSQL proxy / recipe-resolution backlog | Preserved design work with an explicit deferral of the only-writer cutover in the task notes | Review the retained `feature/muse` work and those scope notes separately. This PR does not establish a deployed single-writer proxy or authorize changing database grants. |
+| Main-pipeline Drive snapshot refresh | Saved request for a post-verification archive refresh | Keep it tied to the exact successfully verified main revision and a separately qualified external-publication path; no Drive operation is performed here. |
+| Archived old-main verification repairs | Five requests refer to superseded main revisions and say not to resubmit | Retain provenance; obtain verification for the actual current candidate/main rather than recreating those stale-tip repair tasks. |
+
+## Validation boundary
+
+The latest consolidation recorded 326 native Rust tests, 35 generated-asset
+tests, 18 CI recovery tests and 7 relay tests passing, plus a generated
+input-presentation fixture. Earlier integration records retain their own test
+scopes; these counts are not a complete final-head release gate. Historical
+source-fingerprint checks still fail against the combined source. `make ui-qa`
+stopped at the absent locked Playwright dependency, so browser assertions and
+screenshot acceptance did not run. The generated-emitter fixture used a
+header-only WASM fixture and is not actual-WASM browser evidence.
+
+See the [task consolidation record](../reports/task-branch-consolidation-20261126.json),
+[local branch record](../reports/local-branch-consolidation-20261126.json),
+[dated runtime inventory](../architecture/forge-ide-system-inventory.yaml) and
+[delivery roadmap](../roadmap/forge-framework.md). These distinguish implementation,
+local evidence, installed selection and release authority.
+
+## Existing content identity and retry contracts
 
 Source now includes an opt-in [content identity protocol](../architecture/content-identity.md)
 and its UML data, component and sequence views. Canonical SHA-256 source manifests,
@@ -26,7 +142,9 @@ legacy plan can adopt its actual spent retries and continue with its retained
 plan and review. This source description is not a live activation receipt;
 the delivery panel and protected rollout records establish the deployed version.
 
-The retained pre-delivery live checkpoint is main `95651a5` (tree `6d380c5a`) on
+## Historical qualified release — 23 November 2026
+
+The retained pre-delivery live checkpoint was main `95651a5` (tree `6d380c5a`) on
 23 November 2026. Its Rust/UI artifacts and native/browser qualification retain
 their actual built revision `a3a14e9`: all **499 consumed build inputs** match
 the final source exactly. Genuine Jenkins native build 17 and companion build 1
@@ -42,7 +160,7 @@ had **no Studio relay**, and the `homelab` source project had neither managed-wr
 opt-in nor write grants. Protected activation and bridge receipts are retained
 under `/var/lib/forge-provisioning/portal-web-activation/operator-main-release/`.
 
-The current delivery implementation adds migrations29–31, unified verification,
+At that historical checkpoint, the delivery follow-on added migrations29–31, unified verification,
 automatic normal-policy repairs, observed-main capture and guarded web deployment.
 The Agents project/task delivery panel and protected Root receipts are the runtime
 authority for the latest source, checks and activation. This historical checkpoint

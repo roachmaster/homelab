@@ -1,12 +1,26 @@
 # CI pipeline: branch and main
 
-**Source status, 2026-11-23:** the explicitly selected
-`forge-sdlc-jenkins-v2` contract implements the branch/main split below.
-It is not active on Mission Control yet. The last installed native verifier is
-`8d0cdefc…`, profile v1: three full legacy commands on every scope. Source v1
-keeps that behavior, including database/browser execution. The last release
-qualified `95651a5` with native Jenkins #17 and a separate three-suite operator
-companion #1. It did not replace the installed helper or activate v2.
+**Current source/operation note — 26 November 2026:** consolidated source under
+[PR29](https://github.com/roachmaster/homelab/pull/29) includes the explicit
+v1/v2 contracts below and the event-scoped v3 implementation in
+`work_ci_contract.py` / `work_ci_phases.py` (`forge-sdlc-jenkins-v3`).
+Persistent per-agent branch and
+correlation-stage state uses additive migration **0041**, not the already-applied
+0039 terminal-retry settlement migration. Browser source is ABI16.
+
+The live database reports schema40. The API/event runner is stopped/disabled;
+publication/external-delivery workers and Jenkins are active. This documentation
+pass did not re-audit installed verifier bytes, the selected private CI profile
+or fresh build receipts. The old v1/helper observation and timing figures below
+are **22–23 November history**, not a statement that only v1 runs today.
+See the [current checkpoint](../design/implementation-status.md).
+
+The intended split remains branch in-memory checks, then database/browser and
+other service-backed verification in main scope on the trusted observed merged
+commit. Keep selected profile, ordered phase plan, source manifest and genuine
+receipt bound together. Local disposable-database and emitter checks supplement
+integration evidence; they do not manufacture main/browser coverage. PR29 still
+needs explicit source-fingerprint qualification and actual-browser acceptance.
 
 The imports/layers checks are wired into `make ci`. `forge-llama` and the demo
 crates are retired; `forge-kernel` is now `forge-system`. The `forge-template`
@@ -30,13 +44,18 @@ Working rules that go with it:
 - Agents **can** build and test locally; each agent manages their own
   local cache.
 - Trunk-based development: each agent creates **one** feature branch and
-  never changes it, always rebasing with main before pushing.
+  never changes it, always rebasing with main before pushing. In source
+  (`branch_policy = "persistent-agent-v1"`, migration `0041`), each admitted
+  agent profile defaults to `forge/agent/<profile-slug>` with exclusive
+  active-workflow reservation in `forge_agent.agent_branch_state`, compare-and-swap
+  pushes, and correlation-scoped Jenkins CI/CD stage/console/test inspection in
+  the portal (ABI 16). Live activation remains a separate authorized step.
 - A branch merges when its in-memory stages pass. Out-of-memory tests
   never gate a branch.
 
-## 2. Current state (measured 2026-11-22)
+## 2. Historical measured state (2026-11-22)
 
-`make ci` today is **11 cargo configurations**: 1 all-features workspace
+At that checkpoint, `make ci` used **11 cargo configurations**: 1 all-features workspace
 pass (build, check, lint, test, test-release, doc — the only place
 doc/release tests run) plus 10 minimal no-default-features
 profiles. Totals: 12 test runs, 9 Clippy runs, then `ui-check` and
@@ -46,7 +65,7 @@ gate). Measured cost (Jenkins qualification 2026-11-21):
 36m28s cold. Warm cost is dominated by the first compile, not by the
 number of test runs — cutting combinations saves little warm time.
 
-The two CI systems both violate the spec today:
+At that measured checkpoint, both CI systems violated the spec:
 
 - **Jenkins** (`deploy/mission-control/jenkins/verify-candidate.py`):
   CHECKS is exactly three, all run pre-merge on candidates: `make ci`,
@@ -222,7 +241,7 @@ branch scopes; cache reuse cannot upgrade branch coverage into main coverage.
 
 ### Source and runtime separation
 
-A deliberate future rollout must qualify and install the matching verifier,
+Any rollout must qualify and install the matching verifier,
 profile and worker configuration together. The [coordinator-owned post-merge
 flow](forge-post-merge-verification.md) composes a confirmed merge into a durable,
 main-scoped request in source. PostgreSQL records the successor atomically with
@@ -245,9 +264,9 @@ pretending to be a GitHub browser job.
 - Classify remaining service/driver/studio cases before moving any into the
   branch stage. The current branch plan runs only declared agent-runner
   in-memory coverage; main runs all four suites.
-- Qualify an intentional v2/migration28 rollout and enable the implemented
-  post-merge coordinator with its main-scoped provider. Neither profile rollout
-  nor live scheduling is claimed active by this source change.
+- Reconcile the installed verifier/profile and protected rollout receipts against
+  the integrated source. Qualify schema41 and matching branch/stage consumers as
+  a coordinated rollout; this documentation does not activate them.
 - The `forge-kernel` rename is done: the crate is now `forge-system`
   (crate-dependency-tree.md section 10). The `forge-llama` and
   demo-crate decisions are done too: both removed from the workspace.

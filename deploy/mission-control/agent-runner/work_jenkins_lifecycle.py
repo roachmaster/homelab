@@ -92,7 +92,8 @@ def _utc_now():
 
 def build_lifecycle_event(*, project_alias, jenkins_instance, job_name, action_id,
                           event_kind, commit_sha, queue_id=None, build_number=None,
-                          build_result=None, occurred_at=None):
+                          build_result=None, occurred_at=None,
+                          correlation_id=None, branch=None, branch_scope=None):
     """Construct the validated lifecycle event for one observed transition."""
     kind = event_kind if isinstance(event_kind, JenkinsEventKind) else JenkinsEventKind(event_kind)
     if kind is JenkinsEventKind.BUILD_QUEUED:
@@ -102,12 +103,14 @@ def build_lifecycle_event(*, project_alias, jenkins_instance, job_name, action_i
     else:
         summary = "Jenkins build #%s completed: %s" % (
             build_number, build_result.value if isinstance(build_result, JenkinsBuildResult) else build_result)
+    action_uuid = action_id if (isinstance(action_id, str) and len(action_id) == 36 and action_id.count("-") == 4) else None
     return JenkinsEventEmit(
         project_alias=project_alias, jenkins_instance=jenkins_instance, job_name=job_name,
         delivery_id=lifecycle_delivery_id(action_id, kind), event_kind=kind,
         occurred_at=occurred_at if occurred_at is not None else _utc_now(),
         summary=summary, build_number=build_number, queue_id=queue_id,
-        commit_sha=commit_sha, build_result=build_result)
+        commit_sha=commit_sha, branch=branch, build_result=build_result,
+        correlation_id=correlation_id, action_id=action_uuid, branch_scope=branch_scope)
 
 
 def _intent_filename(event_kind):
@@ -126,13 +129,17 @@ class LifecycleTracker:
     """
 
     def __init__(self, directory, *, action_id, project_alias, jenkins_instance,
-                 job_name, commit_sha, event_lookup=None):
+                 job_name, commit_sha, event_lookup=None,
+                 correlation_id=None, branch=None, branch_scope=None):
         self._directory = Path(directory)
         self._action_id = action_id
         self._project_alias = project_alias
         self._jenkins_instance = jenkins_instance
         self._job_name = job_name
         self._commit_sha = commit_sha
+        self._correlation_id = correlation_id
+        self._branch = branch
+        self._branch_scope = branch_scope
         # Optional callable (project_alias, job_name, commit_sha) -> list of
         # delivered lifecycle events, each with event_kind and delivery_id.
         # Without it, reconcile uses only the state and intent files; a
@@ -214,7 +221,9 @@ class LifecycleTracker:
                     event_kind=kind, commit_sha=self._commit_sha,
                     queue_id=recorded.get("queue_id"), build_number=recorded.get("build_number"),
                     build_result=recorded.get("build_result"),
-                    occurred_at=recorded.get("occurred_at"))
+                    occurred_at=recorded.get("occurred_at"),
+                    correlation_id=self._correlation_id, branch=self._branch,
+                    branch_scope=self._branch_scope)
                 durable_json(intent, event.semantic_payload())
         self._write_state()
         return frozenset(kind for kind in LIFECYCLE_KINDS
@@ -252,7 +261,9 @@ class LifecycleTracker:
                 recorded.append(self._record(build_lifecycle_event(
                     project_alias=self._project_alias, jenkins_instance=self._jenkins_instance,
                     job_name=self._job_name, action_id=self._action_id,
-                    event_kind="build_queued", commit_sha=self._commit_sha, queue_id=queue_id)))
+                    event_kind="build_queued", commit_sha=self._commit_sha, queue_id=queue_id,
+                    correlation_id=self._correlation_id, branch=self._branch,
+                    branch_scope=self._branch_scope)))
             if build_number is not None:
                 if self._state.get("build_queued") is None and queue_id is not None:
                     # A build implies its queue assignment; record it from the
@@ -260,13 +271,17 @@ class LifecycleTracker:
                     recorded.append(self._record(build_lifecycle_event(
                         project_alias=self._project_alias, jenkins_instance=self._jenkins_instance,
                         job_name=self._job_name, action_id=self._action_id,
-                        event_kind="build_queued", commit_sha=self._commit_sha, queue_id=queue_id)))
+                        event_kind="build_queued", commit_sha=self._commit_sha, queue_id=queue_id,
+                        correlation_id=self._correlation_id, branch=self._branch,
+                        branch_scope=self._branch_scope)))
                 if self._state.get("build_started") is None:
                     recorded.append(self._record(build_lifecycle_event(
                         project_alias=self._project_alias, jenkins_instance=self._jenkins_instance,
                         job_name=self._job_name, action_id=self._action_id,
                         event_kind="build_started", commit_sha=self._commit_sha,
-                        queue_id=queue_id, build_number=build_number)))
+                        queue_id=queue_id, build_number=build_number,
+                        correlation_id=self._correlation_id, branch=self._branch,
+                        branch_scope=self._branch_scope)))
                 if status in {"passed", "failed"} and self._state.get("build_completed") is None:
                     build_result = self._build_result_for(receipt, status)
                     if build_result is None:
@@ -277,7 +292,9 @@ class LifecycleTracker:
                             project_alias=self._project_alias, jenkins_instance=self._jenkins_instance,
                             job_name=self._job_name, action_id=self._action_id,
                             event_kind="build_completed", commit_sha=self._commit_sha,
-                            queue_id=queue_id, build_number=build_number, build_result=build_result)))
+                            queue_id=queue_id, build_number=build_number, build_result=build_result,
+                            correlation_id=self._correlation_id, branch=self._branch,
+                            branch_scope=self._branch_scope)))
         except (OSError, ValueError) as error:
             LOG.warning("Lifecycle intent recording failed for action %s: %s", self._action_id, error)
         return tuple(recorded)
@@ -303,7 +320,9 @@ class LifecycleTracker:
                 job_name=self._job_name, action_id=self._action_id,
                 event_kind="build_completed", commit_sha=self._commit_sha,
                 queue_id=receipt.get("queue_id"), build_number=build_number,
-                build_result=JenkinsBuildResult.ABORTED)),)
+                build_result=JenkinsBuildResult.ABORTED,
+                correlation_id=self._correlation_id, branch=self._branch,
+                branch_scope=self._branch_scope)),)
         except (OSError, ValueError) as error:
             LOG.warning("Lifecycle cancellation intent failed for action %s: %s", self._action_id, error)
             return ()

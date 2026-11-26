@@ -2,10 +2,13 @@
 
 Start with the [current implementation reference](design/implementation-status.md). It distinguishes implemented repository capabilities, configured live services, remaining work and historical proposals. The live portal exposes the same reference at `/design/implementation`.
 
-The active portal is Agents, Workbench, Home and Design, with ABI13. The last
-qualified live `95651a5` deployment retained schema26 and kept Studio/managed writes
-disabled for the checked host/project. New source and documentation fixes await
-their own verification and rollout; historical Chat/Mail notes are not active UI.
+The [current system picture](design/implementation-status.md) separates the live schema40/services snapshot
+from the consolidated ABI16/schema41 source in
+[draft PR29](https://github.com/roachmaster/homelab/pull/29). The event/API runner
+is stopped and boot-disabled while other coding/delivery services remain active.
+The [roadmap](roadmap/forge-framework.md) prioritizes integrated source qualification, main-scoped
+acceptance and a coordinated rollout before broader platform expansion.
+Historical release records retain their dates and are not current health claims.
 
 ## Current architecture and operation
 
@@ -19,6 +22,10 @@ their own verification and rollout; historical Chat/Mail notes are not active UI
 - [Portal Home](architecture/proposals/forge-portal-landing.md): generated launchers and documentation navigation.
 
 ## Coding agents and usage
+
+[Preserved resubmission queue](../resubmission-queue/README.md): original task
+definitions and a dated reconciliation with the consolidated source. Check
+current gaps before resubmitting collection-time requests.
 
 [Source content and verification identity](architecture/content-identity.md)
 documents canonical source artifacts, immutable policy generations, provider

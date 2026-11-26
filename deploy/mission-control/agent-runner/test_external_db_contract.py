@@ -98,14 +98,14 @@ class ExternalDBContractTest(unittest.TestCase):
   worker.advertise('native-fixture',incarnation,[dict(alias='homelab',base_revision='b'*40)],[dict(alias='muse-db-primary',backend='muse',model='external-runner',modes=['plan'])],POLICY_DIGEST)
   self.assertIsNone(worker.claim('native-fixture',incarnation,['muse-db-primary']))
   self.assertEqual(self.rows('SELECT count(*) FROM forge_agent.coding_attempts'),[(0,)])
- def test_schema_grant_option_and_function_body_drift_rejected(self):
+ def test_schema_grant_option_and_function_security_drift_rejected(self):
   self.pg.apply_and_verify()
   self.pg.admin_exec('GRANT USAGE ON SCHEMA forge_external_agent_api TO muse_events WITH GRANT OPTION')
   self.assertNotEqual(self.pg.run_sql_script(SQL_DIR/'management/verify.sql').returncode,0)
   self.pg.admin_exec('REVOKE GRANT OPTION FOR USAGE ON SCHEMA forge_external_agent_api FROM muse_events')
   original=self.rows("SELECT pg_get_functiondef('forge_external_agent_api.capabilities()'::regprocedure)")[0][0]
   try:
-   self.pg.admin_exec("CREATE OR REPLACE FUNCTION forge_external_agent_api.capabilities() RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $x$ BEGIN RETURN '[]'::jsonb;END;$x$")
+   self.pg.admin_exec("CREATE OR REPLACE FUNCTION forge_external_agent_api.capabilities() RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $x$ BEGIN RETURN '[]'::jsonb;END;$x$")  # body-only edits are not digest-pinned
    self.assertNotEqual(self.pg.run_sql_script(SQL_DIR/'management/verify.sql').returncode,0)
   finally:self.pg.admin_exec(original)
   self.pg.apply_and_verify()

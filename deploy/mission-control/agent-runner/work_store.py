@@ -2,6 +2,7 @@
 
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
+import hashlib
 import json
 import psycopg2
 import re
@@ -12,6 +13,7 @@ from psycopg2.extras import Json, RealDictCursor, register_uuid
 
 from work_retry_policy import AGENT_RETRY_LIMIT
 from queue_store import Rejected
+from work_failure_cause import CAUSE_SUMMARY_BYTES, FAILURE_CAUSES
 from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
@@ -184,8 +186,40 @@ def _summary(row):
     return item
 
 
+def _public_deadline_extension(payload):
+    """Bounded projection of a recorded deadline extension (M47), else None."""
+    if (not isinstance(payload, dict) or payload.get("stage") != "deadline_extended"
+            or set(payload) != {"stage", "attempt_id", "extension_no", "previous_deadline", "new_deadline", "signal", "actor"}
+            or not _projection_actor(payload, "worker")):
+        return None
+    try:
+        valid = (str(UUID(payload["attempt_id"])) == payload["attempt_id"]
+                 and type(payload["extension_no"]) is int and 1 <= payload["extension_no"] <= 64
+                 and payload["signal"] in {"progress_report", "checkpoint", "output"}
+                 and all(isinstance(payload[k], str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", payload[k])
+                         for k in ("previous_deadline", "new_deadline")))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not valid:
+        return None
+    return {k: payload[k] for k in ("attempt_id", "extension_no", "previous_deadline", "new_deadline", "signal")}
+
+
+def _public_failure(payload):
+    """Cause code and bounded summary of a failed event (M46), else None."""
+    if not isinstance(payload, dict):
+        return None
+    cause, summary = payload.get("cause"), payload.get("cause_summary")
+    if (cause not in FAILURE_CAUSES or not isinstance(summary, str)
+            or len(summary.encode("utf-8")) > CAUSE_SUMMARY_BYTES
+            or any(ord(c) < 32 and c not in "\t\n" for c in summary)):
+        return None
+    return {"cause": cause, "summary": summary}
+
+
 def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
-                          prompt, acceptance_criteria, auto_repair=False, workflow_policy_digest=None):
+                          prompt, acceptance_criteria, auto_repair=False, workflow_policy_digest=None,
+                          workflow_policy_id=None):
     return sha256_canonical({
         "project_alias": project_alias,
         "base_revision": base_revision,
@@ -195,6 +229,7 @@ def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
         "acceptance_criteria": acceptance_criteria,
         **({"auto_repair":True} if auto_repair else {}),
         **({"workflow_policy_digest":workflow_policy_digest} if workflow_policy_digest is not None else {}),
+        **({"workflow_policy_id":str(workflow_policy_id)} if workflow_policy_id is not None else {}),
     })
 
 
@@ -392,6 +427,85 @@ class WorkStore:
                 raise Rejected(*mapped[error.pgcode]) from None
             raise
 
+    # M44 identity catalog (phase 0d). Documents are frozen to a catalog UUID
+    # plus a per-subject generation by jsonb equality, never by re-hashing.
+    # Dual-written beside the legacy digests; absent before M44 is applied.
+    def _identity_catalog_ready(self, cursor):
+        cursor.execute("SELECT to_regprocedure('forge_agent.coding_identity_register(text,text,text,text,jsonb,text)') IS NOT NULL AS ready")
+        return bool(cursor.fetchone()["ready"])
+
+    def _register_identity(self, cursor, project_alias, kind, subject, document, legacy_digest):
+        cursor.execute("SELECT identity_id,generation FROM forge_agent.coding_identity_register(%s,%s,%s,%s,%s,%s)",
+                       (self._owner, project_alias, kind, subject, Json(document), legacy_digest))
+        row = cursor.fetchone()
+        return {"policy_id": str(row["identity_id"]), "policy_generation": int(row["generation"])}
+
+    @staticmethod
+    def _policy_document(snapshot):
+        return {key: value for key, value in snapshot.items() if key != "policy_digest"}
+
+    def policy_identity(self, *, project_alias, kind, snapshot):
+        """Return the catalog identity of a policy snapshot, or None before M44."""
+        with self._transaction() as cursor:
+            if not self._identity_catalog_ready(cursor):
+                return None
+            return self._register_identity(cursor, project_alias, kind, "policy",
+                                           self._policy_document(snapshot), snapshot["policy_digest"])
+
+    def policy_drifted(self, workflow_id, snapshot):
+        """Policy fence by identity: compare the workflow's frozen catalog document
+        to the current policy document. Returns None when no frozen identity exists
+        (pre-M44 database or a workflow created before M44); callers then fall back
+        to the legacy digest comparison."""
+        with self._transaction() as cursor:
+            if not self._identity_catalog_ready(cursor):
+                return None
+            from proxy_client import run_read_query
+            doc_rows = run_read_query(cursor, "workflow_policy_document", {
+                "owner_id": self._owner,
+                "workflow_id": str(workflow_id),
+            })
+            row = doc_rows[0] if doc_rows else None
+        if row is None:
+            return None
+        return row["document"] != self._policy_document(snapshot)
+
+    def _attach_policy_identities(self, projects, config):
+        """Discovery: advertise the catalog id and generation of each current policy."""
+        external = getattr(self._external, "workflow", None)
+        pending = []
+        for project in projects:
+            alias = project["alias"]
+            if project.get("workflow") is not None:
+                pending.append((project["workflow"], "workflow_policy",
+                                config.project_workflows[alias].snapshot(config.catalog(), config.repair_policy)))
+            if project.get("external_workflow") is not None and external is not None:
+                pending.append((project["external_workflow"], "external_workflow_policy",
+                                external.policies[alias].snapshot(external.catalog)))
+        if not pending:
+            return
+        with self._transaction() as cursor:
+            if not self._identity_catalog_ready(cursor):
+                return
+            for summary, kind, snapshot in pending:
+                alias = next(p["alias"] for p in projects if p.get("workflow") is summary or p.get("external_workflow") is summary)
+                summary.update(self._register_identity(cursor, alias, kind, "policy",
+                                                       self._policy_document(snapshot), snapshot["policy_digest"]))
+
+    def _record_task_identity(self, cursor, project_alias, task_id, agent_profile, recipe, workflow, workflow_id):
+        if not self._identity_catalog_ready(cursor):
+            return
+        recipe_id = self._register_identity(cursor, project_alias, "recipe",
+                                            f"{agent_profile}:{recipe.mode}",
+                                            recipe.to_dict(), recipe.digest)["policy_id"]
+        policy_id = None
+        if workflow is not None:
+            policy_id = self._register_identity(cursor, project_alias, "workflow_policy", "policy",
+                                                self._policy_document(workflow), workflow["policy_digest"])["policy_id"]
+        cursor.execute("""INSERT INTO forge_agent.coding_task_identities(owner_id,project_alias,task_id,recipe_id,workflow_id,workflow_policy_id)
+                          VALUES(%s,%s,%s,%s,%s,%s)""",
+                       (self._owner, project_alias, task_id, recipe_id, workflow_id, policy_id))
+
     def catalog(self, *, config):
         if not isinstance(config, WorkConfig) or config.owner != self._owner:
             raise ValueError("Catalog requires matching frozen WorkConfig")
@@ -472,6 +586,7 @@ class WorkStore:
             }
             for alias in sorted(config.allowed_projects)[:MAX_PROJECTS]
         ]
+        self._attach_policy_identities(projects, config)
         if self._delivery_enabled:
             with self._transaction(read_only=True) as cursor:
                 for project in projects:
@@ -491,18 +606,105 @@ class WorkStore:
                 "backend": profile.backend,
                 "model": profile.model,
                 "modes": [m for m in MODE_ORDER if m in modes],
+                "branch": profile.branch,
                 **({"transport": "external_db"} if profile.is_external else {}),
             })
+        agent_branches = self._agent_branch_states(config)
         return {
             "projects": projects,
             "profiles": profiles,
             "worker_status": worker_status,
             "observed_at": observed_at,
+            "agent_branches": agent_branches,
         }
+
+    def _branch_row_to_dto(self, row):
+        return {
+            "project_alias": row["project_alias"],
+            "agent_profile": row["agent_profile"],
+            "branch_name": row["branch_name"],
+            "branch_scope": row["branch_scope"],
+            "head_commit_sha": row.get("head_commit_sha"),
+            "fetched_main_sha": row.get("fetched_main_sha"),
+            "fetched_main_at": _timestamp(row["fetched_main_at"]) if row.get("fetched_main_at") is not None else None,
+            "sync_status": row.get("sync_status") or "unknown",
+            "conflict_paths": list(row.get("conflict_paths") or []),
+            "cache_status": row.get("cache_status") or "unknown",
+            "cache_updated_at": _timestamp(row["cache_updated_at"]) if row.get("cache_updated_at") is not None else None,
+            "last_task_id": str(row["last_task_id"]) if row.get("last_task_id") is not None else None,
+            "last_correlation_id": str(row["last_correlation_id"]) if row.get("last_correlation_id") is not None else None,
+            "reservation_status": row.get("reservation_status") or "idle",
+            "active_scope_kind": row.get("active_scope_kind"),
+            "active_scope_id": str(row["active_scope_id"]) if row.get("active_scope_id") is not None else None,
+            "active_root_task_id": str(row["active_root_task_id"]) if row.get("active_root_task_id") is not None else None,
+            "active_task_id": str(row["active_task_id"]) if row.get("active_task_id") is not None else None,
+            "active_pr_url": row.get("active_pr_url"),
+            "reservation_epoch": int(row.get("reservation_epoch") or 0),
+            "reservation_blocker": row.get("reservation_blocker"),
+        }
+
+    def _agent_branch_states(self, config):
+        from work_agent_branch import branch_scope_for_branch
+        live = {}
+        with self._transaction(read_only=True) as cursor:
+            cursor.execute(
+                "SELECT to_regclass('forge_agent.agent_branch_state') IS NOT NULL "
+                "AND has_table_privilege(current_user, 'forge_agent.agent_branch_state', 'SELECT') AS has_table"
+            )
+            if cursor.fetchone()["has_table"]:
+                cursor.execute("""
+                    SELECT project_alias, agent_profile, branch_name, branch_scope,
+                           head_commit_sha, fetched_main_sha, fetched_main_at,
+                           sync_status, conflict_paths, cache_status, cache_updated_at,
+                           last_task_id, last_correlation_id,
+                           reservation_status, active_scope_kind, active_scope_id,
+                           active_root_task_id, active_task_id, active_pr_url,
+                           reservation_epoch, reservation_blocker
+                    FROM forge_agent.agent_branch_state
+                    WHERE owner_id = %s AND project_alias = ANY(%s)
+                    ORDER BY project_alias ASC, agent_profile ASC
+                """, (self._owner, sorted(config.allowed_projects)))
+                for row in cursor.fetchall():
+                    live[(row["project_alias"], row["agent_profile"])] = self._branch_row_to_dto(row)
+        result = []
+        for project_alias in sorted(config.allowed_projects)[:MAX_PROJECTS]:
+            for alias in sorted(config.profiles)[:MAX_PROFILES]:
+                existing = live.get((project_alias, alias))
+                if existing is not None:
+                    result.append(existing)
+                else:
+                    profile = config.profiles[alias]
+                    result.append({
+                        "project_alias": project_alias,
+                        "agent_profile": alias,
+                        "branch_name": profile.branch,
+                        "branch_scope": branch_scope_for_branch(profile.branch),
+                        "head_commit_sha": None,
+                        "fetched_main_sha": None,
+                        "fetched_main_at": None,
+                        "sync_status": "unknown",
+                        "conflict_paths": [],
+                        "cache_status": "unknown",
+                        "cache_updated_at": None,
+                        "last_task_id": None,
+                        "last_correlation_id": None,
+                        "reservation_status": "idle",
+                        "active_scope_kind": None,
+                        "active_scope_id": None,
+                        "active_root_task_id": None,
+                        "active_task_id": None,
+                        "active_pr_url": None,
+                        "reservation_epoch": 0,
+                        "reservation_blocker": None,
+                    })
+                if len(result) >= 128:
+                    return result
+        return result
 
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
                prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False,
-               workflow_policy_digest=None,resolve_workflow=lambda:None,delivery_admission=None,actor=None):
+               workflow_policy_digest=None,resolve_workflow=lambda:None,delivery_admission=None,actor=None,
+               workflow_policy_id=None):
         self._require_project(project_alias)
         if type(auto_repair) is not bool:
             raise Rejected(400,"invalid_request")
@@ -515,6 +717,7 @@ class WorkStore:
             prompt=prompt,
             acceptance_criteria=acceptance_criteria,
             auto_repair=auto_repair,workflow_policy_digest=workflow_policy_digest,
+            workflow_policy_id=workflow_policy_id,
         )
         lock_scope = f"{self._owner}\n{project_alias}"
         with self._transaction() as cursor:
@@ -529,7 +732,29 @@ class WorkStore:
             existing = rows[0] if rows else None
             if existing is not None:
                 if existing["intent_digest"] != intent_digest:
-                    raise Rejected(409, "idempotency_conflict")
+                    # The Idempotency-Key identifies the request; the policy fence
+                    # fields (digest or catalog id) are preconditions, not intent,
+                    # so a retry that switches between the two forms replays.
+                    core = dict(project_alias=project_alias, base_revision=base_revision, mode=mode,
+                                agent_profile=agent_profile, prompt=prompt,
+                                acceptance_criteria=acceptance_criteria, auto_repair=auto_repair)
+                    digests, ids = {None, workflow_policy_digest}, {None, workflow_policy_id}
+                    cursor.execute("""SELECT w.workflow_id, w.policy_digest FROM forge_agent.coding_tasks t
+                                      JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id
+                                      WHERE t.owner_id=%s AND t.project_alias=%s AND t.idempotency_key=%s""",
+                                   (self._owner, project_alias, idempotency_key))
+                    frozen = cursor.fetchone()
+                    if frozen is not None:
+                        digests.add(frozen["policy_digest"])
+                        if self._identity_catalog_ready(cursor):
+                            cursor.execute("""SELECT workflow_policy_id FROM forge_agent.coding_task_identities
+                                              WHERE owner_id=%s AND workflow_id=%s AND workflow_policy_id IS NOT NULL""",
+                                           (self._owner, frozen["workflow_id"]))
+                            ids.update(row["workflow_policy_id"] for row in cursor.fetchall())
+                    variants = {_submit_intent_digest(**core, workflow_policy_digest=d, workflow_policy_id=i)
+                                for d in digests for i in ids}
+                    if existing["intent_digest"] not in variants:
+                        raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
             cursor.execute("""
@@ -549,14 +774,14 @@ class WorkStore:
                                (UUID(delivery_admission['operation_id']),delivery_admission['generation'],
                                 UUID(delivery_admission['lease_token']),intent_digest))
             trusted_main=self._delivery_head(cursor,project_alias)
-            if trusted_main is not None and trusted_main!=base_revision:raise Rejected(409,"result_mismatch")
+            if trusted_main is not None and trusted_main!=base_revision:raise Rejected(409,"result_mismatch","base_stale")
             workflow=resolve_workflow()
             if workflow is not None:
                 rows = _read_query(cursor, "merge_head",
                                   {"owner_id": self._owner, "project_alias": project_alias})
                 merged = rows[0] if rows else None
                 trusted_head=trusted_main or (merged["head"] if merged else None)
-                if trusted_head is not None and trusted_head!=base_revision:raise Rejected(409,'result_mismatch')
+                if trusted_head is not None and trusted_head!=base_revision:raise Rejected(409,'result_mismatch','base_stale')
                 auto_repair=True
             recipe = resolve_recipe()
             if (not isinstance(recipe, PinnedRecipe)
@@ -591,6 +816,8 @@ class WorkStore:
                 cursor.execute("INSERT INTO forge_agent.coding_workflows(owner_id,project_alias,root_task_id,policy_digest,snapshot) VALUES(%s,%s,%s,%s,%s) RETURNING workflow_id",(self._owner,project_alias,task_id,workflow["policy_digest"],Json(workflow)))
                 workflow_id=cursor.fetchone()["workflow_id"]
                 cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_required=true,workflow_id=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(workflow_id,self._owner,project_alias,task_id))
+            self._record_task_identity(cursor, project_alias, task_id, agent_profile, recipe, workflow,
+                                       workflow_id if workflow is not None else None)
             insert_event(cursor, self._owner, project_alias, task_id, "queued",
                          receipt, actor=actor, first=True)
             if recipe.resource_profile in EXTERNAL_POLICIES:
@@ -715,7 +942,316 @@ class WorkStore:
                     detail["external_result"] = artifact
             delivery=self._delivery_projection(cursor,project_alias,task_id)
             if delivery is not None:detail["delivery"]=delivery
+            correlation_cicd = self._correlation_cicd_projection(cursor, row, delivery=delivery)
+            if correlation_cicd is not None:
+                detail["correlation_cicd"] = correlation_cicd
             return detail
+
+    def _correlation_cicd_projection(self, cursor, task, *, delivery=None):
+        from work_agent_branch import branch_scope_for_branch, default_agent_branch
+        from work_pipeline_projection import project_correlation_cicd
+        correlation_id = task.get("correlation_id")
+        if correlation_id is None:
+            return None
+        project_alias = task["project_alias"]
+        corr_str = str(correlation_id)
+
+        def _can_select(relation_name):
+            cursor.execute(
+                "SELECT to_regclass(%s) IS NOT NULL AND has_table_privilege(current_user, %s, 'SELECT') AS ok",
+                (relation_name, relation_name),
+            )
+            return bool(cursor.fetchone()["ok"])
+
+        # 1. Branch state and whether this task is currently waiting on another workflow's reservation.
+        branch_state = None
+        waiting_on_branch_owner = False
+        if _can_select("forge_agent.agent_branch_state"):
+            cursor.execute("""
+                SELECT project_alias, agent_profile, branch_name, branch_scope,
+                       head_commit_sha, fetched_main_sha, fetched_main_at,
+                       sync_status, conflict_paths, cache_status, cache_updated_at,
+                       last_task_id, last_correlation_id,
+                       reservation_status, active_scope_kind, active_scope_id,
+                       active_root_task_id, active_task_id, active_pr_url,
+                       reservation_epoch, reservation_blocker
+                FROM forge_agent.agent_branch_state
+                WHERE owner_id = %s AND project_alias = %s AND agent_profile = %s
+            """, (self._owner, project_alias, task["agent_profile"]))
+            brow = cursor.fetchone()
+            if brow is not None:
+                branch_state = self._branch_row_to_dto(brow)
+                if brow["reservation_status"] == "active" and task.get("status") not in {"completed", "cancelled", "failed"}:
+                    task_scope_id = (
+                        str(task["workflow_id"])
+                        if task.get("workflow_id") is not None
+                        else str(task.get("repair_root_task_id") or task["id"])
+                    )
+                    if (str(brow["active_scope_id"]) != task_scope_id
+                            and str(brow["active_task_id"]) != str(task["id"])
+                            and str(brow.get("active_root_task_id") or "") != task_scope_id):
+                        waiting_on_branch_owner = True
+        if branch_state is None:
+            default_b = default_agent_branch(task["agent_profile"])
+            branch_state = {
+                "project_alias": project_alias,
+                "agent_profile": task["agent_profile"],
+                "branch_name": default_b,
+                "branch_scope": branch_scope_for_branch(default_b),
+                "head_commit_sha": None,
+                "fetched_main_sha": None,
+                "fetched_main_at": None,
+                "sync_status": "unknown",
+                "conflict_paths": [],
+                "cache_status": "unknown",
+                "cache_updated_at": None,
+                "last_task_id": None,
+                "last_correlation_id": None,
+                "reservation_status": "idle",
+                "active_scope_kind": None,
+                "active_scope_id": None,
+                "active_root_task_id": None,
+                "active_task_id": None,
+                "active_pr_url": None,
+                "reservation_epoch": 0,
+                "reservation_blocker": None,
+            }
+
+        # 2. Collect linked task IDs, correlation IDs & candidate commits across this workflow / repair family.
+        root_id = task.get("repair_root_task_id") or task["id"]
+        # Named fixed read (forge_pg_proxy.READ_QUERIES): the OR
+        # family lookup is too complex for the generic proxy read
+        # rule, and a NULL workflow_id reproduces the no-workflow
+        # variant on both transports.
+        from proxy_client import run_read_query
+        linked_rows = run_read_query(cursor, "linked_family_tasks", {
+            "owner_id": self._owner,
+            "project_alias": project_alias,
+            "correlation_id": correlation_id,
+            "workflow_id": task.get("workflow_id"),
+            "root_id": root_id,
+        })
+        linked_ids = [r["id"] for r in linked_rows]
+        linked_corrs = list({r["correlation_id"] for r in linked_rows} | {correlation_id})
+        linked_corr_strs = [str(c) for c in linked_corrs]
+
+        candidate_commits = []
+        hosted_observations = []
+        if linked_ids:
+            from proxy_client import run_read_query
+            candidate_rows = run_read_query(cursor, "candidate_commits_for_tasks", {
+                "owner_id": self._owner,
+                "project_alias": project_alias,
+                "task_ids": linked_ids,
+            })
+            candidate_commits = [r["candidate_commit"] for r in candidate_rows]
+            from proxy_client import run_read_query
+            hosted_observations = run_read_query(cursor, "hosted_observations_for_tasks", {
+                "owner_id": self._owner,
+                "project_alias": project_alias,
+                "task_ids": linked_ids,
+            })
+
+        # 3. Query immutable stage_results for this correlation / workflow family.
+        stage_results = []
+        if _can_select("forge_agent.jenkins_stage_results"):
+            from proxy_client import run_read_query
+            stage_rows = run_read_query(cursor, "stage_results_for_correlations", {
+                "owner_id": self._owner,
+                "project_alias": project_alias,
+                "correlation_ids": [str(c) for c in linked_corrs],
+            })
+            for r in stage_rows:
+                item = dict(r)
+                item["action_id"] = str(r["action_id"])
+                item["correlation_id"] = str(r["correlation_id"])
+                item["task_id"] = str(r["task_id"]) if r["task_id"] is not None else None
+                item["created_at"] = _timestamp(r["created_at"]) if r["created_at"] is not None else None
+                stage_results.append(item)
+
+        # 4. Query jenkins_events scoped by correlation_id OR linked candidate commits.
+        jenkins_events = []
+        if _can_select("forge_agent.jenkins_events"):
+            from proxy_client import run_read_query
+            jenkins_rows = run_read_query(cursor, "jenkins_events_for_family", {
+                "owner_id": self._owner,
+                "project_alias": project_alias,
+                "correlation_ids": linked_corr_strs,
+                "commit_shas": candidate_commits,
+            })
+            for r in jenkins_rows:
+                item = dict(r)
+                if item.get("occurred_at") is not None:
+                    item["occurred_at"] = _timestamp(item["occurred_at"])
+                if item.get("action_id") is not None:
+                    item["action_id"] = str(item["action_id"])
+                jenkins_events.append(item)
+
+        # 5. Derive post-merge main verification & release state from the authorized delivery projection.
+        post_merge_runs = []
+        release_status = None
+        if isinstance(delivery, dict):
+            verification = delivery.get("verification")
+            if isinstance(verification, dict) and delivery.get("verification_id"):
+                post_merge_runs.append({
+                    "post_merge_id": str(delivery["verification_id"]),
+                    "merge_commit": delivery.get("commit_sha"),
+                    "status": verification.get("status"),
+                    "receipt": {"build_number": verification.get("build_number")} if verification.get("build_number") is not None else {},
+                    "summary": verification.get("summary") or "",
+                    "created_at": verification.get("updated_at"),
+                    "updated_at": verification.get("updated_at"),
+                })
+            release = delivery.get("release")
+            if isinstance(release, dict) and isinstance(release.get("status"), str):
+                release_status = release["status"]
+
+        return project_correlation_cicd(
+            correlation_id=corr_str,
+            branch_state=branch_state,
+            waiting_on_branch_owner=waiting_on_branch_owner,
+            stage_results=stage_results,
+            jenkins_events=jenkins_events,
+            hosted_observations=hosted_observations,
+            post_merge_runs=post_merge_runs,
+            release_status=release_status,
+        )
+
+    def cicd_stage_log(self, *, project_alias, task_id, correlation_id, action_id,
+                       stage_id, view, cursor_token=None, limit_bytes=32768):
+        self._require_project(project_alias)
+        if (not isinstance(task_id, UUID) or not isinstance(correlation_id, UUID)
+                or not isinstance(action_id, UUID)
+                or not isinstance(stage_id, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", stage_id)
+                or view not in {"errors", "tests", "console"}
+                or type(limit_bytes) is not int or not 1 <= limit_bytes <= 32768):
+            raise Rejected(400, "invalid_request")
+        req_digest = None
+        offset = 0
+        if cursor_token is not None:
+            if not isinstance(cursor_token, str) or not re.fullmatch(r"[0-9a-f]{64}\.(0|[1-9][0-9]{0,7})", cursor_token):
+                raise Rejected(400, "invalid_request")
+            req_digest, raw_off = cursor_token.split(".", 1)
+            offset = int(raw_off)
+
+        with self._transaction(read_only=True) as cursor:
+            cursor.execute("""
+                SELECT id, correlation_id, workflow_id, repair_root_task_id
+                FROM forge_agent.coding_tasks
+                WHERE owner_id = %s AND project_alias = %s AND id = %s
+            """, (self._owner, project_alias, task_id))
+            task_row = cursor.fetchone()
+            if task_row is None:
+                raise Rejected(404, "not_found")
+            if str(task_row["correlation_id"]) != str(correlation_id):
+                raise Rejected(403, "denied")
+            root_id = task_row["repair_root_task_id"] or task_row["id"]
+            from proxy_client import run_read_query
+            family_rows = run_read_query(cursor, "linked_family_tasks", {
+                "owner_id": self._owner,
+                "project_alias": project_alias,
+                "correlation_id": correlation_id,
+                "workflow_id": task_row["workflow_id"],
+                "root_id": root_id,
+            })
+            allowed_corrs = list({r["correlation_id"] for r in family_rows} | {correlation_id})
+
+            cursor.execute("SELECT to_regclass('forge_agent.jenkins_stage_results') IS NOT NULL AS has_table")
+            if not cursor.fetchone()["has_table"]:
+                raise Rejected(404, "not_found")
+
+            from proxy_client import run_read_query
+            stage_rows = run_read_query(cursor, "stage_log_rows", {
+                "owner_id": self._owner,
+                "project_alias": project_alias,
+                "action_id": action_id,
+                "correlation_ids": allowed_corrs,
+                "stage_id": stage_id,
+            })
+            if not stage_rows:
+                raise Rejected(404, "not_found")
+
+            stage_indices = [int(r["stage_index"]) for r in stage_rows]
+            t_passed_vals = [r["tests_passed"] for r in stage_rows if type(r["tests_passed"]) is int]
+            t_failed_vals = [r["tests_failed"] for r in stage_rows if type(r["tests_failed"]) is int]
+            t_skipped_vals = [r["tests_skipped"] for r in stage_rows if type(r["tests_skipped"]) is int]
+            tests_passed = sum(t_passed_vals) if t_passed_vals else None
+            tests_failed = sum(t_failed_vals) if t_failed_vals else None
+            tests_skipped = sum(t_skipped_vals) if t_skipped_vals else None
+            test_cases = []
+            for r in stage_rows:
+                ts = r.get("test_summary")
+                if isinstance(ts, dict):
+                    for case in ts.get("cases") or ():
+                        if isinstance(case, dict) and isinstance(case.get("name"), str) and len(test_cases) < 64:
+                            test_cases.append({"name": case["name"][:160], "status": str(case.get("status") or "unknown")})
+            excerpts = [r["error_excerpt"] for r in stage_rows if isinstance(r.get("error_excerpt"), str) and r["error_excerpt"]]
+            combined_excerpt = "\n\n".join(excerpts) if excerpts else None
+            if combined_excerpt is not None and len(combined_excerpt.encode("utf-8")) > 4096:
+                combined_excerpt = combined_excerpt.encode("utf-8")[:4096].decode("utf-8", errors="ignore").rstrip()
+
+            if view == "errors":
+                full_bytes = (combined_excerpt or "").encode("utf-8")
+            elif view == "tests":
+                lines = []
+                if tests_passed is not None or tests_failed is not None or tests_skipped is not None:
+                    lines.append(
+                        f"Tests: {tests_passed or 0} passed, {tests_failed or 0} failed, {tests_skipped or 0} skipped"
+                    )
+                for case in test_cases:
+                    lines.append(f"[{case['status']}] {case['name']}")
+                full_bytes = "\n".join(lines).encode("utf-8")
+            else:
+                cursor.execute("""
+                    SELECT stage_index, chunk_index, chunk_bytes
+                    FROM forge_agent.jenkins_stage_log_chunks
+                    WHERE owner_id = %s AND project_alias = %s
+                      AND action_id = %s AND stage_index = ANY(%s)
+                    ORDER BY stage_index ASC, chunk_index ASC
+                """, (self._owner, project_alias, action_id, stage_indices))
+                parts = [bytes(r["chunk_bytes"]) for r in cursor.fetchall()]
+                full_bytes = b"".join(parts)
+
+        digest = hashlib.sha256(full_bytes).hexdigest()
+        total_bytes = len(full_bytes)
+        if req_digest is not None and req_digest != digest:
+            raise Rejected(409, "result_mismatch")
+        if offset > total_bytes:
+            raise Rejected(400, "invalid_request")
+        raw_end = min(total_bytes, offset + limit_bytes)
+        if raw_end < total_bytes:
+            while raw_end > offset and (full_bytes[raw_end] & 0xC0) == 0x80:
+                raw_end -= 1
+        page_bytes = full_bytes[offset:raw_end]
+        end_offset = offset + len(page_bytes)
+        content = page_bytes.decode("utf-8", errors="replace")
+        next_cursor = f"{digest}.{end_offset}" if end_offset < total_bytes else None
+        if offset > 0:
+            prev_offset = max(0, offset - limit_bytes)
+            while prev_offset > 0 and prev_offset < total_bytes and (full_bytes[prev_offset] & 0xC0) == 0x80:
+                prev_offset -= 1
+            prev_cursor = f"{digest}.{prev_offset}"
+        else:
+            prev_cursor = None
+        return {
+            "project_alias": project_alias,
+            "task_id": str(task_id),
+            "correlation_id": str(correlation_id),
+            "action_id": str(action_id),
+            "stage_id": stage_id,
+            "view": view,
+            "content": content,
+            "truncated": end_offset < total_bytes,
+            "total_bytes": total_bytes,
+            "byte_offset": offset,
+            "next_cursor": next_cursor,
+            "prev_cursor": prev_cursor,
+            "tests_passed": tests_passed,
+            "tests_failed": tests_failed,
+            "tests_skipped": tests_skipped,
+            "test_cases": test_cases,
+            "error_excerpt": combined_excerpt,
+        }
 
     def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None, delivery_visible=True):
         self._require_project(project_alias)
@@ -943,6 +1479,14 @@ class WorkStore:
                         item["external_progress"] = external
                     elif flow is not None:
                         item["workflow_progress"] = flow
+                    else:
+                        extension = _public_deadline_extension(payload)
+                        if extension is not None and extension["attempt_id"] in owned_attempts:
+                            item["deadline_extension"] = extension
+                elif row["event_kind"] == "failed":
+                    failure = _public_failure(row["payload"])
+                    if failure is not None:
+                        item["failure"] = failure
                 items.append(item)
         next_sequence = items[-1]["sequence"] if items else after_sequence
         return {

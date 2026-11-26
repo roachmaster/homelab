@@ -37,9 +37,16 @@ LOG = logging.getLogger("forge-agent-runner")
 
 
 class Rejected(Exception):
-    def __init__(self, status, code):
+    """An admitted request refused with a stable public code.
+
+    ``reason`` is an optional, bounded refinement of ``code`` that tells the
+    caller what to fix (for example which part of a submission was stale).
+    Clients that only read ``code`` are unaffected.
+    """
+    def __init__(self, status, code, reason=None):
         self.status = status
         self.code = code
+        self.reason = reason
         super().__init__(code)
 
 

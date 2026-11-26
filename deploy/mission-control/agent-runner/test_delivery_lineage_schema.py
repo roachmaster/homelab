@@ -11,7 +11,7 @@ import test_delivery_retry_events as delivery_fixtures
 from test_work_policy_upgrade import historical_registry,PreUpgradeCluster
 
 
-# Migration 0043 (pg_proxy_cutover) revokes direct table writes
+# Migration 0051 (pg_proxy_cutover) revokes direct table writes
 # (INSERT/UPDATE/DELETE/TRUNCATE, ACL letters a/w/d/D) for the four
 # write-capable roles. Apply that revocation to a pg_class relacl value
 # so an upgrade test can pin exactly which privileges may disappear
@@ -45,7 +45,7 @@ def _split_acl_array(relacl):
 
 def _normalize_null_acl(relacl, owner):
     # A NULL relacl means "the owner holds every table privilege".
-    # REVOKE (as the M43 cutover does on all tables in the schemas)
+    # REVOKE (as the M51 cutover does on all tables in the schemas)
     # materializes that as an explicit owner entry,
     # '{owner=arwdDxt/owner}', without changing effective privileges.
     # Normalize the two spellings so the upgrade comparison is not
@@ -55,9 +55,9 @@ def _normalize_null_acl(relacl, owner):
     return '{%s=arwdDxt/%s}' % (owner, owner)
 
 
-# Migration 0042 (pg_proxy_preparation) grants each caller role SELECT
+# Migration 0050 (pg_proxy_preparation) grants each caller role SELECT
 # on its allowlisted read tables, derived from the proxy registry (the
-# same source M42 was generated from, so the expected post-upgrade ACL
+# same source M50 was generated from, so the expected post-upgrade ACL
 # is exact). Coordinator/operator share forge_agent; a "*" read set
 # means every READ_TABLES entry. The grants run as forge_agent_owner.
 from forge_pg_proxy import CALLER_ALLOWLISTS as _PROXY_ALLOWLISTS, CALLER_ROLES as _PROXY_ROLES, READ_TABLES as _PROXY_READ_TABLES
@@ -73,7 +73,7 @@ def _with_proxy_reads(relacl,readers):
     # Append a `role=r/forge_agent_owner` entry for every proxy reader
     # role that had no entry before, in the generator's grant order
     # (roles sorted). A role that already held an entry is untouched:
-    # GRANT SELECT on an existing entry is a no-op, and the M43
+    # GRANT SELECT on an existing entry is a no-op, and the M51
     # revocation below only rewrites forge_agent's entry in place.
     if not readers:
         return relacl
@@ -142,14 +142,14 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                         'migration_history':self.rows(cluster,'SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=31 ORDER BY version'),
                         'credentials':self.rows(cluster,'SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r'),
                         'defaults':self.rows(cluster,'SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
-                        'old_relation_acl':[(schema,name,owner,_normalize_null_acl(relacl,owners.get(owner))) for schema,name,owner,relacl in self.rows(cluster,"SELECT n.nspname,c.relname,c.relowner,c.relacl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname<>'delivery_lineage_handoffs' AND NOT(n.nspname='forge_external_workflow' AND c.relname='plan_approve_overrides') ORDER BY 1,2")],
+                        'old_relation_acl':[(schema,name,owner,_normalize_null_acl(relacl,owners.get(owner))) for schema,name,owner,relacl in self.rows(cluster,"SELECT n.nspname,c.relname,c.relowner,c.relacl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname NOT IN('delivery_lineage_handoffs','agent_branch_state','jenkins_stage_results','jenkins_stage_log_chunks','coding_identity_catalog','coding_task_identities','coding_attempt_deadline_extensions') AND NOT(n.nspname='forge_external_workflow' AND c.relname='plan_approve_overrides') ORDER BY 1,2")],
                         'hba':hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest(),
                     }
                 before=snapshot()
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 # Preparation stage: apply.sql stops at migration
-                # 0042 (pg_proxy_preparation), which grants each
+                # 0050 (pg_proxy_preparation), which grants each
                 # caller role SELECT on its allowlisted read tables;
                 # the expected ACL adds exactly those entries (in
                 # grant order) to the M31 ACL, and nothing else about
@@ -162,8 +162,8 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                     for schema,name,owner,relacl in before['old_relation_acl']
                 ]
                 self.assertEqual(snapshot(),preparation)
-                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(42,)])
-                # Cutover stage: migration 0043 (pg_proxy_cutover),
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(50,)])
+                # Cutover stage: migration 0051 (pg_proxy_cutover),
                 # applied only via apply-cutover.sql, intentionally
                 # revokes direct table writes
                 # (INSERT/UPDATE/DELETE/TRUNCATE) for forge_agent,
@@ -176,7 +176,7 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                     for schema,name,owner,relacl in before['old_relation_acl']
                 ]
                 self.assertEqual(snapshot(),expected)
-                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(43,)])
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(51,)])
                 self.assertEqual(self.rows(cluster,'SELECT count(*) FROM forge_agent.delivery_lineage_handoffs'),[(0,)])
                 self.assertEqual(self.rows(cluster,"SELECT has_table_privilege('muse_events','forge_agent.delivery_lineage_handoffs','SELECT')"),[(False,)])
                 # verify.sql itself starts BEGIN READ ONLY and pins the exact

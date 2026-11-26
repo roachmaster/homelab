@@ -1,6 +1,12 @@
 # Forge architecture
 
-The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Updated 23 November 2026; distinguish source capabilities from what a live host enables. The last qualified deployment is `95651a5`, ABI13/schema26; later review fixes are not a deployment.
+The [current system picture](../design/implementation-status.md) separates the live schema40/services snapshot
+from the consolidated ABI16/schema41 source in
+[draft PR29](https://github.com/roachmaster/homelab/pull/29). The event/API runner
+is stopped and boot-disabled while other coding/delivery services remain active.
+The [roadmap](../roadmap/forge-framework.md) prioritizes integrated source qualification, main-scoped
+acceptance and a coordinated rollout before broader platform expansion.
+Historical release records retain their dates and are not current health claims.
 
 ## Current design references
 

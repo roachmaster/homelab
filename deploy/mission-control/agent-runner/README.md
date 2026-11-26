@@ -1,10 +1,17 @@
 # Forge agent runner
 
+**Operating note — 26 November 2026:** the event/API runner is deliberately
+stopped and disabled at boot. Coding, publication and external-delivery workers
+are separate services and remain active; this is not a full queue/workflow pause.
+The live database reports schema40. Consolidated source in PR29 adds schema41
+branch/stage contracts and ABI16, with qualification/rollout still outstanding.
+See the [current system picture](../../../docs/design/implementation-status.md).
+
 [AGY quota handoff to Codex](../../../docs/architecture/agent-quota-handoff.md)
 describes optional source-bound author delegation, retained Plans/workspaces,
 independent review and required schema/configuration rollout.
 
-Mission Control runs `forge-agent-runner.service` as the `forge_agent` account.
+When started, Mission Control runs `forge-agent-runner.service` as the `forge_agent` account.
 The service listens on `127.0.0.1:18083`. In legacy mode it uses the private
 tunnel on `127.0.0.1:18082` to send inference requests to Forge GPU. In dispatch
 mode the API stores jobs in PostgreSQL and consumes results from a worker on Forge.
@@ -382,6 +389,13 @@ Mail, Chat persistence, and GPU flags.
   connections, or CLI actions; supported `ide.work.*` / `ide.usage.*` routes
   return `503` (`work_failed` / `usage_failed`, `unavailable`) and unsupported
   destinations return `404` (`not_found`).
+- A rejected `ide.work.submit` keeps its `code` but may add a bounded
+  `reason` naming which part of the caller's own submission to fix:
+  `result_mismatch` with `base_stale`, `policy_stale`, `policy_missing`,
+  `policy_not_applicable`, `workflow_mode` or `workflow_profile`, and `denied`
+  with `mode_not_granted`, `profile_not_granted`, `profile_disabled` or
+  `profile_mode_not_allowed`. Current base and workflow values are in
+  `ide.work.catalog`; clients that read only `code` are unaffected.
 
 The `forge-coding-v3` policy retains `antigravity_tool_policy: workspace-elevated-v1`
 and adds receipt-owned, task-scoped Antigravity conversation continuation.
@@ -919,3 +933,26 @@ Combined policy10 and additive migration0019 preserve Grok policy9/migration0018
 and every earlier immutable recipe, receipt and migration. See the [Muse provider
 design](../../../docs/architecture/muse-code-provider.md) for the fixed command,
 accounting convention, lifecycle and activation boundary.
+
+### Persistent per-agent branches & correlation CI/CD stages (migration 0041)
+
+In source, `branch_policy` defaults to `"persistent-agent-v1"` across `WorkConfig`,
+`WorkerConfig`, `PublicationConfig`, and external delivery (with explicit
+`"ephemeral-task-v1"` opt-in preserved for legacy regression tests and historical
+`forge/task-<uuid>` receipts). Every admitted profile (`agy-primary`,
+`codex-primary`, `grok-primary`, `muse-primary`, `muse-db-primary`, or any
+configured alias) resolves deterministically to `forge/agent/<profile-slug>`
+unless an explicit validated per-profile or per-project override is frozen at
+startup.
+
+Exclusive active-workflow ownership is persisted in `forge_agent.agent_branch_state`
+with monotonic `reservation_epoch`, branch-aware claim wrappers
+(`review_claim_for_branch_policy`, `publication_claim_for_branch_policy`), pre-push
+remote open-PR checks, compare-and-swap pushes (`--force-with-lease`), and startup
+`reconcile_branch_reservations()` recovery. Unrelated tasks wait cleanly in
+`pending` until the owning workflow reaches a verified terminal state with zero
+open PRs confirmed on GitHub (otherwise `reservation_blocker = 'open_pr_awaiting_closure'`).
+Read-only correlation CI/CD stage projections and bounded Errors/Tests/Console logs
+are exposed through `ide.work.catalog`, `ide.work.get`, and `ide.work.cicd.stage_log`
+backed by `forge_agent.jenkins_stage_results` and `jenkins_stage_log_chunks`.
+Live migration 0041 activation and portal deployment remain separate authorized steps.

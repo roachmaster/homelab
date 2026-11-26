@@ -234,8 +234,10 @@ class OwnerContinuationFenceTest(unittest.TestCase):
             c.rollback()
         with closing(self.cluster.connect('postgres')) as c,c.cursor() as q:
             q.execute("SELECT pg_get_functiondef('forge_agent._coding_owner_continuation_fenced(uuid)'::regprocedure)")
-            definition=q.fetchone()[0];self.assertEqual(definition.count(' RETURN true;'),1)
-            q.execute(definition.replace(' RETURN true;',' RETURN false;'))
+            # Body-only edits are covered by migrations/tests, not digest pins; a
+            # replacement that drops SECURITY DEFINER changes the catalog shape.
+            definition=q.fetchone()[0];self.assertEqual(definition.count('SECURITY DEFINER'),1)
+            q.execute(definition.replace('SECURITY DEFINER','SECURITY INVOKER'))
             with self.assertRaises(psycopg2.Error):q.execute((SQL_DIR/'management/verify-owner-continuation.sql').read_text())
             c.rollback()
 
@@ -278,7 +280,7 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                         hba=hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest())
                 before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
-                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(42,)])
+                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(50,)])
                 self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(27,)])
                 self.assertEqual(execute("SELECT has_function_privilege('muse_events','forge_agent._coding_owner_continuation_fenced(uuid)','EXECUTE')"),[(False,)])
             finally:cluster.stop()

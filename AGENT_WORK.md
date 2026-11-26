@@ -1,4 +1,64 @@
-# Current: Durable AGY-to-Codex quota handoff — 2026-11-26
+# Current: Reconcile the system picture and delivery direction — 2026-11-26
+
+User requests reviewing the consolidated changes and updating files/notes to
+reflect the current system and where it is headed. Update the existing status,
+roadmap, architecture and operating references on backup/main / draft PR29.
+Use application code 0163a615 and dated read-only runtime evidence. Separate
+framework primitives, the concrete Python/PostgreSQL delivery application,
+installed configuration, qualified artifacts and future proposals.
+
+Observed schema40; event/API runner inactive/disabled; coding/publication/
+external-delivery/web/source-agent/Jenkins services active/enabled. Source adds
+ABI16/schema41; historical fingerprint and actual-browser qualification remain
+open. Preserve dated historical evidence and existing migration files. This is
+a documentation pass, not a deployment, service-start, test-qualification or
+workflow-policy change. Review links, YAML and contract references, then publish
+the notes through the existing PR.
+
+Documentation review reconciles the newly published resubmission queue from
+main 4bf1d230 without changing its original task YAMLs. Runtime read-only
+observations, 25 added/changed local link checks and YAML parsing are recorded in this
+pass; application code and previously recorded test results are not requalified.
+
+# Previous: Consolidate local development and remaining feat/fix branches — 2026-11-26
+
+User authorizes merging every local development branch plus remote
+`feat/forge-ide-agents-triage` and `fix/native-postfix-verification-20261125`
+into `backup/main`, then deleting those 30 local and two remote branch names.
+Preserve `main`, remote `feature/muse`, all worktree directories and their
+uncommitted/untracked contents. Named development worktrees become detached
+at the exact preserved branch tips after remote backup verification.
+
+Most local changes are patch-equivalent to existing cherry-picks; integrate their
+original histories without reverting newer changes. Include the remaining private
+CI recovery helpers and merge Agents triage with the CI/CD stage inspector.
+Record branch tips and validation in
+`docs/reports/local-branch-consolidation-20261126.json`. This source consolidation
+does not authorize deployment or restart the boot-disabled event runner.
+Validation: 326 Rust native tests, 35 generation tests, 18 CI recovery tests,
+and 7 relay tests passed. The generated input-presentation fixture passed.
+Historical source-fingerprint qualification remains outstanding. Browser
+acceptance stops at the missing locked Playwright dependency; do not claim
+browser or screenshot acceptance.
+
+# Previous: Consolidate task branches into backup/main — 2026-11-26
+
+User authorizes merging all remote `forge/task-*` branches into the existing
+`backup/main` branch, then deleting those task branches. The source branches and
+exact tips are retained in `docs/reports/task-branch-consolidation-20261126.json`.
+All 32 task tips must remain ancestors of the published backup before deletion.
+Main, unrelated branches and task worktrees remain preserved.
+
+The merge combines persistent agent branches and CI stage reporting with the
+newer content identity and author handoff code, retaining superseding integrated
+plan-override and terminal-settlement implementations. The task migration uses
+0041; applied migration files 0001 through 0040 remain unchanged. Targeted backend
+integration: 129 tests passed; 9 author-handoff schema tests and 316 Rust UI
+tests also passed. Historical source-fingerprint checks fail against
+the combined source; this archival integration is not a release qualification.
+No deployment is performed. The event runner remains stopped and boot-disabled.
+
+# Previous: Durable AGY-to-Codex quota handoff — 2026-11-26
 
 The user authorizes adding an automatic handoff to Codex when AGY quota blocks
 work. Root owns integration, typed handoff/transition ports, qualification and
@@ -38,6 +98,57 @@ boundary/parity/CI-contract checks passed against the finalized source. The
 normal observed-main Jenkins run must now establish the complete final-source
 backend/browser/native gate before runtime activation. Private operation drafts
 remain inactive until that protected receipt exists.
+
+# Previous: Forge IDE Agents triage (UI-01 / UI-02) — 2026-11-25
+
+Implement a focused review PR on `feat/forge-ide-agents-triage`, starting from
+fresh `origin/main` 32588ab5. Surface the existing authoritative Needs attention
+scope, readable assignment rows, and a single Now / Why / Next task summary.
+Keep retry budget separate from revision count and worker readiness separate
+from main verification. Preserve native/Muse semantics, review and merge gates,
+full evidence, selection, keyboard focus and list position.
+
+Root owns typed component/YAML declarations, reusable presentation primitives,
+integration, qualification and the PR. Model and owned-fixture work use separate
+worktrees with bounded ownership; readers may audit without edits. Apply Design
+Forge UI, Design Forge IDE UX, Design Modern UI and Test Forge UI. No handwritten
+application HTML/CSS/JS, workflow-policy changes, unrelated screen work, live
+assignment mutations, deployment, main push or merge are authorized.
+
+Extend Rust tests and the fixed `make ui-qa` fixture journey for native/Muse,
+automatic retry versus operator action, keyboard/focus/scroll and desktop plus
+320/390px layouts. Capture and inspect fixture before/after inbox/detail images.
+Local Rust/browser prerequisite availability and hosted CI are being checked;
+report actual checks, source identity, blocked steps and unverified live behavior.
+Only the named feature branch is to be committed/pushed and opened for review.
+
+Implementation checkpoint: the Rust triage projection and authoritative scope
+shortcut, retained list selection/context, typed list/detail navigation primitive,
+YAML layouts and owned-fixture coverage are integrated. No backend policy or
+action guard changed. Local `make ui-qa-check` passes 37 tests; the script suite
+passes 129. The exact MAIN emitter passes the existing and extended deterministic
+input-presentation suite (a Node diagnostic, not generated/WASM/browser evidence).
+`make ui-qa` stopped at prerequisites: Cargo is absent, as are the locked browser
+dependencies. `make portal-style-check` likewise stopped at Cargo/rustfmt.
+No dependencies were installed and no real assignments were used. Fixture PNG
+capture and actual browser acceptance remain unverified. The feature branch is
+published as review PR #23. A read-only GitHub query confirmed both Rust CI and
+IDE browser acceptance are disabled_manually; no hosted run or status exists for
+the published source. That policy remains unchanged. Even when enabled, ordinary
+PR browser jobs skip the full journey. The connected tools provide no
+authenticated workflow-dispatch path.
+
+Formatting follow-up: the official Rust Playground formatter processed 16 changed
+Rust files with edition 2021, correcting 7. Child module declarations were
+temporarily opaque for single-file formatting and restored unchanged; no skip
+attribute was added to the repository. Independent review found no semantic or
+literal changes. Automatic approval review then blocked further external source
+uploads because that separate service was not explicitly authorized. That route
+was stopped; the remaining 2 files passed local formatting review. No toolchain
+was installed. This is not a Cargo formatting, native test, generation, WASM or
+browser gate. Those checks and source-bound before/after screenshots still need
+a prepared runner. Live portal verification remains for Dot after Leo approves
+the next step; no deployment or main change occurred.
 
 # Previous: Stabilize the event stream and measure bottlenecks — 2026-11-25
 

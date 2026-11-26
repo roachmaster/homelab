@@ -2,6 +2,7 @@
 //! No application HTML, CSS, JS, raw-code field or string template lives here.
 use super::{Document, HeaderBinding, RequestBinding, RequestPolicy, TimerBinding, Transport};
 use crate::component;
+mod cicd;
 mod delivery;
 mod external_agents;
 
@@ -46,6 +47,7 @@ pub fn ide_document() -> Document {
                             component!(region "agents-task-scope-field"; [
                                 component!(select "agents-task-scope", "Tasks", "select_agent_task_scope"),
                             ]),
+                            component!(button "agents-attention", "Needs attention", "select_agent_task_scope"),
                         ]),
                     ]),
                     component!(region "agents-unsupported"; [
@@ -55,8 +57,9 @@ pub fn ide_document() -> Document {
                     component!(region "agents-overview"; [
                         component!(region "agents-task-list"; [
                             component!(heading "agents-tasks-heading", "Tasks"),
-                            component!(stacked_tree "agents-tasks", "Coding assignments"),
+                            component!(list_detail_tree "agents-tasks", "Coding assignments", "agents-reader", "agents-task-title", "agents"),
                         ]),
+                        cicd::branches_overview(),
                         external_agents::directory(),
                     ]),
                     component!(region "agents-list-pagination"; [
@@ -93,16 +96,31 @@ pub fn ide_document() -> Document {
                     component!(button "agents-retry", "Retry saved request", "retry_agent_request"),
                     component!(region "agents-reader"; [
                         component!(heading "agents-task-title", "Task"),
-                        component!(status "agents-task-status", ""),
-                        component!(caption "agents-retry-event", ""),
-                        component!(caption "agents-task-mode", ""),
-                        component!(caption "agents-attempt", ""),
-                        component!(caption "agents-task-correlation", ""),
-                        component!(region "agents-stage-panel"; [
-                            component!(heading "agents-stage-heading", "Event stream path"),
-                            component!(flow_diagram "agents-stage-diagram", "Task event-stream stage diagram"),
+                        component!(region "agents-triage"; [
+                            component!(caption "agents-triage-kind", ""),
+                            component!(region "agents-triage-now-group"; [
+                                component!(heading "agents-triage-now-heading", "Now"),
+                                component!(status "agents-triage-now", "Loading task state…"),
+                            ]),
+                            component!(region "agents-triage-why-group"; [
+                                component!(heading "agents-triage-why-heading", "Why"),
+                                component!(text "agents-triage-why", ""),
+                            ]),
+                            component!(region "agents-triage-next-group"; [
+                                component!(heading "agents-triage-next-heading", "Next"),
+                                component!(text "agents-triage-next", ""),
+                            ]),
+                            component!(caption "agents-retry-event", ""),
                         ]),
-                        component!(region "agents-workflow"; [
+                        cicd::reader_panel(),
+                        component!(region "agents-stage-panel"; [
+                            component!(heading "agents-stage-heading", "Current stage"),
+                            component!(text "agents-current-stage", "Loading stage evidence…"),
+                            component!(disclosure "agents-stage-evidence", "All stages and observed transitions"; [
+                                component!(flow_diagram "agents-stage-diagram", "Task event-stream stage diagram"),
+                            ]),
+                        ]),
+                        component!(disclosure "agents-workflow", "Workflow evidence"; [
                             component!(row [
                                 component!(heading "agents-workflow-heading", "Autonomous workflow"),
                                 component!(badge "agents-workflow-phase", "Workflow phase"),
@@ -149,6 +167,13 @@ pub fn ide_document() -> Document {
                             component!(text "agents-task-prompt", ""),
                             component!(caption "agents-task-criteria", ""),
                         ]),
+                        component!(disclosure "agents-task-technical", "Task identifiers and runtime details"; [
+                            component!(status "agents-task-status", ""),
+                            component!(caption "agents-task-mode", ""),
+                            component!(caption "agents-task-updated", ""),
+                            component!(caption "agents-attempt", ""),
+                            component!(caption "agents-task-correlation", ""),
+                        ]),
                         component!(region "agents-progress-panel"; [
                             component!(heading "agents-plan-heading", "Agent plan"),
                             component!(caption "agents-plan-help", "Public plan and milestones reported by the agent. Completion requires a verified final result."),
@@ -171,8 +196,7 @@ pub fn ide_document() -> Document {
                             component!(caption "agents-external-result-help", "Returned by the external runner. This artifact does not prove source verification, review approval or merge."),
                             component!(transcript "agents-external-result", "External Muse artifact", "You", "Muse", ""),
                         ]),
-                        component!(region "agents-history-panel"; [
-                            component!(heading "agents-history-heading", "Event history"),
+                        component!(disclosure "agents-history-panel", "Event history"; [
                             component!(caption "agents-history-range", ""),
                             component!(row [
                                 component!(button "agents-history-first", "First events", "agent_history_first"),
@@ -524,6 +548,13 @@ pub fn ide_transport() -> Transport {
             "work_publication_retry_queued",
             "work_failed",
             true,
+        ),
+        (
+            "work_cicd_stage_log",
+            "ide.work.cicd.stage_log",
+            "work_cicd_stage_log_page",
+            "work_failed",
+            false,
         ),
         (
             "usage_overview",

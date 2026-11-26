@@ -1,11 +1,13 @@
 //! Owned coding-task and usage UI state. Network/DOM work stays at typed ports.
 use super::*;
 use crate::markdown::render_markdown;
+mod cicd;
 mod delivery;
 mod history;
 mod pipeline_diagram;
 mod presentation;
 mod stage_diagram;
+mod triage;
 mod workflow;
 use pipeline_diagram::project_pipeline_diagram;
 use presentation::{compact_counter, group_counter, model_title, relative_time, short_time};
@@ -53,6 +55,8 @@ pub(super) struct Agents {
     auto_repair: bool,
     verified_finding_ids: BTreeSet<String>,
     tasks: Vec<WorkTaskSummary>,
+    list_loaded: bool,
+    list_selected: Option<String>,
     task_scope: WorkListScope,
     scope_counts: Option<WorkScopeCounts>,
     list_cursor: Option<String>,
@@ -74,6 +78,7 @@ pub(super) struct Agents {
     history_loaded: bool,
     history_request: Option<history::HistoryRequest>,
     stage_trace: stage_diagram::StageTrace,
+    cicd: cicd::CicdState,
     result: String,
     result_digest: Option<String>,
     result_attempt: Option<String>,
@@ -136,6 +141,7 @@ impl Agents {
         self.active = false;
         self.watch = None;
         self.clock_watch = None;
+        self.cicd.clear();
     }
     pub fn open(
         &mut self,
@@ -209,6 +215,7 @@ impl Agents {
         self.review_note = snapshot.review_note;
         self.auto_repair = snapshot.auto_repair;
         self.selected = snapshot.task_id;
+        self.list_selected = self.selected.clone();
         self.retry = snapshot.retry_intent;
         if self.retry.is_some() {
             self.status =
@@ -334,6 +341,9 @@ impl Agents {
         self.events_more = false;
         self.progress.clear();
         self.clear_stage_trace();
+        if self.task.is_none() {
+            self.cicd.clear();
+        }
     }
     fn keep_progress(&mut self, events: Vec<WorkLogEvent>) {
         let attempt = self
@@ -396,6 +406,9 @@ impl Agents {
                 self.watch = Some(watch.clone());
                 effects.push(UiEffect::AgentsWatch { watch });
             }
+        }
+        if self.cicd.matches_request(id) {
+            self.cicd.fail_network(id);
         }
         if self
             .pending_usage
@@ -515,6 +528,11 @@ impl Agents {
                 self.warning = true;
             }
             UiEvent::AgentsNewTask {} if work && self.assignment_catalog_ready() => {
+                if self.task_scope != WorkListScope::Active {
+                    self.tasks.clear();
+                    self.list_loaded = false;
+                    self.list_selected = None;
+                }
                 self.task_scope = WorkListScope::Active;
                 self.list_cursor = None;
                 self.list_next = None;
@@ -583,6 +601,8 @@ impl Agents {
                     {
                         self.task_scope = scope;
                         self.tasks.clear();
+                        self.list_loaded = false;
+                        self.list_selected = None;
                         self.list_cursor = None;
                         self.list_next = None;
                         self.list_history.clear();
@@ -633,6 +653,9 @@ impl Agents {
                     self.pending = None;
                     self.pending_usage = None;
                     self.providers.clear();
+                    self.tasks.clear();
+                    self.list_loaded = false;
+                    self.list_selected = None;
                     self.selected = None;
                     self.task = None;
                     self.clear_progress();
@@ -710,6 +733,9 @@ impl Agents {
                             workflow_policy_digest: self
                                 .workflow_policy()
                                 .map(|p| p.policy_digest.clone()),
+                            workflow_policy_id: self
+                                .workflow_policy()
+                                .and_then(|p| p.policy_id.clone()),
                         },
                         effects,
                     );
@@ -746,6 +772,9 @@ impl Agents {
                         })
                 {
                     self.pending = None;
+                    if self.pane == Pane::List {
+                        self.list_selected = Some(task_id.clone());
+                    }
                     self.selected = Some(task_id);
                     self.task = None;
                     self.clear_progress();
@@ -1079,6 +1108,71 @@ impl Agents {
             {
                 self.selected_usage = Some(agent_profile);
             }
+            UiEvent::SelectCicdRun {
+                task_id,
+                correlation_id,
+                run_id,
+            } if work => {
+                if let Some(task) = self.task.as_ref().filter(|t| t.task_id == task_id) {
+                    self.cicd
+                        .select_run(task, &correlation_id, &run_id, id, effects);
+                }
+            }
+            UiEvent::SelectCicdStage {
+                task_id,
+                correlation_id,
+                run_id,
+                stage_id,
+            } if work => {
+                if let Some(task) = self.task.as_ref().filter(|t| t.task_id == task_id) {
+                    self.cicd
+                        .select_stage(task, &correlation_id, &run_id, &stage_id, id, effects);
+                }
+            }
+            UiEvent::SelectCicdStageView {
+                task_id,
+                correlation_id,
+                run_id,
+                stage_id,
+                view,
+            } if work => {
+                if let Some(task) = self.task.as_ref().filter(|t| t.task_id == task_id) {
+                    self.cicd.select_view(
+                        task,
+                        cicd::CicdStageRef {
+                            correlation_id: &correlation_id,
+                            run_id: &run_id,
+                            stage_id: &stage_id,
+                        },
+                        view,
+                        id,
+                        effects,
+                    );
+                }
+            }
+            UiEvent::CicdStageLogPage {
+                task_id,
+                correlation_id,
+                run_id,
+                stage_id,
+                view,
+                cursor,
+            } if work => {
+                if let Some(task) = self.task.as_ref().filter(|t| t.task_id == task_id) {
+                    self.cicd.request_page(
+                        task,
+                        cicd::CicdStageRef {
+                            correlation_id: &correlation_id,
+                            run_id: &run_id,
+                            stage_id: &stage_id,
+                        },
+                        view,
+                        cursor,
+                        id,
+                        effects,
+                    );
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -1334,6 +1428,10 @@ impl Agents {
         aux: String,
         effects: &mut Vec<UiEffect>,
     ) {
+        if self.cicd.matches_request(response.request_id()) {
+            self.cicd.complete(response, self.task.as_ref());
+            return;
+        }
         let Some(request) = self
             .pending
             .as_ref()
@@ -1371,6 +1469,7 @@ impl Agents {
                 profiles,
                 worker_status,
                 observed_at,
+                agent_branches,
                 ..
             } => {
                 self.catalog = Some(WorkCatalog {
@@ -1378,6 +1477,7 @@ impl Agents {
                     profiles,
                     worker_status,
                     observed_at,
+                    agent_branches,
                 });
                 let c = self.catalog.as_ref().expect("stored catalog");
                 if !c.projects.iter().any(|p| p.alias == self.project) {
@@ -1416,6 +1516,7 @@ impl Agents {
                 self.retry = None;
                 self.prompt.clear();
                 self.criteria.clear();
+                self.list_selected = Some(task_id.clone());
                 self.selected = Some(task_id);
                 self.task = None;
                 self.clear_progress();
@@ -1467,6 +1568,7 @@ impl Agents {
                     self.clear_progress();
                 }
                 self.status = task.status.label().into();
+                self.cicd.sync_task(&task);
                 self.task = Some(*task);
                 if let Some(manifest) = manifest {
                     if self.result_digest.as_ref() != Some(&manifest.sha256)
@@ -1504,6 +1606,7 @@ impl Agents {
                     self.list_cursor = cursor;
                 }
                 self.tasks = tasks;
+                self.list_loaded = true;
                 self.list_next = next_cursor;
                 self.scope_counts = scope_counts;
                 self.status.clear();
@@ -1675,7 +1778,7 @@ impl Agents {
                 self.result_complete = complete;
                 self.schedule(id, effects);
             }
-            WorkResponse::WorkFailed { code, .. } => {
+            WorkResponse::WorkFailed { code, reason, .. } => {
                 self.retry = if code == WorkFailure::Unavailable && request.is_mutation() {
                     Some(request)
                 } else {
@@ -1685,7 +1788,9 @@ impl Agents {
                 self.status = if self.retry.is_some() {
                     "Request outcome unknown. Retry checks the same saved intent.".into()
                 } else {
-                    work_failure(code).into()
+                    reason
+                        .map_or_else(|| work_failure(code), work_failure_reason)
+                        .into()
                 };
                 if matches!(
                     code,
@@ -1698,6 +1803,7 @@ impl Agents {
                     self.get(id, effects);
                 }
             }
+            WorkResponse::WorkCicdStageLogPage { .. } => {}
         }
     }
     fn complete_usage(&mut self, response: UsageResponse, id: String, effects: &mut Vec<UiEffect>) {
@@ -1816,12 +1922,13 @@ impl Agents {
             visible(
                 "agents-status",
                 self.warning
-                    || pending
+                    || pending && !reader
                     || self.retry.is_some()
-                    || self
-                        .task
-                        .as_ref()
-                        .is_some_and(|t| t.status == WorkStatus::CancelRequested),
+                    || !reader
+                        && self
+                            .task
+                            .as_ref()
+                            .is_some_and(|t| t.status == WorkStatus::CancelRequested),
             ),
             visible(
                 "agents-usage-status",
@@ -1979,6 +2086,7 @@ impl Agents {
             visible("agents-list-pagination", active && !compose && !reader),
             visible("agents-usage", active && usage && !compose && !reader),
             visible("agents-task-list", active && work && !compose && !reader),
+            visible("agents-attention", active && work && !compose && !reader),
             visible(
                 "agents-task-scope-field",
                 active && work && !compose && !reader,
@@ -2116,6 +2224,16 @@ impl Agents {
             }),
         });
         project_pipeline_diagram(view, review);
+        cicd::CicdState::project_overview(
+            view,
+            active,
+            !compose && !reader,
+            &self.project,
+            self.catalog.as_ref(),
+            self.now_ms,
+        );
+        self.cicd
+            .project_reader(view, active, reader, self.task.as_ref(), self.now_ms);
         view.texts.extend([
             text("agents-status", &self.status),
             text("agents-usage-status", &self.usage_status),
@@ -2148,7 +2266,13 @@ impl Agents {
             text(
                 "agents-task-title",
                 self.task.as_ref().map_or_else(
-                    || "Loading task…".into(),
+                    || {
+                        if self.warning {
+                            "Task unavailable".into()
+                        } else {
+                            "Loading task…".into()
+                        }
+                    },
                     |t| {
                         t.title
                             .clone()
@@ -2544,8 +2668,18 @@ impl Agents {
         ]);
         view.lists.push(ListBinding {
             id: "agents-tasks",
-            empty_message: if pending {
+            context: Some(format!(
+                "{}:{}:{}",
+                self.project,
+                self.task_scope.value(),
+                self.list_cursor.as_deref().unwrap_or("")
+            )),
+            empty_message: if self.warning {
+                "Tasks unavailable. Refresh to recover the authoritative list."
+            } else if pending {
                 "Loading tasks…"
+            } else if !self.list_loaded {
+                "Tasks have not been loaded. Refresh to check this scope."
             } else {
                 match self.task_scope {
                     WorkListScope::Active => {
@@ -2562,10 +2696,7 @@ impl Agents {
                 .iter()
                 .map(|t| RowView {
                     id: t.task_id.clone(),
-                    label: t
-                        .title
-                        .clone()
-                        .unwrap_or_else(|| format!("Task {}", &t.task_id[..8])),
+                    label: triage::task_title(t.title.as_deref(), &t.task_id),
                     glyph: if t.mode == WorkMode::Implement {
                         "↗"
                     } else {
@@ -2575,9 +2706,13 @@ impl Agents {
                     icon: RowIcon::Symbol,
                     kind_label: "Coding task",
                     parent: None,
-                    secondary: String::new(),
+                    secondary: t
+                        .retry_event
+                        .as_ref()
+                        .map_or_else(String::new, triage::retry_budget),
                     depth: 0,
-                    selected: self.selected.as_ref() == Some(&t.task_id),
+                    selected: self.list_selected.as_ref().or(self.selected.as_ref())
+                        == Some(&t.task_id),
                     expanded: None,
                     action: RowAction::OpenAgentTask {
                         task_id: t.task_id.clone(),
@@ -2585,15 +2720,20 @@ impl Agents {
                     toggle: None,
                     summary: Some(RowSummary {
                         badge: self.task_summary_badge(t),
-                        tag: t.agent_profile.clone(),
-                        time: timestamp(
-                            t.delivery
-                                .as_ref()
-                                .map(|d| d.updated_at.as_str())
-                                .or(t.updated_at.as_deref())
-                                .unwrap_or(&t.created_at),
-                            self.now_ms,
-                        ),
+                        tag: self
+                            .catalog
+                            .as_ref()
+                            .and_then(|catalog| {
+                                catalog
+                                    .profiles
+                                    .iter()
+                                    .find(|profile| profile.alias == t.agent_profile)
+                            })
+                            .map_or_else(
+                                || t.agent_profile.clone(),
+                                |profile| profile.label.clone(),
+                            ),
+                        time: triage::task_time(t, self.now_ms),
                     }),
                 })
                 .collect(),
@@ -2734,6 +2874,11 @@ impl Agents {
         self.project_workflow(view, compose, reader);
         self.project_delivery(view, active && work, reader, pending);
         self.project_stage_diagram(view, active && work && reader);
+        self.project_triage(
+            view,
+            active && work && reader,
+            active && work && !locked && !pending,
+        );
         self.project_history(view, active && work && reader);
         self.project_retry_event(view, reader);
     }
@@ -2797,7 +2942,8 @@ fn rekey(mut request: WorkRequest, id: String) -> WorkRequest {
         | WorkRequest::WorkPlanDecide { request_id, .. }
         | WorkRequest::WorkReviewDecide { request_id, .. }
         | WorkRequest::WorkRepair { request_id, .. }
-        | WorkRequest::WorkPublicationRetry { request_id, .. } => *request_id = id,
+        | WorkRequest::WorkPublicationRetry { request_id, .. }
+        | WorkRequest::WorkCicdStageLog { request_id, .. } => *request_id = id,
     };
     request
 }
@@ -3053,6 +3199,33 @@ fn work_failure(code: WorkFailure) -> &'static str {
         }
         WorkFailure::ResultMismatch => {
             "The accepted result changed. Refresh before reading another page."
+        }
+    }
+}
+
+fn work_failure_reason(reason: WorkFailureReason) -> &'static str {
+    match reason {
+        WorkFailureReason::BaseStale => {
+            "The project base moved. Refresh the catalog and resubmit on the current base."
+        }
+        WorkFailureReason::PolicyStale => {
+            "The workflow policy changed. Refresh the catalog and resubmit."
+        }
+        WorkFailureReason::PolicyMissing => {
+            "This project requires its workflow policy. Refresh the catalog and resubmit."
+        }
+        WorkFailureReason::PolicyNotApplicable => {
+            "No workflow policy applies to this project. Resubmit without one."
+        }
+        WorkFailureReason::WorkflowMode => "This project's workflow does not accept this mode.",
+        WorkFailureReason::WorkflowProfile => {
+            "This project's workflow requires its configured author profile."
+        }
+        WorkFailureReason::ModeNotGranted => "This mode is not authorized.",
+        WorkFailureReason::ProfileNotGranted => "This agent profile is not authorized.",
+        WorkFailureReason::ProfileDisabled => "This agent profile is disabled for execution.",
+        WorkFailureReason::ProfileModeNotAllowed => {
+            "This agent profile cannot run tasks in this mode."
         }
     }
 }

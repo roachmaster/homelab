@@ -998,6 +998,7 @@ impl UiModel {
             lists: vec![
                 ListBinding {
                     id: "files",
+                    context: None,
                     rows: tree.rows,
                     empty_message: if self.report.is_some() {
                         "No entry names match this filter in the accepted report."
@@ -1008,17 +1009,20 @@ impl UiModel {
                 },
                 ListBinding {
                     id: "outline",
+                    context: None,
                     rows: outline.rows,
                     empty_message: outline_empty_message,
                 },
                 ListBinding {
                     id: "declarations",
+                    context: None,
                     rows: vec![],
                     empty_message: "Use Outline or Find to navigate declarations in this file."
                         .into(),
                 },
                 ListBinding {
                     id: "problems",
+                    context: None,
                     rows: problems.rows,
                     empty_message: match &self.report {
                         None => "Inspect a project to see problems",
@@ -1031,11 +1035,13 @@ impl UiModel {
                 },
                 ListBinding {
                     id: "source-shape",
+                    context: None,
                     rows: shape.rows,
                     empty_message: "No source shape is available in the accepted report.".into(),
                 },
                 ListBinding {
                     id: "search-results",
+                    context: None,
                     rows: search.rows,
                     empty_message: "No matching file or Rust symbol names in this inspection."
                         .into(),

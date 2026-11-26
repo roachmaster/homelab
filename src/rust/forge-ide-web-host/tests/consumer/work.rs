@@ -243,7 +243,9 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
                 request["request_id"].as_str().unwrap()
             );
             let kind = request["kind"].as_str().unwrap();
-            let expected = if matches!(
+            let expected = if kind == "work_cicd_stage_log" {
+                "ide.work.cicd.stage_log".into()
+            } else if matches!(
                 kind,
                 "work_plan_decide" | "work_review_decide" | "work_publication_retry"
             ) {
@@ -1505,4 +1507,148 @@ fn autonomous_submission_forwards_exact_policy_without_receipt_stranding_prechec
     assert_eq!(calls[0], calls[1]);
     assert_eq!(calls[0]["workflow_policy_digest"], "c".repeat(64));
     assert!(calls.iter().all(|call| call["kind"] == "work_submit"));
+}
+
+#[test]
+fn cicd_stage_log_admission_bounds_and_catalog_branch_filtering() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+
+    let corr = "99999999-9999-4999-8999-999999999999";
+    let action = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let valid_req = json!({
+        "kind": "work_cicd_stage_log",
+        "request_id": "request-1",
+        "project_alias": PROJECT,
+        "task_id": TASK,
+        "correlation_id": corr,
+        "action_id": action,
+        "stage_id": "unit-tests",
+        "view": "console",
+        "limit_bytes": 4096
+    });
+    let log_text = "running 3 tests\ntest result: ok. 3 passed; 0 failed; 0 ignored;";
+    let valid_page = json!({
+        "kind": "work_cicd_stage_log_page",
+        "request_id": "request-1",
+        "project_alias": PROJECT,
+        "task_id": TASK,
+        "correlation_id": corr,
+        "action_id": action,
+        "stage_id": "unit-tests",
+        "view": "console",
+        "content": log_text,
+        "truncated": false,
+        "total_bytes": log_text.len(),
+        "byte_offset": 0,
+        "next_cursor": null,
+        "prev_cursor": null,
+        "tests_passed": 3,
+        "tests_failed": 0,
+        "tests_skipped": 0,
+        "test_cases": [],
+        "error_excerpt": null
+    });
+    let catalog_raw = json!({
+        "kind": "work_catalog",
+        "request_id": "request-1",
+        "projects": [
+            {"alias": PROJECT, "label": "Workspace", "base_revision": "a".repeat(40)},
+            {"alias": "other-project", "label": "Other", "base_revision": "a".repeat(40)}
+        ],
+        "profiles": [
+            {"alias": "agy-plan-v1", "label": "AGY", "backend": "antigravity", "model": "gemini", "modes": ["plan", "review"], "branch": "forge/agent/agy-plan-v1"},
+            {"alias": "other-profile", "label": "Other", "backend": "codex", "model": "gpt", "modes": ["plan"], "branch": "forge/agent/other-profile"}
+        ],
+        "worker_status": "ready",
+        "observed_at": "2026-11-19T18:00:00Z",
+        "agent_branches": [
+            {
+                "project_alias": PROJECT,
+                "agent_profile": "agy-plan-v1",
+                "branch_name": "forge/agent/agy-plan-v1",
+                "branch_scope": "branch/forge-agent-agy-plan-v1-0123456789abcdef",
+                "sync_status": "synced_with_main",
+                "cache_status": "hit_branch",
+                "reservation_status": "idle",
+                "reservation_epoch": 1
+            },
+            {
+                "project_alias": "other-project",
+                "agent_profile": "agy-plan-v1",
+                "branch_name": "forge/agent/agy-plan-v1",
+                "branch_scope": "branch/forge-agent-agy-plan-v1-0123456789abcdef",
+                "sync_status": "unknown",
+                "cache_status": "unknown",
+                "reservation_status": "idle",
+                "reservation_epoch": 0
+            },
+            {
+                "project_alias": PROJECT,
+                "agent_profile": "other-profile",
+                "branch_name": "forge/agent/other-profile",
+                "branch_scope": "branch/forge-agent-other-profile-0123456789abcdef",
+                "sync_status": "unknown",
+                "cache_status": "unknown",
+                "reservation_status": "idle",
+                "reservation_epoch": 0
+            }
+        ]
+    });
+    let valid_page_env = json!({"protocol_version": 1, "event": valid_page});
+    let catalog_env = json!({"protocol_version": 1, "event": catalog_raw});
+    let worker = backend(
+        upstream,
+        vec![(200, valid_page_env.clone()), (200, catalog_env)],
+    );
+
+    // Oversized limit_bytes -> rejected before runner I/O
+    let mut oversized = valid_req.clone();
+    oversized["limit_bytes"] = json!(65_536);
+    assert_reply(
+        &host,
+        "ide.work.cicd.stage_log",
+        oversized,
+        &auth,
+        400,
+        failure("invalid_request"),
+    );
+    // Unauthorized project -> rejected before runner I/O
+    let mut denied_proj = valid_req.clone();
+    denied_proj["project_alias"] = json!("other-project");
+    assert_reply(
+        &host,
+        "ide.work.cicd.stage_log",
+        denied_proj,
+        &auth,
+        403,
+        failure("denied"),
+    );
+
+    // Valid stage log request -> forwarded and validated
+    assert_reply(
+        &host,
+        "ide.work.cicd.stage_log",
+        valid_req,
+        &auth,
+        200,
+        valid_page_env,
+    );
+
+    // Catalog filters agent_branches to allowed_projects & allowed_profiles
+    let cat_req = json!({"kind": "work_catalog", "request_id": "request-1"});
+    let reply = exchange(&host, post(&host, "ide.work.catalog", cat_req, &auth));
+    assert!(reply.starts_with("HTTP/1.1 200 "));
+    let body: Value = serde_json::from_str(reply.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let branches = body["event"]["agent_branches"].as_array().unwrap();
+    assert_eq!(branches.len(), 1);
+    assert_eq!(branches[0]["project_alias"], PROJECT);
+    assert_eq!(branches[0]["agent_profile"], "agy-plan-v1");
+
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["kind"], "work_cicd_stage_log");
+    assert_eq!(calls[1]["kind"], "work_catalog");
 }

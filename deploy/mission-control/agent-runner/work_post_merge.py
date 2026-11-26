@@ -4,7 +4,9 @@ This does not reopen the completed coding workflow or acquire model/merge
 authority. The injected provider owns Jenkins transport and submission journals;
 PostgreSQL owns the action, frozen request, progress and remediation record.
 """
+import hashlib
 import json
+import logging
 import re
 import threading
 from uuid import UUID, uuid5
@@ -12,6 +14,8 @@ from uuid import UUID, uuid5
 from work_ci_contract import SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory
 from work_publication_clients import PublicationError
 from work_verification import diagnostic_text
+
+LOG = logging.getLogger('forge-post-merge')
 
 REQUEST_KEYS = frozenset(('action_id', 'prepare_action_id', 'workflow_id',
     'project_alias', 'candidate_commit', 'candidate_tree', 'integration_base',
@@ -130,6 +134,54 @@ class PostMergeWorker:
             if not self.store.post_merge_start_allowed(job):
                 raise PublicationError('post_merge_start_not_authorized')
 
+        def persist_stage_artifacts(req, rcpt):
+            raw_store = getattr(self.store, '_store', self.store)
+            if not callable(getattr(type(raw_store), 'record_jenkins_stage_evidence', None)):
+                return
+            action_id = req.get('action_id')
+            if not action_id or not isinstance(rcpt, dict):
+                return
+            try:
+                from work_cicd_artifacts import extract_stage_evidence_from_receipt
+                delivery_cfg = getattr(getattr(self.provider, 'delivery', None), 'config', None)
+                results_root = getattr(delivery_cfg, 'results_root', None)
+                job_name = getattr(delivery_cfg, 'jenkins_job', None) or 'forge-main-post-merge'
+                full_receipt = rcpt
+                receipt_sha = rcpt.get('check_receipt_sha256')
+                log_bytes = None
+                if results_root is not None:
+                    result_path = results_root / (action_id + '.json')
+                    if result_path.is_file():
+                        raw_res = result_path.read_bytes()
+                        full_receipt = json.loads(raw_res.decode('utf-8'))
+                        receipt_sha = hashlib.sha256(raw_res).hexdigest()
+                    log_path = results_root / (action_id + '.log')
+                    if log_path.is_file():
+                        log_bytes = log_path.read_bytes()
+                if not isinstance(receipt_sha, str) or len(receipt_sha) != 64:
+                    receipt_sha = hashlib.sha256(
+                        json.dumps(full_receipt, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
+                    ).hexdigest()
+                entries = extract_stage_evidence_from_receipt(
+                    full_receipt,
+                    log_bytes,
+                    project_alias=req['project_alias'],
+                    action_id=action_id,
+                    correlation_id=req['correlation_id'],
+                    task_id=job.get('task_id'),
+                    job_name=job_name,
+                    build_number=rcpt.get('build_number'),
+                    commit_sha=req['candidate_commit'],
+                    branch_name='main',
+                    branch_scope='main',
+                    pipeline_scope='main',
+                    receipt_sha256=receipt_sha,
+                )
+                for evidence, chunks in entries:
+                    raw_store.record_jenkins_stage_evidence(evidence, chunks)
+            except Exception:
+                LOG.warning('Post-merge stage evidence persistence deferred for action %s', action_id)
+
         def finish(status, receipt, summary):
             require_lease()
             if not self.store.post_merge_finish(job, status, receipt, diagnostic_text(summary)):
@@ -193,8 +245,10 @@ class PostMergeWorker:
             if len(json.dumps(receipt, allow_nan=False).encode()) > 65536:
                 raise ValueError('Oversized post-merge receipt')
             if status == 'passed' and not cancelling and passed_receipt(request, receipt):
+                persist_stage_artifacts(request, receipt)
                 finish('passed', receipt, summary)
             elif status in {'failed', 'cancelled'} and stopped_receipt(request, receipt):
+                persist_stage_artifacts(request, receipt)
                 finish('failed', receipt, previous.get('failure_summary', summary))
             elif status in {'pending', 'failed', 'cancelled', 'passed'}:
                 receipt = dict(receipt)

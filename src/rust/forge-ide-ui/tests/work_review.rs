@@ -216,6 +216,7 @@ fn automatic_repair_is_an_explicit_implementation_only_choice() {
         idempotency_key: "task".into(),
         auto_repair: true,
         workflow_policy_digest: None,
+        workflow_policy_id: None,
     };
     assert!(request.is_valid());
     if let WorkRequest::WorkSubmit { mode, .. } = &mut request {
@@ -367,6 +368,7 @@ fn autonomous_policy_and_phase_contracts_are_strict_and_request_digest_is_plan_o
         idempotency_key: "workflow-key".into(),
         auto_repair: false,
         workflow_policy_digest: Some("c".repeat(64)),
+        workflow_policy_id: None,
     };
     assert!(request.is_valid());
     if let WorkRequest::WorkSubmit { mode, .. } = &mut request {

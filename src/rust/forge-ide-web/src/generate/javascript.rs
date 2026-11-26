@@ -10,6 +10,7 @@ let focusKeyByElement=new WeakMap();
 let inputDrafts=new WeakMap();
 let sourceViews=new WeakMap();
 let transcriptViews=new WeakMap();
+let listDetailViews=new WeakMap();
 let presentationSequence=0;
 let pendingActionOrigin=null;
 let workspaceWork=false;
@@ -120,6 +121,89 @@ function visible(n){
   }
   return n.getClientRects?.().length!==0;
 }
+function listDetailState(tree){
+  if(!tree?.dataset?.listDetail)return null;
+  let state=listDetailViews.get(tree);
+  if(state)return state;
+  const detail=element(tree.dataset.listDetail),heading=element(tree.dataset.detailFocus),owner=element(tree.dataset.listScroll);
+  if(!detail||!heading||!owner||!owner.contains(tree)||!owner.contains(detail)||!detail.contains(heading))return null;
+  state={tree,detail,heading,owner,context:null,memory:null};listDetailViews.set(tree,state);return state;
+}
+function rememberListPosition(state,focus){
+  const rows=[...state.tree.querySelectorAll('.fg-row-select')];
+  const focused=rows.find(row=>row===focus)||rows.find(row=>row.tabIndex===0)||rows[0];
+  const top=state.owner.getBoundingClientRect().top+state.owner.clientTop;
+  const bottom=top+state.owner.clientHeight;
+  const anchor=rows.find(row=>{const box=row.getBoundingClientRect();return box.bottom>top&&box.top<bottom;});
+  return {focus:focusKeyByElement.get(focused),anchor:focusKeyByElement.get(anchor),offset:anchor?anchor.getBoundingClientRect().top-top:0,top:state.owner.scrollTop,left:state.owner.scrollLeft};
+}
+function captureListNavigation(bindings,focus){
+  const frames=[];
+  for(const binding of bindings){
+    const state=listDetailState(element(binding.id));if(!state)continue;
+    // The token is opaque accepted Rust context. It is never persisted in DOM,
+    // URLs or storage, and the browser never derives application scope from it.
+    const context=typeof binding.context==='string'?binding.context:null;
+    const same=context!==null&&state.context===context;
+    if(!same)state.memory=null;
+    state.context=context;
+    const list=visible(state.tree),detail=visible(state.detail);
+    const position=same&&list?rememberListPosition(state,focus):null;
+    if(position)state.memory=position;
+    frames.push({state,list,detail,same,position,focused:state.tree.contains(focus)});
+  }
+  return frames;
+}
+function restoreListPosition(state,position){
+  if(!position)return;
+  state.owner.scrollTop=position.top;state.owner.scrollLeft=position.left;
+  const anchor=[...state.tree.querySelectorAll('.fg-row-select')].find(row=>focusKeyByElement.get(row)===position.anchor);
+  if(anchor){
+    const top=state.owner.getBoundingClientRect().top+state.owner.clientTop;
+    state.owner.scrollTop+=anchor.getBoundingClientRect().top-top-position.offset;
+  }
+}
+function listReturnTarget(state,position){
+  const rows=[...state.tree.querySelectorAll('.fg-row-select')];
+  const top=state.owner.getBoundingClientRect().top+state.owner.clientTop;
+  const bottom=top+state.owner.clientHeight;
+  const inView=row=>{const box=row.getBoundingClientRect();return box.bottom>top&&box.top<bottom;};
+  const retained=rows.find(row=>focusKeyByElement.get(row)===position?.focus);
+  const anchor=rows.find(row=>focusKeyByElement.get(row)===position?.anchor&&inView(row));
+  const target=retained||anchor||rows.find(row=>row.getAttribute('aria-selected')==='true')||rows.find(inView)||rows[0]||state.tree;
+  for(const row of rows)row.tabIndex=row===target?0:-1;
+  if(!rows.length)state.tree.tabIndex=0;
+  // A removed row must not leave keyboard focus on an offscreen replacement.
+  // The original retained row keeps its saved viewport without an extra reveal.
+  if(!retained){
+    const box=target.getBoundingClientRect();
+    if(box.top<top)state.owner.scrollTop+=box.top-top;
+    else if(box.bottom>bottom)state.owner.scrollTop+=box.bottom-bottom;
+  }
+  return target;
+}
+function finishListNavigation(frames,focus,origin,acknowledgedSequence){
+  let target=null;
+  const accepted=origin&&origin.sequence===acknowledgedSequence;
+  for(const frame of frames){
+    const {state}=frame;const list=visible(state.tree),detail=visible(state.detail);
+    if(frame.same&&frame.list&&list){
+      restoreListPosition(state,frame.position);
+      if(frame.focused&&(!state.tree.contains(focus)||!visible(focus)))target=listReturnTarget(state,frame.position);
+    }
+    if(!frame.same||!accepted||!state.owner.contains(origin.node))continue;
+    // Only an acknowledged local navigation that still owns focus may move it.
+    // A delayed view cannot consume a newer action or interrupt another control.
+    const ownsFocus=origin.node===focus;
+    if(frame.list&&!list&&detail&&state.tree.contains(origin.node)&&ownsFocus){
+      state.owner.scrollTop=0;state.owner.scrollLeft=0;target=state.heading;
+    }else if(frame.detail&&!detail&&list&&ownsFocus){
+      restoreListPosition(state,state.memory);
+      target=listReturnTarget(state,state.memory);
+    }
+  }
+  return target;
+}
 function openSheet(sheet,trigger){
   if(!sheet?.hasAttribute('data-sheet')||sheet.closest('[hidden]'))return;
   for(const other of sheets.values())if(other!==sheet&&other.open)other.close();
@@ -150,7 +234,7 @@ function sendAction(n,value,sequence){
   }
   if(!navigation)navigationStatus('');
   tell(value===undefined?action:{...action,value},sequence);
-  pendingActionOrigin={sequence,pane};
+  pendingActionOrigin={sequence,pane,node:n};
 }
 function setMarkdown(node,html){
   // Only sanitized HTML produced by the Rust Markdown renderer may pass here.
@@ -212,6 +296,7 @@ function clearProtected(){
   for(const n of [...dialogs.values(),...sheets.values()])if(n.open)n.close();
   for(const n of [...panelToggles.values(),...document.querySelectorAll('[data-sheet-open]')])n.setAttribute('aria-expanded','false');
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
+  listDetailViews=new WeakMap();
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
   metricViews=new WeakMap();
   flowDiagramViews=new WeakMap();
@@ -236,7 +321,7 @@ function focusRow(row){
   for(const n of tree.querySelectorAll('.fg-row-select'))n.tabIndex=n===row?0:-1;
   // Explicit keyboard tree navigation is newer user intent; automatic pane
   // restoration never passes here. Retain the pending dispatch's acknowledgement.
-  if(pendingActionOrigin)pendingActionOrigin={sequence:pendingActionOrigin.sequence,pane:row.closest('[data-pane]')};
+  if(pendingActionOrigin)pendingActionOrigin={...pendingActionOrigin,pane:row.closest('[data-pane]')};
   row.focus();row.scrollIntoView({block:'nearest'});
 }
 function paintBadge(node,value){
@@ -397,18 +482,42 @@ function renderFlowDiagram(binding){
     parts.nodeSig=null;parts.branchSig=null;parts.hopSig=null;
     return;
   }
-  parts.empty.hidden=true;parts.header.hidden=false;parts.track.hidden=false;parts.trace.hidden=false;
+  parts.empty.hidden=true;parts.header.hidden=false;parts.track.hidden=false;parts.trace.hidden=!binding.trace_label&&!hopList.length;
   parts.trackLabel.textContent=binding.track_label||'';
   if(binding.current_badge)paintBadge(parts.currentBadge,binding.current_badge);
   parts.summary.textContent=binding.summary||'';
   const nodeSig=JSON.stringify(nodes);
   if(parts.nodeSig!==nodeSig){
+    const priorSteps=new Map([...parts.track.children].filter(x=>x.dataset?.stageKey).map(x=>[x.dataset.stageKey,x]));
     const items=[];
     for(let i=0;i<nodes.length;i++){
-      const node=nodes[i];const st=flowState(node.state);
-      const step=document.createElement('li');step.className='fg-flow-step';step.dataset.state=st;
-      const card=document.createElement('div');card.className='fg-flow-node';card.dataset.stageId=String(node.id||'');card.dataset.state=st;
-      if(node.current)card.setAttribute('aria-current','step');
+      const node=nodes[i];const st=flowState(node.state);const stageId=String(node.id||'');
+      const interactive=!!(node.action&&typeof node.action==='object');
+      const key=(interactive?'btn:':'div:')+stageId;
+      let step=priorSteps.get(key);let card;
+      if(step&&step.firstElementChild){
+        card=step.firstElementChild;
+        step.className='fg-flow-step';step.dataset.state=st;
+        while(step.children.length>1)step.lastElementChild.remove();
+        card.replaceChildren();
+      }else{
+        step=document.createElement('li');step.className='fg-flow-step';step.dataset.state=st;step.dataset.stageKey=key;
+        card=document.createElement(interactive?'button':'div');
+        if(interactive){card.type='button';card.addEventListener('click',()=>sendAction(card));}
+        step.append(card);
+      }
+      card.className=interactive?'fg-flow-node fg-flow-dot-button':'fg-flow-node';
+      card.dataset.stageId=stageId;card.dataset.state=st;
+      if(node.current)card.setAttribute('aria-current','step');else card.removeAttribute('aria-current');
+      if(interactive){
+        const sel=node.selected===true;
+        card.dataset.selected=String(sel);
+        card.setAttribute('aria-pressed',String(sel));
+        actionByElement.set(card,node.action);
+        focusKeyByElement.set(card,binding.id+':stage:'+stageId);
+      }else{
+        delete card.dataset.selected;card.removeAttribute('aria-pressed');
+      }
       const head=document.createElement('div');head.className='fg-flow-node-head';
       const marker=document.createElement('span');marker.className='fg-flow-marker';marker.setAttribute('aria-hidden','true');marker.textContent=FLOW_MARKERS[st]||'○';
       const label=document.createElement('span');label.className='fg-flow-label';label.textContent=node.label||'';
@@ -417,13 +526,15 @@ function renderFlowDiagram(binding){
         const count=document.createElement('span');count.className='fg-flow-count';count.textContent=node.count_label;head.append(count);
       }
       card.append(head);
+      if(node.metrics_label){
+        const metrics=document.createElement('span');metrics.className='fg-flow-metrics';metrics.textContent=node.metrics_label;card.append(metrics);
+      }
       if(node.detail){
         const detail=document.createElement('span');detail.className='fg-flow-detail';detail.textContent=node.detail;card.append(detail);
       }
       if(node.time){
         const time=document.createElement('time');time.className='fg-flow-time';paintTime(time,node.time);card.append(time);
       }
-      step.append(card);
       if(i<nodes.length-1){
         const next=nodes[i+1];const nextSt=flowState(next.state);
         const edge=nextSt==='current'||(st==='completed'&&next.current)?'active':st==='completed'&&nextSt==='completed'?'traversed':(nextSt==='warning'||nextSt==='error'||nextSt==='cancelled')?'alert':'upcoming';
@@ -433,7 +544,9 @@ function renderFlowDiagram(binding){
       }
       items.push(step);
     }
-    parts.track.replaceChildren(...items);parts.nodeSig=nodeSig;
+    const sameOrder=parts.track.children.length===items.length&&items.every((el,idx)=>parts.track.children[idx]===el);
+    if(!sameOrder)parts.track.replaceChildren(...items);
+    parts.nodeSig=nodeSig;
   }
   parts.branches.hidden=!branchList.length;
   const branchSig=JSON.stringify(branchList);
@@ -493,6 +606,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   const priorTree=focus?.closest?.('[role="tree"]');
   const priorPane=focus?.closest?.('[data-pane]');
   const priorFooter=focus?.closest?.('.fg-pane-footer');
+  const listNavigation=captureListNavigation(view.lists||[],focus);
   const origin=pendingActionOrigin;
   // Capture provenance before clearing its acknowledgement, including early
   // focus-return paths. Older views must not consume newer pending intent.
@@ -720,6 +834,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
     if((heading&&(invalidatedFocus===heading||focus===heading))||(direct&&focus.disabled))sourceFocus=anchor;
   }
   const focusedDialog=focus?.closest?.('[data-modal]');
+  const listFocus=finishListNavigation(listNavigation,focus,origin,acknowledgedSequence);
   for(const [n,show] of dialogBindings)if(!show&&n.open)n.close();
   for(const [n,show] of dialogBindings)if(show&&!n.open){
     n.showModal();
@@ -730,6 +845,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(enteringEditor&&!activeEditor.disabled&&visible(activeEditor)){activeEditor.focus({preventScroll:true});return;}
   if(visible(sourceFocus)){sourceFocus.focus({preventScroll:true});return;}
   if(visible(invalidatedFocus)){invalidatedFocus.focus();return;}
+  if(visible(listFocus)){listFocus.focus({preventScroll:true});return;}
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle,.fg-timeline-related')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
   if(focus!==document.body && (!focus.isConnected||!visible(focus))){
@@ -1255,7 +1371,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==15 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==16 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));

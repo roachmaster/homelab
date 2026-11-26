@@ -91,6 +91,19 @@ class NativeVerificationIdentityProvider:
             'artifact_id':identity.artifact_id,'policy_sha256':identity.policy_sha256,
             'verification_id':identity.verification_id,'snapshot_sha256':hashlib.sha256(canonical(snapshot)).hexdigest()}
     @staticmethod
+    def reference_matches(reference,snapshot):
+        """Bind a saved reference by typed fields, not by re-hashing the snapshot.
+
+        snapshot_sha256 is still written for older readers but never compared;
+        verification_id may be the typed UUID or the legacy hex form."""
+        _Manifest,_Policy,Identity=NativeVerificationIdentityProvider._types()
+        if not isinstance(reference,dict) or set(reference)!={'version','generation','artifact_id','policy_sha256','verification_id','snapshot_sha256'}:
+            return False
+        identity=Identity.from_dict(snapshot['identity'])
+        return (reference['version']==VERSION and reference['generation']==snapshot['scope']['review_id']
+            and reference['artifact_id']==identity.artifact_id and reference['policy_sha256']==identity.policy_sha256
+            and identity.matches_id(reference['verification_id']))
+    @staticmethod
     def plan(snapshot):
         _Manifest,Policy,_Identity=NativeVerificationIdentityProvider._types()
         body=Policy.parse_dict(snapshot['policy']).to_dict()['policy']
@@ -105,7 +118,7 @@ class NativeVerificationIdentityProvider:
         p=snapshot['provenance']
         if (p['candidate_commit']!=job['candidate_commit'] or p['integration_base']!=job['integration_base']
                 or job.get('gate_manifest_sha256',p['native_gate_manifest_sha256'])!=p['native_gate_manifest_sha256']
-                or reference is not None and reference!=self.reference(snapshot)):
+                or reference is not None and not self.reference_matches(reference,snapshot)):
             raise PublicationError('native_identity_source_changed')
         actual=self.artifacts.acquire(repository,job['candidate_commit'])
         if actual!=Manifest.from_dict(snapshot['artifact']):raise PublicationError('native_identity_artifact_changed')

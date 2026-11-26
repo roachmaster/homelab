@@ -41,7 +41,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  -- M40 grants the proxy read surface (worker/reconciler SELECT, plus
  -- muse_proxy_writer SELECT on coding_tasks); the pinned catalog expects
  -- exactly those entries from here on.
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=42 AND name='pg_proxy_preparation') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=50 AND name='pg_proxy_preparation') THEN
   expected.data:=CASE expected.name
    WHEN 'coding_review_policy' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
    WHEN 'coding_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
@@ -56,7 +56,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
    WHEN 'coding_workflow_actions' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
    ELSE expected.data END;
  END IF;
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=43 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_cutover') THEN
   expected.data:=jsonb_set(expected.data,'{acl}',coalesce((SELECT jsonb_agg(CASE WHEN entry::text LIKE '"forge_agent=%' THEN to_jsonb('forge_agent=r/forge_agent_owner'::text) ELSE entry END ORDER BY ord)
    FROM jsonb_array_elements(expected.data->'acl') WITH ORDINALITY AS acl(entry,ord)),'[]'::jsonb));
  END IF;
@@ -94,10 +94,15 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
   actual:=jsonb_set(actual,'{indexes}',(SELECT jsonb_agg(CASE WHEN item->>0='coding_workflow_reviews_workflow_id_target_kind_source_atte_key' THEN jsonb_set(item,'{1}',(SELECT old->1 FROM jsonb_array_elements(expected.data->'indexes') old WHERE old->>0=item->>0)) ELSE item END ORDER BY n) FROM jsonb_array_elements(actual->'indexes') WITH ORDINALITY a(item,n) WHERE item->>0 NOT IN('coding_workflow_reviews_supersedes_review_id_key','coding_workflow_reviews_one_live_source')));
   actual:=jsonb_set(actual,'{triggers}',(SELECT jsonb_agg(item ORDER BY n) FROM jsonb_array_elements(actual->'triggers') WITH ORDINALITY a(item,n) WHERE item->>0<>'coding_workflow_reviews_supersession_guard'));
  END IF;
+ -- M49 widened only the gate check to also accept named contracts; verify the exact
+ -- widened expression by restoring the predecessor text before the shape compare.
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=49 AND name='gate_contract_names') AND expected.name='coding_workflow_reviews' THEN
+  actual:=replace(actual::text,$m49new$~ '^([0-9a-f]{64}|forge-sdlc-jenkins-v[1-3]:(main|detached|branch/[a-z0-9]([a-z0-9._-]{0,56}[a-z0-9])?))$'::text$m49new$,$m49old$~ '^[0-9a-f]{64}$'::text$m49old$)::jsonb;
+ END IF;
  -- M40 grants the proxy read surface (worker/reconciler SELECT, plus
  -- muse_proxy_writer SELECT on coding_tasks); the pinned catalog expects
  -- exactly those entries from here on.
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=42 AND name='pg_proxy_preparation') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=50 AND name='pg_proxy_preparation') THEN
   expected.data:=CASE expected.name
    WHEN 'coding_review_policy' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
    WHEN 'coding_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
@@ -112,7 +117,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
    WHEN 'coding_workflow_actions' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
    ELSE expected.data END;
  END IF;
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=43 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_cutover') THEN
   expected.data:=jsonb_set(expected.data,'{acl}',coalesce((SELECT jsonb_agg(CASE WHEN entry::text LIKE '"forge_agent=%' THEN to_jsonb('forge_agent=r/forge_agent_owner'::text) ELSE entry END ORDER BY ord)
    FROM jsonb_array_elements(expected.data->'acl') WITH ORDINALITY AS acl(entry,ord)),'[]'::jsonb));
  END IF;
@@ -153,7 +158,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  -- M40 grants the proxy read surface (worker/reconciler SELECT, plus
  -- muse_proxy_writer SELECT on coding_tasks); the pinned catalog expects
  -- exactly those entries from here on.
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=42 AND name='pg_proxy_preparation') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=50 AND name='pg_proxy_preparation') THEN
   expected.data:=CASE expected.name
    WHEN 'coding_review_policy' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
    WHEN 'coding_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
@@ -168,7 +173,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
    WHEN 'coding_workflow_actions' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
    ELSE expected.data END;
  END IF;
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=43 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_cutover') THEN
   expected.data:=jsonb_set(expected.data,'{acl}',coalesce((SELECT jsonb_agg(CASE WHEN entry::text LIKE '"forge_agent=%' THEN to_jsonb('forge_agent=r/forge_agent_owner'::text) ELSE entry END ORDER BY ord)
    FROM jsonb_array_elements(expected.data->'acl') WITH ORDINALITY AS acl(entry,ord)),'[]'::jsonb));
  END IF;
@@ -319,12 +324,12 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  FOR expected IN SELECT * FROM(VALUES ('coding_workflows',ARRAY['SELECT','INSERT','UPDATE'],ARRAY['forge_coding_worker','forge_coding_reconciler']),('coding_workflow_reviews',ARRAY['SELECT','INSERT','UPDATE'],ARRAY['forge_coding_worker','forge_coding_reconciler']),('coding_workflow_actions',ARRAY['SELECT','INSERT','UPDATE'],ARRAY['forge_coding_worker','forge_coding_reconciler'])) s(name,grants,readers) LOOP
  -- M41 revokes every direct forge_agent table write; the proxy is the
  -- only writer, so forge_agent keeps SELECT only on these tables.
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=43 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_cutover') THEN
   expected.grants:=ARRAY['SELECT'];
  END IF;
  FOREACH role_name IN ARRAY ARRAY['public','forge_agent','forge_gpu_worker','forge_coding_worker','forge_coding_reconciler'] LOOP
  FOREACH privilege_name IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
- want:=(role_name='forge_agent' AND privilege_name=ANY(expected.grants)) OR (EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=42 AND name='pg_proxy_preparation') AND privilege_name='SELECT' AND role_name=ANY(expected.readers));
+ want:=(role_name='forge_agent' AND privilege_name=ANY(expected.grants)) OR (EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=50 AND name='pg_proxy_preparation') AND privilege_name='SELECT' AND role_name=ANY(expected.readers));
  IF has_table_privilege(role_name,'forge_agent.'||expected.name,privilege_name) IS DISTINCT FROM want OR (privilege_name IN('SELECT','INSERT','UPDATE','REFERENCES') AND NOT want AND has_any_column_privilege(role_name,'forge_agent.'||expected.name,privilege_name)) THEN RAISE EXCEPTION 'Autonomy privilege drift: % % %',role_name,expected.name,privilege_name;END IF;
  END LOOP;END LOOP;END LOOP;
 END;

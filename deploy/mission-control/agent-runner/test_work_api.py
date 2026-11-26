@@ -652,15 +652,17 @@ class WorkHttpApiTest(unittest.TestCase):
 
         with runner_server(work_service=service, distributed=False) as port:
             # Denied project, mode, and profile -> 403 denied before store.
-            for body in [
-                submit_body(project_alias="unconfigured-project"),
-                submit_body(mode="implement"),
-                submit_body(agent_profile="unconfigured-profile"),
+            # Mode/profile denials name only the caller's own ungranted input.
+            for body, reason in [
+                (submit_body(project_alias="unconfigured-project"), None),
+                (submit_body(mode="implement"), "mode_not_granted"),
+                (submit_body(agent_profile="unconfigured-profile"), "profile_not_granted"),
             ]:
                 with self.subTest(denied_submit=body):
+                    fields = {"code": "denied"} if reason is None else {"code": "denied", "reason": reason}
                     self.assertEqual(
                         work_post(port, work_api.Destination.SUBMIT, body),
-                        (403, reply("work_failed", code="denied"), "no-store"),
+                        (403, reply("work_failed", **fields), "no-store"),
                     )
 
             for destination, body in [
@@ -963,6 +965,72 @@ class WorkHttpApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubmitRejectionReasonTest(unittest.TestCase):
+    """dispatch-digest-diagnosis: a rejected submitter can tell what to fix."""
+
+    def test_workflow_submission_distinguishes_each_stale_or_wrong_input(self):
+        check = work_api._require_workflow_submission
+        current = "c" * 64
+        self.assertIsNone(check("plan", "author", "author", current, current))
+        for args, reason in [
+            (("implement", "author", "author", current, current), "workflow_mode"),
+            (("plan", "other", "author", current, current), "workflow_profile"),
+            (("plan", "author", "author", None, current), "policy_missing"),
+            (("plan", "author", "author", "d" * 64, current), "policy_stale"),
+        ]:
+            with self.subTest(reason=reason):
+                with self.assertRaises(Rejected) as ctx:
+                    check(*args)
+                self.assertEqual((ctx.exception.status, ctx.exception.code, ctx.exception.reason),
+                                 (409, "result_mismatch", reason))
+
+    def test_digest_without_applicable_workflow_is_not_applicable(self):
+        config = work_config.parse_work_config(sample_raw_config())
+        service = work_api.WorkService(config, config.catalog(), Mock())
+        with self.assertRaises(Rejected) as ctx:
+            service._workflow_snapshot("homelab", "plan", "agy-plan", "e" * 64)
+        self.assertEqual((ctx.exception.code, ctx.exception.reason), ("result_mismatch", "policy_not_applicable"))
+        self.assertIsNone(service._workflow_snapshot("homelab", "plan", "agy-plan", None))
+
+    def test_failed_envelope_carries_only_bounded_known_reasons(self):
+        cases = [
+            (Rejected(409, "result_mismatch", "base_stale"), (409, {"code": "result_mismatch", "reason": "base_stale"})),
+            (Rejected(409, "result_mismatch", "policy_stale"), (409, {"code": "result_mismatch", "reason": "policy_stale"})),
+            (Rejected(409, "result_mismatch"), (409, {"code": "result_mismatch"})),
+            # Unknown or mismatched reasons are never echoed.
+            (Rejected(409, "result_mismatch", "other-profile-digest"), (409, {"code": "result_mismatch"})),
+            (Rejected(409, "revision_conflict", "base_stale"), (409, {"code": "revision_conflict"})),
+            (Rejected(403, "denied", "profile_disabled"), (403, {"code": "denied", "reason": "profile_disabled"})),
+            (Rejected(403, "denied", "policy_stale"), (403, {"code": "denied"})),
+            (Rejected(503, "unavailable", "base_stale"), (503, {"code": "unavailable"})),
+        ]
+        for error, (status, fields) in cases:
+            with self.subTest(error=(error.status, error.code, error.reason)):
+                self.assertEqual(work_api.failed(REQUEST_ID, error), (status, reply("work_failed", **fields)))
+
+    def test_store_base_rejection_reaches_the_http_client_with_its_reason(self):
+        config = work_config.parse_work_config(sample_raw_config())
+        fake_store = Mock()
+        fake_store.submit.side_effect = Rejected(409, "result_mismatch", "base_stale")
+        service = work_api.WorkService(config, config.catalog(), fake_store)
+        with runner_server(work_service=service) as port:
+            self.assertEqual(
+                work_post(port, work_api.Destination.SUBMIT, submit_body()),
+                (409, reply("work_failed", code="result_mismatch", reason="base_stale"), "no-store"),
+            )
+
+    def test_disabled_profile_is_distinguishable_from_an_ungranted_one(self):
+        raw = sample_raw_config()
+        raw["profiles"]["agy-plan"]["execution_enabled"] = False
+        config = work_config.parse_work_config(raw)
+        store = Mock()
+        store.submit.side_effect = lambda **kwargs: kwargs["resolve_recipe"]()
+        service = work_api.WorkService(config, config.catalog(), store)
+        with self.assertRaises(Rejected) as ctx:
+            service.submit(work_api.decode(work_api.Destination.SUBMIT, REQUEST_ID, submit_body()))
+        self.assertEqual((ctx.exception.status, ctx.exception.reason), (403, "profile_disabled"))
 
 
 class RunnerListenerConfigurationTests(unittest.TestCase):

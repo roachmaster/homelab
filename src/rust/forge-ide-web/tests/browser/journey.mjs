@@ -13,6 +13,7 @@ import { VIEWPORTS, verifyViewportProfiles } from './viewports.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
 import { startDurableRelay } from './durable-relay.mjs';
 import { startAgentsRelay } from './agents-relay.mjs';
+import { exerciseAgentsTriage } from './agents-triage.mjs';
 
 let assets, agent, fixtureBinary, output, browser, browserOwner, durableRelayOwner, agentsRelayOwner, check, report;
 const active = new Set();
@@ -3236,6 +3237,7 @@ async function agentsJourney() {
       await check(row).toBeVisible(); await row.click();
       await check(page.locator('#agents-plan-actions')).toBeVisible();
       await check(page.locator('#agents-stage-panel')).toBeVisible();
+      await disclosure(page, 'agents-stage-evidence', true);
       await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText(status === 'completed' ? 'Accepted' : 'Ready for review');
       await check(page.locator('#agents-stage-diagram script,#agents-stage-diagram img')).toHaveCount(0);
       await check(page.locator('#agents-plan-resume')).toBeEnabled();
@@ -3412,6 +3414,8 @@ async function agentsJourney() {
     await page.locator('#agents-criteria').fill('Keep peer review and automatic merge source-bound.');
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    await disclosure(page, 'agents-workflow', true);
+    await disclosure(page, 'agents-stage-evidence', true);
     await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Autonomous workflow · Native');
     await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Plan review');
     const autonomousSubmission=relay.workflowSubmissions.at(-1);
@@ -3563,6 +3567,9 @@ async function agentsJourney() {
     await page.locator('#agents-refresh').click();
     await page.locator(`#agents-tasks [data-row-id="${historyTaskId}"] .fg-row-select`).click();
     await check(page.locator('#agents-task-correlation')).toContainText('Correlation ·');
+    await disclosure(page, 'agents-task-technical', true);
+    await disclosure(page, 'agents-history-panel', true);
+    await disclosure(page, 'agents-stage-evidence', true);
     await check(page.locator('#agents-history > li')).toHaveCount(50);
     await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
     await check(page.locator('#agents-stage-diagram .fg-flow-summary')).toContainText('Events 1–61');
@@ -3636,10 +3643,8 @@ async function agentsJourney() {
     for(const width of [320,390,1440]){
       await page.setViewportSize({width,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'event metadata and summaries fit the viewport');
-      assert.equal(await page.locator('#agents-stage-diagram .fg-flow-track').evaluate((node,phone)=>{
-        const dir=getComputedStyle(node).flexDirection;
-        return phone?dir==='column':dir==='row';
-      },width<640),true,'stage track stacks vertically on phones and flows horizontally on desktop');
+      assert.equal(await page.locator('#agents-stage-diagram .fg-flow-track').evaluate(node=>
+        getComputedStyle(node).flexDirection==='column'),true,'full stage evidence has a deliberate vertical reading order at desktop and phone widths');
     }
     await page.setViewportSize({width:390,height:844});
     // Verify touch-target sizing, reduced-motion cascade, and direct tap/click toggle on phone without hover.
@@ -3668,6 +3673,9 @@ async function agentsJourney() {
     await page.locator('#agents-criteria').fill('Preserve the envelope history and source receipts with no manual approvals.');
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    await disclosure(page, 'agents-workflow', true);
+    await disclosure(page, 'agents-stage-evidence', true);
+    await disclosure(page, 'agents-history-panel', true);
     await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Autonomous workflow · External Muse');
     await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Plan review');
     assert.deepEqual(
@@ -3677,12 +3685,12 @@ async function agentsJourney() {
     );
     const externalWorkflowTask=relay.latestWorkflowTaskId;
     relay.retryEvent(externalWorkflowTask,'compilation',20,{total:20});await page.locator('#agents-refresh').click();
-    await check(page.locator('#agents-retry-event')).toHaveText('Fixing compilation · Retry 20/20');
+    await check(page.locator('#agents-retry-event')).toHaveText('Compilation retry budget · 20 of 20 used · Open');
     relay.retryEvent(externalWorkflowTask,'tests',1,{total:21});await page.locator('#agents-refresh').click();
-    await check(page.locator('#agents-retry-event')).toHaveText('Fixing tests · Retry 1/20');
+    await check(page.locator('#agents-retry-event')).toHaveText('Tests retry budget · 1 of 20 used · Open');
     await check(page.locator('#agents-workflow-revisions')).toContainText('Code revisions 21');
     relay.retryEvent(externalWorkflowTask,'tests',20,{total:40});await page.locator('#agents-refresh').click();
-    await check(page.locator('#agents-retry-event')).toHaveText('Fixing tests · Retry 20/20');
+    await check(page.locator('#agents-retry-event')).toHaveText('Tests retry budget · 20 of 20 used · Open');
     await check(page.locator('#agents-workflow-revisions')).toContainText('Code revisions 40');
     relay.retryEvent(externalWorkflowTask,'tests',20,{status:'resolved',total:40});
     for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
@@ -3713,12 +3721,111 @@ async function agentsJourney() {
         await page.locator(`#agents-tasks [data-row-id="${externalWorkflowTask}"] .fg-row-select`).click();
         await check(page.locator('#agents-workflow-phase')).toHaveText(label);
       }
-      for(const id of ['agents-accept','agents-resume','agents-plan-actions','agents-review-actions'])await check(page.locator('#'+id)).toBeHidden();
+      for(const id of ['agents-accept','agents-resume','agents-plan-actions','agents-verification-actions']){
+        await check(page.locator('#'+id)).toHaveCount(1);
+        await check(page.locator('#'+id)).toBeHidden();
+      }
     }
     await check(page.locator('#agents-history')).toContainText('Trusted fixture workflow: completed.');
     await check(page.locator('#agents-workflow-source')).toContainText('Merged commit');
     for(const id of ['agents-progress-panel','agents-result-panel'])await check(page.locator('#'+id)).toBeHidden();
     await screenshot(page,'ide-agents-external-workflow.png');
+
+    // Verify per-agent persistent branches on overview & interactive correlation CI/CD stages in reader.
+    const branchActionId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const mainActionId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const cicdConsoleLog='[stage] compiling workspace\nerror[E0308]: mismatched types <script>window.__forgeCicdXss=true</script><img src=x onerror=window.__forgeCicdXss=true>\n'
+      +'console detail line '.repeat(40)+'END_OF_CICD_LOG\n';
+    relay.setCorrelationCicd(externalWorkflowTask,{
+      branch_state:{
+        project_alias:'workspace',
+        agent_profile:'muse-db-primary',
+        branch_name:'forge/agent/muse-db-primary',
+        branch_scope:'branch/forge-agent-muse-db-primary-0123456789abcdef',
+        head_commit_sha:'e'.repeat(40),
+        fetched_main_sha:'f'.repeat(40),
+        fetched_main_at:'2026-11-19T18:00:00Z',
+        sync_status:'synced_with_main',
+        conflict_paths:[],
+        cache_status:'hit_branch',
+        cache_updated_at:'2026-11-19T18:00:00Z',
+        last_task_id:externalWorkflowTask,
+        last_correlation_id:null,
+        reservation_status:'active',
+        active_scope_kind:'external_workflow',
+        active_scope_id:'33333333-3333-4333-8333-333333333333',
+        active_root_task_id:externalWorkflowTask,
+        active_task_id:externalWorkflowTask,
+        active_pr_url:'https://github.com/roachmaster/homelab/pull/101',
+        reservation_epoch:2,
+        reservation_blocker:null,
+      },
+      waiting_on_branch_owner:false,
+      runs:[
+        {
+          run_id:branchActionId,action_id:branchActionId,job_name:'forge-native-verify',build_number:42,
+          pipeline_scope:'branch',commit_sha:'e'.repeat(40),branch_name:'forge/agent/muse-db-primary',
+          branch_scope:'branch/forge-agent-muse-db-primary-0123456789abcdef',
+          phase:'complete',availability:'available',status:'failed',
+          started_at:'2026-11-19T18:00:00Z',completed_at:'2026-11-19T18:01:00Z',
+          stages:[
+            {stage_id:'compile',label:'Compile',status:'passed',returncode:0,duration_ms:1200,error_count:0,has_console_log:true,log_byte_count:128,sub_phases:[]},
+            {stage_id:'unit-tests',label:'Unit & In-Memory Tests',status:'failed',returncode:101,duration_ms:4300,tests_passed:964,tests_failed:1,tests_skipped:0,error_count:1,error_excerpt:'error[E0308]: mismatched types <script>window.__forgeCicdXss=true</script>',test_framework:'cargo-test',test_cases:[{name:'tests::failing_case',status:'failed'}],has_console_log:true,log_byte_count:cicdConsoleLog.length,sub_phases:[{phase_id:'all-features-unit-tests',phase_kind:'tests',label:'all-features-unit-tests',status:'failed',returncode:101,duration_ms:4300,tests_passed:964,tests_failed:1,tests_skipped:0}]},
+          ],
+        },
+        {
+          run_id:mainActionId,action_id:mainActionId,job_name:'forge-main-post-merge',build_number:43,
+          pipeline_scope:'main',commit_sha:'f'.repeat(40),branch_name:'main',branch_scope:'main',
+          phase:'complete',availability:'available',status:'passed',
+          started_at:'2026-11-19T18:02:00Z',completed_at:'2026-11-19T18:04:00Z',
+          stages:[
+            {stage_id:'real-browser',label:'Real Browser (28 groups)',status:'passed',returncode:0,duration_ms:32000,tests_passed:28,tests_failed:0,tests_skipped:0,error_count:0,test_framework:'ui-qa',test_cases:[{name:'group-01-agents',status:'passed'}],has_console_log:false,log_byte_count:0,sub_phases:[]},
+          ],
+        },
+      ],
+    },{
+      [`${branchActionId}:unit-tests:console`]:{content:cicdConsoleLog,pageSize:200,tests_passed:964,tests_failed:1,tests_skipped:0,test_cases:[{name:'tests::failing_case',status:'failed'}]},
+    });
+    await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-cicd-panel')).toBeVisible();
+    await check(page.locator('#agents-cicd-branch')).toHaveText('forge/agent/muse-db-primary');
+    await check(page.locator('#agents-cicd-sync')).toContainText('Synced with main');
+    await check(page.locator('#agents-cicd-cache')).toContainText('Branch cache hit');
+    await check(page.locator('#agents-cicd-owner')).toContainText('Owned by this task');
+    // Latest run (Main CI #43) auto-selected with 28/28 tests.
+    await check(page.locator('#agents-cicd-stages-diagram .fg-flow-dot-button[data-stage-id="real-browser"]')).toHaveAttribute('aria-pressed','true');
+    await check(page.locator('#agents-cicd-stages-diagram .fg-flow-dot-button[data-stage-id="real-browser"]')).toContainText('28/28 tests');
+    // Switch to Branch CI #42 run -> auto-selects failed Unit & In-Memory Tests dot.
+    await page.locator(`#agents-cicd-runs [data-row-id="${branchActionId}"] .fg-row-select`).click();
+    const unitDot=page.locator('#agents-cicd-stages-diagram .fg-flow-dot-button[data-stage-id="unit-tests"]');
+    await check(unitDot).toHaveAttribute('aria-pressed','true');
+    await check(page.locator('#agents-cicd-log-content')).toContainText('error[E0308]: mismatched types');
+    await check(page.locator('#agents-cicd-panel script,#agents-cicd-panel img')).toHaveCount(0);
+    assert.equal(await page.evaluate(()=>globalThis.__forgeCicdXss),undefined,'CI/CD stage output renders strictly as textContent');
+    // Inspect Tests tab and Console paged log.
+    await page.locator('#agents-cicd-tab-tests').click();
+    await check(page.locator('#agents-cicd-tab-tests')).toHaveAttribute('aria-pressed','true');
+    await check(page.locator('#agents-cicd-log-content')).toContainText('964 passed, 1 failed, 0 skipped');
+    await page.locator('#agents-cicd-tab-console').click();
+    await check(page.locator('#agents-cicd-log-content')).toContainText('[stage] compiling workspace');
+    await check(page.locator('#agents-cicd-log-next')).toBeEnabled();
+    await page.locator('#agents-cicd-log-next').click();
+    await check(page.locator('#agents-cicd-log-prev')).toBeEnabled();
+    // Keyboard select passing Compile dot and confirm focus survives refresh.
+    const compileDot=page.locator('#agents-cicd-stages-diagram .fg-flow-dot-button[data-stage-id="compile"]');
+    await compileDot.focus();await page.keyboard.press('Enter');
+    await check(compileDot).toHaveAttribute('aria-pressed','true');
+    await check(page.locator('#agents-cicd-log-status')).toContainText('0 errors');
+    for(const width of [320,390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'CI/CD stage inspector fits viewport');
+      assert.equal(await compileDot.evaluate(node=>node.getBoundingClientRect().height>=44),true,'interactive CI/CD stage dot meets 44px touch target');
+    }
+    await screenshot(page,'ide-agents-cicd-stages.png');
+    await page.locator('#agents-back').click();
+    await check(page.locator('#agents-branches-panel')).toBeVisible();
+    await check(page.locator('#agents-branches-list')).toContainText('forge/agent/agy-primary');
+    await check(page.locator('#agents-branches-list')).toContainText('Synced with main');
 
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
@@ -3733,9 +3840,32 @@ async function agentsJourney() {
   }
 }
 
+async function agentsTriageJourney() {
+  agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
+  let fixture, context;
+  try {
+    const relay = await agentsRelayOwner.ready;
+    relay.enableAutonomy();
+    relay.enableExternal();
+    relay.enableExternalWorkflow();
+    fixture = await startFixture(false, false, { agents: relay });
+    context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const traffic = await observe(context);
+    const { page, errors } = await connect(context, fixture);
+    await exerciseAgentsTriage({ page, relay, check, screenshot, origin: fixture.origin });
+    await assertRetiredChat(page, traffic);
+    assert.equal(traffic.businessCalls().mail, 0, 'triage uses no retired Mail gateway');
+    assert.deepEqual(errors, []);
+  } finally {
+    try { if (context) await context.close(); }
+    finally { try { if (fixture) await stopFixture(fixture); } finally { await agentsRelayOwner.close(); } }
+  }
+}
+
 async function realJourney() {
   report.start('real.report.partial');
   await agentsJourney();
+  await agentsTriageJourney();
   await sourceSearchJourney();
   const fixture = await startFixture();
   report.setStage('context_start');

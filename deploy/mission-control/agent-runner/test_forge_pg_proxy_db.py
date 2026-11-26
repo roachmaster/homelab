@@ -56,12 +56,12 @@ def _free_port():
 def _parse_apply_sql():
     """(version, filename, name) triples from apply.sql, in order.
 
-    apply.sql stops at the preparation migration (42); cutover (43)
+    apply.sql stops at the preparation migration (50); cutover (51)
     applies only via apply-cutover.sql, so the count is not pinned
-    to 42 — assert the files and values agree and the versions
-    increase from 1 with only the reserved 41 skipped (the number a
-    previously submitted candidate carried for preparation, before
-    main's provider author handoff took 40)."""
+    to 50 — assert the files and values agree and the versions
+    increase from 1 with no skip (the merged chain is contiguous:
+    backup/main's consolidation took 41-49 and the proxy pair was
+    renumbered 42/43 to 50/51)."""
     with open(os.path.join(SQL_DIR, "apply.sql"),
                encoding="utf-8") as handle:
         text = handle.read()
@@ -75,8 +75,8 @@ def _parse_apply_sql():
     versions = [version for version, _, _ in triples]
     assert versions == sorted(set(versions)) and versions[0] == 1, (
         f"apply.sql versions must strictly increase from 1: {versions}")
-    assert set(range(1, versions[-1] + 1)) - set(versions) == {41}, (
-        f"apply.sql may skip only the reserved 41: {versions}")
+    assert set(range(1, versions[-1] + 1)) - set(versions) == set(), (
+        f"apply.sql versions must be contiguous from 1: {versions}")
     return triples
 
 
@@ -87,7 +87,7 @@ def _normalize(sql):
 
 
 def _parse_cutover_sql():
-    """(version, filename, name) for the cutover migration (43) from
+    """(version, filename, name) for the cutover migration (51) from
     apply-cutover.sql: the only path that applies it."""
     with open(os.path.join(SQL_DIR, "apply-cutover.sql"),
                encoding="utf-8") as handle:
@@ -262,12 +262,12 @@ class ScratchCluster:
                   "GRANT CONNECT ON DATABASE forge_agent TO muse_events")
 
     def apply_cutover(self):
-        """Apply ONLY migration 43 via apply-cutover.sql's model, as
+        """Apply ONLY migration 51 via apply-cutover.sql's model, as
         forge_agent_owner, in one transaction: the cutover guard
         (39 applied) plus the migration and its schema_migrations
         row. The caller re-runs apply_grant_files() afterwards, the
         way setup-postgres.sh does (the grant files re-apply the
-        cutover revocation when 43 is recorded)."""
+        cutover revocation when 51 is recorded)."""
         version, filename, name = _parse_cutover_sql()
         path = os.path.join(SQL_DIR, "migrations", filename)
         script = os.path.join(self.root, "apply-cutover.sql")
@@ -278,9 +278,9 @@ class ScratchCluster:
                 "SELECT pg_catalog.pg_advisory_xact_lock(20261111, 1);",
                 "DO $cutover_guard$ BEGIN IF NOT EXISTS("
                 "SELECT 1 FROM forge_agent.schema_migrations"
-                " WHERE version = 42 AND name = 'pg_proxy_preparation'"
+                " WHERE version = 50 AND name = 'pg_proxy_preparation'"
                 ") THEN RAISE EXCEPTION 'cutover requires the"
-                " preparation migration (42) first'; END IF; END"
+                " preparation migration (50) first'; END IF; END"
                 " $cutover_guard$;",
                 f"\\ir {path}",
                 "INSERT INTO forge_agent.schema_migrations"
@@ -311,7 +311,7 @@ class ScratchCluster:
 
 
 class ProxyDbTestCase(unittest.TestCase):
-    """Base: one scratch cluster per test class, at M42 + grants."""
+    """Base: one scratch cluster per test class, at M50 + grants."""
 
     cluster = None
     proxy_port = None
@@ -323,7 +323,7 @@ class ProxyDbTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls.cluster = ScratchCluster()
         cls.cluster.start()
-        cls.cluster.apply_migrations(42)
+        cls.cluster.apply_migrations(50)
         cls.cluster.apply_grant_files()
         cls.proxy_port = _free_port()
         cls.tokens = {}
@@ -1954,10 +1954,10 @@ class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
             "SELECT version FROM forge_agent.schema_migrations"
             " ORDER BY version")
         versions = [row[0] for row in rows]
-        self.assertEqual(versions[-1], 42)
-        self.assertNotIn(43, versions)
+        self.assertEqual(versions[-1], 50)
+        self.assertNotIn(51, versions)
         version, _, name = _parse_cutover_sql()
-        self.assertEqual((version, name), (43, "pg_proxy_cutover"))
+        self.assertEqual((version, name), (51, "pg_proxy_cutover"))
 
     def test_verify_sql_passes_at_preparation(self):
         ok, output = self.cluster.run_verifier(
@@ -1988,11 +1988,11 @@ class CutoverStageTest(ProxyDbTestCase, FixtureMixin):
 
     @classmethod
     def setUpClass(cls):
-        # Like ProxyDbTestCase but at M43: preparation, cutover,
+        # Like ProxyDbTestCase but at M51: preparation, cutover,
         # then the grant files again (the cutover re-revocation).
         cls.cluster = ScratchCluster()
         cls.cluster.start()
-        cls.cluster.apply_migrations(42)
+        cls.cluster.apply_migrations(50)
         cls.cluster.apply_grant_files()
         cls.cluster.apply_cutover()
         cls.cluster.apply_grant_files()
@@ -2107,7 +2107,7 @@ class AdmissionTest(unittest.TestCase):
         cls.cluster = ScratchCluster()
         cls.port = _free_port()
         cls.cluster.start(tcp_port=cls.port)
-        cls.cluster.apply_migrations(42)
+        cls.cluster.apply_migrations(50)
         cls.cluster.apply_grant_files()
         cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
         cls.cluster.install_hba("postgres-worker-hba.conf")
@@ -2193,7 +2193,7 @@ class PreparationAdmissionTest(unittest.TestCase):
         cls.cluster = ScratchCluster()
         cls.port = _free_port()
         cls.cluster.start(tcp_port=cls.port)
-        cls.cluster.apply_migrations(42)
+        cls.cluster.apply_migrations(50)
         cls.cluster.apply_grant_files()
         cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
         cls.cluster.set_password("muse_events", MUSE_EVENTS_PASSWORD)

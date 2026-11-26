@@ -47,6 +47,16 @@ BEGIN
  END IF;
 END;
 $delivery_reads$;
+DO $cicd_branch_reads$
+BEGIN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41 AND name='agent_branch_and_cicd_stages') THEN
+  GRANT SELECT ON forge_agent.agent_branch_state,forge_agent.jenkins_stage_results,forge_agent.jenkins_stage_log_chunks TO muse_events;
+ END IF;
+END;
+$cicd_branch_reads$;
+-- No read grants for the migration 0044 identity catalog tables or the
+-- migration 0045 deadline-extension table: those migrations deliberately
+-- revoke muse_events access, and the reader must stay excluded.
 -- Match the pre-existing permission for future tables from this owner/schema.
 ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent
     GRANT SELECT ON TABLES TO muse_events;

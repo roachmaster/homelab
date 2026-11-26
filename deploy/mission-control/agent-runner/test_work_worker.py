@@ -335,6 +335,67 @@ class WorkerLifecycleTest(unittest.TestCase):
                 if drift == "lease":
                     self.assertIn("record-stop", events)
 
+    def test_typed_renewal_never_labels_cancellation_or_deadline_as_lease_lost(self):
+        import work_worker
+        cases = (("task_cancelled", "scope_stopped", work_worker.CANCELLED_STOP_SUMMARY),
+                 ("deadline_exceeded", "deadline_exceeded", work_worker.DEADLINE_STOP_SUMMARY),
+                 ("lease_expired", "lease_lost", None))
+        for status, cause, summary in cases:
+            with self.subTest(status=status), TemporaryDirectory(prefix="forge-typed-renew-") as root:
+                worker, value, store, events = self._worker(root)
+                signals, stops = [], []
+                store.renew_status = lambda lease_value, signal=None: (signals.append(signal), status)[1]
+                store.record_stop = lambda *args: stops.append(args)
+                worker.process(value)
+                self.assertNotIn("runner", events)
+                self.assertEqual(store.publications, [])
+                self.assertEqual(stops[-1][3], cause)
+                if summary is not None:
+                    self.assertEqual(stops[-1][2], summary)
+                self.assertNotIn("renew", events)  # typed renewal replaces the boolean call
+                self.assertIsNone(signals[0])
+
+    def test_typed_renewal_falls_back_to_boolean_renew_before_m45(self):
+        with TemporaryDirectory(prefix="forge-typed-renew-fallback-") as root:
+            worker, value, store, events = self._worker(root)
+            store.renew_status = Mock(return_value=None)
+            worker.process(value)
+            self.assertIn("renew", events)
+            self.assertEqual(store.publications[0][1], "awaiting_review")
+
+    def test_agent_output_signals_renewal_and_extended_deadline_reaches_runner(self):
+        from datetime import datetime, timedelta, timezone
+        with TemporaryDirectory(prefix="forge-deadline-hint-") as root:
+            worker, value, store, events = self._worker(root)
+            calls, hints = [], []
+            store.renew_deadline = lambda lease_value, signal=None: (calls.append(signal), {
+                "status": "renewed", "deadline_at": datetime.now(timezone.utc) + timedelta(minutes=40), "extended": True})[1]
+            base = worker.runner
+
+            class HookedRunner:
+                def prepare(self):
+                    base.prepare()
+
+                def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None,
+                        report_activity=None, deadline_hint=None):
+                    report_activity()
+                    worker_renewed = calls[:]
+                    hints.append((deadline_hint(), worker_renewed))
+                    return base.run(lease, workspace, stop, report_progress=report_progress,
+                                    plan_context=plan_context, feedback_context=feedback_context)
+
+            worker.runner = HookedRunner()
+            worker.process(value)
+            self.assertEqual(store.publications[0][1], "awaiting_review")
+            self.assertGreater(hints[0][0], 30 * 60)
+            self.assertNotIn("renew", events)  # M47 renewal replaces the boolean call
+
+    def test_cancellation_without_proven_scope_stop_is_interrupted(self):
+        import work_worker
+        self.assertEqual(work_worker._stop_cause("scope_stopped", {"scope_stopped": False}), "interrupted")
+        self.assertEqual(work_worker._stop_cause("scope_stopped", {"scope_stopped": True}), "scope_stopped")
+        self.assertEqual(work_worker._stop_cause("lease_lost", None), "lease_lost")
+
     def test_lost_publication_ack_retries_receipt_without_rerunning_agent(self):
         with TemporaryDirectory(prefix="forge-worker-replay-") as root:
             worker, value, store, events = self._worker(root)

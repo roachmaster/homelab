@@ -80,6 +80,8 @@ def _row_to_event(row) -> JenkinsEventRecord:
         reconciled=bool(row["reconciled"]),
         completion_time_estimated=bool(row["completion_time_estimated"]),
         started_at=_iso_utc(row["started_at"]),
+        action_id=str(row["action_id"]) if row.get("action_id") is not None else None,
+        branch_scope=row.get("branch_scope"),
     )
 
 
@@ -304,14 +306,16 @@ class JenkinsStore:
                     event_kind, build_number, queue_id, commit_sha, branch, build_result,
                     stage_name, stage_status, duration_ms, build_url, summary,
                     correlation_id, occurred_at, payload_sha256,
-                    actor, backfilled, reconciled, completion_time_estimated, started_at
+                    actor, backfilled, reconciled, completion_time_estimated, started_at,
+                    action_id, branch_scope
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s,
+                    %s, %s
                 )
                 RETURNING event_id, project_alias, sequence, payload_sha256
                 """,
@@ -341,6 +345,8 @@ class JenkinsStore:
                     event.reconciled,
                     event.completion_time_estimated,
                     event.started_at,
+                    UUID(event.action_id) if event.action_id is not None else None,
+                    event.branch_scope,
                 ),
             )
             inserted = cursor.fetchone()

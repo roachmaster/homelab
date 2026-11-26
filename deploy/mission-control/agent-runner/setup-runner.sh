@@ -100,6 +100,7 @@ publish "$directory/work_store.py" "$target/work_store.py"
 publish "$directory/proxy_client.py" "$target/proxy_client.py"
 publish "$directory/proxy_statements.py" "$target/proxy_statements.py"
 publish "$directory/work_events.py" "$target/work_events.py"
+publish "$directory/work_failure_cause.py" "$target/work_failure_cause.py"
 publish "$directory/work_api.py" "$target/work_api.py"
 publish "$directory/work_owner_control.py" "$target/work_owner_control.py"
 publish "$directory/work_owner_reverification.py" "$target/work_owner_reverification.py"
@@ -164,6 +165,8 @@ publish "$directory/jenkins_emitter.py" "$target/jenkins_emitter.py"
 publish "$directory/jenkins_emit_tool.py" "$target/jenkins_emit_tool.py"
 publish "$directory/work_jenkins_lifecycle.py" "$target/work_jenkins_lifecycle.py"
 publish "$directory/work_pipeline_projection.py" "$target/work_pipeline_projection.py"
+publish "$directory/work_agent_branch.py" "$target/work_agent_branch.py"
+publish "$directory/work_cicd_artifacts.py" "$target/work_cicd_artifacts.py"
 publish "$directory/runner.py" "$target/runner.py"
 publish "$directory/forge-agent-runner.service" "$unit"
 systemctl daemon-reload
@@ -201,7 +204,7 @@ PY
 # --- forge-pg-proxy -------------------------------------------------------
 # Publish the proxy alongside the runner. The proxy is enabled
 # unconditionally but only started once the proxy HBA rules are
-# installed (preparation, migration 42, or cutover, migration 43);
+# installed (preparation, migration 50, or cutover, migration 51);
 # before that it cannot reach Postgres and would only serve 503
 # on /health. Starting at preparation lets the operator run the
 # pre-cutover proxy verification sequence (proxy_verify.py) before
@@ -312,5 +315,5 @@ PY
     /usr/bin/python3 "$directory/proxy_verify.py" \
         --config-dir "$proxy_config_directory"
 else
-    printf '%s\n' 'Forge Postgres proxy published but not started: proxy HBA rules are not installed (preparation, migration 42, not yet applied).'
+    printf '%s\n' 'Forge Postgres proxy published but not started: proxy HBA rules are not installed (preparation, migration 50, not yet applied).'
 fi

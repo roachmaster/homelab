@@ -215,6 +215,7 @@ def func_params(full, params):
 # from the migration sources; keep it in sync with them.
 # ---------------------------------------------------------------------------
 FUNC_CATALOG = {
+    'forge_agent.coding_identity_register': [['p_owner', 'text'], ['p_project', 'text'], ['p_kind', 'text'], ['p_subject', 'text'], ['p_document', 'jsonb'], ['p_legacy_digest', 'text']],
     'forge_agent_worker_api.advertise': [['p_model', 'text'], ['p_ready', 'boolean']],
     'forge_agent_worker_api.claim': [['p_model', 'text']],
     'forge_agent_worker_api.lock_attempt': [['p_run', 'uuid'], ['p_token', 'uuid']],
@@ -424,13 +425,14 @@ ENTRY_POINTS = {
 #   caller itself holds no read allowlist at all).
 # ---------------------------------------------------------------------------
 READ_TABLES = {
+    "forge_agent.agent_branch_state": (["owner_id", "project_alias", "agent_profile"], "project_alias", ("owner",)),
     "forge_agent.coding_tasks": (["owner_id", "project_alias", "id", "status", "workflow_id", "mode"], "created_at", ("owner",)),
     "forge_agent.coding_workflows": (["workflow_id", "owner_id", "project_alias", "root_task_id", "phase"], "created_at", ("owner",)),
     "forge_agent.coding_workflow_reviews": (["workflow_review_id", "workflow_id", "status", "owner_id", "project_alias"], "created_at", ("join", "JOIN forge_agent.coding_workflows wf ON wf.workflow_id = t.workflow_id", "wf.owner_id")),
     "forge_agent.coding_workflow_actions": (["action_id", "workflow_id", "status", "kind", "source_key", "workflow_review_id", "source_publication_id"], "created_at", ("join", "JOIN forge_agent.coding_workflows wf ON wf.workflow_id = t.workflow_id", "wf.owner_id")),
     "forge_agent.coding_events": (["owner_id", "project_alias", "task_id", "event_kind"], "sequence", ("owner",)),
     "forge_agent.coding_control_receipts": (["owner_id", "project_alias", "task_id", "idempotency_key", "action"], "created_at", ("owner",)),
-    "forge_agent.coding_reviews": (["review_id", "task_id", "status", "owner_id", "project_alias", "attempt_id", "phase"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
+    "forge_agent.coding_reviews": (["review_id", "task_id", "status", "owner_id", "project_alias", "attempt_id", "phase", "candidate_commit"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
     "forge_agent.coding_attempts": (["owner_id", "project_alias", "task_id", "attempt_id", "agent_profile", "published_at"], "started_at", ("owner",)),
     "forge_agent.coding_publications": (["publication_id", "task_id", "status", "owner_id", "project_alias", "attempt_id", "review_id"], "created_at", ("join", "JOIN forge_agent.coding_tasks ct ON ct.id = t.task_id", "ct.owner_id")),
     "forge_agent.coding_result_chunks": (["owner_id", "project_alias", "task_id"], "created_at", ("owner",)),
@@ -457,6 +459,8 @@ READ_TABLES = {
     "forge_agent.jenkins_events": (["event_id", "owner_id", "project_alias", "job_name", "jenkins_instance", "delivery_id", "commit_sha"], "sequence", ("owner",)),
     "forge_agent.jenkins_event_deliveries": (["delivery_row_id", "event_id", "status", "consumer_name", "owner_id"], "created_at", ("join", "JOIN forge_agent.jenkins_events je ON je.event_id = t.event_id", "je.owner_id")),
     "forge_agent.jenkins_observations": (["owner_id", "project_alias", "jenkins_instance", "job_name", "observation_key"], "updated_at", ("owner",)),
+    "forge_agent.jenkins_stage_results": (["owner_id", "project_alias", "action_id", "stage_index", "correlation_id"], "created_at", ("owner",)),
+    "forge_agent.jenkins_stage_log_chunks": (["owner_id", "project_alias", "action_id", "stage_index", "chunk_index"], "chunk_index", ("owner",)),
     "forge_agent.inference_results": (["run_id", "attempt_token"], "accepted_at", ("join", "JOIN forge_agent.runs r ON r.id = t.run_id JOIN forge_agent.conversations c ON c.id = r.conversation_id", "c.owner_id")),
     "forge_agent.mail_threads": (["owner_id", "id"], "updated_at", ("owner",)),
     "forge_agent.mail_messages": (["owner_id", "thread_id", "sequence", "run_id"], "sequence", ("owner",)),
@@ -922,6 +926,107 @@ READ_QUERIES = {
         "AND phase NOT IN ('completed', 'cancelled', 'escalated') "
         "ORDER BY created_at",
         [("owner_id", "text", True)]),
+    # work_store: tasks linked across a workflow / repair family,
+    # by correlation, workflow, root id, or repair root. A NULL
+    # workflow_id never matches, which reproduces the no-workflow
+    # variant of the direct query.
+    "linked_family_tasks": (
+        "SELECT id, correlation_id FROM forge_agent.coding_tasks "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND (correlation_id = %(correlation_id)s OR workflow_id = %(workflow_id)s "
+        "OR id = %(root_id)s OR repair_root_task_id = %(root_id)s) "
+        "LIMIT 64",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("correlation_id", "uuid", True), ("workflow_id", "uuid", False),
+         ("root_id", "uuid", True)]),
+    # work_store: hosted-check observations for a task family,
+    # joined through their publications.
+    # work_store: distinct candidate commits across a task family.
+    "candidate_commits_for_tasks": (
+        "SELECT DISTINCT candidate_commit FROM forge_agent.coding_reviews "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND task_id = ANY(%(task_ids)s::uuid[]) "
+        "AND candidate_commit IS NOT NULL",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_ids", "uuid[]", True)]),
+    # work_workflow: latest completed revival decision for a workflow.
+    "revival_floor": (
+        "SELECT max(created_at) AS floor FROM forge_agent.coding_workflow_actions "
+        "WHERE workflow_id = %(workflow_id)s AND owner_id = %(owner_id)s "
+        "AND kind = 'decide' "
+        "AND status = 'completed' AND source_key LIKE %(source_key_pattern)s",
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("source_key_pattern", "text", True)]),
+    # work_workflow: how many revival decisions a workflow has used.
+    "revival_decide_count": (
+        "SELECT count(*) AS n FROM forge_agent.coding_workflow_actions "
+        "WHERE workflow_id = %(workflow_id)s AND owner_id = %(owner_id)s "
+        "AND kind = 'decide' "
+        "AND source_key LIKE %(source_key_pattern)s",
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("source_key_pattern", "text", True)]),
+    # work_store: immutable stage rows for a correlation family.
+    "stage_results_for_correlations": (
+        "SELECT action_id, stage_index, correlation_id, task_id, job_name, "
+        "build_number, commit_sha, branch_name, branch_scope, pipeline_scope, "
+        "logical_stage_id, phase_id, phase_kind, label, status, returncode, "
+        "duration_ms, tests_passed, tests_failed, tests_skipped, test_summary, "
+        "error_excerpt, log_sha256, log_byte_count, log_chunk_count, created_at "
+        "FROM forge_agent.jenkins_stage_results "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND correlation_id = ANY(%(correlation_ids)s::uuid[]) "
+        "ORDER BY created_at ASC, action_id ASC, stage_index ASC LIMIT 512",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("correlation_ids", "uuid[]", True)]),
+    # work_store: the frozen policy document for a workflow (M44).
+    "workflow_policy_document": (
+        "SELECT c.document FROM forge_agent.coding_task_identities i "
+        "JOIN forge_agent.coding_identity_catalog c "
+        "ON c.identity_id = i.workflow_policy_id "
+        "WHERE i.owner_id = %(owner_id)s AND i.workflow_id = %(workflow_id)s "
+        "ORDER BY i.created_at LIMIT 1",
+        [("owner_id", "text", True), ("workflow_id", "uuid", True)]),
+    "hosted_observations_for_tasks": (
+        "SELECT h.candidate_commit, h.checks "
+        "FROM forge_agent.coding_hosted_checks h "
+        "JOIN forge_agent.coding_publications p "
+        "ON p.publication_id = h.publication_id "
+        "WHERE h.owner_id = %(owner_id)s AND h.project_alias = %(project_alias)s "
+        "AND p.task_id = ANY(%(task_ids)s::uuid[]) "
+        "ORDER BY h.observed_at ASC, h.observation_id ASC LIMIT 32",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("task_ids", "uuid[]", True)]),
+    # work_store: Jenkins events for a correlation family, matched
+    # by correlation or by candidate commit. An empty commit list
+    # never matches, reproducing the correlation-only variant. The
+    # post-M39 columns (action_id, branch_scope) are always selected:
+    # the merged schema is the only one the proxy serves.
+    "jenkins_events_for_family": (
+        "SELECT event_kind, job_name, build_number, queue_id, commit_sha, "
+        "branch, build_result, stage_name, stage_status, occurred_at, "
+        "sequence, correlation_id, action_id, branch_scope "
+        "FROM forge_agent.jenkins_events "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND (correlation_id = ANY(%(correlation_ids)s) "
+        "OR commit_sha = ANY(%(commit_shas)s)) "
+        "ORDER BY sequence ASC LIMIT 512",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("correlation_ids", "text[]", True), ("commit_shas", "text[]", True)]),
+    # work_store: stage rows for one stage of a CI/CD log view,
+    # addressed by logical stage id or phase id.
+    "stage_log_rows": (
+        "SELECT stage_index, phase_id, logical_stage_id, label, status, "
+        "returncode, tests_passed, tests_failed, tests_skipped, "
+        "test_summary, error_excerpt, log_sha256, log_byte_count, "
+        "log_chunk_count FROM forge_agent.jenkins_stage_results "
+        "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
+        "AND action_id = %(action_id)s "
+        "AND correlation_id = ANY(%(correlation_ids)s::uuid[]) "
+        "AND (logical_stage_id = %(stage_id)s OR phase_id = %(stage_id)s) "
+        "ORDER BY stage_index ASC",
+        [("owner_id", "text", True), ("project_alias", "text", True),
+         ("action_id", "uuid", True), ("correlation_ids", "uuid[]", True),
+         ("stage_id", "text", True)]),
     "workflow_root_task": (
         "SELECT w.root_task_id FROM forge_agent.coding_tasks t "
         "JOIN forge_agent.coding_workflows w ON w.workflow_id = t.workflow_id "
@@ -1550,6 +1655,7 @@ CALLER_ALLOWLISTS = {
             "forge_external_workflow_api.enqueue_v2",
             "forge_external_workflow_api.service_scope",
             "forge_agent.amend_agent_retry_policy",
+            "forge_agent.coding_identity_register",
             "forge_agent.coding_make_feedback",
             "forge_agent.coding_queue_approved_review",
             "forge_agent.coding_schedule_repair",
@@ -1568,7 +1674,7 @@ CALLER_ALLOWLISTS = {
         },
         "op": {"coding_task_insert", "coding_task_update", "coding_workflow_insert", "coding_workflow_update", "coding_workflow_review_insert", "coding_workflow_review_update", "coding_workflow_action_insert", "coding_workflow_action_update", "coding_event_insert", "coding_control_receipt_insert", "coding_review_insert", "coding_review_insert_copy", "coding_review_update", "coding_plan_decision_insert", "coding_review_policy_upsert", "coding_review_budget_insert", "coding_worker_grant_insert", "coding_usage_refresh_request_insert", "ide_conversation_insert", "ide_conversation_delete", "ide_run_insert", "ide_run_update", "ide_run_delete", "ide_message_insert", "ide_tool_call_insert", "ide_tool_call_update", "ide_tool_call_update_by_run", "ide_tool_result_insert", "ide_run_event_insert", "ide_workspace_tab_insert", "ide_workspace_tab_update", "ide_workspace_tab_delete", "ide_workspace_history_insert", "ide_workspace_history_update", "ide_chat_insert", "ide_chat_update", "mail_thread_insert", "mail_thread_update", "mail_message_insert", "jenkins_event_insert", "jenkins_event_delivery_insert", "jenkins_event_delivery_update", "jenkins_observation_insert", "inference_result_delete", "ext_workflow_insert", "ext_workflow_update", "ext_task_insert", "ext_context_insert", "ext_review_insert", "ext_review_update", "ext_action_insert", "ext_action_update", "ext_plan_approve_override_insert", "ext_workflow_cancel", "coding_workflow_cancel", "workflow_action_lease", "ide_run_admit", "ide_run_claim_next", "ide_tool_started", "ide_tool_finished", "ide_interrupt_conversation_runs", "ide_tool_calls_mark_outcome_unknown", "ide_run_cancel", "workflow_retry_allowance_amend"},
         "read": "*",
-        "readq": {"action_source_count", "attempt_reservation", "attempt_result_content", "attempts_leased", "blocked_witnessed", "coding_events_after", "deadline_retry_actions", "deadline_retry_count", "gpu_ready_models", "gpu_worker_ready", "ide_chat_source", "ide_chats_visible", "ide_tabs_beyond_offset", "inference_ready_runs", "jenkins_next_sequence", "mail_page", "mail_thread_messages", "max_infrastructure_retries", "max_review_no", "merge_commit_by_project", "merge_head", "message_totals", "needs_reconcile_witnessed", "publication_required_green", "published_with_green", "recent_completed_transcripts", "result_chunks_page", "resume_receipt", "retry_policy_checkpoint", "review_root_tasks", "review_with_max_rounds", "run_chat_mail", "run_detail", "run_events_after", "run_fingerprint_by_conversation", "run_fingerprint_by_mail", "run_has_chat_or_mail", "run_last_error", "run_mail_source", "run_messages_with_source_prompt", "run_queue_totals", "sibling_failure", "stale_distributed_runs", "sweep_escalated_reviews", "sweep_handoff_reviews", "author_handoff_available", "sweep_needs_reconcile", "sweep_needs_reconcile_handoff", "sweep_orphan_tasks", "sweep_publication_failures", "sweep_retry_policy_workflows", "task_receipt_by_idempotency", "task_root", "tasks_page", "tasks_with_attempts", "usage_refresh_pending", "verification_retries_sum", "worker_readiness_catalog", "worker_readiness_fresh", "workflow_action_by_receipt_review", "workflow_actions_by_source_or_policy", "workflow_actions_by_source_or_policy_exists", "workflow_actions_by_source_or_policy_request", "workflow_busy", "workflow_root_task", "workflow_with_budget", "workflows_open", "writer_active"},
+        "readq": {"action_source_count", "attempt_reservation", "attempt_result_content", "attempts_leased", "blocked_witnessed", "candidate_commits_for_tasks", "coding_events_after", "deadline_retry_actions", "deadline_retry_count", "gpu_ready_models", "gpu_worker_ready", "hosted_observations_for_tasks", "ide_chat_source", "ide_chats_visible", "ide_tabs_beyond_offset", "inference_ready_runs", "jenkins_events_for_family", "jenkins_next_sequence", "linked_family_tasks", "mail_page", "mail_thread_messages", "max_infrastructure_retries", "max_review_no", "merge_commit_by_project", "merge_head", "message_totals", "needs_reconcile_witnessed", "publication_required_green", "published_with_green", "recent_completed_transcripts", "result_chunks_page", "resume_receipt", "revival_decide_count", "revival_floor", "retry_policy_checkpoint", "review_root_tasks", "review_with_max_rounds", "run_chat_mail", "run_detail", "run_events_after", "run_fingerprint_by_conversation", "run_fingerprint_by_mail", "run_has_chat_or_mail", "run_last_error", "run_mail_source", "run_messages_with_source_prompt", "run_queue_totals", "sibling_failure", "stage_log_rows", "stage_results_for_correlations", "stale_distributed_runs", "sweep_escalated_reviews", "sweep_handoff_reviews", "author_handoff_available", "sweep_needs_reconcile", "sweep_needs_reconcile_handoff", "sweep_orphan_tasks", "sweep_publication_failures", "sweep_retry_policy_workflows", "task_receipt_by_idempotency", "task_root", "tasks_page", "tasks_with_attempts", "usage_refresh_pending", "verification_retries_sum", "worker_readiness_catalog", "worker_readiness_fresh", "workflow_action_by_receipt_review", "workflow_actions_by_source_or_policy", "workflow_actions_by_source_or_policy_exists", "workflow_actions_by_source_or_policy_request", "workflow_busy", "workflow_policy_document", "workflow_root_task", "workflow_with_budget", "workflows_open", "writer_active"},
         "notify": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_external_delivery", "forge_jenkins_events", "forge_coding_usage_refresh"},
         "subscribe": {"forge_coding_jobs", "forge_agent_jobs", "forge_agent_events", "forge_agent_results", "forge_jenkins_events"},
     },

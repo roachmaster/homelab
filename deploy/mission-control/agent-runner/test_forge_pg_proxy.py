@@ -1255,15 +1255,17 @@ class ProxyMigrationGuardTest(unittest.TestCase):
 
     UNMIGRATED = {
         "work_store.py": {
-            "_control_task", "_workflow_projection", "accept",
+            "_control_task", "_record_task_identity", "_register_identity",
+            "_workflow_projection", "accept",
             "handoff_author", "plan_decide",
-            "publication_retry", "repair", "resume", "review_decide"},
+            "publication_retry", "repair", "resume", "review_decide",
+            "submit"},
         "work_workflow.py": {
             "_admit_reviewer", "_apply_verdict", "_cancel_workflow",
-            "_code_review_source", "_escalate",
+            "_code_review_source", "_escalate", "_revive",
             "_verify_peer_recovery_source", "defer_source_readiness",
             "process", "retry_native_timeout", "retry_peer_verdict",
-            "retry_preparation", "validate"},
+            "retry_preparation", "revive_workflow", "validate"},
         "work_owner_control.py": {"resume", "review_decide"},
         "work_owner_reverification.py": {"recover"},
         "queue_store.py": {

@@ -18,6 +18,7 @@ import threading
 import jenkins_api
 import jenkins_config
 from jenkins_emitter import InProcessJenkinsEmitter
+from work_agent_branch import AgentBranchProvider, BranchOwnershipConflictError, PERSISTENT_BRANCH_POLICY
 from work_executor import SystemdSupervisor, WorkspaceProvider
 from work_external_delivery import DeliveryConfig, DeliveryProviderFactory, command, read_private
 from work_jenkins_lifecycle import DRAIN_SHUTDOWN_TIMEOUT_SECONDS, IntentDrain
@@ -65,7 +66,8 @@ def validate_job(config, job):
 
 class PublicationWorker:
     def __init__(self, config, store, snapshots, git, checks, pull_requests, *, candidates, reviewer=None, merger=None, stop=None,
-                 native_ci=None, post_merge=None, source_observer=None, release=None, jenkins_drain=None):
+                 native_ci=None, post_merge=None, source_observer=None, release=None, jenkins_drain=None,
+                 branch_provider=None):
         self.config, self.store, self.snapshots, self.git = config, store, snapshots, git
         self.checks, self.pull_requests = checks, pull_requests
         self.candidates, self.reviewer = candidates, reviewer
@@ -73,6 +75,7 @@ class PublicationWorker:
         self.native_ci = native_ci
         self.post_merge = post_merge
         self.jenkins_drain = jenkins_drain
+        self.branch_provider = branch_provider
         self.automation = tuple(port for port in (post_merge, source_observer, release) if port is not None)
         self._automation_index = 0
         self._yield_post_merge = False
@@ -125,37 +128,102 @@ class PublicationWorker:
                 self.git.verify(repository, head)
                 if self.native_ci is not None:
                     job = self.native_ci.publication_job(job)
+                reservation = None
+                if self.branch_provider is not None and self.branch_provider.persistent_enabled:
+                    reservation = self.branch_provider.acquire(job, publication_id=job["publication_id"])
+                    if reservation is not None:
+                        job = {**job, "agent_profile": reservation.agent_profile, "branch_name": reservation.branch_name}
                 require_lease()
-                branch = branch_name(job)
+                branch = reservation.branch_name if reservation is not None else branch_name(job, self.config)
                 if not self.store.publication_finish(job, "publishing", "Isolated fixed checks passed.",
                                                      branch=branch, commit_sha=head):
                     raise PublicationError("publication_lease_lost")
                 require_lease()
                 existing_head = self.git.remote_head(job)
                 previous = job.get("expected_remote_head")
-                if existing_head not in ({None, head} if previous is None else {previous, head}):
-                    raise PublicationError("remote_branch_identity_changed")
-                prior_url = self.pull_requests.find(job, previous) if previous and existing_head == previous else None
-                url = self.pull_requests.find(job, head) if existing_head == head or previous is None else None
-                if url is not None and existing_head != head:
-                    raise PublicationError("remote_branch_identity_changed")
-                if url is None:
-                    if existing_head != head:
-                        if previous is not None:
-                            self.git._git(repository, "merge-base", "--is-ancestor", previous, head)
-                        require_lease()
-                        self.git.push(job, repository, head)
-                        if self.git.remote_head(job) != head:
-                            raise PublicationError("remote_branch_identity_changed")
-                    require_lease()
-                    url = self.pull_requests.find(job, head) if prior_url else self.pull_requests.create(job, head)
+                if reservation is not None:
+                    allowed_heads = {None, head}
+                    for known in (previous, reservation.head_commit_sha, reservation.active_candidate_commit):
+                        if known is not None:
+                            allowed_heads.add(known)
+                    if existing_head not in allowed_heads:
+                        raise PublicationError("remote_branch_identity_changed")
+                    expected_pr_url = reservation.active_pr_url
+                    prior_url = (
+                        self.pull_requests.find(job, existing_head, expected_pr_url=expected_pr_url)
+                        if expected_pr_url is not None and existing_head is not None and existing_head != head
+                        else None
+                    )
+                    url = (
+                        self.pull_requests.find(job, head, expected_pr_url=expected_pr_url)
+                        if existing_head == head or expected_pr_url is None
+                        else None
+                    )
+                    if url is not None and existing_head != head:
+                        raise PublicationError("remote_branch_identity_changed")
                     if url is None:
-                        raise PublicationError("pull_request_update_unconfirmed")
+                        if existing_head != head:
+                            require_lease()
+                            self.git.push(
+                                job, repository, head,
+                                expected_remote_head=existing_head,
+                                reservation=reservation,
+                                pull_requests=self.pull_requests,
+                            )
+                            if self.git.remote_head(job) != head:
+                                raise PublicationError("remote_branch_identity_changed")
+                            self.branch_provider.record_publication(
+                                reservation, candidate_commit=head, publication_id=job["publication_id"]
+                            )
+                        require_lease()
+                        if prior_url or expected_pr_url:
+                            url = self.pull_requests.find(job, head, expected_pr_url=expected_pr_url or prior_url)
+                        else:
+                            open_prs = self.pull_requests.list_open(job)
+                            if open_prs:
+                                # Lost-ACK reconciliation for exact matching candidate only.
+                                if len(open_prs) == 1 and open_prs[0].get("head", {}).get("sha") == head:
+                                    url = self.pull_requests._validated(job, head, open_prs[0])
+                                else:
+                                    raise PublicationError("branch_open_pr_conflict")
+                            else:
+                                url = self.pull_requests.create(job, head)
+                        if url is None:
+                            raise PublicationError("pull_request_update_unconfirmed")
+                    self.branch_provider.record_publication(
+                        reservation, candidate_commit=head, pr_url=url, publication_id=job["publication_id"]
+                    )
+                else:
+                    if existing_head not in ({None, head} if previous is None else {previous, head}):
+                        raise PublicationError("remote_branch_identity_changed")
+                    prior_url = self.pull_requests.find(job, previous) if previous and existing_head == previous else None
+                    url = self.pull_requests.find(job, head) if existing_head == head or previous is None else None
+                    if url is not None and existing_head != head:
+                        raise PublicationError("remote_branch_identity_changed")
+                    if url is None:
+                        if existing_head != head:
+                            if previous is not None:
+                                self.git._git(repository, "merge-base", "--is-ancestor", previous, head)
+                            require_lease()
+                            self.git.push(job, repository, head)
+                            if self.git.remote_head(job) != head:
+                                raise PublicationError("remote_branch_identity_changed")
+                        require_lease()
+                        url = self.pull_requests.find(job, head) if prior_url else self.pull_requests.create(job, head)
+                        if url is None:
+                            raise PublicationError("pull_request_update_unconfirmed")
                 require_lease()
                 if not self.store.publication_finish(job, "published", "Verified implementation PR is ready for review.",
                                                      branch=branch, commit_sha=head, pr_url=url):
                     raise PublicationError("publication_lease_lost")
         except Exception as error:
+            if isinstance(error, BranchOwnershipConflictError):
+                try:
+                    self.store.publication_finish(job, "failed", "Publication stopped: " + error.code + ". Review before retrying.",
+                                                  branch=branch, commit_sha=head)
+                except Exception:
+                    LOG.warning("Publication receipt unavailable; remote actions will not be replayed")
+                return
             # A lost push/PR acknowledgement triggers read-only reconciliation,
             # never an automatic second push/create. Keep the known head receipt.
             if branch is not None and head is not None and not stop.is_set():
@@ -163,12 +231,21 @@ class PublicationWorker:
                     require_lease()
                     url = self.pull_requests.find(job, head)
                     if url and self.git.remote_head(job) == head:
+                        if self.branch_provider is not None and self.branch_provider.persistent_enabled:
+                            try:
+                                res = self.branch_provider.acquire(job, publication_id=job["publication_id"])
+                                if res is not None:
+                                    self.branch_provider.record_publication(
+                                        res, candidate_commit=head, pr_url=url, publication_id=job["publication_id"]
+                                    )
+                            except Exception:
+                                pass
                         self.store.publication_finish(job, "published", "Existing matching PR reconciled after an uncertain acknowledgement.",
                                                       branch=branch, commit_sha=head, pr_url=url)
                         return
                 except Exception:
                     pass
-            code = error.code if isinstance(error, PublicationError) else "publication_failed"
+            code = error.code if isinstance(error, (PublicationError, BranchOwnershipConflictError)) else "publication_failed"
             try:
                 self.store.publication_finish(job, "failed", "Publication stopped: " + code + ". Review before retrying.",
                                               branch=branch, commit_sha=head)
@@ -183,6 +260,8 @@ class PublicationWorker:
             return False
         if self.native_ci is not None:
             self.native_ci.reconcile_once()
+        if self.branch_provider is not None and self.branch_provider.persistent_enabled:
+            self.branch_provider.reconcile_reservations(self.pull_requests, self.config.repositories)
         if self.automation:
             # A slow observation can outlast the DB polling delay. Always give
             # review/merge/publication one turn before claiming more main CI.
@@ -197,8 +276,16 @@ class PublicationWorker:
                     if port.run_once():
                         self._yield_post_merge = True
                         return True
+        use_branch_claim = (
+            self.branch_provider is not None and self.branch_provider.persistent_enabled
+        )
         if self.reviewer is not None:
-            review = self.store.review_claim(self.config.worker.worker_id[:54] + "-reviewer")
+            claim_review = (
+                self.store.review_claim_for_branch_policy
+                if use_branch_claim and hasattr(self.store, "review_claim_for_branch_policy")
+                else self.store.review_claim
+            )
+            review = claim_review(self.config.worker.worker_id[:54] + "-reviewer")
             if review is not None:
                 self.reviewer.process(review)
                 return True
@@ -207,7 +294,12 @@ class PublicationWorker:
             if merge is not None:
                 self.merger.process(merge)
                 return True
-        job = self.store.publication_claim(self.config.worker.worker_id[:54] + "-publisher")
+        claim_pub = (
+            self.store.publication_claim_for_branch_policy
+            if use_branch_claim and hasattr(self.store, "publication_claim_for_branch_policy")
+            else self.store.publication_claim
+        )
+        job = claim_pub(self.config.worker.worker_id[:54] + "-publisher")
         if job is None:
             return False
         self.process(job)
@@ -372,7 +464,19 @@ class PublicationWorkerFactory:
         workspaces.prepare()
         supervisor = self.supervisor_factory(self.config.worker)
         store, snapshots = self.store_factory(self.config), self.snapshot_factory(workspaces)
+        store_has_branch_api = callable(getattr(type(store), "agent_branch_acquire", None)) or (
+            isinstance(getattr(store, "__dict__", None), dict)
+            and callable(store.__dict__.get("agent_branch_acquire"))
+        )
+        branch_provider = (
+            AgentBranchProvider(self.config.resolved_branch_policy(), store)
+            if getattr(self.config, "branch_policy", PERSISTENT_BRANCH_POLICY) == PERSISTENT_BRANCH_POLICY
+            and store_has_branch_api
+            else None
+        )
         git = self.git_factory(self.config)
+        if branch_provider is not None and hasattr(git, "branch_provider"):
+            git.branch_provider = branch_provider
         identities=None
         if self.config.hosted_provider=='jenkins'and self.config.native_identity_protocol=='content-v2':
             from work_artifact_source import GitArtifactProviderFactory
@@ -394,6 +498,8 @@ class PublicationWorkerFactory:
             native_ci = self.native_jenkins_factory(self.config, store, git, candidates, supervisor, client=pulls, stop=self.stop,
                                                     emitter=emitter, event_lookup=event_lookup, jenkins_instance=jenkins_instance,
                                                     **delivery_options,**identity_options)
+            if branch_provider is not None and hasattr(native_ci, "branch_provider"):
+                native_ci.branch_provider = branch_provider
             if drain_emitter is not None:
                 jenkins_drain = IntentDrain(native_ci.delivery.config.state_root / 'actions', drain_emitter)
             checks = hosted = native_ci
@@ -401,6 +507,8 @@ class PublicationWorkerFactory:
             checks = self.checks_factory(self.config, supervisor)
             hosted = (self.hosted_factory or GitHubHostedChecksProvider)(self.config, client=pulls)
         reviewer_options = {'stop': self.stop, 'hosted_checks': hosted}
+        if branch_provider is not None:
+            reviewer_options['branch_provider'] = branch_provider
         repair_sources = None
         if native_ci is not None:
             reviewer_options['native_ci'] = native_ci
@@ -409,6 +517,8 @@ class PublicationWorkerFactory:
                 reviewer_options['repair_sources'] = repair_sources
         reviewer = self.reviewer_factory(self.config, store, snapshots, git, checks, candidates, **reviewer_options)
         merge_options = {'stop': self.stop}
+        if branch_provider is not None:
+            merge_options['branch_provider'] = branch_provider
         if native_ci is not None:
             merge_options['native_ci'] = native_ci
         if repair_sources is not None:
@@ -434,7 +544,7 @@ class PublicationWorkerFactory:
                                  pulls, candidates=candidates,
                                  reviewer=reviewer, merger=merger, stop=self.stop, native_ci=native_ci,
                                  post_merge=post_merge, source_observer=source_observer, release=release,
-                                 jenkins_drain=jenkins_drain)
+                                 jenkins_drain=jenkins_drain, branch_provider=branch_provider)
 
 
 def default_store_factory(config):

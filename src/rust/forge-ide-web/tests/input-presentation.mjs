@@ -67,6 +67,7 @@ function sourceNode(tag = 'span') {
     hasAttribute(name) { return name === 'data-source-view' && this.tagName === 'PRE'; },
     append(...children) { for (const child of children) child.parentElement = this; this.children.push(...children); },
     replaceChildren(...children) { for (const child of children) child.parentElement = this; this.children = children; },
+    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(node => node !== this); this.parentElement = null; this.isConnected = false; },
     scrollIntoView() { this.scrolled = true; },
     focus() { document.activeElement = this; },
   };
@@ -520,3 +521,146 @@ lifecycle.get('pageshow')();
 flowView(sampleDiagram);
 assert.equal(flowMount.children.length, 5, 'new worker re-renders flow diagram without stale cache');
 console.log('Flow diagram presentation: SVG connectors, aria-current, state clamping, safe text, persistent disclosure and teardown passed.');
+
+// The list/detail primitive compares only opaque accepted context. Geometry and
+// native focus are deterministic here; real browser layout is a separate gate.
+function navigationNode(id, tag = 'div') {
+  const attrs = new Map();
+  return {
+    id, tagName: tag.toUpperCase(), dataset: {}, children: [], hidden: false,
+    isConnected: true, disabled: false, tabIndex: -1, scrollTop: 0, scrollLeft: 0,
+    clientTop: 0, clientHeight: 240, classList: { contains() { return false; } },
+    contains(node) { for (let p = node; p; p = p.parentElement) if (p === this) return true; return false; },
+    closest(selector) {
+      for (let p = this; p; p = p.parentElement) {
+        if (selector === '[hidden]' && p.hidden) return p;
+        if (selector === '[role="tree"]' && p === navTree) return p;
+      }
+      return null;
+    },
+    hasAttribute(name) { return attrs.has(name); },
+    setAttribute(name, value) { attrs.set(name, value); },
+    removeAttribute(name) { attrs.delete(name); },
+    getAttribute(name) { return attrs.get(name) ?? null; },
+    append(...nodes) { for (const n of nodes) { n.parentElement = this; this.children.push(n); } },
+    replaceChildren(...nodes) { this.children = []; this.append(...nodes); },
+    insertBefore(node, before) {
+      this.children = this.children.filter(n => n !== node);
+      const index = before ? this.children.indexOf(before) : this.children.length;
+      this.children.splice(index, 0, node); node.parentElement = this;
+    },
+    remove() { this.parentElement.children = this.parentElement.children.filter(n => n !== this); this.parentElement = null; this.isConnected = false; },
+    querySelectorAll(selector) { return selector === '.fg-row-select' ? this.children.filter(n => n.dataset.rowId).map(n => n.children[1]) : []; },
+    querySelector(selector) { return selector === '.fg-row-label' ? this.children[1] : null; },
+    getBoundingClientRect() { return { top: 100, bottom: 340 }; },
+    focus() { document.activeElement = this; },
+  };
+}
+const navOwner = navigationNode('record-viewport');
+const navTree = navigationNode('record-list');
+const navDetail = navigationNode('record-reader'); navDetail.hidden = true;
+const navHeading = navigationNode('record-title', 'h2');
+const navBack = navigationNode('record-back', 'button');
+const navOther = navigationNode('record-other', 'button');
+navTree.dataset = { listDetail: navDetail.id, detailFocus: navHeading.id, listScroll: navOwner.id };
+navOwner.append(navTree, navDetail, navBack, navOther); navDetail.append(navHeading);
+const navRows = new Map();
+for (const id of ['first', 'second', 'third', 'fourth']) {
+  const item = navigationNode(id); item.dataset.rowId = id;
+  const toggle = navigationNode(id + '-toggle', 'button');
+  const select = navigationNode(id + '-select', 'button');
+  select.append(navigationNode(id + '-glyph'), navigationNode(id + '-label'), navigationNode(id + '-secondary'));
+  select.getBoundingClientRect = () => {
+    const top = 170 + navTree.children.indexOf(item) * 80 - navOwner.scrollTop;
+    return { top, bottom: top + 80 };
+  };
+  item.append(toggle, select); navTree.append(item); navRows.set(id, select);
+}
+for (const node of [navOwner, navTree, navDetail, navHeading, navBack, navOther]) extraElements.set(node.id, node);
+const previousQueryAll = document.querySelectorAll.bind(document);
+document.querySelectorAll = selector => {
+  if (selector === '[data-protected]') return [navOwner];
+  if (selector.startsWith('.fg-tree,.fg-details,')) return [...previousQueryAll(selector), navTree];
+  if (selector === '.fg-row-select,.fg-toggle,.fg-timeline-related') return [...navRows.values()];
+  return previousQueryAll(selector);
+};
+context.navBack = navBack; context.navOther = navOther; context.navTree = navTree;
+context.navRow = navRows.get('second');
+vm.runInContext("actionByElement.set(navBack,{kind:'close_record'});actionByElement.set(navOther,{kind:'refresh_records'});", context);
+function navigationView(detail, sequence = null, keys = ['first', 'second', 'third', 'fourth'], token = 'accepted-collection-A') {
+  workers.at(-1).onmessage({ data: { kind: 'view', presentation_sequence: sequence, view: {
+    visibility: [{ id: navOwner.id, visible: true }, { id: navTree.id, visible: !detail }, { id: navDetail.id, visible: detail }],
+    lists: [{ id: navTree.id, context: token, empty_message: 'No records', rows: keys.map(id => ({
+      id, label: id, glyph: 'R', kind_label: 'record', parent: null, secondary: '', depth: 0,
+      selected: id === 'second', expanded: null, action: { kind: 'open_record', record: id }, toggle: null,
+    })) }],
+  } } });
+}
+navigationView(false);
+navOwner.scrollTop = 125; navOwner.scrollLeft = 6;
+document.activeElement = context.navRow;
+const openRecord = dispatchFrom('navRow');
+navigationView(true, openRecord);
+assert.equal(document.activeElement, navHeading, 'accepted open focuses the declared detail heading');
+assert.equal(navOwner.scrollTop, 0, 'accepted open reveals the detail from its top');
+document.activeElement = navOther;
+navigationView(true);
+assert.equal(document.activeElement, navOther, 'background detail updates do not steal focus');
+document.activeElement = navBack;
+const backToRecords = dispatchFrom('navBack');
+navigationView(false, backToRecords);
+assert.equal(document.activeElement, context.navRow, 'accepted back restores the exact list row');
+assert.equal(context.navRow.tabIndex, 0, 'restored focus owns the roving list tab stop');
+assert.equal(navOwner.scrollTop, 125, 'accepted back restores list position');
+assert.equal(navOwner.scrollLeft, 6);
+// An inserted/reordered row above the visible anchor must not jump the reader.
+navigationView(false, null, ['third', 'first', 'second', 'fourth']);
+assert.equal(navOwner.scrollTop, 205, 'same-context refresh preserves the visible row anchor');
+assert.equal(document.activeElement, context.navRow);
+document.activeElement = context.navRow;
+const olderOpenRecord = dispatchFrom('navRow');
+document.activeElement = navOther;
+const newerRecordAction = dispatchFrom('navOther');
+navigationView(true, olderOpenRecord, ['third', 'first', 'second', 'fourth']);
+assert.equal(document.activeElement, navOther, 'older acknowledged open cannot override newer focus');
+assert.equal(vm.runInContext('pendingActionOrigin.sequence', context), newerRecordAction);
+navigationView(true, newerRecordAction, ['third', 'first', 'second', 'fourth']);
+assert.equal(document.activeElement, navOther, 'later background detail view does not replay navigation');
+// A context change invalidates saved row identity and scroll even while hidden.
+navigationView(true, null, ['third', 'first', 'second', 'fourth'], 'accepted-collection-B');
+assert.equal(vm.runInContext('listDetailViews.get(navTree).memory', context), null);
+navOwner.scrollTop = 17;
+document.activeElement = navBack;
+navigationView(false, dispatchFrom('navBack'), ['third', 'first', 'second', 'fourth'], 'accepted-collection-B');
+assert.notEqual(navOwner.scrollTop, 205, 'different context never restores the previous collection scroll');
+assert.equal(document.activeElement, context.navRow, 'a fresh context uses its accepted selected row');
+assert(context.navRow.getBoundingClientRect().bottom <= 340, 'fresh context reveals its selected fallback');
+// Returning after removal has a reachable first-row fallback instead of body focus.
+navOwner.scrollTop = 230;
+document.activeElement = context.navRow;
+navigationView(true, dispatchFrom('navRow'), ['third', 'first', 'second', 'fourth'], 'accepted-collection-B');
+navigationView(true, null, ['third', 'first', 'fourth'], 'accepted-collection-B');
+document.activeElement = navBack;
+navigationView(false, dispatchFrom('navBack'), ['third', 'first', 'fourth'], 'accepted-collection-B');
+assert.equal(document.activeElement, navRows.get('fourth'), 'removed focus falls back to a visible row in the retained viewport');
+assert.equal(navOwner.scrollTop, 230, 'a visible fallback preserves the scrolled return position');
+assert.equal(navRows.get('fourth').tabIndex, 0);
+// Background removal repairs only the row whose focus was invalidated. When no
+// old row remains visible, its fallback is revealed inside the named scroller.
+navigationView(false, null, ['third', 'first'], 'accepted-collection-B');
+assert.equal(document.activeElement, navRows.get('third'));
+assert.equal(navRows.get('third').tabIndex, 0);
+const fallbackBox = navRows.get('third').getBoundingClientRect();
+assert(fallbackBox.top >= 100 && fallbackBox.bottom <= 340, 'background focus fallback is on screen');
+context.navFallback = navRows.get('third');
+navigationView(true, dispatchFrom('navFallback'), ['third', 'first'], 'accepted-collection-B');
+navigationView(true, null, [], 'accepted-collection-B');
+document.activeElement = navBack;
+navigationView(false, dispatchFrom('navBack'), [], 'accepted-collection-B');
+assert.equal(document.activeElement, navTree, 'an emptied list has a reachable named focus target');
+assert.equal(navTree.tabIndex, 0);
+assert.equal(vm.runInContext('listDetailViews.has(navTree)', context), true);
+lifecycle.get('pagehide')({ persisted: true });
+assert.equal(vm.runInContext('listDetailViews.has(navTree)', context), false, 'protected teardown erases list navigation memory');
+assert.equal(navTree.children.length, 0, 'protected teardown clears the retained list DOM');
+console.log('List/detail presentation: accepted navigation, row anchors, focus, context changes, stale acknowledgements, removal fallback and teardown passed.');

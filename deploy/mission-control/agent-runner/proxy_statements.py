@@ -320,7 +320,7 @@ _NOTIFY_RE = re.compile(
     re.IGNORECASE)
 _LISTEN_RE = re.compile(r"^LISTEN ([A-Za-z_][A-Za-z0-9_]*)$", re.IGNORECASE)
 _TO_REGPROC_RE = re.compile(
-    r"^SELECT to_regprocedure\((%s|'[^']*')\)(?: IS NOT NULL)?(?: AS \w+)?$",
+    r"^SELECT to_regprocedure\((%s|'[^']*')\)(?: IS NOT NULL)?(?: AS (\w+))?$",
     re.IGNORECASE)
 _TXN_NOOP_RE = re.compile(
     r"^(BEGIN|COMMIT|ROLLBACK|SET LOCAL (lock_timeout|statement_timeout)\s*=.*)$",
@@ -360,13 +360,70 @@ def _translate_special(sql, params, caller=None):
     match = _LISTEN_RE.match(sql)
     if match:
         return Subscribe(match.group(1))
+    regclass_only = re.match(
+        r"^SELECT to_regclass\((%s|'[^']*')\) IS NOT NULL"
+        r"(?:\s+AS\s+(\w+))?$", sql, re.IGNORECASE)
+    if regclass_only:
+        from forge_pg_proxy import READ_TABLES as _READ_TABLES
+        relation = params[0] if regclass_only.group(1) == "%s" \
+            else regclass_only.group(1)[1:-1]
+        return StaticResult([regclass_only.group(2) or "?column?"],
+                            [(relation in _READ_TABLES,)], 1)
     match = _TO_REGPROC_RE.match(sql)
     if match:
         signature = params[0] if match.group(1) == "%s" else match.group(1)[1:-1]
         name = signature.split("(")[0].strip()
         available = name in FUNC_CATALOG
-        column = "available" if " AS " in sql.upper() else "to_regprocedure"
+        column = match.group(2) or "to_regprocedure"
         return StaticResult([column], [(available,)], 1)
+    # SELECT to_regclass(rel) IS NOT NULL AND has_table_privilege(
+    # current_user, rel, 'SELECT') AS alias: the schema-capability
+    # probe WorkStore issues before reading the M41 branch/stage
+    # tables. In the proxy world the answer is whether the relation
+    # is a registered read table covered by the caller's read
+    # allowlist (the proxy is the only reader).
+    probe = re.match(
+        r"^SELECT to_regclass\((%s|'[^']*')\) IS NOT NULL AND "
+        r"has_table_privilege\(current_user, (%s|'[^']*'), 'SELECT'\)"
+        r"(?:\s+AS\s+(\w+))?$", sql, re.IGNORECASE)
+    if probe:
+        from forge_pg_proxy import CALLER_ALLOWLISTS, READ_TABLES as _READ_TABLES
+        consumed = 0
+        relations = []
+        for group in (probe.group(1), probe.group(2)):
+            if group == "%s":
+                relations.append(params[consumed])
+                consumed += 1
+            else:
+                relations.append(group[1:-1])
+        relation = relations[0]
+        allowed = False
+        if caller and relation in _READ_TABLES:
+            read = CALLER_ALLOWLISTS.get(caller, {}).get("read", set())
+            allowed = read == "*" or relation in read
+        return StaticResult([probe.group(3) or "ok"], [(allowed,)], 1)
+    # SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute WHERE
+    # attrelid = 'forge_agent.jenkins_events'::regclass AND attname =
+    # 'action_id' AND NOT attisdropped) AS alias: WorkStore's probe
+    # for the post-M39 jenkins_events columns. The proxy serves only
+    # the current schema, so the answer comes from the merged
+    # schema's declared column set for that table; any other catalog
+    # probe is unmapped and fails closed below.
+    attribute_probe = re.match(
+        r"^SELECT EXISTS\(\s*SELECT 1 FROM pg_catalog\.pg_attribute WHERE "
+        r"attrelid = '([\w.]+)'::regclass AND attname = '(\w+)' "
+        r"AND NOT attisdropped\s*\)(?:\s+AS\s+(\w+))?$", sql, re.IGNORECASE)
+    if attribute_probe:
+        known_columns = {
+            "forge_agent.jenkins_events": {"action_id", "branch_scope"},
+        }
+        columns = known_columns.get(attribute_probe.group(1))
+        if columns is None:
+            raise UnsupportedStatement(
+                sql, "catalog probe for an unregistered relation")
+        return StaticResult(
+            [attribute_probe.group(3) or "exists"],
+            [(attribute_probe.group(2) in columns,)], 1)
     if _TXN_NOOP_RE.match(sql):
         return StaticResult([], [], -1)
     if re.match(r"^SET TRANSACTION ISOLATION LEVEL REPEATABLE READ(?: READ ONLY)?$",

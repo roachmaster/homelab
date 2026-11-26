@@ -1,10 +1,12 @@
 # Forge framework: small kernel, explicit starters, cohesive capabilities
 
-**Status: implementation reference plus broader target architecture.** Reviewed
-against the repository on 18 November 2026. The original architecture derives
-from the 30 October repository reviews; those reviews and the target diagrams
-remain historical design evidence. The checkpoint below describes current code,
-not a new deployment or test certification.
+**Reviewed 26 November 2026:** this is the reusable framework reference.
+The [current system picture](../design/implementation-status.md) describes the
+concrete Agents/Workbench delivery application, observed runtime and integrated
+candidate. The framework remains the small typed assembly/admission foundation;
+Python/PostgreSQL orchestration, model execution, Git/Jenkins delivery and portal
+policy are application consumers, not mandatory framework dependencies.
+Original architecture reviews and target diagrams retain their historical scope.
 
 ## Current implementation
 
@@ -15,7 +17,7 @@ not a new deployment or test certification.
 | Local tools | [`forge-system`](../../src/rust/forge-system/README.md), [`forge-local`](../../src/rust/forge-local/README.md) and [`forge-terminal`](../../src/rust/forge-terminal/README.md) provide node observations, admitted command discovery, optional native disk sessions and an explicitly stepped volatile counter | Node status is client-instance observation. Disk navigation does not become a filesystem sandbox or arbitrary command executor |
 | Durable jobs and access | [`forge-jobs`](../../src/rust/forge-jobs/README.md) commits bounded sum-job receipts/results to a locked local file store, recovers them on reopen, and fences leased attempts. [`forge_core::access`](../../src/rust/forge-core/src/access.rs) issues verified subject/deadline contexts and exact-route policy decisions | The Unix jobs executable selects an operator verifier and private store. Generic programs, automatic receipt retention, identity federation/delegation and remote jobs are not supplied by that slice |
 | Remote agent | [`forge-remote`](../../src/rust/forge-remote/src/lib.rs) and optional HTTPS adapters carry typed calls with target/incarnation and expiry. The [agent composition](../../src/rust/forge-agent/src/host.rs) supplies project inspection, bounded source reads and explicitly granted managed writes through the admitted gateway | Managed writes require a separately provisioned private Unix workspace and project grants; a read grant does not enable editing. Deployment and credential provisioning are operational configuration |
-| Browser and reference pages | The [generated IDE](../../src/rust/forge-ide-web/README.md) and [native host](../../src/rust/forge-ide-web-host/README.md) implement Chat, Mail, Workbench, a portal hub and focused design readers from Rust/YAML declarations | Main-thread presentation, worker/WASM application decisions and admitted native I/O retain distinct owners. Repository support does not prove a capability is enabled on a particular live host |
+| Browser and reference pages | The [generated IDE](../../src/rust/forge-ide-web/README.md) and [native host](../../src/rust/forge-ide-web-host/README.md) implement Agents, Workbench, Home and focused Design readers from Rust/YAML declarations; Chat/Mail history contracts remain inactive in the portal | Main-thread presentation, worker/WASM application decisions and admitted native I/O retain distinct owners. Repository support does not prove a capability is enabled on a particular live host |
 
 The real store, configured HTTPS boundary and browser are optional concrete
 consumers, not mandatory additions to the six core packages. Use their linked
