@@ -142,6 +142,7 @@
     "backend_integration": "129 tests passed",
     "source_fingerprint_guards": "33 tests ran; 268 subtest failures against historical source pins; fresh combined-source qualification is still required.",
     "runtime": "No deployment or service startup authorized by this consolidation.",
-    "author_handoff_schema": "9 tests passed"
+    "author_handoff_schema": "9 tests passed",
+    "rust_ui": "316 tests passed across forge-ide-ui, forge-ide-web and forge-ide-web-host using the existing /opt/forge-ci/toolchain toolchain"
   }
 }

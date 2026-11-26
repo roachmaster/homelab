@@ -10,7 +10,8 @@ The merge combines persistent agent branches and CI stage reporting with the
 newer content identity and author handoff code, retaining superseding integrated
 plan-override and terminal-settlement implementations. The task migration uses
 0041; applied migration files 0001 through 0040 remain unchanged. Targeted backend
-integration: 129 tests passed. Historical source-fingerprint checks fail against
+integration: 129 tests passed; 9 author-handoff schema tests and 316 Rust UI
+tests also passed. Historical source-fingerprint checks fail against
 the combined source; this archival integration is not a release qualification.
 No deployment is performed. The event runner remains stopped and boot-disabled.
 
