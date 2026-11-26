@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+import hashlib
+import json
 from threading import Barrier
 from types import SimpleNamespace
 import unittest
@@ -108,6 +110,159 @@ class AgentHandoffPostgresTest(unittest.TestCase):
     def workflow_counts(self, task_id):
         workflow = self.get(task_id)["workflow"]
         return workflow["plan_revisions"], workflow["code_revisions"]
+
+    def handed_off_implementation(self):
+        _admitted, _plan, original = self.implementation()
+        approved = self.db.read_plan(original)
+        self.stop_quota_attempt(original)
+        self.handoff_port.handoff(self.command(original))
+        handed = self.claim("codex-author")
+        self.assertIsNotNone(handed)
+        return original, handed, approved
+
+    def checked_handed_off_code(self, source, *, source_revision=False):
+        receipt = self.publish(source, "Codex completed the same approved implementation scope.")
+        self.db.queue_review(source, receipt)
+        self.coordinator.run_once()
+        check = self.db.review_claim("fixed-handoff-checks")
+        self.assertIsNotNone(check)
+        self.db.review_finish(check, dict(disposition="awaiting_review", candidate_commit=("5" if source_revision else "d") * 40,
+            gate_manifest_sha256="e" * 64, findings=[], verified_finding_ids=[], fingerprint=None,
+            summary="Fixed independent handoff fixture checks passed.", cleanup_confirmed=True,
+            verification=dict(checks_passed=True, candidate_workspace_digest="f" * 64,
+                repair_requires_new_workspace=False, cleanup_confirmed=True, integration_base="a" * 40,
+                gate_changes_require_review=source_revision, toolchain="fixture",
+                checks=[dict(check_id="make-ci", status="passed", head_sha=("5" if source_revision else "d") * 40)])))
+        self.coordinator.run_once()
+        critic = self.claim("codex-v2")
+        self.assertIsNotNone(critic)
+        return critic
+
+    def test_codex_deadline_scan_keeps_same_author_plan_workspace_and_twenty_per_event(self):
+        from work_retry_events import RetryEventProviderFactory, RetryScope
+        original, current, approved = self.handed_off_implementation()
+        frozen = self.frozen(original)
+        counts = self.workflow_counts(original.task_id)
+        flow = self.coordinator.store
+        events = RetryEventProviderFactory(self.config.owner).create()
+        flow.retry_events = events
+        self.service._store.retry_events = events
+        with flow._transaction() as cursor:
+            other = events.observe_failure(cursor,
+                RetryScope(self.config.owner, "homelab", "native_workflow", UUID(current.workflow_id)),
+                "infrastructure", "separate-jenkins-event", "a" * 64, phase_id="jenkins.deadline")
+            events.reserve(cursor, other["event_id"], "separate-jenkins-first-retry")
+        for ordinal in range(1, 21):
+            native_fixtures.NativeTimeoutRetryTest.stop_at_deadline(self, current)
+            # Exercise the ordinary scan, not the private direct retry ingress.
+            flow._recover_native_timeouts()
+            flow._recover_native_timeouts()
+            resumed = self.claim("codex-author")
+            self.assertIsNotNone(resumed, ordinal)
+            self.assertEqual(resumed.task_id, current.task_id)
+            self.assertEqual(resumed.agent_profile, "codex-author")
+            self.assertEqual(resumed.recipe, current.recipe)
+            self.assertEqual(resumed.resume_attempt_id, current.attempt_id)
+            self.assertEqual(resumed.resume_workspace_digest, "c" * 64)
+            self.assertEqual(self.db.read_plan(resumed), approved)
+            self.assertEqual(self.workflow_counts(original.task_id), counts)
+            self.assertIsNone(self.claim("agy-v2"))
+            current = resumed
+        self.assertEqual(self.rows("SELECT used,status FROM forge_agent.coding_retry_events WHERE event_id=%s", (other["event_id"],)), [(1, "open")])
+        native_fixtures.NativeTimeoutRetryTest.stop_at_deadline(self, current)
+        flow._recover_native_timeouts()
+        self.assertIsNone(self.claim("codex-author"))
+        self.assertIsNone(self.claim("agy-v2"))
+        self.assertEqual(self.rows("SELECT used,attempt_limit,status FROM forge_agent.coding_retry_events WHERE scope_id=%s AND phase_id=%s",
+            (current.workflow_id, "native_execution.deadline." + current.task_id)), [(20, 20, "exhausted")])
+        self.assertEqual(self.frozen(original), frozen)
+        self.assertEqual(self.workflow_counts(original.task_id), counts)
+
+    def test_codex_deadline_scan_recovers_a_genuine_preexisting_escalation(self):
+        original, stopped, approved = self.handed_off_implementation()
+        frozen = self.frozen(original)
+        flow = self.coordinator.store
+        native_fixtures.NativeTimeoutRetryTest.stop_at_deadline(self, stopped)
+        # Reproduce an older controller's genuine parked state by withholding
+        # only this new scanner for one normal event-processing turn.
+        with patch.object(flow, "_recover_native_timeouts", return_value=None):
+            self.coordinator.run_once()
+        self.assertEqual(self.get(original.task_id)["workflow"]["phase"], "escalated")
+        flow._recover_native_timeouts()
+        resumed = self.claim("codex-author")
+        self.assertIsNotNone(resumed)
+        self.assertEqual(resumed.agent_profile, "codex-author")
+        self.assertEqual(resumed.resume_attempt_id, stopped.attempt_id)
+        self.assertEqual(resumed.resume_workspace_digest, "c" * 64)
+        self.assertEqual(self.db.read_plan(resumed), approved)
+        self.assertEqual(self.frozen(original), frozen)
+
+    def test_codex_source_incomplete_approval_gets_reviewer_only_correction(self):
+        from work_peer_review import parse_review_target
+        original, source, _approved = self.handed_off_implementation()
+        frozen = self.frozen(original)
+        critic = self.checked_handed_off_code(source)
+        self.publish(critic, self.verdict(critic, "revise"))
+        self.coordinator.run_once()
+        source = self.claim("codex-author")
+        self.assertIsNotNone(source)
+        critic = self.checked_handed_off_code(source, source_revision=True)
+        target = self.db.read_review_target(critic)
+        parsed = parse_review_target(target["target_json"], target["target_sha256"])
+        required = [finding["finding_id"] for finding in parsed["findings"] if finding["status"] == "open"]
+        self.assertTrue(required)
+        raw = self.verdict(critic, attested_finding_ids=[])
+        self.publish(critic, raw)
+        counts = self.workflow_counts(original.task_id)
+        self.coordinator.run_once()
+        correction = self.claim("codex-v2")
+        self.assertIsNotNone(correction)
+        self.assertEqual(correction.task_id, critic.task_id)
+        self.assertNotEqual(correction.attempt_id, critic.attempt_id)
+        self.assertEqual(correction.mode, "review")
+        self.assertEqual(self.db.read_review_target(correction), target)
+        self.assertIsNone(self.claim("codex-author"))
+        self.assertIsNone(self.db.publication_claim("unapproved-codex-source"))
+        self.publish(correction, self.verdict(correction, attested_finding_ids=required))
+        self.coordinator.run_once()
+        self.assertIsNotNone(self.db.publication_claim("corrected-independent-codex-review"))
+        self.assertEqual(self.frozen(original), frozen)
+        self.assertEqual(self.workflow_counts(original.task_id), counts)
+        self.assertEqual(self.rows("SELECT result_sha256 FROM forge_agent.coding_attempts WHERE attempt_id=%s", (critic.attempt_id,)), [(hashlib.sha256(raw.encode()).hexdigest(),)])
+
+    def test_codex_plan_bad_context_hash_gets_fresh_review_without_changing_old_escalated_row(self):
+        from work_retry_events import RetryEventProviderFactory
+        events = RetryEventProviderFactory(self.config.owner).create()
+        self.coordinator.store.retry_events = events
+        self.service._store.retry_events = events
+        self.submit()
+        original = self.claim("agy-v2")
+        self.stop_quota_attempt(original)
+        self.handoff_port.handoff(self.command(original))
+        source = self.claim("codex-author")
+        self.publish(source, "Codex Plan with the same admitted source-bound scope.")
+        self.coordinator.run_once()
+        critic = self.claim("codex-v2")
+        target = self.db.read_review_target(critic)
+        malformed = json.loads(self.verdict(critic))
+        malformed["context_sha256"] = malformed["context_sha256"][:49]
+        raw = json.dumps(malformed, separators=(",", ":"))
+        self.publish(critic, raw)
+        for _ in range(3):
+            self.coordinator.run_once()
+        replacement = self.claim("codex-v2")
+        self.assertIsNotNone(replacement)
+        self.assertNotEqual(replacement.task_id, critic.task_id)
+        self.assertNotEqual(replacement.workflow_review_id, critic.workflow_review_id)
+        self.assertIsNone(self.claim("codex-author"))
+        self.assertEqual(self.rows("SELECT status,target_json,target_sha256 FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s", (critic.workflow_review_id,)), [("escalated", target["target_json"], target["target_sha256"])])
+        self.assertEqual(self.rows("SELECT result_sha256 FROM forge_agent.coding_attempts WHERE attempt_id=%s", (critic.attempt_id,)), [(hashlib.sha256(raw.encode()).hexdigest(),)])
+        self.publish(replacement, self.verdict(replacement, "approve"))
+        self.coordinator.run_once()
+        implementation = self.claim("codex-author")
+        self.assertIsNotNone(implementation)
+        self.assertEqual(implementation.mode, "implement")
+        self.assertEqual(self.db.read_plan(implementation)["plan_attempt_id"], source.attempt_id)
 
     def test_approved_implementation_keeps_plan_workspace_original_authority_and_budgets(self):
         _, plan, original = self.implementation()
