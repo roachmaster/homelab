@@ -437,6 +437,30 @@ class WorkerDB:
             )
             return bool(cursor.fetchone()[0])
 
+    RENEW_STATUSES = frozenset({"renewed", "lease_expired", "deadline_exceeded", "task_cancelled", "task_gone"})
+    PROGRESS_SIGNALS = frozenset({"progress_report", "checkpoint", "output"})
+
+    def renew_status(self, lease, progress_signal=None):
+        """Typed renewal (M45): why a renewal failed, and progress-aware deadlines.
+
+        Before M45 the typed function does not exist; fall back to the boolean
+        renew(), which cannot tell a cancelled task from an expired lease.
+        """
+        if progress_signal is not None and progress_signal not in self.PROGRESS_SIGNALS:
+            raise ValueError(f"invalid progress signal: {progress_signal!r}")
+        attempt_id, attempt_token = _extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT to_regprocedure('forge_coding_worker_api.renew_status(uuid,uuid,text)') IS NOT NULL")
+            if not cursor.fetchone()[0]:
+                cursor.execute("SELECT forge_coding_worker_api.renew(%s, %s)", (attempt_id, attempt_token))
+                return "renewed" if cursor.fetchone()[0] else "lease_expired"
+            cursor.execute("SELECT forge_coding_worker_api.renew_status(%s, %s, %s)",
+                           (attempt_id, attempt_token, progress_signal))
+            status = cursor.fetchone()[0]
+        if status not in self.RENEW_STATUSES:
+            raise ValueError(f"invalid renew status: {status!r}")
+        return status
+
     def checkpoint(self, lease, summary):
         attempt_id, attempt_token = _extract_attempt_creds(lease)
         sanitized_summary = _validate_summary(summary)
