@@ -7,7 +7,7 @@ import selectors
 import subprocess
 import time
 
-from work_external_delivery import canonical, digest, read_private, sha, uid
+from work_external_delivery import canonical, digest, gate_ref, read_private, sha, uid
 from work_post_merge_provider import PostMergeProviderFactory
 from work_process import terminate_and_reap
 from work_publication_clients import PublicationError
@@ -134,8 +134,8 @@ class ReleaseProvider:
             uid(job[key])
         for key in ('commit_sha', 'tree_sha'):
             sha(job[key])
-        for key in ('ci_receipt_sha256', 'gate_manifest_sha256'):
-            digest(job[key])
+        digest(job['ci_receipt_sha256'])
+        gate_ref(job['gate_manifest_sha256'])
         return {key: job[key] for key in IDENTITY}
 
     def _plan(self, identity, plan):

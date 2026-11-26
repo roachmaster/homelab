@@ -23,6 +23,7 @@ REQUEST_KEYS = frozenset(('action_id', 'prepare_action_id', 'workflow_id',
     'verification_profile', 'correlation_id'))
 HEX40 = re.compile(r'[0-9a-f]{40}')
 HEX64 = re.compile(r'[0-9a-f]{64}')
+GATE_CONTRACT = re.compile(r'forge-sdlc-jenkins-v[1-3]:(?:main|detached|branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?)')
 MAIN_PLAN = CiGateContractFactory(SCOPED_PROFILE).create().plan('main')
 
 
@@ -41,7 +42,8 @@ def validate_request(job, request):
         'correlation_id': job['correlation_id']}
     if any(request.get(key) != value for key, value in expected.items()):
         raise ValueError('Post-merge request identity changed')
-    if not isinstance(request['gate_manifest_sha256'], str) or not HEX64.fullmatch(request['gate_manifest_sha256']):
+    gate = request['gate_manifest_sha256']
+    if not isinstance(gate, str) or not (HEX64.fullmatch(gate) or GATE_CONTRACT.fullmatch(gate)):
         raise ValueError('Invalid post-merge gate digest')
 
 

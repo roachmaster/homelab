@@ -12,7 +12,7 @@ from uuid import UUID, uuid5
 
 from work_ci_contract import SCOPED_PROFILE, EVENT_PROFILE, contract_for_config
 from work_external_delivery import (DeliveryConfig, DeliveryProviderFactory,
-    canonical, digest, durable_json, read_private, sha, uid)
+    canonical, digest, durable_json, gate_ref, read_private, sha, uid)
 
 
 VERSION = 'forge-post-merge-main-v1'
@@ -82,7 +82,7 @@ class PostMergeVerificationProvider:
         if (not isinstance(request, dict) or set(request) != set(expected) | {'gate_manifest_sha256'}
                 or any(request.get(key) != value for key, value in expected.items())):
             raise ValueError('Post-merge verification request scope changed')
-        digest(request['gate_manifest_sha256'])
+        gate_ref(request['gate_manifest_sha256'])
 
     @staticmethod
     def _superseded(observed):
@@ -126,7 +126,7 @@ class PostMergeVerificationProvider:
             'candidate_commit': scope['merge_commit'], 'candidate_tree': tree,
             'integration_base': scope['merge_commit'], 'source_branch': 'main',
             'branch_scope': 'main', 'verification_profile': self.delivery.config.verification_profile,
-            'gate_manifest_sha256': digest(prepared['gate_manifest_sha256']),
+            'gate_manifest_sha256': gate_ref(prepared['gate_manifest_sha256']),
             'correlation_id': scope['correlation_id']}
         self._validate_request(scope, request)
         require_lease()
