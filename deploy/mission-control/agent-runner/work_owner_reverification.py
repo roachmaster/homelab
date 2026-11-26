@@ -324,6 +324,7 @@ def recover(flow, cursor, task, owner, command, request, digest):
         raise Rejected(409, 'result_mismatch')
     rows = _read_query(cursor, "workflow_busy",
                        {"workflow_id": w["workflow_id"],
+                        "owner_id": store.owner,
                         "task_statuses": ["queued", "running", "cancel_requested"],
                         "include_attempts": True,
                         "publication_statuses": ["pending", "checking", "publishing"]})
@@ -353,10 +354,10 @@ def recover(flow, cursor, task, owner, command, request, digest):
     cursor.execute("UPDATE forge_agent.coding_reviews SET candidate_commit=NULL,gate_manifest_sha256=NULL,verification='{}'::jsonb,owner_decision=NULL WHERE review_id=%s AND status='pending' AND previous_review_id=%s", (receipt['review_id'], q['review_id']))
     if cursor.rowcount != 1:
         raise Rejected(409, 'reconcile_required')
-    rows = _read_query(cursor, "deadline_retry_count", {"workflow_id": w["workflow_id"]})
+    rows = _read_query(cursor, "deadline_retry_count", {"workflow_id": w["workflow_id"], "owner_id": store.owner})
     deadline_recoveries = rows[0]["n"]
     rows = _read_query(cursor, "verification_retries_sum",
-                       {"workflow_id": w["workflow_id"], "review_id": receipt["review_id"]})
+                       {"workflow_id": w["workflow_id"], "owner_id": store.owner, "review_id": receipt["review_id"]})
     verification_retries = rows[0]["n"]
     intent = dict(policy=POLICY, request=request, workflow_id=str(w['workflow_id']), policy_digest=w['policy_digest'],
         source_attempt_id=str(q['attempt_id']), source_result_sha256=q['parent_result_sha256'], source_review_id=str(q['review_id']),

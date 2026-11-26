@@ -490,19 +490,20 @@ class WorkflowStore:
                                {"owner_id": self.store.owner, "project_alias": project_alias,
                                 "task_id": task_id, "since": attempt["started_at"]})
             if rows[0]["blocked"]:raise Rejected(409,'not_reviewable')
-            rows = _read_query(cursor, "writer_active", {"workflow_id": w["workflow_id"]})
+            rows = _read_query(cursor, "writer_active", {"workflow_id": w["workflow_id"], "owner_id": self.store.owner})
             if rows[0]["writer"]:raise Rejected(409,'reconcile_required')
             rows = _read_query(cursor, "workflow_busy",
                                {"workflow_id": w["workflow_id"],
+                                "owner_id": self.store.owner,
                                 "task_statuses": ["queued", "running", "cancel_requested"],
                                 "include_attempts": False,
                                 "publication_statuses": ["pending", "checking", "publishing"]})
             if rows[0]["busy"]:raise Rejected(409,'reconcile_required')
             rows = _read_query(cursor, "sibling_failure",
-                               {"workflow_id": w["workflow_id"], "task_id": task_id})
+                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner, "task_id": task_id})
             if rows[0]["sibling_failure"]:raise Rejected(409,'not_reviewable')
             rows = _read_query(cursor, "action_source_count",
-                               {"workflow_id": w["workflow_id"], "kind": "decide",
+                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner, "kind": "decide",
                                 "prefix": "native-deadline-retry:"})
             prior_deadlines = rows[0]["used"]
             if self.retry_events is None and prior_deadlines>=NATIVE_DEADLINE_RETRIES:
@@ -577,6 +578,7 @@ class WorkflowStore:
             raise Rejected(409,'not_reviewable')
         rows = _read_query(cursor, "workflow_busy",
                            {"workflow_id": w["workflow_id"],
+                            "owner_id": self.store.owner,
                             "task_statuses": ["queued", "running", "cancel_requested", "failed", "needs_reconcile", "quota_blocked", "blocked_auth", "blocked_permission", "cancelled"],
                             "include_attempts": True,
                             "publication_statuses": None})
@@ -750,7 +752,7 @@ class WorkflowStore:
             if not action or action['status']!='handoff' or action['finish_receipt'] is not None or action['intent'] is not None:
                 raise Rejected(409,'not_reviewable')
             rows = _read_query(cursor, "action_source_count",
-                               {"workflow_id": w["workflow_id"], "kind": "decide",
+                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner, "kind": "decide",
                                 "prefix": "peer-verdict-replay:"})
             if rows[0]["used"]:raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT repair_rounds,stagnant_rounds,policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
@@ -855,6 +857,7 @@ class WorkflowStore:
             self._artifact(cursor,task_id,task['latest_attempt_id'])
             rows = _read_query(cursor, "workflow_busy",
                                {"workflow_id": w["workflow_id"],
+                                "owner_id": self.store.owner,
                                 "task_statuses": ["queued", "running", "cancel_requested", "failed", "needs_reconcile", "quota_blocked", "blocked_auth", "blocked_permission", "cancelled"],
                                 "include_attempts": True,
                                 "publication_statuses": ["pending", "checking", "publishing"]})
@@ -956,6 +959,7 @@ class WorkflowStore:
             self._artifact(cursor,task_id,task['latest_attempt_id'])
             rows = _read_query(cursor, "workflow_busy",
                                {"workflow_id": w["workflow_id"],
+                                "owner_id": self.store.owner,
                                 "task_statuses": ["queued", "running", "cancel_requested", "failed", "needs_reconcile", "quota_blocked", "blocked_auth", "blocked_permission", "cancelled"],
                                 "include_attempts": True,
                                 "publication_statuses": ["pending", "checking", "publishing"]})
@@ -965,7 +969,7 @@ class WorkflowStore:
                                 "project_alias": project_alias, "task_id": task_id})
             if rows[0]['latest']!=q['review_no']:raise Rejected(409,'not_reviewable')
             rows = _read_query(cursor, "action_source_count",
-                               {"workflow_id": w["workflow_id"], "kind": None,
+                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner, "kind": None,
                                 "prefix": "source-readiness-delivery:"})
             if rows[0]["used"]:raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='checks',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
@@ -1068,7 +1072,7 @@ class WorkflowStore:
             cursor.execute("SELECT enabled,phase FROM forge_agent.coding_workflows WHERE workflow_id=%s",(w['workflow_id'],));active=cursor.fetchone()
             if not active or not active['enabled'] or active['phase'] in {'completed','cancelled','escalated'}:continue
             rows = _read_query(cursor, "published_with_green",
-                               {"workflow_id": w["workflow_id"]})
+                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner})
             for p in rows:
                 if not w['snapshot']['auto_merge']:continue
                 cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,source_publication_id) VALUES(%s,%s,%s,'merge',%s,%s) ON CONFLICT DO NOTHING",(w['workflow_id'],self.store.owner,w['project_alias'],str(p['publication_id'])+':'+p['commit_sha'],p['publication_id']))
@@ -1124,7 +1128,7 @@ class WorkflowStore:
             self._project_lock(cursor,job["project_alias"])
             # Task -> peer review -> action is shared with owner/cancel paths.
             rows = _read_query(cursor, "review_root_tasks",
-                               {"workflow_review_id": job["workflow_review_id"]})
+                               {"workflow_review_id": job["workflow_review_id"], "owner_id": self.store.owner})
             identity = rows[0] if rows else None
             if not identity:return
             if identity['root_task_id']!=identity['source_task_id']:

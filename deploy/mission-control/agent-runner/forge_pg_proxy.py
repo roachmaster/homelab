@@ -479,9 +479,14 @@ READ_TABLES = {
 # generic ``read.<table>`` rule (JOINs, aggregates, subqueries, CTEs,
 # comparisons, IN-lists). Each entry is (SQL, [(param, kind, required)]).
 # The SQL is FIXED: the caller supplies only named arguments, validated
-# against the declared kinds, and a parameter whose name ends in
-# ``_owner_id`` is bound to the caller's own owner (a foreign owner
-# value is refused). A readq returns {"rows": [...]}.
+# against the declared kinds, and a parameter named ``owner_id`` or
+# ending in ``_owner_id`` is bound to the caller's own owner (a
+# foreign owner value is refused). Every query that can reach
+# owner-scoped rows declares such a parameter and predicates on it;
+# the only exceptions are the two GPU readiness queries, because
+# forge_agent.gpu_worker_readiness has no owner column at all (it is
+# global worker infrastructure state, keyed by worker_name).
+# A readq returns {"rows": [...]}.
 READ_QUERIES = {
     # queue_store: the run that produced a mail thread's first event.
     "run_fingerprint_by_mail": (
@@ -498,9 +503,12 @@ READ_QUERIES = {
         "SELECT r.id, r.status, e.data->>'fingerprint' AS fingerprint "
         "FROM forge_agent.runs r "
         "JOIN forge_agent.run_events e ON e.run_id = r.id AND e.sequence = 1 "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
         "WHERE r.conversation_id = %(conversation_id)s "
-        "AND r.request_id = %(request_id)s",
-        [("conversation_id", "uuid", True), ("request_id", "text", True)]),
+        "AND r.request_id = %(request_id)s "
+        "AND c.owner_id = %(owner_id)s",
+        [("conversation_id", "uuid", True), ("request_id", "text", True),
+         ("owner_id", "text", True)]),
     # queue_store: open-run totals for a conversation's owner.
     "run_queue_totals": (
         "SELECT count(*) AS total, "
@@ -516,8 +524,11 @@ READ_QUERIES = {
         "SELECT count(*) AS count, "
         "coalesce(sum(octet_length(content)), 0) AS bytes, "
         "coalesce(max(position), 0) AS last_position "
-        "FROM forge_agent.messages WHERE conversation_id = %(conversation_id)s",
-        [("conversation_id", "uuid", True)]),
+        "FROM forge_agent.messages m "
+        "JOIN forge_agent.conversations c ON c.id = m.conversation_id "
+        "WHERE m.conversation_id = %(conversation_id)s "
+        "AND c.owner_id = %(owner_id)s",
+        [("conversation_id", "uuid", True), ("owner_id", "text", True)]),
     # queue_store: which chat/mail a run belongs to.
     "run_chat_mail": (
         "SELECT r.ide_chat_id, r.mail_owner_id, r.mail_thread_id "
@@ -581,10 +592,12 @@ READ_QUERIES = {
         [("run_id", "uuid", True), ("mail_owner_id", "text", True)]),
     # queue_store: does a conversation have a chat- or mail-linked run?
     "run_has_chat_or_mail": (
-        "SELECT 1 FROM forge_agent.runs WHERE conversation_id = "
-        "%(conversation_id)s AND (ide_chat_id IS NOT NULL "
-        "OR mail_thread_id IS NOT NULL) LIMIT 1",
-        [("conversation_id", "uuid", True)]),
+        "SELECT 1 FROM forge_agent.runs r "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "WHERE r.conversation_id = %(conversation_id)s "
+        "AND c.owner_id = %(owner_id)s AND (r.ide_chat_id IS NOT NULL "
+        "OR r.mail_thread_id IS NOT NULL) LIMIT 1",
+        [("conversation_id", "uuid", True), ("owner_id", "text", True)]),
     # queue_store: distributed result-ready runs awaiting inference.
     "inference_ready_runs": (
         "SELECT result.run_id FROM forge_agent.inference_results result "
@@ -607,6 +620,8 @@ READ_QUERIES = {
         "LIMIT %(limit)s",
         [("owner_id", "text", True), ("limit", "integer", True)]),
     # queue_store: which of the requested models has a fresh GPU worker.
+    # No owner predicate is possible here or in gpu_worker_ready:
+    # gpu_worker_readiness has no owner column (global worker state).
     "gpu_ready_models": (
         "SELECT DISTINCT model_id FROM forge_agent.gpu_worker_readiness "
         "WHERE model_id = ANY(%(model_ids)s) AND ready "
@@ -614,11 +629,16 @@ READ_QUERIES = {
         [("model_ids", "text[]", True)]),
     # queue_store: run events after a sequence (fingerprint stripped).
     "run_events_after": (
-        "SELECT sequence, event_type AS type, data - 'fingerprint' AS data, "
-        "recorded_at FROM forge_agent.run_events "
-        "WHERE run_id = %(run_id)s AND sequence > %(sequence)s "
-        "ORDER BY sequence LIMIT 100",
-        [("run_id", "uuid", True), ("sequence", "integer", True)]),
+        "SELECT e.sequence, e.event_type AS type, "
+        "e.data - 'fingerprint' AS data, e.recorded_at "
+        "FROM forge_agent.run_events e "
+        "JOIN forge_agent.runs r ON r.id = e.run_id "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "WHERE e.run_id = %(run_id)s AND e.sequence > %(sequence)s "
+        "AND c.owner_id = %(owner_id)s "
+        "ORDER BY e.sequence LIMIT 100",
+        [("run_id", "uuid", True), ("sequence", "integer", True),
+         ("owner_id", "text", True)]),
     # queue_store: is a GPU worker fresh for this model?
     "gpu_worker_ready": (
         "SELECT EXISTS (SELECT 1 FROM forge_agent.gpu_worker_readiness "
@@ -634,8 +654,11 @@ READ_QUERIES = {
         "FROM forge_agent.messages m "
         "JOIN forge_agent.run_events queued "
         "ON queued.run_id = m.run_id AND queued.sequence = 1 "
-        "WHERE m.run_id = %(run_id)s ORDER BY m.position",
-        [("run_id", "uuid", True)]),
+        "JOIN forge_agent.runs r ON r.id = m.run_id "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "WHERE m.run_id = %(run_id)s AND c.owner_id = %(owner_id)s "
+        "ORDER BY m.position",
+        [("run_id", "uuid", True), ("owner_id", "text", True)]),
     # chat_history_store: source position/attachment of a chat's run.
     "ide_chat_source": (
         "SELECT (queued.data->>'source_message_position')::int AS position, "
@@ -677,11 +700,13 @@ READ_QUERIES = {
     # mail_store: the last error of a run's failed/interrupted/cancelled
     # events.
     "run_last_error": (
-        "SELECT data->>'error' AS error FROM forge_agent.run_events "
-        "WHERE run_id = %(run_id)s "
-        "AND event_type IN ('failed', 'interrupted', 'cancelled') "
-        "ORDER BY sequence DESC LIMIT 1",
-        [("run_id", "uuid", True)]),
+        "SELECT e.data->>'error' AS error FROM forge_agent.run_events e "
+        "JOIN forge_agent.runs r ON r.id = e.run_id "
+        "JOIN forge_agent.conversations c ON c.id = r.conversation_id "
+        "WHERE e.run_id = %(run_id)s AND c.owner_id = %(owner_id)s "
+        "AND e.event_type IN ('failed', 'interrupted', 'cancelled') "
+        "ORDER BY e.sequence DESC LIMIT 1",
+        [("run_id", "uuid", True), ("owner_id", "text", True)]),
     # mail_store: one page of a thread's messages with each message's
     # timestamp and (for assistant messages) a length finish reason.
     "mail_page": (
@@ -969,11 +994,11 @@ READ_QUERIES = {
     # actions used a source-key prefix (kind fixed by the caller).
     "action_source_count": (
         "SELECT count(*) AS used FROM forge_agent.coding_workflow_actions "
-        "WHERE workflow_id = %(workflow_id)s "
+        "WHERE workflow_id = %(workflow_id)s AND owner_id = %(owner_id)s "
         "AND (%(kind)s::text IS NULL OR kind = %(kind)s) "
         "AND source_key LIKE %(prefix)s || '%%'",
-        [("workflow_id", "uuid", True), ("kind", "text", False),
-         ("prefix", "text", True)]),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("kind", "text", False), ("prefix", "text", True)]),
     # work_owner_control / work_owner_reverification: the retries spent
     # across a workflow's reviews.
     "verification_retries_sum": (
@@ -986,8 +1011,10 @@ READ_QUERIES = {
         "ON (t.owner_id, t.project_alias, t.id) = "
         "(q.owner_id, q.project_alias, q.task_id) "
         "WHERE t.workflow_id = %(workflow_id)s "
+        "AND t.owner_id = %(owner_id)s "
         "AND q.review_id <> %(review_id)s",
-        [("workflow_id", "uuid", True), ("review_id", "uuid", True)]),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("review_id", "uuid", True)]),
     # work_owner_reverification / work_workflow: the latest review_no.
     "max_review_no": (
         "SELECT max(review_no) AS latest FROM forge_agent.coding_reviews "
@@ -998,12 +1025,14 @@ READ_QUERIES = {
     # work_owner_control: decide actions by source key, policy, or both.
     "workflow_actions_by_source_or_policy": (
         "SELECT * FROM forge_agent.coding_workflow_actions "
-        "WHERE workflow_id = %(workflow_id)s AND kind = 'decide' "
+        "WHERE workflow_id = %(workflow_id)s AND owner_id = %(owner_id)s "
+        "AND kind = 'decide' "
         "AND (source_key = %(source_key)s "
         "OR source_key LIKE %(source_pattern)s "
         "OR intent->>'policy' = ANY(%(policies)s)) "
         "ORDER BY created_at, action_id LIMIT %(limit)s",
-        [("workflow_id", "uuid", True), ("source_key", "text", True),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("source_key", "text", True),
          ("source_pattern", "text", True), ("policies", "text[]", True),
          ("limit", "integer", True)]),
     # work_owner_control: decide actions for one request (policy match
@@ -1024,11 +1053,12 @@ READ_QUERIES = {
     # work_owner_control: does a decide action exist for this source?
     "workflow_actions_by_source_or_policy_exists": (
         "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions "
-        "WHERE workflow_id = %(workflow_id)s AND kind = 'decide' "
+        "WHERE workflow_id = %(workflow_id)s AND owner_id = %(owner_id)s "
+        "AND kind = 'decide' "
         "AND (source_key LIKE %(source_pattern)s "
         "OR intent->>'policy' = %(policy)s)) AS orphaned",
-        [("workflow_id", "uuid", True), ("source_pattern", "text", True),
-         ("policy", "text", True)]),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("source_pattern", "text", True), ("policy", "text", True)]),
     # work_owner_reverification: the decide action that finished a review.
     "workflow_action_by_receipt_review": (
         "SELECT * FROM forge_agent.coding_workflow_actions "
@@ -1067,16 +1097,18 @@ READ_QUERIES = {
     # native-deadline-retry decisions does this workflow have?
     "deadline_retry_count": (
         "SELECT count(*) AS n FROM forge_agent.coding_workflow_actions "
-        "WHERE workflow_id = %(workflow_id)s AND kind = 'decide' "
+        "WHERE workflow_id = %(workflow_id)s AND owner_id = %(owner_id)s "
+        "AND kind = 'decide' "
         "AND status = 'completed' "
         "AND source_key LIKE 'native-deadline-retry:%%'",
-        [("workflow_id", "uuid", True)]),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True)]),
     # work_owner_control / work_workflow: is a workflow busy? The four
     # call sites differ in the task statuses, the attempts branch, and
     # the publication statuses; all three are parameters.
     "workflow_busy": (
         "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks "
         "WHERE workflow_id = %(workflow_id)s "
+        "AND owner_id = %(owner_id)s "
         "AND status = ANY(%(task_statuses)s)) "
         "OR (%(include_attempts)s AND EXISTS(SELECT 1 "
         "FROM forge_agent.coding_attempts a "
@@ -1084,15 +1116,18 @@ READ_QUERIES = {
         "ON (t.owner_id, t.project_alias, t.id) = "
         "(a.owner_id, a.project_alias, a.task_id) "
         "WHERE t.workflow_id = %(workflow_id)s "
+        "AND t.owner_id = %(owner_id)s "
         "AND (a.reservation_active OR a.lease_expires_at IS NOT NULL))) "
         "OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions "
         "WHERE workflow_id = %(workflow_id)s "
+        "AND owner_id = %(owner_id)s "
         "AND status IN ('pending', 'leased')) "
         "OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p "
         "JOIN forge_agent.coding_tasks t "
         "ON (t.owner_id, t.project_alias, t.id) = "
         "(p.owner_id, p.project_alias, p.task_id) "
         "WHERE t.workflow_id = %(workflow_id)s "
+        "AND t.owner_id = %(owner_id)s "
         "AND (%(publication_statuses)s::text[] IS NULL "
         "OR p.status = ANY(%(publication_statuses)s))) "
         "OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q "
@@ -1100,8 +1135,10 @@ READ_QUERIES = {
         "ON (t.owner_id, t.project_alias, t.id) = "
         "(q.owner_id, q.project_alias, q.task_id) "
         "WHERE t.workflow_id = %(workflow_id)s "
+        "AND t.owner_id = %(owner_id)s "
         "AND q.status IN ('pending', 'checking')) AS busy",
-        [("workflow_id", "uuid", True), ("task_statuses", "text[]", True),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("task_statuses", "text[]", True),
          ("include_attempts", "boolean", True),
          ("publication_statuses", "text[]", False)]),
     # work_owner_control / work_workflow: is a writer still active on a
@@ -1112,9 +1149,10 @@ READ_QUERIES = {
         "ON (t.owner_id, t.project_alias, t.id) = "
         "(a.owner_id, a.project_alias, a.task_id) "
         "WHERE t.workflow_id = %(workflow_id)s "
+        "AND t.owner_id = %(owner_id)s "
         "AND (a.reservation_active OR a.lease_expires_at IS NOT NULL)) "
         "AS writer",
-        [("workflow_id", "uuid", True)]),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True)]),
     # work_workflow: was a needs_reconcile event witnessed for an attempt?
     "needs_reconcile_witnessed": (
         "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events "
@@ -1141,11 +1179,13 @@ READ_QUERIES = {
     # work_workflow: does a sibling task of a workflow carry a failure?
     "sibling_failure": (
         "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks "
-        "WHERE workflow_id = %(workflow_id)s AND id <> %(task_id)s "
+        "WHERE workflow_id = %(workflow_id)s AND owner_id = %(owner_id)s "
+        "AND id <> %(task_id)s "
         "AND status IN ('failed', 'needs_reconcile', 'quota_blocked', "
         "'blocked_auth', 'blocked_permission', 'cancelled')) "
         "AS sibling_failure",
-        [("workflow_id", "uuid", True), ("task_id", "uuid", True)]),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True),
+         ("task_id", "uuid", True)]),
     # work_workflow: attempts of a workflow's tasks, with result content.
     "attempt_result_content": (
         "SELECT a.result_sha256, a.result_byte_count, a.phase, "
@@ -1198,7 +1238,8 @@ READ_QUERIES = {
         "ON (t.owner_id, t.project_alias, t.id, t.latest_attempt_id) = "
         "(p.owner_id, p.project_alias, p.task_id, p.attempt_id) "
         "JOIN forge_agent.coding_reviews q ON q.review_id = p.review_id "
-        "WHERE t.workflow_id = %(workflow_id)s AND p.status = 'published' "
+        "WHERE t.workflow_id = %(workflow_id)s "
+        "AND t.owner_id = %(owner_id)s AND p.status = 'published' "
         "AND q.status = 'approved' AND q.repair_task_id IS NULL "
         "AND q.owner_decision->>'closed_by' = 'peer_reviewer' "
         "AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h "
@@ -1206,14 +1247,16 @@ READ_QUERIES = {
         "AND h.candidate_commit = p.commit_sha "
         "ORDER BY h.observed_at DESC, h.observation_id DESC LIMIT 1) IS TRUE "
         "ORDER BY p.created_at DESC",
-        [("workflow_id", "uuid", True)]),
+        [("workflow_id", "uuid", True), ("owner_id", "text", True)]),
     # work_workflow: the source and root task of a workflow review.
     "review_root_tasks": (
         "SELECT r.source_task_id, w.root_task_id "
         "FROM forge_agent.coding_workflow_reviews r "
         "JOIN forge_agent.coding_workflows w USING (workflow_id) "
-        "WHERE r.workflow_review_id = %(workflow_review_id)s",
-        [("workflow_review_id", "uuid", True)]),
+        "WHERE r.workflow_review_id = %(workflow_review_id)s "
+        "AND w.owner_id = %(owner_id)s",
+        [("workflow_review_id", "uuid", True),
+         ("owner_id", "text", True)]),
     # queue_store: tab ids beyond the keep offset, for pruning.
     "ide_tabs_beyond_offset": (
         "SELECT tab_id FROM forge_agent.ide_workspace_tabs "
@@ -1760,15 +1803,19 @@ class Proxy:
 
         The SQL is fixed in READ_QUERIES: the caller supplies only
         named arguments, validated against the declared kinds. A
-        parameter whose name ends in ``_owner_id`` is owner-scoped:
-        the client-supplied value must equal the caller's owner and
-        the bound value is always the caller's owner, so a fixed
-        query can never select another owner's rows.
+        parameter named ``owner_id`` or ending in ``_owner_id`` is
+        owner-scoped: the client-supplied value must equal the
+        caller's owner and the bound value is always the caller's
+        owner, so a fixed query can never select another owner's
+        rows. (Before this fix the exact name ``owner_id`` did not
+        match the suffix rule and passed through unbound, so any
+        caller could read any owner's rows through a named query
+        that took an ``owner_id`` argument.)
         """
         values = validate_args(params, args or {})
         bound = {}
         for (param_name, _, _), value in zip(params, values):
-            if param_name.endswith("_owner_id"):
+            if param_name == "owner_id" or param_name.endswith("_owner_id"):
                 if value is not None and value != caller.owner:
                     raise Rejected(403, "not_allowed")
                 bound[param_name] = caller.owner

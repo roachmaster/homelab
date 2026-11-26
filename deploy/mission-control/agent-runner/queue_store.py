@@ -469,7 +469,7 @@ def _finish_locked(cursor, run, saved, answer=None, error=None, usage=None, fini
         if saved["due"]:
             error, answer = "chat_not_found", None
         elif answer is not None and error is None:
-            rows = _read_query(cursor, "run_messages_with_source_prompt", {"run_id": run_id})
+            rows = _read_query(cursor, "run_messages_with_source_prompt", {"run_id": run_id, "owner_id": OWNER})
             messages = [dict(row) for row in rows]
             messages.append({"role": "assistant", "content": completion_content(answer, finish_reason)})
             if _valid_transcript(messages):
@@ -634,7 +634,8 @@ def get_events(run_id, after, *, include_completion=False):
         cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         run = _get_run(cursor, run_id, distributed_chat=include_completion)
         events = _read_query(cursor, "run_events_after",
-                             {"run_id": run_id, "sequence": after})
+                             {"run_id": run_id, "sequence": after,
+                              "owner_id": OWNER})
         response = {"run_id": run_id, "status": run["status"], "events": events}
         if include_completion:
             rows = _read_query(cursor, "gpu_worker_ready", {"model_id": run["model"]})

@@ -1581,6 +1581,49 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
                  len(chunk.encode("utf-8")), SHA64))
         return attempt_id
 
+    def test_readq_rejects_a_foreign_owner_id(self):
+        # Round-6 finding 4: a parameter named exactly "owner_id" was
+        # not owner-bound (only "*_owner_id" was), so a caller could
+        # aim a named read at another owner's rows.
+        coordinator = self.instance.callers["coordinator"]
+        for name, args in (
+                ("worker_readiness_catalog",
+                 {"max_age_seconds": 90, "owner_id": "other-owner"}),
+                ("deadline_retry_count",
+                 {"workflow_id": _uuid(), "owner_id": "other-owner"})):
+            with self.assertRaises(proxy.Rejected) as caught:
+                self.instance.execute(coordinator, f"readq.{name}", args)
+            self.assertEqual(caught.exception.code, "not_allowed")
+
+    def test_readq_object_id_query_is_scoped_to_the_caller_owner(self):
+        # workflow_busy keys only on workflow_id: without the owner
+        # predicate it reports another owner's busy workflow as busy.
+        foreign_task = self.insert_task(owner="other-owner")
+        self._task_ids.append(foreign_task)
+        foreign_workflow = self.insert_workflow(
+            "other-owner", foreign_task)
+        self._workflow_ids.append(foreign_workflow)
+        self.fixture_sql(
+            "UPDATE forge_agent.coding_tasks SET workflow_id = %s"
+            " WHERE id = %s", (foreign_workflow, foreign_task))
+        coordinator = self.instance.callers["coordinator"]
+        args = {"workflow_id": foreign_workflow,
+                "owner_id": "mission-control",
+                "task_statuses": ["queued", "running"],
+                "include_attempts": True,
+                "publication_statuses": None}
+        result = self.instance.execute(
+            coordinator, "readq.workflow_busy", args)
+        self.assertEqual(result["rows"], [{"busy": False}])
+        # The caller's own workflow with a queued task IS busy.
+        own_task = self.insert_task()
+        self._task_ids.append(own_task)
+        own_workflow = self._insert_workflow(own_task)
+        args["workflow_id"] = own_workflow
+        result = self.instance.execute(
+            coordinator, "readq.workflow_busy", args)
+        self.assertEqual(result["rows"], [{"busy": True}])
+
     def test_result_read_through_the_proxy(self):
         # Finding: WorkStore.result discarded the chunk rows
         # _read_query returned and re-fetched from the cursor, so a

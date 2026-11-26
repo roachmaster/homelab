@@ -726,7 +726,8 @@ class ReadQueryTest(unittest.TestCase):
         cursor = connection.cursor()
         rows = proxy_client.run_read_query(
             cursor, "deadline_retry_count",
-            {"workflow_id": "00000000-0000-0000-0000-000000000001"})
+            {"workflow_id": "00000000-0000-0000-0000-000000000001",
+             "owner_id": "mission-control"})
         self.assertEqual(rows, [{"n": 2}])
         rows = proxy_client.run_read_query(
             cursor, "task_root",

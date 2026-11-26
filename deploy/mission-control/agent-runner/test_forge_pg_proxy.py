@@ -9,6 +9,7 @@ records every statement and returns canned rows.
 
 import http.client
 import json
+import re
 import threading
 import unittest
 from unittest.mock import Mock
@@ -21,6 +22,7 @@ class FakeCursor:
         self.connection = connection
         self.statements = connection.statements
         self._row = None
+        self.description = None
 
     def execute(self, sql, params=None):
         self.statements.append((sql, params))
@@ -499,6 +501,69 @@ class ProxyReadTest(unittest.TestCase):
                 instance.execute(coordinator,
                                  "read.forge_agent.coding_tasks", bad)
             self.assertEqual(caught.exception.code, "invalid_argument")
+
+    def test_readq_rejects_a_foreign_exact_owner_id(self):
+        # Regression (round-6 finding 4): the owner-scope rule matched
+        # only parameter names ending in "_owner_id", so a parameter
+        # named exactly "owner_id" passed through unbound and any
+        # caller could aim a named read at another owner's rows.
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        with self.assertRaises(proxy.Rejected) as caught:
+            instance.execute(
+                coordinator, "readq.worker_readiness_catalog",
+                {"max_age_seconds": 90, "owner_id": "other-owner"})
+        self.assertEqual(caught.exception.code, "not_allowed")
+        # Refused before any database connection was opened.
+        self.assertEqual(created, [])
+
+    def test_readq_binds_the_exact_owner_id_to_the_caller(self):
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        result = instance.execute(
+            coordinator, "readq.worker_readiness_catalog",
+            {"max_age_seconds": 90, "owner_id": "mission-control"})
+        self.assertEqual(result, {"rows": []})
+        selects = [(sql, params) for sql, params in created[0].statements
+                   if "coding_worker_readiness" in sql]
+        self.assertEqual(len(selects), 1)
+        self.assertEqual(selects[0][1]["owner_id"], "mission-control")
+
+    def test_readq_object_id_queries_reject_a_foreign_owner(self):
+        # The workflow-keyed named reads gained a required owner_id
+        # in the same fix: a foreign value is refused, and omitting
+        # it is an argument error (validate_args), never a silent
+        # unscoped read.
+        instance, created = make_proxy()
+        coordinator = instance.callers["coordinator"]
+        with self.assertRaises(proxy.Rejected) as caught:
+            instance.execute(
+                coordinator, "readq.deadline_retry_count",
+                {"workflow_id": "00000000-0000-0000-0000-000000000001",
+                 "owner_id": "other-owner"})
+        self.assertEqual(caught.exception.code, "not_allowed")
+        with self.assertRaises(proxy.Rejected):
+            instance.execute(
+                coordinator, "readq.deadline_retry_count",
+                {"workflow_id": "00000000-0000-0000-0000-000000000001"})
+        self.assertEqual(created, [])
+
+    def test_every_readq_is_owner_scoped(self):
+        # Structural guard: every named read declares exactly the
+        # parameters its SQL uses, and (except the two GPU readiness
+        # queries — gpu_worker_readiness has no owner column, it is
+        # global worker state) one of them is owner-scoped.
+        exceptions = {"gpu_ready_models", "gpu_worker_ready"}
+        for name, (sql, params) in proxy.READ_QUERIES.items():
+            declared = {param[0] for param in params}
+            used = set(re.findall(r"%\(([a-z0-9_]+)\)s", sql))
+            self.assertEqual(used, declared, name)
+            if name in exceptions:
+                continue
+            owner_params = {
+                param for param in declared
+                if param == "owner_id" or param.endswith("_owner_id")}
+            self.assertTrue(owner_params, name)
 
     def test_reads_reject_unknown_tables_and_columns(self):
         instance, _ = make_proxy()

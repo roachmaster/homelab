@@ -130,6 +130,7 @@ def _owner_source_history(flow, cursor, task, first):
     store=flow.store
     history = _read_query(cursor, "workflow_actions_by_source_or_policy",
                           {"workflow_id": task["workflow_id"],
+                           "owner_id": store.owner,
                            "source_key": owner_source_key(task["workflow_id"]),
                            "source_pattern": "owner-code-resume-v2:" + str(task["workflow_id"]) + ":%",
                            "policies": [OWNER_CODE_RESUME, OWNER_CODE_FOLLOWUP],
@@ -397,7 +398,7 @@ class NativeOwnerControl:
             if flow._artifact(cursor, task['id'], attempt['attempt_id'])['result_sha256'] != q['parent_result_sha256']:
                 raise Rejected(409, 'result_mismatch')
             rows = _read_query(cursor, "workflow_busy",
-                {"workflow_id": w["workflow_id"],
+                {"workflow_id": w["workflow_id"], "owner_id": store.owner,
                  "task_statuses": ["queued", "running", "cancel_requested"],
                  "include_attempts": True,
                  "publication_statuses": ["pending", "checking", "publishing"]})
@@ -427,10 +428,10 @@ class NativeOwnerControl:
             cursor.execute("UPDATE forge_agent.coding_reviews SET candidate_commit=NULL,gate_manifest_sha256=NULL,verification='{}'::jsonb,owner_decision=NULL WHERE review_id=%s AND status='pending' AND previous_review_id=%s", (receipt['review_id'], q['review_id']))
             if cursor.rowcount != 1:
                 raise Rejected(409, 'reconcile_required')
-            rows = _read_query(cursor, "deadline_retry_count", {"workflow_id": w["workflow_id"]})
+            rows = _read_query(cursor, "deadline_retry_count", {"workflow_id": w["workflow_id"], "owner_id": store.owner})
             deadline_recoveries = rows[0]["n"]
             rows = _read_query(cursor, "verification_retries_sum",
-                {"workflow_id": w["workflow_id"], "review_id": receipt["review_id"]})
+                {"workflow_id": w["workflow_id"], "owner_id": store.owner, "review_id": receipt["review_id"]})
             verification_retries = rows[0]["n"]
             intent = dict(policy=OWNER_VERIFY_RETRY, request=request, workflow_id=str(w['workflow_id']),
                 source_attempt_id=str(attempt['attempt_id']), source_result_sha256=q['parent_result_sha256'],
@@ -499,7 +500,7 @@ class NativeOwnerControl:
             if saved:return _followup_replay(cursor,store,task,saved[0],request,digest)
             if prior is None:
                 rows = _read_query(cursor, "workflow_actions_by_source_or_policy_exists",
-                    {"workflow_id": task["workflow_id"],
+                    {"workflow_id": task["workflow_id"], "owner_id": store.owner,
                      "source_pattern": "owner-code-resume-v2:" + str(task["workflow_id"]) + ":%",
                      "policy": OWNER_CODE_FOLLOWUP})
                 if rows[0]["orphaned"]:raise Rejected(409,'reconcile_required')
@@ -640,7 +641,7 @@ class NativeOwnerControl:
                     or attempt['recipe_digest'] != recipe.digest or attempt['pinned_recipe'] != recipe.to_dict()):
                 raise Rejected(409, 'reconcile_required')
             rows = _read_query(cursor, "workflow_busy",
-                {"workflow_id": w["workflow_id"],
+                {"workflow_id": w["workflow_id"], "owner_id": store.owner,
                  "task_statuses": ["queued", "running", "cancel_requested"],
                  "include_attempts": True,
                  "publication_statuses": ["pending", "checking", "publishing"]})
