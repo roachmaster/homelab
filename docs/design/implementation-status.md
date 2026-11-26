@@ -28,8 +28,8 @@ release.
 flowchart LR
   UI[Generated portal and Rust/WASM] --> Host[Admitted native web host]
   Host --> Source[Configured source agent]
-  Host --> API[Work/event API runner: stopped]
-  API <--> DB[(PostgreSQL: live schema40)]
+  Host --> API[Configured Work/event API]
+  API <--> DB[(Durable PostgreSQL state)]
   Workers[Isolated coding and review workers] <--> DB
   Delivery[Trusted publication and delivery workers] <--> DB
   Delivery --> Git[Git candidates and pull requests]
@@ -44,7 +44,7 @@ authors and external database authors such as Muse have different execution
 contracts, while independent review, immutable feedback and trusted delivery
 remain shared requirements.
 
-## Current operating and source checkpoints
+## Pre-deployment operating and source checkpoints — 26 November 2026
 
 | Layer | Checked or implemented state | Practical implication |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ remain shared requirements.
 | Database, read-only observation | Highest migration is **40**, `provider_author_handoff`; 39 is `terminal_retry_settlement`. | Schema41 branch/stage tables are not established by the observed live migration registry. This observation is not a full role/function audit. |
 | Installed release selection | Web ExecStart names `portal-auto-0070e78f…`; API/worker/publisher/external-delivery ExecStart paths select `codex-quota-handoff-0070e78f`. | These are configured source labels, not a new artifact-digest or browser qualification. |
 | Git/source | `main` advanced to `4bf1d230` with the preserved resubmission queue; consolidated `backup/main` is under draft PR29. `feature/muse` is retained separately. | Task/development branch names were retired after preserving their committed tips. Worktree files remain available; consolidation is not main promotion. |
-| Consolidated contract | **ABI16**, native HTTP protocol1, additive migration **41** (`agent_branch_and_cicd_stages`). Migrations 1–40 are unchanged. | Host, assets, WASM, schema and grants need a coordinated, qualified rollout. Source presence does not establish runtime activation. |
+| Consolidated contract | **ABI16**, native HTTP protocol1, migrations **41–50** through the schema50 rollout target. Migration41 is `agent_branch_and_cicd_stages`; migrations 1–40 are unchanged. | Host, assets, WASM, schema and grants need a coordinated, qualified rollout. Source presence does not establish runtime activation. |
 
 The current portal navigation is **Agents, Workbench, Home and Design**. Chat is
 inactive and Mail retired as portal views; their PostgreSQL history and inert
@@ -66,7 +66,7 @@ CI/CD stages and bounded Errors/Tests/Console inspection through
 | Capability | Present in source | Next evidence or decision |
 | --- | --- | --- |
 | Author/reviewer workflows | Separate configured author and independent reviewer, retained Plans, immutable feedback, source-bound AGY-to-Codex quota handoff | Qualify the combined source and preserve original workflow authority, workspace and budgets across any selected handoff. |
-| Branch ownership and CI visibility | One default `forge/agent/<profile-slug>` branch, exclusive workflow reservation, main synchronization, cache scope and correlation-stage/log projection | Apply schema41 only in an authorized rollout with matching services/grants. Prove stale-owner, open-PR, restart and paging behavior through the real path. |
+| Branch ownership and CI visibility | One default `forge/agent/<profile-slug>` branch, exclusive workflow reservation, main synchronization, cache scope and correlation-stage/log projection | Apply migrations41–50 only in an authorized rollout with matching services/grants. Prove stale-owner, open-PR, restart and paging behavior through the real path. |
 | Verification identity and recovery | Opt-in content-v2 manifests/policy generations; retained legacy bindings; private historical-CI pass and completion helpers | Verify actual source, process ownership and genuine receipts. Helpers do not authorize CI, reset event allowances or deploy themselves. |
 | Triage and Workbench | Needs attention, task detail/evidence disclosures, focus/scroll retention; admitted source inspection and opt-in managed writes | Complete current actual-WASM/browser and desktop/narrow visual acceptance. Recheck live write/Studio configuration before describing either as enabled. |
 | Other framework consumers | Durable Rust jobs, local tools, game simulation/assets/replay and static-web Studio service | Keep their contracts distinct from the Python/PostgreSQL delivery workflow; expand them when a concrete consumer and acceptance case require it. |

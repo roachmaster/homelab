@@ -37,6 +37,19 @@ overflow-wrap rule keeps implementation code readable within the page. Preserve
 the existing browser overflow check and inspect owned before/after geometry and
 phone screenshots; do not replace the check with a CSS-string assertion.
 
+Validation: all six affected native asset tests and five public asset consumer
+checks passed, as did workspace formatting. The fixed full `make ui-qa` passed
+28/28 ordered groups with all owned cleanup passed on clean checkpoint
+`48dd58f70e0bdc1941270da9f6df5b1c8bb5651e`, unchanged source fingerprint
+`030ad6fa51f70b79d48ca6d6a70e65f5bab6437aacbc78b8403e6a9b704bdb8b`.
+Evidence: `/mnt/data/homelab-build/portal-browser-fix-908-qa/forge-ui-qa-r2gjr1p0`.
+Pinned existing CI Rust1.97.1, browser dependencies and sandbox were preserved.
+Owned after-fix geometry matches375/390/1440px viewports; the375px code screenshot
+is readable and contained. Final follow-up changes only documentation: neutral
+responsibility labels, explicitly dated pre-deployment observations, and the
+schema50 source target. Tested application bytes remain unchanged. Exact final
+published-source Jenkins qualification and deployment remain root-owned work.
+
 # Previous: Restore bounded embedded documentation rendering — 2026-11-26
 
 The user authorizes fixing deployment blockers. Jenkins99 on main a55a17f8
