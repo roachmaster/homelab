@@ -389,6 +389,13 @@ Mail, Chat persistence, and GPU flags.
   connections, or CLI actions; supported `ide.work.*` / `ide.usage.*` routes
   return `503` (`work_failed` / `usage_failed`, `unavailable`) and unsupported
   destinations return `404` (`not_found`).
+- A rejected `ide.work.submit` keeps its `code` but may add a bounded
+  `reason` naming which part of the caller's own submission to fix:
+  `result_mismatch` with `base_stale`, `policy_stale`, `policy_missing`,
+  `policy_not_applicable`, `workflow_mode` or `workflow_profile`, and `denied`
+  with `mode_not_granted`, `profile_not_granted`, `profile_disabled` or
+  `profile_mode_not_allowed`. Current base and workflow values are in
+  `ide.work.catalog`; clients that read only `code` are unaffected.
 
 The `forge-coding-v3` policy retains `antigravity_tool_policy: workspace-elevated-v1`
 and adds receipt-owned, task-scoped Antigravity conversation continuation.
