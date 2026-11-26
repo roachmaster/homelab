@@ -13,6 +13,7 @@ from psycopg2.extras import Json, RealDictCursor, register_uuid
 
 from work_retry_policy import AGENT_RETRY_LIMIT
 from queue_store import Rejected
+from work_failure_cause import CAUSE_SUMMARY_BYTES, FAILURE_CAUSES
 from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
@@ -178,6 +179,18 @@ def _summary(row):
     if "workflow_phase" in row:
         item["workflow_phase"] = row["workflow_phase"]
     return item
+
+
+def _public_failure(payload):
+    """Cause code and bounded summary of a failed event (M46), else None."""
+    if not isinstance(payload, dict):
+        return None
+    cause, summary = payload.get("cause"), payload.get("cause_summary")
+    if (cause not in FAILURE_CAUSES or not isinstance(summary, str)
+            or len(summary.encode("utf-8")) > CAUSE_SUMMARY_BYTES
+            or any(ord(c) < 32 and c not in "\t\n" for c in summary)):
+        return None
+    return {"cause": cause, "summary": summary}
 
 
 def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
@@ -1485,6 +1498,10 @@ class WorkStore:
                         item["external_progress"] = external
                     elif flow is not None:
                         item["workflow_progress"] = flow
+                elif row["event_kind"] == "failed":
+                    failure = _public_failure(row["payload"])
+                    if failure is not None:
+                        item["failure"] = failure
                 items.append(item)
         next_sequence = items[-1]["sequence"] if items else after_sequence
         return {

@@ -9,6 +9,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 import psycopg2
+from work_failure_cause import failure_cause
 from psycopg2.extras import Json, register_uuid
 
 from usage_store import (
@@ -517,19 +518,24 @@ class WorkerDB:
         sanitized_proof = _validate_stop_proof(
             stop_proof, require_stopped=(outcome != "needs_reconcile")
         )
+        arguments = (
+            attempt_id,
+            attempt_token,
+            outcome,
+            None if sanitized_manifest is None else Json(sanitized_manifest),
+            None if sanitized_usage is None else Json(sanitized_usage),
+            sanitized_summary,
+            Json(sanitized_proof),
+        )
         with self._worker_cursor() as cursor:
-            cursor.execute(
-                "SELECT forge_coding_worker_api.publish(%s, %s, %s, %s, %s, %s, %s)",
-                (
-                    attempt_id,
-                    attempt_token,
-                    outcome,
-                    None if sanitized_manifest is None else Json(sanitized_manifest),
-                    None if sanitized_usage is None else Json(sanitized_usage),
-                    sanitized_summary,
-                    Json(sanitized_proof),
-                ),
-            )
+            if outcome == "failed":
+                # M46: the failed event carries a cause code and bounded summary.
+                cursor.execute("SELECT to_regprocedure('forge_coding_worker_api.publish_with_cause(uuid,uuid,text,jsonb,jsonb,text,jsonb,text)') IS NOT NULL")
+                if cursor.fetchone()[0]:
+                    cursor.execute("SELECT forge_coding_worker_api.publish_with_cause(%s, %s, %s, %s, %s, %s, %s, %s)",
+                                   arguments + (failure_cause(sanitized_summary),))
+                    return dict(cursor.fetchone()[0])
+            cursor.execute("SELECT forge_coding_worker_api.publish(%s, %s, %s, %s, %s, %s, %s)", arguments)
             return dict(cursor.fetchone()[0])
 
     def record_stop(self, lease, stop_proof, summary, cause):
