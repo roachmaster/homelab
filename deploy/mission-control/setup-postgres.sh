@@ -53,13 +53,16 @@ install_auth_files() {
     # Install the HBA template and ident map for the current stage.
     # Sets hba_changed=true when a file changed. The installed HBA
     # file keeps its name; only its contents are stage-dependent.
-    # Three stages: cutover (40) admits the proxy roles only via
-    # peer auth and rejects everything else; preparation (39, no 40)
-    # admits the proxy OS user as the caller roles via peer auth
-    # while preserving direct access, so the proxy can run and be
+    # Three stages: cutover (41) admits the proxy roles only via
+    # peer auth and rejects everything else; preparation (40, no 41)
+    # admits the caller roles via peer auth while preserving the
+    # pre-existing local callers, so the proxy can run and be
     # verified before cutover; before preparation the original
-    # template applies. The ident map is installed at preparation
-    # (the peer rules need it) and at cutover.
+    # template applies. The ident map is stage-specific: at
+    # preparation the forge-preparation map (the proxy OS user PLUS
+    # the preserved local callers forge_agent and lrocha — pg_hba
+    # peer auth does not fall through, so a proxy-only map would
+    # lock them out); at cutover the forge-pg-proxy map.
     local template ident_file cutover preparation
     cutover="$(proxy_cutover)"
     preparation="$(proxy_preparation)"
@@ -74,7 +77,7 @@ install_auth_files() {
         install -m 0640 -o postgres -g postgres "$template" "$cluster_config/forge-worker-hba.conf"
         hba_changed=true
     fi
-    if [[ "$cutover" == t || "$preparation" == t ]]; then
+    if [[ "$cutover" == t ]]; then
         ident_file="$cluster_config/pg_ident.conf"
         if [[ -f "$ident_file" ]]; then
             # Appended once; the cluster file keeps operator additions.
@@ -84,6 +87,18 @@ install_auth_files() {
             fi
         else
             install -m 0640 -o postgres -g postgres "$directory/postgres-worker-ident.conf" "$ident_file"
+            hba_changed=true
+        fi
+    elif [[ "$preparation" == t ]]; then
+        ident_file="$cluster_config/pg_ident.conf"
+        if [[ -f "$ident_file" ]]; then
+            # Appended once; the cluster file keeps operator additions.
+            if ! grep -q '^forge-preparation[[:space:]]' "$ident_file"; then
+                cat "$directory/postgres-worker-ident-preparation.conf" >> "$ident_file"
+                hba_changed=true
+            fi
+        else
+            install -m 0640 -o postgres -g postgres "$directory/postgres-worker-ident-preparation.conf" "$ident_file"
             hba_changed=true
         fi
     fi
@@ -179,32 +194,36 @@ check_cluster() {
         FROM pg_hba_file_rules;
     ")"
     elif [[ "$preparation" == t ]]; then
-        # Preparation: the proxy OS user is admitted as each caller
-        # role via local peer auth (six peer rules, in order, then
-        # the retained host rules at 7-10), the ident map holds the
-        # six mappings, and direct access is preserved: no local
-        # reject rule for a proxy role, and both SCRAM host paths
-        # still admit their roles.
+        # Preparation: the caller roles are admitted via local peer
+        # auth through the forge-preparation map (six peer rules, in
+        # order, then the retained host rules at 7-10); the map
+        # holds nine mappings — the proxy OS user to the six roles,
+        # forge_agent to forge_agent, and lrocha to the two worker
+        # roles — because peer auth does not fall through and a
+        # proxy-only map would lock the existing local callers out.
+        # Direct access is otherwise preserved: no local reject
+        # rule for a proxy role, and both SCRAM host paths still
+        # admit their roles.
         worker_access="$(psql_as postgres postgres -Atc "
         SELECT count(*) FILTER (WHERE error IS NOT NULL) = 0
            AND count(*) FILTER (WHERE type = 'local'
              AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_agent']
-             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-preparation']) = 1
            AND count(*) FILTER (WHERE type = 'local'
              AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_coding_worker']
-             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-preparation']) = 1
            AND count(*) FILTER (WHERE type = 'local'
              AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_coding_reconciler']
-             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-preparation']) = 1
            AND count(*) FILTER (WHERE type = 'local'
              AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_gpu_worker']
-             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-preparation']) = 1
            AND count(*) FILTER (WHERE type = 'local'
              AND database = ARRAY['forge_agent'] AND user_name = ARRAY['muse_proxy_writer']
-             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-preparation']) = 1
            AND count(*) FILTER (WHERE type = 'local'
              AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_pg_proxy']
-             AND auth_method = 'peer' AND options = ARRAY['map=forge-pg-proxy']) = 1
+             AND auth_method = 'peer' AND options = ARRAY['map=forge-preparation']) = 1
            AND count(*) FILTER (WHERE type = 'local'
              AND database = ARRAY['forge_agent']
              AND user_name && ARRAY['forge_agent','forge_coding_worker','forge_coding_reconciler','forge_gpu_worker','muse_proxy_writer','forge_pg_proxy']
@@ -224,9 +243,15 @@ check_cluster() {
              AND user_name = ARRAY['all'] AND auth_method = 'reject'
              AND type = 'host' AND address = '$loopback' AND netmask = '255.255.255.255') = 1
            AND (SELECT count(*) FILTER (WHERE error IS NOT NULL) = 0
-             AND count(*) FILTER (WHERE map_name = 'forge-pg-proxy'
+             AND count(*) FILTER (WHERE map_name = 'forge-preparation'
                AND sys_name = 'forge-pg-proxy'
                AND pg_username IN ('forge_agent','forge_coding_worker','forge_coding_reconciler','forge_gpu_worker','muse_proxy_writer','forge_pg_proxy')) = 6
+             AND count(*) FILTER (WHERE map_name = 'forge-preparation'
+               AND sys_name = 'forge_agent'
+               AND pg_username = 'forge_agent') = 1
+             AND count(*) FILTER (WHERE map_name = 'forge-preparation'
+               AND sys_name = 'lrocha'
+               AND pg_username IN ('forge_coding_worker','forge_coding_reconciler')) = 2
              FROM pg_ident_file_mappings)
         FROM pg_hba_file_rules;
     ")"

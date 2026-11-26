@@ -214,22 +214,28 @@ defaults for local peer + other hosts). `forge_agent`,
 `forge_coding_worker`, `forge_coding_reconciler` connect over the
 local Unix socket (peer) and/or TCP from the runner host.
 
-Preparation (migration 39 applied, 40 not yet): the preparation
+Preparation (migration 40 applied, 41 not yet): the preparation
 HBA template (`postgres-worker-hba-preparation.conf`) admits the
-proxy OS user as each caller role via local peer auth through the
-`forge-pg-proxy` ident map (six peer rules first), then retains
-the original four host rules unchanged — direct access is
-preserved, no reject rules are added, and non-proxy OS users fall
-through to the distribution's local peer rules. This stage is what
-makes the proxy runnable and verifiable before cutover: the proxy
-starts at preparation (setup-runner.sh) and the pre-cutover
-verification sequence (proxy_verify.py: /health, per-caller
-probes, peer admission) runs against it before any caller
-migrates. `setup-postgres.sh` `install_auth_files()` installs the
-preparation template (and the ident map) at this stage, and
-`check_cluster` asserts it stage-aware (six peer rules, six ident
-mappings, the four host rules at positions 7-10, no local reject
-rule for a proxy role).
+caller roles via local peer auth through the `forge-preparation`
+ident map (six peer rules first), then retains the original four
+host rules unchanged — no reject rules are added. pg_hba is
+first-match and a failed peer authentication does not fall
+through to later rules, so the forge-preparation map
+(`postgres-worker-ident-preparation.conf`) carries the
+pre-existing local callers alongside the proxy OS user:
+forge_agent -> forge_agent and lrocha -> forge_coding_worker /
+forge_coding_reconciler, nine mappings in all; a proxy-only map
+would lock those callers out at this stage (round-6 finding 2).
+This stage is what makes the proxy runnable and verifiable
+before cutover: the proxy starts at preparation
+(setup-runner.sh) and the pre-cutover verification sequence
+(proxy_verify.py: /health, per-caller probes, peer admission)
+runs against it before any caller migrates.
+`setup-postgres.sh` `install_auth_files()` installs the
+preparation template (and the preparation ident map) at this
+stage, and `check_cluster` asserts it stage-aware (six peer
+rules, nine ident mappings, the four host rules at positions
+7-10, no local reject rule for a proxy role).
 
 Post-cutover: write-capable roles (`forge_agent`,
 `forge_coding_worker`, `forge_coding_reconciler`,
@@ -244,7 +250,7 @@ terminated at cutover.
 Files: the post-cutover HBA template is
 `deploy/mission-control/postgres-worker-hba-proxy.conf`
 (installed as `forge-worker-hba.conf` by `setup-postgres.sh`
-`install_auth_files()` when the cutover migration (version 40)
+`install_auth_files()` when the cutover migration (version 41)
 exists; pre-cutover the original `postgres-worker-hba.conf` is
 installed). It lists, in order, one local peer rule with
 `map=forge-pg-proxy` per proxy role
@@ -260,12 +266,12 @@ replication all reject`. The ident map lives in
 six DB roles) and is appended once to the cluster `pg_ident.conf`
 (the cluster file keeps operator additions).
 `setup-postgres.sh` `check_cluster` asserts this state
-stage-aware on the migration-40 row (peer rule before the reject
+stage-aware on the migration-41 row (peer rule before the reject
 rule per role, exactly one of each, no host rule naming any
 proxy role, exactly six ident mappings); at preparation it asserts
-the preparation template (six peer rules, six ident mappings,
-original host rules retained); before preparation it asserts the
-original HBA rules unchanged.
+the preparation template (six peer rules, nine forge-preparation
+ident mappings, original host rules retained); before preparation
+it asserts the original HBA rules unchanged.
 
 ## 7. What the proxy does NOT cover
 

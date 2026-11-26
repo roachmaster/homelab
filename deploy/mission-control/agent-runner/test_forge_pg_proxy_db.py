@@ -2154,11 +2154,22 @@ class AdmissionTest(unittest.TestCase):
 class PreparationAdmissionTest(unittest.TestCase):
     """Finding 3: the preparation HBA template admits the proxy OS
     user as each caller role via local peer auth (six peer rules +
-    six ident mappings) while preserving direct access — no reject
-    rules, and both SCRAM host paths still admit their roles. The
-    live peer login itself is proved by proxy_verify.py on Mission
-    Control (this suite cannot run as the forge-pg-proxy OS user);
-    here the deployed configuration is asserted, rule by rule."""
+    the forge-preparation ident map) while preserving direct
+    access — no reject rules, and both SCRAM host paths still
+    admit their roles.
+
+    Round-6 finding 2: pg_hba is first-match and a failed peer
+    authentication does NOT fall through to later rules, so with a
+    proxy-only ident map the preparation peer rules locked out the
+    pre-existing local callers (the forge_agent OS user, and the
+    operator's worker/reconciler sessions). The forge-preparation
+    map therefore also carries forge_agent -> forge_agent and
+    lrocha -> forge_coding_worker / forge_coding_reconciler, and
+    test_preparation_local_callers_keep_peer_access proves the
+    preserved logins behaviorally by mapping the test's own OS
+    user the same way. The proxy OS user's own peer login is
+    proved by proxy_verify.py on Mission Control (this suite
+    cannot run as the forge-pg-proxy OS user)."""
 
     PROXY_ROLES = ("forge_agent", "forge_coding_worker",
                    "forge_coding_reconciler", "forge_gpu_worker",
@@ -2173,8 +2184,9 @@ class PreparationAdmissionTest(unittest.TestCase):
         cls.cluster.apply_grant_files()
         cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
         cls.cluster.set_password("muse_events", MUSE_EVENTS_PASSWORD)
-        cls.cluster.install_hba("postgres-worker-hba-preparation.conf",
-                                ident_name="postgres-worker-ident.conf")
+        cls.cluster.install_hba(
+            "postgres-worker-hba-preparation.conf",
+            ident_name="postgres-worker-ident-preparation.conf")
 
     @classmethod
     def tearDownClass(cls):
@@ -2198,7 +2210,7 @@ class PreparationAdmissionTest(unittest.TestCase):
                 if row["type"] == "local"
                 and row["database"] == ["forge_agent"]
                 and row["auth_method"] == "peer"
-                and row["options"] == ["map=forge-pg-proxy"]]
+                and row["options"] == ["map=forge-preparation"]]
         self.assertEqual(
             {row["user_name"][0] for row in peer}, set(self.PROXY_ROLES))
         self.assertEqual(len(peer), 6)
@@ -2220,18 +2232,53 @@ class PreparationAdmissionTest(unittest.TestCase):
             cur = conn.cursor()
             cur.execute(
                 "SELECT count(*) FILTER (WHERE error IS NOT NULL),"
-                " count(*) FILTER (WHERE map_name = 'forge-pg-proxy'"
+                " count(*) FILTER (WHERE map_name = 'forge-preparation'"
                 " AND sys_name = 'forge-pg-proxy'"
                 " AND pg_username IN ('forge_agent',"
                 " 'forge_coding_worker', 'forge_coding_reconciler',"
                 " 'forge_gpu_worker', 'muse_proxy_writer',"
-                " 'forge_pg_proxy'))"
+                " 'forge_pg_proxy')),"
+                " count(*) FILTER (WHERE map_name = 'forge-preparation'"
+                " AND sys_name = 'forge_agent'"
+                " AND pg_username = 'forge_agent'),"
+                " count(*) FILTER (WHERE map_name = 'forge-preparation'"
+                " AND sys_name = 'lrocha'"
+                " AND pg_username IN ('forge_coding_worker',"
+                " 'forge_coding_reconciler'))"
                 " FROM pg_ident_file_mappings")
-            errors, mapped = cur.fetchone()
+            errors, mapped, preserved, operator = cur.fetchone()
             self.assertEqual(errors, 0)
             self.assertEqual(mapped, 6)
+            self.assertEqual(preserved, 1)
+            self.assertEqual(operator, 2)
         finally:
             conn.close()
+
+    def test_preparation_local_callers_keep_peer_access(self):
+        # Behavioral proof of the round-6 finding-2 fix: map the
+        # test's own OS user the way the preparation ident maps the
+        # host's pre-existing local callers, reload, and connect.
+        import pwd
+        me = pwd.getpwuid(os.getuid()).pw_name
+        ident_path = os.path.join(self.cluster.data, "pg_ident.conf")
+        with open(ident_path, "a", encoding="utf-8") as handle:
+            handle.write(f"\nforge-preparation {me} forge_agent\n")
+            handle.write(
+                f"forge-preparation {me} forge_coding_worker\n")
+        self.cluster.reload()
+        for user in ("forge_agent", "forge_coding_worker"):
+            conn = self.cluster.connect("forge_agent", user)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT current_user")
+                self.assertEqual(cur.fetchone()[0], user)
+            finally:
+                conn.close()
+        # A role this OS user is not mapped to is refused by the
+        # first matching peer rule: peer failure does not fall
+        # through to the fixture's trailing trust line.
+        with self.assertRaises(psycopg2.OperationalError):
+            self.cluster.connect("forge_agent", "forge_gpu_worker")
 
     def test_preparation_preserves_direct_tcp_access(self):
         for user, password in (("forge_gpu_worker", GPU_PASSWORD),
