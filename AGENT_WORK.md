@@ -24,6 +24,21 @@ Live activation requires matched schema, scoped grants, sealed runtime/config
 and clean worker ownership; source publication alone is not activation proof.
 Record actual test, publication, recovery and running-source evidence separately.
 
+Candidate checkpoint: thirty actual handoff tests and six historical controls
+passed, including M32 upgrades, original 49-character review escalation, Opus
+continuation, queued Plan revisions, partial repairs, twenty-per-event deadline
+and Codex quota boundaries. Three delegated-author recovery regressions failed
+before the correction and passed afterward. M40's nine schema tests include a
+deterministic claim-cursor race that fails on M39 and passes on M40.
+
+The first full local gate stopped on historical source-hash assertions, not a
+handoff behavior failure. The explicit M40 qualification overlay preserves all
+34 historical maps and all 39 predecessor migration files. Forty-seven combined
+boundary/parity/CI-contract checks passed against the finalized source. The
+normal observed-main Jenkins run must now establish the complete final-source
+backend/browser/native gate before runtime activation. Private operation drafts
+remain inactive until that protected receipt exists.
+
 # Previous: Stabilize the event stream and measure bottlenecks — 2026-11-25
 
 User requests fixing the live event stream and identifying its bottlenecks and
