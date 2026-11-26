@@ -49,7 +49,7 @@ END;
 $delivery_reads$;
 DO $cicd_branch_reads$
 BEGIN
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=39 AND name='agent_branch_and_cicd_stages') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41 AND name='agent_branch_and_cicd_stages') THEN
   GRANT SELECT ON forge_agent.agent_branch_state,forge_agent.jenkins_stage_results,forge_agent.jenkins_stage_log_chunks TO muse_events;
  END IF;
 END;

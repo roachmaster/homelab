@@ -1,4 +1,23 @@
-# Current: Reconcile the system picture and delivery direction — 2026-11-26
+# Current: Qualify and deploy merged main, migrate DB, restore portal — 2026-11-26
+
+User authorizes starting Jenkins verification, fixing failures, deploying the
+matched web/UI, database and runner/worker release, and restoring the portal.
+Start from merged main e9b29210 including timeout fix 8a86dd4. Preserve existing
+workspaces, task/Plan/review history, credentials and independently configured
+agent roles. No database reset or legacy digest-column drop is authorized.
+
+Deploy matching web host/UI before or together with the runner. Install the
+matching Jenkins verifier before any coordinated switch to transmitting named
+contracts; leave that producer switch separate pending the requested handoff.
+Keep genuine failed CI results and qualify each changed exact source. Read-only
+preflight found schema40, API runner inactive/disabled, other worker and web
+services active. Jenkins #96 failed source preflight on a contradictory
+prepare-source diagnostic assertion. ABI16 release-actor admission and two stale
+M39/M41 database grant guards are being corrected before final qualification.
+Use isolated source worktrees and /mnt/data evidence; inspect leases before
+service cutover and preserve a verified DB backup and rollback selectors.
+
+# Previous: Reconcile the system picture and delivery direction — 2026-11-26
 
 User requests reviewing the consolidated changes and updating files/notes to
 reflect the current system and where it is headed. Update the existing status,

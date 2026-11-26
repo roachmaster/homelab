@@ -62,6 +62,25 @@ class FakeSystem:
 
 
 class PortalReleaseActorTest(unittest.TestCase):
+    def test_configuration_supports_abi16_and_retains_closed_legacy_abi_selection(self):
+        raw = dict(owner='owner', project_alias='homelab', repository='roachmaster/homelab',
+            canonical_repo='/home/lrocha/repos/homelab',
+            ci_results_root='/var/lib/forge-provisioning/delivery-ci-results',
+            releases_root='/opt/homelab-forge/releases',
+            web_config_root='/etc/homelab-forge/web',
+            state_root='/var/lib/forge-provisioning/portal-release',
+            override='/etc/systemd/system/homelab-web.service.d/portal.conf',
+            replay_archive_root='/opt/homelab-forge/replay-archive',
+            web_user='homelab-web', web_group='homelab-web', source_account='lrocha',
+            source_github_config_dir='/home/lrocha/.config/gh', candidate_port=18788,
+            expected_abi=16)
+        for abi in (14, 15, 16):
+            with self.subTest(supported=abi):
+                self.assertEqual(ACTOR.ActorConfig.parse(dict(raw, expected_abi=abi)).expected_abi, abi)
+        for abi in (13, 17, True, '16', 16.0):
+            with self.subTest(unsupported=abi), self.assertRaises(ValueError):
+                ACTOR.ActorConfig.parse(dict(raw, expected_abi=abi))
+
     def test_atomic_root_writer_handles_existing_near_name_max_override(self):
         # Exercise real filesystem atomic replacement; substitute only Root
         # ownership metadata so this regression also runs under the CI UID.
@@ -242,9 +261,9 @@ class PortalReleaseActorTest(unittest.TestCase):
             self.invoke('plan')
         self.assertEqual(self.system.restarts, 0)
 
-    def test_abi15_artifacts_require_the_matching_selected_abi(self):
+    def _assert_artifacts_require_the_matching_selected_abi(self, abi):
         assets = json.loads(self.inventory['assets/manifest.json'])
-        assets['abi_version'] = 15
+        assets['abi_version'] = abi
         self.inventory['assets/manifest.json'] = ACTOR.canonical(assets)
         self.put(self.packet / 'assets/manifest.json', self.inventory['assets/manifest.json'])
         for item in self.manifest['files']:
@@ -258,9 +277,15 @@ class PortalReleaseActorTest(unittest.TestCase):
         self.save_result()
         with self.assertRaises(ValueError):
             self.invoke('plan')
-        self.config.expected_abi = 15
+        self.config.expected_abi = abi
         self.assertEqual(self.invoke('plan')['status'], 'planned')
         self.assertEqual(self.system.restarts, 0)
+
+    def test_abi15_artifacts_require_the_matching_selected_abi(self):
+        self._assert_artifacts_require_the_matching_selected_abi(15)
+
+    def test_abi16_artifacts_require_the_matching_selected_abi(self):
+        self._assert_artifacts_require_the_matching_selected_abi(16)
 
     def test_ready_provider_and_actual_actor_agree_on_plan_replay_and_activation(self):
         from work_delivery_ops import ReleaseProvider
