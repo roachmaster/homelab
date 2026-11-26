@@ -104,11 +104,12 @@ class ExternalWorkflowStore:
     def _resolve_retry(self,cursor,w,kind,source_id,digest):
         if self._retry_events is not None:return self._retry_events.resolve_verified(cursor,self._retry_scope(w),kind,source_id,digest,phase_id=kind)
 
-    def _reserve_retry(self,cursor,w,kind,source_id,digest,action_key,*,passed_kinds=(),phase_id=None,passed_phase_ids=()):
+    def _reserve_retry(self,cursor,w,kind,source_id,digest,action_key,*,passed_kinds=(),phase_id=None,passed_phase_ids=(),infrastructure=False):
         event=self._retry_events.observe_failure(cursor,self._retry_scope(w),kind,source_id,digest,passed_kinds,phase_id=phase_id or kind,passed_phase_ids=passed_phase_ids)
         event=self._retry_events.reserve(cursor,event['event_id'],action_key)
         if event['status']=='exhausted':
-            self._escalate(cursor,w,kind.replace('_',' ').capitalize()+' event exhausted its twenty retry attempts. All source and review evidence are retained.')
+            self._escalate(cursor,w,kind.replace('_',' ').capitalize()+' event exhausted its twenty retry attempts. All source and review evidence are retained.',
+                           cancel_children=not infrastructure)
             return None
         return event
 
@@ -465,14 +466,17 @@ class ExternalWorkflowStore:
             raise Rejected(409,'result_mismatch')
         for task in (root,source,critic):
             if not self.related_task(cursor,w['project_alias'],w['workflow_id'],task['id']):raise Rejected(409,'result_mismatch')
-        if (critic['status']!='cancelled' or critic['latest_attempt_id'] is None
+        # Before M45-era escalation the cascade cancelled root/source/critic; an
+        # infrastructure escalation now leaves them as they were. Accept both.
+        source_cancelled=source['status']=='cancelled'
+        if (critic['status'] not in {'cancelled','needs_reconcile'} or critic['latest_attempt_id'] is None
                 or critic['agent_profile']!=w['reviewer_profile']
                 or critic['recipe_digest']!=w['snapshot']['recipes']['reviewer_review']['digest']
                 or source['mode']!='implement' or source['latest_attempt_id'] is not None
-                or source['agent_profile']!=w['author_profile'] or source['status']!='cancelled'
+                or source['agent_profile']!=w['author_profile'] or source['status'] not in {'cancelled','awaiting_review'}
                 or source['recipe_digest']!=w['snapshot']['recipes']['author_implement']['digest']
-                or source['revision']!=target['source_revision']+1
-                or root['status']!='cancelled' or root['latest_attempt_id'] is not None):
+                or source['revision']!=target['source_revision']+(1 if source_cancelled else 0)
+                or root['status'] not in {'cancelled','awaiting_review'} or root['latest_attempt_id'] is not None):
             raise Rejected(409,'not_reviewable')
         cursor.execute("SELECT EXISTS(SELECT FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=ANY(%s::uuid[]) AND action='cancel') AS cancelled",
             (self.owner,w['project_alias'],[str(t['id']) for t in (root,source,critic)]))
@@ -807,12 +811,15 @@ class ExternalWorkflowStore:
         if critic['status'] in {'quota_blocked','blocked_auth','blocked_permission','cancelled'}:
             self._escalate(cursor,w,summary);return True
         retry=w['state'].get('review_retries',0)+1
+        # needs_reconcile = the reviewer could not run (context/lease/deadline),
+        # not a judgement on the candidate.
+        infrastructure=critic['status']=='needs_reconcile'
         if self._retry_events is None:
-            if retry>AGENT_RETRY_LIMIT:self._escalate(cursor,w,summary);return True
+            if retry>AGENT_RETRY_LIMIT:self._escalate(cursor,w,summary,cancel_children=not infrastructure);return True
         else:
             source_id='reviewer:'+str(review['review_id'])
             evidence=hashlib.sha256(canonical({'target':review['target_sha256'],'task_id':str(critic['id']),'attempt_id':str(critic['latest_attempt_id']),'summary':summary})).hexdigest()
-            event=self._reserve_retry(cursor,w,'reviewer_correction',source_id,evidence,'reviewer:'+str(review['review_id']))
+            event=self._reserve_retry(cursor,w,'reviewer_correction',source_id,evidence,'reviewer:'+str(review['review_id']),infrastructure=infrastructure)
             if event is None:return True
             retry=event['used']
         cursor.execute("UPDATE forge_external_workflow.reviews SET status='retry',updated_at=clock_timestamp() WHERE review_id=%s",(review['review_id'],))
@@ -994,12 +1001,15 @@ class ExternalWorkflowStore:
         self._save(cursor,w,'Main changed; selecting the new trusted source before bounded rebase.',phase='repair')
         return True
 
-    def _escalate(self,cursor,w,reason):
+    def _escalate(self,cursor,w,reason,*,cancel_children=True):
         root=self._task(cursor,w,w['root_task_id'])
         if w['phase'] not in TERMINAL|{'merging'} and root['status'] in {'cancelled','cancel_requested'}:
             self._cancel_locked(cursor,w,'Root workflow task was cancelled.',actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
             return
-        self._cancel_children(cursor,w,actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
+        # An infrastructure failure (e.g. review context could not be loaded) is
+        # not a verdict: escalate the step alone and leave the submitted
+        # candidate and every sibling task untouched for recovery.
+        if cancel_children:self._cancel_children(cursor,w,actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
 
         # The public workflow DTO caps this field in UTF-8 bytes, not characters.
         # Keep the complete review artifact separately and preserve whole codepoints.
