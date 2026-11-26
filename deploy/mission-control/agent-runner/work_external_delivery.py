@@ -6,7 +6,7 @@ Jenkins and guarded main publication, with explicit scoped factories and leases.
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from uuid import UUID
+from uuid import UUID, uuid5
 import argparse
 import hashlib
 import json
@@ -108,6 +108,38 @@ def digest(value):
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+
+
+NATIVE_ACTION_FIELDS = ('owner_id', 'project_alias', 'task_id', 'attempt_id', 'review_id', 'workflow_id',
+                        'correlation_id', 'candidate_commit', 'candidate_tree', 'native_gate_manifest_sha256')
+
+
+def native_action_id(version, identity):
+    """Native Jenkins action id from a fixed tuple of already-typed fields.
+
+    No JSON canonicalization (the source of Python/PostgreSQL formatting false
+    failures): the name is the frozen version plus the fields joined by '|',
+    a character no field may contain.
+    """
+    values = [identity[key] for key in NATIVE_ACTION_FIELDS]
+    if any(not isinstance(value, str) or not value or '|' in value for value in values):
+        raise ValueError('Invalid native action identity')
+    return str(uuid5(UUID(identity['workflow_id']), version + ':' + '|'.join(values)))
+
+
+def legacy_native_action_id(version, identity):
+    """The pre-0d derivation, kept so in-flight actions finish under their old ids."""
+    return str(uuid5(UUID(identity['workflow_id']), version + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
+
+
+def native_action_ids(version, identity):
+    """Every action id a frozen identity may legitimately carry."""
+    ids = {legacy_native_action_id(version, identity)}
+    try:
+        ids.add(native_action_id(version, identity))
+    except (ValueError, KeyError, TypeError):
+        pass
+    return ids
 
 
 def validate_branch_name(value):

@@ -19,7 +19,7 @@ from uuid import UUID, uuid5
 from work_agent_branch import BranchOwnershipConflictError, PERSISTENT_BRANCH_POLICY
 from work_executor import unit_name
 from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory, contract_for_config
-from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFactory,
+from work_external_delivery import (native_action_id, native_action_ids, CHECKS, DeliveryConfig, DeliveryProviderFactory,
     LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, protected_delivery_gate, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
 from work_jenkins_lifecycle import LifecycleTracker
@@ -254,8 +254,7 @@ class NativeJenkinsVerification:
             identity = {**scope, 'candidate_commit': sha(request['candidate_commit']),
                 'candidate_tree': sha(request['candidate_tree']),
                 'native_gate_manifest_sha256': digest(binding['native_gate_manifest_sha256'])}
-            expected_action = str(uuid5(UUID(scope['workflow_id']), frozen_version + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
-            if action != expected_action or request.get('prepare_action_id') != str(uuid5(UUID(action),'candidate-bundle')):
+            if action not in native_action_ids(frozen_version, identity) or request.get('prepare_action_id') != str(uuid5(UUID(action),'candidate-bundle')):
                 return False
             if self._historical_no_process(directory, binding, scope):
                 return True
@@ -621,7 +620,7 @@ class NativeJenkinsVerification:
         head, tree, native_gate, source, helper, gate = self._source(job, repository, branch_scope)
         identity = {**scope, 'candidate_commit': head, 'candidate_tree': tree,
                     'native_gate_manifest_sha256': native_gate}
-        action = str(uuid5(UUID(scope['workflow_id']), self.version + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
+        action = native_action_id(self.version, identity)
         prepare = str(uuid5(UUID(action), 'candidate-bundle'))
         request = {**scope, 'action_id': action, 'prepare_action_id': prepare,
             'candidate_commit': head, 'candidate_tree': tree, 'integration_base': expected_main,
