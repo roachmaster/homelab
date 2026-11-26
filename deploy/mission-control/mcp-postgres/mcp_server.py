@@ -432,15 +432,63 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         LOG.debug("%s %s", self.address_string(), fmt % args)
 
+    def handle_one_request(self):
+        # Handler instances are reused for keep-alive connections.
+        self.__dict__.pop("_body_result", None)
+        super().handle_one_request()
+
+    def consume_request_body(self):
+        """Drain Content-Length bytes so a reused keep-alive connection stays aligned.
+
+        Returns (body, reason). body is bytes (possibly empty) when the request
+        can stay open. reason is None on success, or 'too_large', 'missing', or
+        'unreadable' when the body cannot be consumed; close_connection is set
+        in those cases and the caller must send Connection: close.
+        """
+        if hasattr(self, "_body_result"):
+            return self._body_result
+        result = self._read_request_body()
+        self._body_result = result
+        if result[0] is None:
+            self.close_connection = True
+        return result
+
+    def _read_request_body(self):
+        transfer = (self.headers.get("Transfer-Encoding") or "").strip().lower()
+        if transfer and transfer != "identity":
+            return None, "missing"
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            return b"", None
+        try:
+            length = int(raw_length)
+        except ValueError:
+            return None, "missing"
+        if length < 0 or length > MAX_BODY_BYTES:
+            return None, "too_large"
+        try:
+            data = self.rfile.read(length)
+        except (OSError, ValueError):
+            return None, "unreadable"
+        if len(data) < length:
+            return None, "unreadable"
+        return data, None
+
     def send_json(self, status, body, extra=None):
+        self.consume_request_body()
         data = b"" if body is None else json.dumps(body, ensure_ascii=False).encode()
+        extra = dict(extra or {})
+        if any(key.lower() == "connection" and str(value).lower() == "close" for key, value in extra.items()):
+            self.close_connection = True
+        if self.close_connection:
+            extra.setdefault("Connection", "close")
         self.send_response(status)
         if body is not None:
             self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        for key, value in (extra or {}).items():
+        for key, value in extra.items():
             self.send_header(key, value)
         self.end_headers()
         if data and self.command != "HEAD":
@@ -520,16 +568,15 @@ class Handler(BaseHTTPRequestHandler):
         if content_type != "application/json":
             self.send_json(415, error_response(None, -32700, "Content-Type must be application/json"))
             return
-        try:
-            length = int(self.headers.get("Content-Length", ""))
-        except ValueError:
-            self.send_json(411, error_response(None, -32700, "Content-Length required"), {"Connection": "close"})
+        body, reason = self.consume_request_body()
+        if body is None:
+            if reason == "too_large":
+                self.send_json(413, error_response(None, -32700, "request too large"), {"Connection": "close"})
+            else:
+                self.send_json(411, error_response(None, -32700, "Content-Length required"), {"Connection": "close"})
             return
-        if length < 0 or length > MAX_BODY_BYTES:
-            self.send_json(413, error_response(None, -32700, "request too large"), {"Connection": "close"})
-            return
         try:
-            message = json.loads(self.rfile.read(length))
+            message = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):
             self.send_json(400, error_response(None, -32700, "Parse error"))
             return
