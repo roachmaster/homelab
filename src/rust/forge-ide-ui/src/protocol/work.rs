@@ -1104,6 +1104,9 @@ pub enum WorkRequest {
         auto_repair: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workflow_policy_digest: Option<String>,
+        /// M44 catalog id of the presented policy; preferred over the digest.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workflow_policy_id: Option<String>,
     },
     WorkGet {
         request_id: String,
@@ -1360,6 +1363,7 @@ impl WorkRequest {
                     mode,
                     auto_repair,
                     workflow_policy_digest,
+                    workflow_policy_id,
                     base_revision,
                     agent_profile,
                     prompt,
@@ -1370,6 +1374,9 @@ impl WorkRequest {
                     valid_work_hex(base_revision, 40)
                         && workflow_policy_digest.as_deref().is_none_or(|digest| {
                             valid_work_hex(digest, 64) && *mode == WorkMode::Plan && !auto_repair
+                        })
+                        && workflow_policy_id.as_deref().is_none_or(|id| {
+                            valid_chat_id(id) && *mode == WorkMode::Plan && !auto_repair
                         })
                         && (!auto_repair || *mode == WorkMode::Implement)
                         && valid_work_name(agent_profile, 64)
