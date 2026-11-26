@@ -144,6 +144,32 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         resumed = self.claim("codex-author")
         self.assertEqual(resumed.task_id, original.task_id)
 
+    def test_unattended_agy_source_hands_off_to_separately_pinned_codex_worker(self):
+        profiles = dict(self.config.profiles)
+        profiles["agy-v2"] = replace(profiles["agy-v2"], resource_profile=work_policy.AGY_POLICY_ID)
+        self.install_config(replace(self.config, profiles=profiles))
+        projects = [dict(alias="homelab", base_revision="a" * 40)]
+        self.db.advertise("workflow-worker", self.incarnation, projects,
+            [dict(alias=alias, backend="codex", model=profiles[alias].model, modes=modes)
+             for alias, modes in (("codex-author", ["plan", "implement"]), ("codex-v2", ["review"]))],
+            work_policy.POLICY_DIGEST)
+        agy_incarnation = str(uuid4())
+        self.db.advertise("agy-unattended", agy_incarnation, projects,
+            [dict(alias="agy-v2", backend="antigravity", model=profiles["agy-v2"].model, modes=["plan", "implement"])],
+            work_policy.AGY_POLICY_DIGEST)
+        self.submit()
+        original = self.db.claim("agy-unattended", agy_incarnation, ["agy-v2"])
+        self.assertIsNotNone(original)
+        frozen = self.frozen(original)
+        self.assertEqual(original.recipe["resource_profile"], work_policy.AGY_POLICY_ID)
+        self.stop_quota_attempt(original)
+        self.handoff_port.handoff(self.command(original))
+        resumed = self.claim("codex-author")
+        self.assertIsNotNone(resumed)
+        self.assertEqual(resumed.recipe["resource_profile"], work_policy.POLICY_ID)
+        self.assertEqual(resumed.recipe["policy_digest"], work_policy.POLICY_DIGEST)
+        self.assertEqual(self.frozen(original), frozen)
+
     def test_never_started_queued_plan_uses_same_project_model_quota_evidence(self):
         self.submit("quota-source")
         quota = self.claim("agy-v2")
