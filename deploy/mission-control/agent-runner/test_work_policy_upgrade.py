@@ -931,7 +931,9 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.cluster.admin_exec(drift)
                 result = self.cluster.run_sql_script(script)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("Author handoff function drift: forge_coding_worker_api.claim(text,uuid,text[])", result.stderr)
+                # Body drift is caught by the structural predicate checks rather
+                # than by a pinned definition digest.
+                self.assertRegex(result.stderr, r"claim policy predicates|function drift: forge_coding_worker_api\.claim")
             finally:
                 self.cluster.admin_exec(function)
         self.cluster.apply_and_verify()
