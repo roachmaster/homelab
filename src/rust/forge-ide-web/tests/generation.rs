@@ -787,7 +787,7 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
 #[test]
 fn component_growth_and_checkpoint_paths_stay_bounded() {
     let mut c = config();
-    c.document.children = (0..385)
+    c.document.children = (0..513)
         .map(|i| component!(text format!("limit-{i}"), "Bounded"))
         .collect();
     assert!(register_assets("assets", c).is_err());

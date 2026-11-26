@@ -13,6 +13,8 @@ CI recovery helpers and merge Agents triage with the CI/CD stage inspector.
 Record branch tips and validation in
 `docs/reports/local-branch-consolidation-20261126.json`. This source consolidation
 does not authorize deployment or restart the boot-disabled event runner.
+Validation: 326 Rust native tests, 35 generation tests, 18 CI recovery tests,
+and 7 relay tests passed. The generated input-presentation fixture passed.
 Historical source-fingerprint qualification remains outstanding. Browser
 acceptance stops at the missing locked Playwright dependency; do not claim
 browser or screenshot acceptance.

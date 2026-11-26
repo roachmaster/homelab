@@ -447,7 +447,9 @@ impl Document {
         ) -> Result<(), &'static str> {
             let in_layout = matches!(parent, Some(Component::PaneLayout { .. }));
             *count += 1;
-            if depth > 12 || *count > 384 {
+            // The combined triage and CI/CD inspector document needs both sets
+            // of declarations; retain a fixed document budget and depth bound.
+            if depth > 12 || *count > 512 {
                 return Err("component declaration limit");
             }
             let (id, label, action) = match c {

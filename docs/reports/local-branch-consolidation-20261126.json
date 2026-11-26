@@ -272,6 +272,13 @@
     "historical_source_fingerprints": "Combined source still requires separate release qualification, as recorded by the preceding task-branch consolidation.",
     "browser_acceptance": "make ui-qa stopped at prerequisites: locked Playwright dependency is absent in this checkout; no browser assertions ran.",
     "ci_recovery_helpers": "18 tests passed, including disposable PostgreSQL lifecycle checks",
-    "agents_relay_fixture": "7 Node tests passed"
-  }
+    "agents_relay_fixture": "7 Node tests passed",
+    "rust_ui": "326 native tests passed across forge-ide-ui, forge-ide-web and forge-ide-web-host",
+    "generated_assets": "35 generation tests passed with build-assets enabled; generated input-presentation fixture passed (header-only WASM fixture, no browser/WASM runtime acceptance claimed)"
+  },
+  "integration_notes": [
+    "CI/CD run lists supply the accepted task/correlation context required by triage presentation.",
+    "Preserve the existing recovery fixture while exposing its preparation helper to the new completion tests.",
+    "Retain both triage and CI/CD inspectors; raise the fixed component declaration capacity from 384 to 512 with the oversized-document rejection test retained."
+  ]
 }
