@@ -1,0 +1,277 @@
+{
+  "date": "2026-11-26",
+  "destination": "backup/main",
+  "original_base": "16339065d6c55cb35995e6ed92b7c846a3aa8b7e",
+  "local_branch_count": 30,
+  "remote_branches": [
+    "feat/forge-ide-agents-triage",
+    "fix/native-postfix-verification-20261125"
+  ],
+  "branches": [
+    {
+      "branch": "docs/content-identity-20261125",
+      "sha": "09e758b2d19553c475935c3dc96c9c2e6893249d",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/content-identity-docs-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "feat/artifact-identity-20261125",
+      "sha": "b69bcf40f8de166338228ba98a9c585c9d15ca4b",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/artifact-identity-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "feat/content-identity-20261125",
+      "sha": "2ae4baebf2d7cf93a53c16f1c078b4056d31a43c",
+      "location": "local",
+      "unmerged_commits": 0,
+      "worktree": "/mnt/data/homelab-build/content-identity-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "feat/native-content-identity-20261125",
+      "sha": "6a3e5712bee313689fd457d3330c09d90a782f62",
+      "location": "local",
+      "unmerged_commits": 3,
+      "worktree": "/mnt/data/homelab-build/native-content-identity-20261125",
+      "worktree_status": "?? deploy/mission-control/agent-runner/work_identity_contract.py\n"
+    },
+    {
+      "branch": "fix/agent-handoff-catalog-20261126",
+      "sha": "45201edf1161e7d344352e7c26ced86530bb6db0",
+      "location": "local",
+      "unmerged_commits": 4,
+      "worktree": "/mnt/data/homelab-build/agent-handoff-catalog-20261126",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/agent-handoff-feedback-20261126",
+      "sha": "959bd98879558954c0fda047ee5143fc3fad4f24",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/agent-handoff-feedback-20261126",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/agent-handoff-qualification-20261126",
+      "sha": "0245349597239981231521c02162acc45978a685",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/agent-handoff-qualification-20261126",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/agent-handoff-schema-20261126",
+      "sha": "688dfa8c273a55b3405265212a30ec75dacae3d3",
+      "location": "local",
+      "unmerged_commits": 3,
+      "worktree": "/mnt/data/homelab-build/agent-handoff-schema-20261126",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/agent-handoff-timeout-20261126",
+      "sha": "ee23884d6ca4dcb9f36e2e0422e8c8bcb54aec0b",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/agent-handoff-timeout-20261126",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/backend-group-quiescence-20261125",
+      "sha": "b893d6c31402da5fd9d16203a7dc5e3d6e1086da",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/backend-group-quiescence-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/backend-main-parallel-20261125",
+      "sha": "1f59658e54554508bec0d449841f9061dd3682d2",
+      "location": "local",
+      "unmerged_commits": 2,
+      "worktree": "/mnt/data/homelab-build/backend-main-parallel-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/ci-agent-package-restart-deferral-20261125",
+      "sha": "e435cb88fe0381ae7f165aed1d6756c319017a62",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/ci-agent-restart-deferral-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/ci-reconcile-stability-20261125",
+      "sha": "540ed9172671e696b054a50cbb2f97c750b7fc7a",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/ci-reconcile-stability-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/codex-quota-handoff-20261126",
+      "sha": "0070e78f9b567ccffcc7a7fdd8c9caeaf44275ff",
+      "location": "local",
+      "unmerged_commits": 0,
+      "worktree": "/mnt/data/homelab-build/codex-quota-handoff-20261126",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/event-stream-stability-20261125",
+      "sha": "f43a4cc6072ea0ccd899e4be8198e6511f0f8c13",
+      "location": "local",
+      "unmerged_commits": 0,
+      "worktree": "/mnt/data/homelab-build/event-stream-stability-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/external-artifact-repair-20261125",
+      "sha": "1163a12884fa61681d83b19714c1bb8a4ab08069",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/external-artifact-repair-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/external-main-refresh-20261125",
+      "sha": "fba06402139b505162e58320f19907ec89ca48d0",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/external-main-refresh-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/jenkins-history-pages-20261125",
+      "sha": "1e1846aa06581837b75e5f30a165048a01e8038f",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/task-cancellation-20261125/jenkins-pages",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/jenkins-read-observer-20261125",
+      "sha": "41656de5177c37a7f1772e82ddd764bc0a009a97",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/jenkins-read-observer-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/m40-upgrade-fixtures-20261126",
+      "sha": "f66764eb3084c26d4a6665621a83fc40129c566f",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/m40-upgrade-fixtures-20261126",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/muse-context-recovery-20261125",
+      "sha": "d701d8b857912980f7a1d417854c5863ee47bc2f",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/muse-context-recovery-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/native-ci-reprepare-20261125",
+      "sha": "ded55e89aa21c64375b2d49fadf9eb8be3a2b090",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/native-ci-reprepare-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/native-deadline-event-recovery-20261125",
+      "sha": "9238ff7a73133041753970ae9e2d3d3e57c7c5b7",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/native-deadline-event-recovery-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/native-postfix-pass-20261125",
+      "sha": "0061b866b5e8ab200e65648aa27902b4b0b28cd5",
+      "location": "local",
+      "unmerged_commits": 2,
+      "worktree": "/mnt/data/homelab-build/native-postfix-pass-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/native-postfix-verification-20261125",
+      "sha": "d6de2af5fe07ee0e881c59771fb82b71573194eb",
+      "location": "local",
+      "unmerged_commits": 3,
+      "worktree": "/mnt/data/homelab-build/native-postfix-verification-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/native-quota-stability-20261125",
+      "sha": "f49cb6ff7793f0d0e43464cc691544be0464b1fa",
+      "location": "local",
+      "unmerged_commits": 4,
+      "worktree": "/mnt/data/homelab-build/native-quota-stability-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/provider-authority-ci-protection-20261125",
+      "sha": "2d91deccc4f32de913f5f22688ed896e54fc802a",
+      "location": "local",
+      "unmerged_commits": 1,
+      "worktree": "/mnt/data/homelab-build/provider-authority-ci-protection-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/stopped-binary-pin-20261125",
+      "sha": "8e9f18da626372e5138e5bafecee3d907d47aab7",
+      "location": "local",
+      "unmerged_commits": 2,
+      "worktree": "/mnt/data/homelab-build/stopped-binary-pin-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/task-recovery-20261125",
+      "sha": "fddc4aafca10bb7235f7557b1fa602a50fd3c946",
+      "location": "local",
+      "unmerged_commits": 0,
+      "worktree": "/mnt/data/homelab-build/task-recovery-20261125",
+      "worktree_status": ""
+    },
+    {
+      "branch": "fix/workflow-attention-badge-20261125",
+      "sha": "487a8606ff622e3213b1eb4355f14dfff0f9ef7c",
+      "location": "local",
+      "unmerged_commits": 2,
+      "worktree": "/mnt/data/homelab-build/task-cancellation-20261125/ui-badge",
+      "worktree_status": ""
+    },
+    {
+      "branch": "feat/forge-ide-agents-triage",
+      "sha": "87c07644ced7cfb4a9b3cedd65b963556db5dd22",
+      "location": "remote",
+      "unmerged_commits": 2
+    },
+    {
+      "branch": "fix/native-postfix-verification-20261125",
+      "sha": "d6de2af5fe07ee0e881c59771fb82b71573194eb",
+      "location": "remote",
+      "unmerged_commits": 3
+    }
+  ],
+  "preserved_branches": [
+    "main",
+    "backup/main",
+    "feature/muse (remote)"
+  ],
+  "worktree_policy": "Detach named development worktrees at their exact branch tip; preserve all files and existing uncommitted/untracked changes.",
+  "scope": "Consolidate committed branch history; no deployment, service startup or worktree removal.",
+  "validation": {
+    "historical_source_fingerprints": "Combined source still requires separate release qualification, as recorded by the preceding task-branch consolidation.",
+    "browser_acceptance": "make ui-qa stopped at prerequisites: locked Playwright dependency is absent in this checkout; no browser assertions ran.",
+    "ci_recovery_helpers": "18 tests passed, including disposable PostgreSQL lifecycle checks",
+    "agents_relay_fixture": "7 Node tests passed"
+  }
+}

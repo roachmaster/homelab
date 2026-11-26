@@ -546,6 +546,7 @@ impl CicdState {
             .collect();
         view.lists.push(ListBinding {
             id: "agents-cicd-runs",
+            context: Some(format!("{}:{}", task.task_id, cicd.correlation_id)),
             rows: run_rows,
             empty_message: "No Jenkins CI/CD runs recorded for this correlation yet.".into(),
         });

@@ -1,4 +1,23 @@
-# Current: Consolidate task branches into backup/main — 2026-11-26
+# Current: Consolidate local development and remaining feat/fix branches — 2026-11-26
+
+User authorizes merging every local development branch plus remote
+`feat/forge-ide-agents-triage` and `fix/native-postfix-verification-20261125`
+into `backup/main`, then deleting those 30 local and two remote branch names.
+Preserve `main`, remote `feature/muse`, all worktree directories and their
+uncommitted/untracked contents. Named development worktrees become detached
+at the exact preserved branch tips after remote backup verification.
+
+Most local changes are patch-equivalent to existing cherry-picks; integrate their
+original histories without reverting newer changes. Include the remaining private
+CI recovery helpers and merge Agents triage with the CI/CD stage inspector.
+Record branch tips and validation in
+`docs/reports/local-branch-consolidation-20261126.json`. This source consolidation
+does not authorize deployment or restart the boot-disabled event runner.
+Historical source-fingerprint qualification remains outstanding. Browser
+acceptance stops at the missing locked Playwright dependency; do not claim
+browser or screenshot acceptance.
+
+# Previous: Consolidate task branches into backup/main — 2026-11-26
 
 User authorizes merging all remote `forge/task-*` branches into the existing
 `backup/main` branch, then deleting those task branches. The source branches and
