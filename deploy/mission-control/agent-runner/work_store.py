@@ -181,7 +181,8 @@ def _summary(row):
 
 
 def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
-                          prompt, acceptance_criteria, auto_repair=False, workflow_policy_digest=None):
+                          prompt, acceptance_criteria, auto_repair=False, workflow_policy_digest=None,
+                          workflow_policy_id=None):
     return sha256_canonical({
         "project_alias": project_alias,
         "base_revision": base_revision,
@@ -191,6 +192,7 @@ def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
         "acceptance_criteria": acceptance_criteria,
         **({"auto_repair":True} if auto_repair else {}),
         **({"workflow_policy_digest":workflow_policy_digest} if workflow_policy_digest is not None else {}),
+        **({"workflow_policy_id":str(workflow_policy_id)} if workflow_policy_id is not None else {}),
     })
 
 
@@ -355,6 +357,67 @@ class WorkStore:
                 raise Rejected(*mapped[error.pgcode]) from None
             raise
 
+    # M44 identity catalog (phase 0d). Documents are frozen to a catalog UUID
+    # plus a per-subject generation by jsonb equality, never by re-hashing.
+    # Dual-written beside the legacy digests; absent before M44 is applied.
+    def _identity_catalog_ready(self, cursor):
+        cursor.execute("SELECT to_regprocedure('forge_agent.coding_identity_register(text,text,text,text,jsonb,text)') IS NOT NULL AS ready")
+        return bool(cursor.fetchone()["ready"])
+
+    def _register_identity(self, cursor, project_alias, kind, subject, document, legacy_digest):
+        cursor.execute("SELECT identity_id,generation FROM forge_agent.coding_identity_register(%s,%s,%s,%s,%s,%s)",
+                       (self._owner, project_alias, kind, subject, Json(document), legacy_digest))
+        row = cursor.fetchone()
+        return {"policy_id": str(row["identity_id"]), "policy_generation": int(row["generation"])}
+
+    @staticmethod
+    def _policy_document(snapshot):
+        return {key: value for key, value in snapshot.items() if key != "policy_digest"}
+
+    def policy_identity(self, *, project_alias, kind, snapshot):
+        """Return the catalog identity of a policy snapshot, or None before M44."""
+        with self._transaction() as cursor:
+            if not self._identity_catalog_ready(cursor):
+                return None
+            return self._register_identity(cursor, project_alias, kind, "policy",
+                                           self._policy_document(snapshot), snapshot["policy_digest"])
+
+    def _attach_policy_identities(self, projects, config):
+        """Discovery: advertise the catalog id and generation of each current policy."""
+        external = getattr(self._external, "workflow", None)
+        pending = []
+        for project in projects:
+            alias = project["alias"]
+            if project.get("workflow") is not None:
+                pending.append((project["workflow"], "workflow_policy",
+                                config.project_workflows[alias].snapshot(config.catalog(), config.repair_policy)))
+            if project.get("external_workflow") is not None and external is not None:
+                pending.append((project["external_workflow"], "external_workflow_policy",
+                                external.policies[alias].snapshot(external.catalog)))
+        if not pending:
+            return
+        with self._transaction() as cursor:
+            if not self._identity_catalog_ready(cursor):
+                return
+            for summary, kind, snapshot in pending:
+                alias = next(p["alias"] for p in projects if p.get("workflow") is summary or p.get("external_workflow") is summary)
+                summary.update(self._register_identity(cursor, alias, kind, "policy",
+                                                       self._policy_document(snapshot), snapshot["policy_digest"]))
+
+    def _record_task_identity(self, cursor, project_alias, task_id, agent_profile, recipe, workflow, workflow_id):
+        if not self._identity_catalog_ready(cursor):
+            return
+        recipe_id = self._register_identity(cursor, project_alias, "recipe",
+                                            f"{agent_profile}:{recipe.mode}",
+                                            recipe.to_dict(), recipe.digest)["policy_id"]
+        policy_id = None
+        if workflow is not None:
+            policy_id = self._register_identity(cursor, project_alias, "workflow_policy", "policy",
+                                                self._policy_document(workflow), workflow["policy_digest"])["policy_id"]
+        cursor.execute("""INSERT INTO forge_agent.coding_task_identities(owner_id,project_alias,task_id,recipe_id,workflow_id,workflow_policy_id)
+                          VALUES(%s,%s,%s,%s,%s,%s)""",
+                       (self._owner, project_alias, task_id, recipe_id, workflow_id, policy_id))
+
     def catalog(self, *, config):
         if not isinstance(config, WorkConfig) or config.owner != self._owner:
             raise ValueError("Catalog requires matching frozen WorkConfig")
@@ -444,6 +507,7 @@ class WorkStore:
             }
             for alias in sorted(config.allowed_projects)[:MAX_PROJECTS]
         ]
+        self._attach_policy_identities(projects, config)
         if self._delivery_enabled:
             with self._transaction(read_only=True) as cursor:
                 for project in projects:
@@ -560,7 +624,8 @@ class WorkStore:
 
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
                prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False,
-               workflow_policy_digest=None,resolve_workflow=lambda:None,delivery_admission=None,actor=None):
+               workflow_policy_digest=None,resolve_workflow=lambda:None,delivery_admission=None,actor=None,
+               workflow_policy_id=None):
         self._require_project(project_alias)
         if type(auto_repair) is not bool:
             raise Rejected(400,"invalid_request")
@@ -573,6 +638,7 @@ class WorkStore:
             prompt=prompt,
             acceptance_criteria=acceptance_criteria,
             auto_repair=auto_repair,workflow_policy_digest=workflow_policy_digest,
+            workflow_policy_id=workflow_policy_id,
         )
         lock_scope = f"{self._owner}\n{project_alias}"
         with self._transaction() as cursor:
@@ -656,6 +722,8 @@ class WorkStore:
                 cursor.execute("INSERT INTO forge_agent.coding_workflows(owner_id,project_alias,root_task_id,policy_digest,snapshot) VALUES(%s,%s,%s,%s,%s) RETURNING workflow_id",(self._owner,project_alias,task_id,workflow["policy_digest"],Json(workflow)))
                 workflow_id=cursor.fetchone()["workflow_id"]
                 cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_required=true,workflow_id=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(workflow_id,self._owner,project_alias,task_id))
+            self._record_task_identity(cursor, project_alias, task_id, agent_profile, recipe, workflow,
+                                       workflow_id if workflow is not None else None)
             insert_event(cursor, self._owner, project_alias, task_id, "queued",
                          receipt, actor=actor, first=True)
             if recipe.resource_profile in EXTERNAL_POLICIES:

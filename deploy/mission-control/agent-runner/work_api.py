@@ -100,6 +100,7 @@ class WorkSubmit:
     idempotency_key: str
     auto_repair: bool = False
     workflow_policy_digest: str | None = None
+    workflow_policy_id: UUID | None = None  # M44 catalog identity; preferred over the digest.
     delivery_admission: dict | None = None  # Internal ready-port authority, never admitted from JSON.
 
 
@@ -290,30 +291,38 @@ class WorkService:
             resolve_recipe=resolve_recipe,
             auto_repair=command.auto_repair,
             workflow_policy_digest=command.workflow_policy_digest,
+            **({"workflow_policy_id":command.workflow_policy_id} if command.workflow_policy_id is not None else {}),
             delivery_admission=command.delivery_admission,
             # The submitter (plan section 4.2): the operator via portal/CLI,
             # or the coordinator for auto-repair submissions.
             actor=COORDINATOR_ACTOR if command.auto_repair else operator_actor(self._store.owner),
-            resolve_workflow=lambda:self._workflow_snapshot(command.project_alias,command.mode,command.agent_profile,command.workflow_policy_digest),
+            resolve_workflow=lambda:self._workflow_snapshot(command.project_alias,command.mode,command.agent_profile,command.workflow_policy_digest,command.workflow_policy_id),
         )
 
-    def _workflow_snapshot(self,project,mode,profile,digest):
+    def _workflow_snapshot(self,project,mode,profile,digest,policy_id=None):
+        presented = digest is not None or policy_id is not None
         selected = self._config.profiles[profile]
         if selected.is_external:
             policy=self._config.external_workflows.get(project)
             if policy is not None:
-                _require_workflow_submission(mode,profile,policy.author_profile,digest,
-                                             policy.snapshot(self._catalog)['policy_digest'])
-            elif digest is not None:
+                snapshot=policy.snapshot(self._catalog)
+                _require_workflow_submission(mode,profile,policy.author_profile,digest,snapshot['policy_digest'],
+                                             policy_id,lambda:self._policy_identity(project,"external_workflow_policy",snapshot))
+            elif presented:
                 raise Rejected(409, "result_mismatch", "policy_not_applicable")
             return None
         policy=self._config.project_workflows.get(project)
         if policy is None:
-            if digest is not None:raise Rejected(409,"result_mismatch","policy_not_applicable")
+            if presented:raise Rejected(409,"result_mismatch","policy_not_applicable")
             return None
         snapshot=policy.snapshot(self._catalog,self._config.repair_policy)
-        _require_workflow_submission(mode,profile,policy.author_profile,digest,snapshot["policy_digest"])
+        _require_workflow_submission(mode,profile,policy.author_profile,digest,snapshot["policy_digest"],
+                                     policy_id,lambda:self._policy_identity(project,"workflow_policy",snapshot))
         return snapshot
+
+    def _policy_identity(self,project,kind,snapshot):
+        lookup=getattr(self._store,"policy_identity",None)
+        return lookup(project_alias=project,kind=kind,snapshot=snapshot) if lookup is not None else None
 
     def get(self, command):
         self._require_project(command.project_alias)
@@ -736,7 +745,7 @@ def decode(route, correlation, body):
     project_alias = _identifier(body["project_alias"])
 
     if (route is Destination.SUBMIT and kind == "work_submit"
-            and body.keys() - {"auto_repair","workflow_policy_digest"} == base | {
+            and body.keys() - {"auto_repair","workflow_policy_digest","workflow_policy_id"} == base | {
                 "base_revision", "mode", "agent_profile",
                 "prompt", "acceptance_criteria", "idempotency_key",
             }):
@@ -750,6 +759,7 @@ def decode(route, correlation, body):
             idempotency_key=_idempotency_key(body["idempotency_key"]),
             auto_repair=_boolean(body.get("auto_repair",False)),
             workflow_policy_digest=_sha256(body["workflow_policy_digest"]) if "workflow_policy_digest" in body else None,
+            workflow_policy_id=_uuid(body["workflow_policy_id"]) if "workflow_policy_id" in body else None,
         )
 
     if route is Destination.GET and kind == "work_get" and body.keys() == base | {"task_id"}:
@@ -893,16 +903,28 @@ def decode(route, correlation, body):
     raise Rejected(400, "invalid_request")
 
 
-def _require_workflow_submission(mode, profile, author_profile, digest, current_digest):
-    """Admit only a plan by the author profile carrying the current policy."""
+def _require_workflow_submission(mode, profile, author_profile, digest, current_digest,
+                                 policy_id=None, current_identity=lambda: None):
+    """Admit only a plan by the author profile carrying the current policy.
+
+    A caller may present the M44 catalog id (preferred), the legacy digest,
+    or both; every presented identity must be current.
+    """
     if mode != "plan":
         raise Rejected(409, "result_mismatch", "workflow_mode")
     if profile != author_profile:
         raise Rejected(409, "result_mismatch", "workflow_profile")
-    if digest is None:
+    if digest is None and policy_id is None:
         raise Rejected(409, "result_mismatch", "policy_missing")
-    if digest != current_digest:
+    if digest is not None and digest != current_digest:
         raise Rejected(409, "result_mismatch", "policy_stale")
+    if policy_id is not None:
+        identity = current_identity()
+        if identity is None:
+            # Catalog not yet migrated: an id cannot be checked, so it cannot admit.
+            raise Rejected(409, "result_mismatch", "policy_missing")
+        if str(policy_id) != identity["policy_id"]:
+            raise Rejected(409, "result_mismatch", "policy_stale")
 
 
 def failure_reason(code, error):
