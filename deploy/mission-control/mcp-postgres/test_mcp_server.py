@@ -188,8 +188,7 @@ class HttpServerTest(unittest.TestCase):
         thread.start()
         self.addCleanup(lambda: (self.server.shutdown(), self.server.server_close()))
 
-    def request(self, method="POST", path="/mcp", body=None, token="default", headers=None, raw=None):
-        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+    def request_on(self, connection, method="POST", path="/mcp", body=None, token="default", headers=None, raw=None):
         sent = {"Host": HOST, "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if token == "default":
             token = self.token
@@ -200,8 +199,14 @@ class HttpServerTest(unittest.TestCase):
         connection.request(method, path, body=payload, headers={k: v for k, v in sent.items() if v is not None})
         response = connection.getresponse()
         data = response.read()
-        connection.close()
         return response.status, dict(response.getheaders()), (json.loads(data) if data else None)
+
+    def request(self, method="POST", path="/mcp", body=None, token="default", headers=None, raw=None):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        try:
+            return self.request_on(connection, method, path, body, token, headers, raw)
+        finally:
+            connection.close()
 
     def rpc(self, method, params=None, request_id=1, **kwargs):
         message = {"jsonrpc": "2.0", "id": request_id, "method": method}
@@ -217,6 +222,40 @@ class HttpServerTest(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertIn('error="invalid_token"', headers["WWW-Authenticate"])
         self.assertEqual(self.backend.calls, [])
+
+    def test_unauthenticated_post_does_not_poison_keepalive(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        self.addCleanup(connection.close)
+        status, headers, body = self.request_on(connection, body={"x": 1}, token=None)
+        self.assertEqual((status, body["error"]), (401, "missing_token"))
+        self.assertEqual(headers["WWW-Authenticate"], 'Bearer realm="homelab-mcp"')
+        self.assertNotEqual((headers.get("Connection") or "").lower(), "close")
+        status, _, body = self.request_on(
+            connection, body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        self.assertEqual(status, 200)
+        self.assertIn("tools", body["result"])
+
+    def test_rejected_paths_do_not_poison_keepalive(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        self.addCleanup(connection.close)
+        status, headers, _ = self.request_on(
+            connection, body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            token="hmcp_000000000000_" + "A" * 43)
+        self.assertEqual(status, 401)
+        self.assertIn('error="invalid_token"', headers["WWW-Authenticate"])
+        status, _, body = self.request_on(connection, path="/nope", body={"x": 1})
+        self.assertEqual(status, 404)
+        status, _, body = self.request_on(
+            connection, body={"jsonrpc": "2.0", "id": 2, "method": "initialize",
+                              "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                                         "clientInfo": {"name": "t", "version": "1"}}})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["result"]["serverInfo"]["name"], "homelab-mcp-postgres")
+
+    def test_oversize_body_closes_connection(self):
+        status, headers, _ = self.request(raw=b"x" * (mcp_server.MAX_BODY_BYTES + 1))
+        self.assertEqual(status, 413)
+        self.assertEqual(headers.get("Connection"), "close")
 
     def test_failed_attempts_are_rate_limited(self):
         for _ in range(4):
