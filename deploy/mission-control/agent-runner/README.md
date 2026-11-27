@@ -337,8 +337,9 @@ repair/peer-review packets retain their existing validation and delivery.
 recovery for the first implementation after the above unstarted-Plan recovery.
 It requires that original recovery history, the same independently approved
 Plan, the exact old note, genuine stopped/reconciled workspace evidence, and
-either a terminal empty-source review without a candidate or a worker-shutdown
-attempt without publication. An interrupted workspace may retain partial edits.
+either a terminal empty-source review without a candidate or an exact published
+`needs_reconcile` worker-shutdown receipt without a result or review. An
+interrupted workspace may retain partial edits.
 It resumes the same task, preserves the old result/review, charges the durable
 feedback-delivery retry ledger, and retains scope and all planning/repair budgets.
 It cannot approve code, invent a candidate, ignore a cancellation or retry a

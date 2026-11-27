@@ -49,7 +49,7 @@ class WorkflowContinuationTest(unittest.TestCase):
                         {p: self.config.profiles[p].branch for p in ('agy-v2', 'codex-v2')}):
             return port.execute(command)
 
-    def process_native(self, lease, text):
+    def process_native(self, lease, text, *, shutdown=False, after_run_digest=None):
         """Real worker lifecycle/DB/context ports; only CLI, Git and CI are fixtures."""
         from work_worker import CodingWorker
         from work_worker_config import parse_config
@@ -59,6 +59,7 @@ class WorkflowContinuationTest(unittest.TestCase):
         from work_review_context import ReviewContextProvider
         from work_peer_context import PeerReviewContextProvider
         captured = {}
+        actual_digest = ['b'*64]
         with TemporaryDirectory() as root:
             raw = raw_config(root)
             raw['worker_id'] = 'workflow-worker';raw['allow_implement'] = True
@@ -74,9 +75,11 @@ class WorkflowContinuationTest(unittest.TestCase):
                     import json
                     source = json.loads(self.db.read_review_target(value)['target_json'])['workspace_digest'] or digest
                 yield SimpleNamespace(path=Path(root),task_id=value['task_id'],base_revision=value['base_revision'],
-                    digest=lambda:digest,source_digest=lambda:source)
+                    digest=lambda:actual_digest[0],source_digest=lambda:source)
             def run(value, workspace, stop, **context):
                 captured.update(context)
+                if after_run_digest is not None:actual_digest[0]=after_run_digest
+                if shutdown:worker.stop.set()
                 return CliOutcome('awaiting_review',text,None,None,'Fixture native result',make_stop_proof(value['unit_name']))
             worker = CodingWorker(config,self.db,SimpleNamespace(run=run),SimpleNamespace(acquire=acquire,
                 projects=lambda:[{'alias':'homelab','base_revision':lease.base_revision}]),
@@ -85,7 +88,7 @@ class WorkflowContinuationTest(unittest.TestCase):
                 peer_context_provider=PeerReviewContextProvider(self.db,SimpleNamespace(ensure=lambda *args:None)))
             worker.incarnation = self.incarnation
             worker.process(lease)
-        self.assertEqual(self.get(lease.task_id)['status'],'awaiting_review')
+        self.assertEqual(self.get(lease.task_id)['status'],'needs_reconcile' if shutdown else 'awaiting_review')
         return captured
 
     def test_claim_validation_failure_rolls_back_admission(self):
@@ -175,8 +178,9 @@ class WorkflowContinuationTest(unittest.TestCase):
         self.coordinator.run_once();peer=self.claim('codex-v2');self.process_native(peer,self.verdict(peer));self.coordinator.run_once()
         author=self.claim('agy-v2')
         if interrupted:
-            self.db.record_stop(author,make_stop_proof(author.unit_name),'Worker shutdown requires review before any replacement attempt.','interrupted')
-            rec=self.db.reconcile(author,'c'*64,make_stop_proof(author.unit_name));self.coordinator.run_once()
+            self.process_native(author,'Interrupted partial implementation.',shutdown=True,after_run_digest='c'*64)
+            self.coordinator.run_once()
+            rec=self.rows('SELECT receipt_id FROM forge_agent.coding_reconciliation_receipts WHERE task_id=%s AND attempt_id=%s ORDER BY created_at DESC LIMIT 1',(author.task_id,author.attempt_id))[0][0]
         else:
             self.process_native(author,'A stale Plan-only note incorrectly prevented implementation.')
             self.coordinator.run_once();q=self.db.review_claim('fixed-checks')
@@ -210,6 +214,7 @@ class WorkflowContinuationTest(unittest.TestCase):
 
     def test_worker_shutdown_direction_retry_preserves_partial_workspace_receipt(self):
         port,command,plan,author=self.phase_direction_failure(interrupted=True)
+        self.assertEqual(self.rows('SELECT outcome,published_at IS NOT NULL,result_sha256 FROM forge_agent.coding_attempts WHERE attempt_id=%s',(author.attempt_id,))[0],('needs_reconcile',True,None))
         result=self.resume_direction(port,command);self.assertIsNone(result['review_id'])
         retried=self.claim('agy-v2');self.assertEqual(retried.resume_workspace_digest,'c'*64)
         self.assertEqual(self.get(author.task_id)['workflow']['phase'],'implement')

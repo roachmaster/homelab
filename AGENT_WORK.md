@@ -27,6 +27,10 @@ real stop/reconciliation, terminal empty-source review or interrupted/no-result
 scope, current recipe/branch/readiness and cancellation guards. It preserves
 partial work, results/reviews, counters and the same Plan/task, and charges one
 durable feedback-delivery retry. No migration or public override is introduced.
+Independent review caught that normal worker shutdown publishes needs_reconcile
+without a result; the private port now validates that exact publication receipt
+instead of requiring published_at=NULL. The regression uses actual Worker
+shutdown/publication/reconciliation with partial source, not a record_stop shortcut.
 
 Live checkpoint16:05UTC supersedes pending-rollout text below: PR33 merged as
 a51e83dae (tree5d601ff4); Jenkins113 branch45 and Jenkins114 main46 passed,

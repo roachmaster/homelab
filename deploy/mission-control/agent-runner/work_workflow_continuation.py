@@ -223,9 +223,20 @@ class WorkflowContinuation:
                         or review['verification'].get('checks_passed') is not False or review['verification'].get('checks')!=[]):raise Rejected(409,'review_changed')
                 if flow._artifact(cursor,task['id'],attempt['attempt_id'])['result_sha256']!=review['parent_result_sha256']:raise Rejected(409,'result_mismatch')
             elif (reviews or w['escalation_reason']!='Agent stopped: needs_reconcile'
-                    or attempt['result_sha256'] is not None or attempt['published_at'] is not None
+                    or attempt['result_sha256'] is not None
                     or attempt['summary']!='Worker shutdown requires review before any replacement attempt.'):
                 raise Rejected(409,'not_plan_direction_defect')
+            if task['status']=='needs_reconcile':
+                receipt=attempt['publish_receipt'] or {}
+                if (attempt['published_at'] is None or attempt['outcome']!='needs_reconcile'
+                        or attempt['outcome_digest'] is None
+                        or attempt['result_byte_count'] is not None or attempt['result_chunk_count'] is not None
+                        or receipt.get('status')!='needs_reconcile' or receipt.get('outcome')!='needs_reconcile'
+                        or receipt.get('task_id')!=str(task['id']) or receipt.get('attempt_id')!=str(attempt['attempt_id'])
+                        or receipt.get('revision')!=task['revision'] or receipt.get('result') is not None
+                        or receipt.get('outcome_digest')!=attempt['outcome_digest']):raise Rejected(409,'source_changed')
+                cursor.execute('SELECT count(*) AS chunks FROM forge_agent.coding_result_chunks WHERE attempt_id=%s',(attempt['attempt_id'],))
+                if cursor.fetchone()['chunks']:raise Rejected(409,'source_changed')
             cursor.execute("""SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested'))
               OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased'))
               OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t USING(owner_id,project_alias) WHERE t.id=p.task_id AND t.workflow_id=%s)

@@ -173,6 +173,19 @@ class ReviewContextTest(unittest.TestCase):
             repair=ReviewContext(b'bound repair','a'*64,str(uuid4()),('finding-1',),note)
             self.assertIs(current_phase_context(value,repair,saved),repair)
 
+    def test_expired_note_must_still_pass_artifact_integrity_checks(self):
+        from dataclasses import replace
+        with TemporaryDirectory(prefix='forge-expired-note-integrity-') as root:
+            config,value,workspace,_=fixture(root)
+            value.pop('feedback_id');value.pop('feedback_sha256')
+            saved=plan_context();value['plan_decision_id']=saved['decision_id']
+            value['resume_attempt_id']=saved['plan_attempt_id']
+            ready=validate_context(value,workspace,{'feedback':None,'feedback_json':None,'legacy_resume_note':'Return a fresh Plan.'})
+            runner=CommandRunnerProvider(config,SystemdSupervisor(config));runner.prepare()
+            with self.assertRaises(ExecutionError) as error:
+                runner.invocation(value,workspace,plan_context=saved,feedback_context=replace(ready,sha256='0'*64))
+            self.assertIn('feedback changed',error.exception.summary)
+
     def test_secret_feedback_and_planted_artifact_are_rejected(self):
         with TemporaryDirectory(prefix="forge-feedback-secret-") as root:
             config, value, workspace, envelope = fixture(root)

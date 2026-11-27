@@ -1350,7 +1350,6 @@ class CommandRunnerProvider:
             prompt += ("\n\nEXPLICIT PLAN DECISION: " + decision.upper() + ". " + instruction
                        + "The original assignment above is retained context. Read the exact saved plan at "
                        + str(CHILD_STATE / plan_file.name) + ".\nREVIEW FEEDBACK:\n" + note)
-        feedback_context = current_phase_context(lease, feedback_context, plan_context)
         feedback_file = None
         build_files = ()
         if lease.get("feedback_id") is not None and feedback_context is None:
@@ -1363,6 +1362,8 @@ class CommandRunnerProvider:
                     or (feedback_context.feedback_id is not None
                         and feedback_context.sha256 != lease.get("feedback_sha256"))):
                 raise ExecutionError("needs_reconcile", "The admitted repair feedback changed before execution.")
+            feedback_context = current_phase_context(lease, feedback_context, plan_context)
+        if feedback_context is not None:
             feedback_file = scratch / "review-feedback.json"
             try:
                 descriptor = os.open(feedback_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
