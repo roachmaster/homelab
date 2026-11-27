@@ -6,6 +6,8 @@ pub mod context_providers;
 /// The transport decision is handled by forge-postgres, and this crate does not route through forge-pg-proxy.
 /// The work_* modules implement forge-work's three driven ports (PgWorkStore)
 /// over the same session/transaction surface; their helpers stay crate-internal.
+#[cfg(feature = "test-support")]
+pub mod pg_fixture;
 pub mod client;
 pub mod config;
 pub mod error;

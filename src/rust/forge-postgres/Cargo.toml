@@ -9,6 +9,9 @@ description = "Dedicated Postgres adapter for Forge stores: a synchronous facade
 [lints]
 workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 forge-core.workspace = true
 forge-jenkins.workspace = true
