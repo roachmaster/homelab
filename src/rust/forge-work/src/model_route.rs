@@ -1365,6 +1365,10 @@ mod tests {
         fn handoff_available(&self) -> Result<bool, WorkError> {
             Ok(false)
         }
+
+        fn superseding_candidates(&self) -> Result<Vec<Value>, WorkError> {
+            Ok(Vec::new())
+        }
     }
 
     fn agy_recipe(mode: &str, model: &str) -> Value {

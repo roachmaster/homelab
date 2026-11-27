@@ -17,6 +17,8 @@ pub mod execution_policy;
 pub mod muse_intake;
 pub mod pinned_recipe;
 pub mod retry_events;
+pub mod reviewer_correction;
+pub mod superseding_review;
 pub mod revival;
 pub mod workflow;
 pub mod model_route;

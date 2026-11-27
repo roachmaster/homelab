@@ -72,6 +72,77 @@ impl WorkflowDecisionPort for PgWorkflowDecisions {
         }))
     }
 
+    fn resume_corrected(
+        &self,
+        request: &ResumeRequest,
+        authority: &forge_work::reviewer_correction::BoundReviewerCorrectionAuthority,
+    ) -> Result<Value, WorkError> {
+        // Authority re-validation in its own transaction (the
+        // F4c/F5a fused split): the task binding plus the
+        // workflow/peer rows the authority was minted against.
+        let mut session = self.store.session()?;
+        let project = request.project_alias.clone();
+        let task_id = request.task_id;
+        let verdict = session
+            .in_tx(|tx| {
+                let params: &[&(dyn ToSql + Sync)] =
+                    &[&self.store.owner, &project, &task_id];
+                let rows = tx.query_rows(
+                    "SELECT to_jsonb(t) AS doc FROM (SELECT * FROM forge_agent.coding_tasks WHERE (owner_id, project_alias, id) = ($1, $2, $3) FOR UPDATE) t",
+                    params,
+                )?;
+                let Some(task) = rows
+                    .first()
+                    .and_then(|row| row.get::<usize, Option<Value>>(0))
+                    
+                else {
+                    return Ok(json!({"found": false, "valid": false}));
+                };
+                let mut valid =
+                    authority.validate(&task, "reviewer_correction").is_ok();
+                let workflow_params: &[&(dyn ToSql + Sync)] = &[&authority.workflow_id];
+                let workflows = tx.query_rows(
+                    "SELECT enabled, phase FROM forge_agent.coding_workflows WHERE workflow_id=$1",
+                    workflow_params,
+                )?;
+                valid = valid
+                    && workflows.first().map(|row| {
+                        row.get::<usize, bool>(0)
+                            && row.get::<usize, String>(1) == "code_review"
+                    }) == Some(true);
+                let peer_params: &[&(dyn ToSql + Sync)] = &[&authority.peer_id];
+                let peers = tx.query_rows(
+                    "SELECT status, target_sha256, reviewer_task_id FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=$1",
+                    peer_params,
+                )?;
+                valid = valid
+                    && peers.first().map(|row| {
+                        row.get::<usize, String>(0) == "reviewing"
+                            && row.get::<usize, Option<String>>(1).as_deref()
+                                == Some(authority.target_sha256.as_str())
+                            && row.get::<usize, Option<uuid::Uuid>>(2)
+                                == Some(task_id)
+                    }) == Some(true);
+                Ok(json!({"found": true, "valid": valid}))
+            })
+            .map_err(work_err)?;
+        if verdict["found"] != json!(true) {
+            return Err(WorkError::not_found("task"));
+        }
+        if verdict["valid"] != json!(true) {
+            return Err(WorkError::rejected(403, "denied"));
+        }
+        let outcome = WorkAdmissionPort::resume(&self.store, request)?;
+        Ok(json!({
+            "project_alias": request.project_alias,
+            "task_id": request.task_id.to_string(),
+            "base_revision": request.expected_revision,
+            "revision": outcome.task.revision,
+            "status": "queued",
+            "recipe_digest": request.recipe_digest,
+        }))
+    }
+
     fn handoff_author(
         &self,
         command: &forge_work::operator_dtos::AuthorHandoff,

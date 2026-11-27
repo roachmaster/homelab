@@ -205,6 +205,16 @@ pub trait WorkflowDecisionPort {
     /// minted by the handoff service (F5a): re-queues the stopped
     /// task under the delegated profile/recipe and returns the
     /// Python receipt document.
+    /// WorkStore.resume under a BoundReviewerCorrectionAuthority
+    /// (F5b): the adapter validates the authority against the
+    /// locked task and the workflow/peer rows, then delegates
+    /// to the S0 resume and returns the Python receipt
+    /// document (with recipe_digest).
+    fn resume_corrected(
+        &self,
+        request: &ResumeRequest,
+        authority: &crate::reviewer_correction::BoundReviewerCorrectionAuthority,
+    ) -> Result<Value, WorkError>;
     fn handoff_author(
         &self,
         command: &crate::operator_dtos::AuthorHandoff,
@@ -2635,6 +2645,14 @@ mod tests {
         unused!(quota_source_attempt, &str, &str, &str => Result<Option<Value>, WorkError>);
         unused!(handoff_busy, Uuid, Uuid => Result<bool, WorkError>);
         unused!(latest_receipt, &str, Uuid, Uuid => Result<Option<Value>, WorkError>);
+        unused!(correction_receipt, &str, Uuid, Uuid, i64, Option<Uuid> => Result<Option<Value>, WorkError>);
+        unused!(any_live_attempt, Uuid => Result<bool, WorkError>);
+        unused!(correction_busy, Uuid, Option<Uuid> => Result<bool, WorkError>);
+        unused!(correction_replay_actions, Uuid, Uuid, &str => Result<Vec<Value>, WorkError>);
+        unused!(superseding_available, => Result<bool, WorkError>);
+        unused!(superseding_busy, Uuid => Result<bool, WorkError>);
+        unused!(deciding_action, Uuid, Uuid, &str => Result<Option<Value>, WorkError>);
+        unused!(other_actions_busy, Uuid, Uuid => Result<bool, WorkError>);
         unused!(workflow_root, &str, Uuid => Result<Option<Uuid>, WorkError>);
         unused!(task_workflow, &str, Uuid => Result<Option<Uuid>, WorkError>);
         unused!(continuation_source, &str, Uuid, Uuid => Result<Value, WorkError>);

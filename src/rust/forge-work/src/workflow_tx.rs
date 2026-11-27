@@ -436,6 +436,60 @@ pub trait WorkflowTx: RetryEvents {
         attempt_id: Uuid,
     ) -> Result<Option<Value>, WorkError>;
 
+    // -- F5b corrections ------------------------------------------
+    /// The reviewer-correction reconciliation load: latest
+    /// receipt for (task, attempt, task_revision), optionally
+    /// pinned to one receipt id.
+    fn correction_receipt(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_id: Uuid,
+        task_revision: i64,
+        receipt_id: Option<Uuid>,
+    ) -> Result<Option<Value>, WorkError>;
+    /// Any live attempt anywhere in the workflow (reservation
+    /// held or lease unexpired).
+    fn any_live_attempt(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+    /// The correction busy composite: queued/running tasks,
+    /// other pending/leased actions, open publications and
+    /// local reviews.
+    fn correction_busy(
+        &mut self,
+        workflow_id: Uuid,
+        action_id: Option<Uuid>,
+    ) -> Result<bool, WorkError>;
+    /// Owner-resume replay probe: correction actions whose
+    /// recorded request names this task and idempotency key.
+    fn correction_replay_actions(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// The superseding provider's catalog-only schema probe
+    /// (review_generation / supersedes_review_id columns and
+    /// the one-live-source index).
+    fn superseding_available(&mut self) -> Result<bool, WorkError>;
+    /// The superseding busy composite: a non-stopped or live
+    /// attempt, a stopped-state task, any publication, an open
+    /// local review.
+    fn superseding_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+    /// The deciding action row for (workflow, review, source
+    /// key), locked FOR UPDATE.
+    fn deciding_action(
+        &mut self,
+        workflow_id: Uuid,
+        review_id: Uuid,
+        source_key: &str,
+    ) -> Result<Option<Value>, WorkError>;
+    /// Another pending/leased action exists in the workflow.
+    fn other_actions_busy(
+        &mut self,
+        workflow_id: Uuid,
+        action_id: Uuid,
+    ) -> Result<bool, WorkError>;
+
     // -- F4f continuation probes -------------------------------
 
     /// _lock's root probe: the workflow's root task id under
@@ -571,4 +625,9 @@ pub trait WorkflowTxFactory {
     /// The coding_workflow_author_handoff(uuid) delegation
     /// function's availability probe (older schemas lack it).
     fn handoff_available(&self) -> Result<bool, WorkError>;
+    /// SupersedingReviewProvider.recover candidates: escalated
+    /// workflow reviews of escalated, disabled workflows with
+    /// the legacy peer-error reason, not yet superseded,
+    /// LIMIT 16.
+    fn superseding_candidates(&self) -> Result<Vec<Value>, WorkError>;
 }

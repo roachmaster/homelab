@@ -255,6 +255,23 @@ impl WorkflowTxFactory for PgWorkflowTxFactory {
             })
             .map_err(work_err)
     }
+
+    fn superseding_candidates(&self) -> Result<Vec<Value>, WorkError> {
+        let sql = "SELECT to_jsonb(s) FROM (SELECT r.workflow_review_id, r.project_alias \
+              FROM forge_agent.coding_workflow_reviews r JOIN forge_agent.coding_workflows w USING (workflow_id) \
+              WHERE r.owner_id=$1 AND r.project_alias=ANY($2) AND r.status='escalated' \
+              AND w.phase='escalated' AND NOT w.enabled \
+              AND w.escalation_reason='Peer review could not safely continue: PeerReviewError' \
+              AND r.target_json IS NOT NULL \
+              AND NOT EXISTS (SELECT FROM forge_agent.coding_workflow_reviews n \
+                WHERE n.supersedes_review_id = r.workflow_review_id) \
+              ORDER BY r.updated_at, r.workflow_review_id LIMIT 16) s";
+        let params: Params = vec![
+            Box::new(self.owner.clone()),
+            Box::new(self.allowed_projects.clone()),
+        ];
+        self.scan_rows(sql, &params)
+    }
 }
 
 impl PgWorkflowTxFactory {
@@ -2110,6 +2127,136 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
             &params,
         )
     }
+    fn correction_receipt(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_id: Uuid,
+        task_revision: i64,
+        receipt_id: Option<Uuid>,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(task_id),
+            Box::new(attempt_id),
+            Box::new(task_revision),
+            Box::new(receipt_id),
+        ];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND attempt_id=$4 AND task_revision=$5 AND ($6::uuid IS NULL OR receipt_id=$6) ORDER BY created_at DESC LIMIT 1) t",
+            &params,
+        )
+    }
+
+    fn any_live_attempt(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
+        let params: Params = vec![Box::new(workflow_id)];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (a.owner_id, a.project_alias, a.task_id) WHERE t.workflow_id=$1 AND (a.reservation_active OR a.lease_expires_at IS NOT NULL)) AS x",
+                &refs(&params),
+            )
+            .map_err(work_err)
+    }
+
+    fn correction_busy(
+        &mut self,
+        workflow_id: Uuid,
+        action_id: Option<Uuid>,
+    ) -> Result<bool, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+            Box::new(action_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+        ];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$1 AND status IN ('queued','running','cancel_requested')) \
+                OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$2 AND status IN ('pending','leased') AND action_id IS DISTINCT FROM $3::uuid) \
+                OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (p.owner_id, p.project_alias, p.task_id) WHERE t.workflow_id=$4 AND p.status IN ('pending','checking','publishing')) \
+                OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (q.owner_id, q.project_alias, q.task_id) WHERE t.workflow_id=$5 AND q.status IN ('pending','checking')) AS x",
+                &refs(&params),
+            )
+            .map_err(work_err)
+    }
+
+    fn correction_replay_actions(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Vec<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(task_id.to_string()),
+            Box::new(idempotency_key.to_string()),
+        ];
+        self.many(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND source_key LIKE 'peer-reviewer-correction:%' AND intent->'request'->>'task_id'=$2 AND intent->'request'->>'idempotency_key'=$3 LIMIT 2) t",
+            &params,
+        )
+    }
+
+    fn superseding_available(&mut self) -> Result<bool, WorkError> {
+        self.tx
+            .call_bool(
+                "SELECT (count(*) = 2 AND to_regclass('forge_agent.coding_workflow_reviews_one_live_source') IS NOT NULL) AS x FROM pg_attribute WHERE attrelid = to_regclass('forge_agent.coding_workflow_reviews') AND NOT attisdropped AND ((attname='review_generation' AND atttypid='integer'::regtype AND attnotnull) OR (attname='supersedes_review_id' AND atttypid='uuid'::regtype))",
+                &[],
+            )
+            .map_err(work_err)
+    }
+
+    fn superseding_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+        ];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (a.owner_id, a.project_alias, a.task_id) WHERE t.workflow_id=$1 AND (a.phase<>'stopped' OR a.reservation_active OR a.lease_expires_at IS NOT NULL)) \
+                OR EXISTS(SELECT FROM forge_agent.coding_tasks WHERE workflow_id=$2 AND status IN ('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) \
+                OR EXISTS(SELECT FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (p.owner_id, p.project_alias, p.task_id) WHERE t.workflow_id=$3) \
+                OR EXISTS(SELECT FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (q.owner_id, q.project_alias, q.task_id) WHERE t.workflow_id=$4 AND q.status IN ('pending','checking')) AS x",
+                &refs(&params),
+            )
+            .map_err(work_err)
+    }
+
+    fn deciding_action(
+        &mut self,
+        workflow_id: Uuid,
+        review_id: Uuid,
+        source_key: &str,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(review_id),
+            Box::new(source_key.to_string()),
+        ];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND workflow_review_id=$2 AND kind='decide' AND source_key=$3 FOR UPDATE) t",
+            &params,
+        )
+    }
+
+    fn other_actions_busy(
+        &mut self,
+        workflow_id: Uuid,
+        action_id: Uuid,
+    ) -> Result<bool, WorkError> {
+        let params: Params = vec![Box::new(workflow_id), Box::new(action_id)];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND action_id<>$2 AND status IN ('pending','leased')) AS x",
+                &refs(&params),
+            )
+            .map_err(work_err)
+    }
+
 }
 
 /// The Python provider raises ValueError for these; the closest
