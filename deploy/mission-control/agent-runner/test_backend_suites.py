@@ -7,6 +7,7 @@ import os
 from types import SimpleNamespace
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,6 +19,33 @@ spec.loader.exec_module(backend_suites)
 
 
 class BackendSuitesTests(unittest.TestCase):
+    def test_workspace_database_fixture_obeys_the_selected_scope(self):
+        code = '''
+import unittest
+from unittest.mock import patch
+with patch('os.geteuid', return_value=1000), patch('pathlib.Path.is_file', return_value=True):
+    import test_workspace_store as workspace
+assert workspace.PG16_AVAILABLE is EXPECT_DATABASE
+assert bool(getattr(workspace.WorkspaceStoreTest, '__unittest_skip__', False)) is not EXPECT_DATABASE
+if not EXPECT_DATABASE:
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(workspace.WorkspaceStoreTest)
+    count = suite.countTestCases()
+    with patch.object(workspace.WorkspaceStoreTest, 'setUpClass', side_effect=AssertionError('Database started in branch scope')) as start:
+        result = unittest.TestResult()
+        suite.run(result)
+        assert count > 0 and len(result.skipped) == count
+        assert not result.errors and not result.failures
+        start.assert_not_called()
+'''
+        for database in (False, True):
+            env = dict(os.environ)
+            env.pop('FORGE_DISABLE_DISPOSABLE_POSTGRES', None)
+            if not database:
+                env['FORGE_DISABLE_DISPOSABLE_POSTGRES'] = '1'
+            with self.subTest(database=database):
+                subprocess.run([sys.executable, '-B', '-c', code.replace('EXPECT_DATABASE', repr(database))],
+                               cwd=Path(__file__).parent, env=env, check=True, timeout=15)
+
     def test_suite_list(self):
         self.assertEqual(backend_suites.SUITES, (
             ("deploy/mission-control", "test_services.py"),
