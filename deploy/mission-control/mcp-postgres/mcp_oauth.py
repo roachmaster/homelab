@@ -642,7 +642,7 @@ font-size:1rem;box-sizing:border-box}}button{{padding:.55rem 1rem;font-size:1rem
         if client is None:
             return None
         return Principal(f"oauth-{grant_id[:12]}", f"oauth:{client.get('name') or client_id}",
-                         frozenset(scope.split()))
+                         frozenset(scope.split()), subject="oauth:" + client_id)
 
 
 class DualAuth:

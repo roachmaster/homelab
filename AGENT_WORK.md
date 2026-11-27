@@ -19,6 +19,20 @@ Do not apply the deferred destructive digest-column migration. Keep three obsole
 release retry deferrals and their uncertainty intact. Current heartbeat agents
 should appear only after actual calls; never simulate continuous live heartbeats.
 
+## MCP backend implementation checkpoint — 2026-11-27
+
+Isolated worktree `/mnt/data/homelab-build/mcp-heartbeat-server-20261127` owns
+only MCP authentication/presence/backend tests and its README/example config.
+Stable authenticated subjects are `static:<token_id>` and `oauth:<client_id>`;
+existing token/grant IDs and read-only SQL behavior remain intact. Optional
+presence factories are selected at `build_app`, then open a separate private
+SQLite store and dedicated local-reader credential. No background beat exists.
+The local reader returns version1/at most16 configured agents with server UTC
+last-seen timestamps; portal host integration and all live configuration/deploy
+remain root-owned. Initial existing MCP qualification passed56 tests; the final
+combined suite including spoofing, restart/freshness, OAuth-client identity,
+reader isolation and the bounded store is pending at this checkpoint.
+
 # Current: Match portal host admission to generated UI ABI16 — 2026-11-26
 
 The user authorizes fixing verified deployment blockers. Jenkins100 and a clean

@@ -36,6 +36,7 @@ class Principal:
     token_id: str
     name: str
     scopes: frozenset
+    subject: str | None = None
 
 
 def now_utc():
@@ -182,7 +183,8 @@ class BearerTokenAuth:
             return None
         if parse_iso(record["expires_at"]) <= self.clock():
             return None
-        return Principal(record["id"], record["name"], frozenset(record["scopes"]))
+        return Principal(record["id"], record["name"], frozenset(record["scopes"]),
+                         subject="static:" + record["id"])
 
 
 class FailureLimiter:
