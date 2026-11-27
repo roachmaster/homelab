@@ -26,7 +26,7 @@ ALLOWED = {
                        ("forge-local", "forge-core", "forge-jobs")},
     "forge-mcp": set(),
     "forge-mcp-host": {("forge-mcp", "normal")},
-    "forge-postgres": {("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-work-publication", "normal")},
+    "forge-postgres": {("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-work-publication", "normal"), ("forge-jenkins", "normal")},
     "forge-work": {("forge-core", "normal")},
     "forge-work-worker": {("forge-core", "normal")},
     "forge-work-publication": {("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-jenkins", "normal")},

@@ -9,8 +9,10 @@
 mod client;
 pub mod codec;
 pub mod config;
+pub mod emitter;
 pub mod events;
 mod observation;
+pub mod store;
 pub mod strict_json;
 
 #[cfg(feature = "http")]

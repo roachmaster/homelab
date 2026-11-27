@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 forge-core.workspace = true
+forge-jenkins.workspace = true
 forge-work.workspace = true
 forge-work-publication.workspace = true
 forge-work-worker.workspace = true
