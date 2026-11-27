@@ -1,4 +1,6 @@
 pub mod branch;
+pub mod candidate_source;
+pub mod context_providers;
 /// This adapter provides a synchronous facade over tokio-postgres, dedicated to PostgreSQL operations.
 /// It uses explicit leases, which are values that expire server-side and are not cleaned up by Drop.
 /// The transport decision is handled by forge-postgres, and this crate does not route through forge-pg-proxy.

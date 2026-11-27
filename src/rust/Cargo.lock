@@ -663,6 +663,7 @@ dependencies = [
  "forge-core",
  "forge-work",
  "forge-work-worker",
+ "nix",
  "serde_json",
  "sha2 0.10.9",
  "tokio",

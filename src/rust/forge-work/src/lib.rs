@@ -5,6 +5,7 @@ pub mod canonical;
 pub mod catalog;
 pub mod catalog_registrar;
 pub mod decision_requests;
+pub mod diagnostic;
 pub mod external_dto;
 pub mod external_identity;
 pub mod external_review;
