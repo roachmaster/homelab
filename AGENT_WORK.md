@@ -1,3 +1,24 @@
+# Current: Portal stop-event reasons — 2026-11-27
+
+User requests cancellation reasons in the portal sub-event reader. Codex owns
+feature/codex. Reuse the typed timeline: recorded reason in the row, Actor /
+Recorded reason / Detail in disclosure. Closed cause vocabulary and bounded text;
+missing historical evidence stays not recorded. No migration or history rewrite.
+ABI18 host opts into version1 attribution; legacy clients retain their old shape.
+Atomic host/assets/WASM required. Local browser QA passed all28 groups with
+unchanged source fingerprint199e3f00 (dirty tree at2db5a0ab); screenshots inspected
+at390/1440px. API/projection/attribution checks31 passed; native host70 passed.
+Subsequent edits are test assertions and documentation only; application bytes
+remain those exercised by the browser. Exact committed CI and rollout pending.
+
+PR30 merged Codex38e89e9b into main as2db5a0ab after Jenkins106 SUCCESS on
+exact tree048232ff. Feature/grok was not merged or modified.
+Earlier running checkpoint superseded: proxy97711535 stopped in attempt2b8b1532
+following native permission cancellation. Its database event did not record that
+category; generic workflow cancellation is not proof of an operator request.
+No retry or revival. Historical connectivity report666c25a9 was reviewed and
+retired through the normal result-bound Plan cancel action; artifact preserved.
+
 # Current: Qualify Grok feature-branch runtime and publication — 2026-11-27
 
 Completed runtime correction47789e90, published on feature/codex and deployed.

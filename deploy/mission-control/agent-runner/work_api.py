@@ -584,6 +584,29 @@ def handles(headers):
     return any(value.startswith("ide.work.") for value in headers.get_all("Forge-Destination", []))
 
 
+def event_attribution_version(headers):
+    values = headers.get_all('Forge-Event-Attribution-Version', [])
+    if not values:
+        return None
+    if values != ['1']:
+        raise Rejected(400, 'invalid_request')
+    return 1
+
+
+def event_attribution_response(response, version):
+    if version == 1:
+        return response
+    status, body = response
+    if not isinstance(body, dict) or not isinstance(body.get('event'), dict):
+        return response
+    event = body['event']
+    if event.get('kind') != 'work_events' or not isinstance(event.get('events'), list):
+        return response
+    return status, {**body, 'event': {**event, 'events': [
+        {key: value for key, value in item.items() if key != 'attribution'}
+        for item in event['events']]}}
+
+
 def retry_events_version(headers):
     """Optional ABI15 response extension, validated before any request effects."""
     values=headers.get_all('Forge-Retry-Events-Version',[])
@@ -642,11 +665,12 @@ def delivery_response(response, version):
 def destination(headers):
     delivery_version(headers)  # Reject malformed negotiation before request effects.
     retry_events_version(headers)
+    event_attribution_version(headers)
     # Work owns this extension. Preserve every other header, including duplicates,
     # for the shared closed-envelope validator rather than relaxing that contract.
     route_headers = Message()
     for name, value in headers.items():
-        if name.lower() not in {'forge-delivery-version','forge-retry-events-version'}:
+        if name.lower() not in {'forge-delivery-version','forge-retry-events-version','forge-event-attribution-version'}:
             route_headers[name] = value
     value = common.dispatch_destination(route_headers)
     try:

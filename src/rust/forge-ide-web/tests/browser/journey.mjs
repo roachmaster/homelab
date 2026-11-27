@@ -3163,6 +3163,23 @@ async function agentsJourney() {
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-task-status')).toContainText('Stopping');
     await check(page.locator('#agents-task-status')).toContainText('Cancelled');
+    await disclosure(page, 'agents-task-technical', true);
+    await disclosure(page, 'agents-history-panel', true);
+    const cancelledEvent=page.locator('#agents-history > li').filter({hasText:'Operator request'}).last();
+    await check(cancelledEvent).toBeVisible();
+    await cancelledEvent.locator('details > summary').focus();
+    await page.keyboard.press('Enter');
+    await check(cancelledEvent).toContainText('operator (fixture-operator)');
+    await check(cancelledEvent).toContainText('Stopped by the owner <safe text>.');
+    await check(cancelledEvent.locator('script,img')).toHaveCount(0);
+    for(const width of [390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'cancellation reasons fit phone and desktop');
+      await screenshot(page, `agents-cancel-reason-${width}.png`);
+    }
+    await page.setViewportSize({width:390,height:844});
+    await disclosure(page, 'agents-task-technical', false);
+
     relay.faults.holdProgressCompletion = false;
     await page.locator('#agents-back').click();
     await check(page.locator('#agents-providers')).toBeVisible();

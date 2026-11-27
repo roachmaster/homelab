@@ -1,3 +1,15 @@
+## Stop-event attribution candidate — 27 November 2026
+
+The portal source now projects recorded cancellation, interruption and blocked
+actors and causes into the typed sub-event timeline. Its reason stays visible;
+Actor, Recorded reason and bounded Detail are expandable. Legacy missing evidence
+is explicitly not recorded. No historical event or applied migration is rewritten.
+The API sends attribution only for Forge-Event-Attribution-Version:1; ABI18 host,
+assets and WASM select that extension together. This does not recover native
+permission categories discarded before publication, nor change retry authority.
+Local browser verification passed all28 groups at the recorded source fingerprint;
+publication and live activation require their own verification receipts.
+
 # Current Forge implementation
 
 Reviewed **26 November 2026** against consolidated application source
