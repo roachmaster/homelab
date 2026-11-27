@@ -161,6 +161,7 @@ def project_pipeline_stages(*, plan, events, observation, findings=(), now=None,
     completed_status = [None] * len(names)  # 'passed' | 'failed' | None
     subsumed = [False] * len(names)
     build_started_at = None
+    stage_witness_at = None
     has_queued = has_started = False
     completed_event = None
     for row in events:
@@ -179,6 +180,12 @@ def project_pipeline_stages(*, plan, events, observation, findings=(), now=None,
                 LOG.warning("Pipeline projection ignoring event for unknown stage %r",
                             row.get("stage_name"))
                 continue
+            # A genuine named stage proves execution even when optional
+            # build lifecycle emission is unavailable. Keep the earliest
+            # recorded stage time as a bounded fallback, never invent an event.
+            witness = _as_utc(row.get("occurred_at"))
+            if witness is not None and (stage_witness_at is None or witness < stage_witness_at):
+                stage_witness_at = witness
             if kind == "stage_started":
                 if completed_status[index] is None:
                     started[index] = True
@@ -202,6 +209,10 @@ def project_pipeline_stages(*, plan, events, observation, findings=(), now=None,
                 if completed_status[earlier] is None:
                     completed_status[earlier] = "passed"
                     subsumed[earlier] = True
+
+    if not has_started and stage_witness_at is not None:
+        has_started = True
+        build_started_at = stage_witness_at
 
     terminal_observation = bool(observation_checks) and all(
         check.get("status") in ("success", "failure", "skipped", "cancelled")

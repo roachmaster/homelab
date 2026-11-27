@@ -1,3 +1,128 @@
+## Native completion and schema52 source integration — 2026-11-27
+
+Migration52 is LIVE from qualified source702cf64e. Jenkins126 passed all45 branch
+checks; actualSQL apply/privilege/config checks passed after a drained seven-service
+hold. All target workflow history, prior51 migration records, roles/ACLs/HBA, the
+complete persistent branch reservation and three deferred release operations
+retained their exact pre-apply checksums. Six services restarted on compatible
+Python source5bdedc1a; no matched Python source upgrade is claimed yet.
+
+Normal same-task Resume queued stopped repair8909443f again, preserving Plan64f81def,
+old attempt06cdab64 and receipt a8280fde. Real attempt da97b36f ran on feature/codex,
+fixed initial external Plan instruction delivery, and passed Jenkins127 all45.
+Independent code review05fb6a56 approved and attested external-initial-plan-policy.
+Normal publication88cd03dd created PR36; its hosted review297336c0 observed real
+passed CI. Normal exact merge e05181b6 completed PR36 as07800f29695ff47af112a196244d17623acda26a.
+Workflow46bcaed7 is completed and the branch reservation released normally asmerged.
+Canonical checkout HEAD/main/index/files remain preserved; source sync updates only
+refs/forge/verified-main. No Grok branch was changed.
+
+Publisher and idle Codex author are paused to serialize root feature publication.
+Use staged m52-release-held-publication config for publisher operations: only release
+activation is disabled; full main verification/source observation remain selected.
+The separate legacy external-delivery service is also held. Do not restart the
+old release-enabled publisher until schema52 source is integrated and verified.
+Fresh old unstarted release plans may be genuinely superseded by the normal actor
+after main advances. Preserve the three older deferred/journalled operations.
+
+A follow-up projection fix uses an actual known-stage timestamp as bounded execution
+evidence when optional build-start events are absent; it never fabricates history.
+Explicit build-start timestamps retain priority, earliest stage time anchors
+staleness, and unknown stages/missing timestamps cannot establish running status.
+All29 pipeline projection tests pass, including six new regressions. This patch
+is not deployed yet; actual Jenkins127 events appeared live but oldAPI5bdedc1a
+conservatively reported unknown run state without build_started. Integrate reviewed
+origin/main07800f29 into feature/codex, verify the combined tree, then publish/main
+integrate schema52 and this projection before normal release/runtime activation.
+
+## Latest database qualification — 2026-11-27
+
+Final35 focused continuation/upgrade tests passed. The M26 upgrade snapshot now
+excludes only read_plan's deliberately changed source, alongside its existing
+reviewed replacement exceptions; M52 independently pins the entire new body and
+security metadata. Original owners, credentials, default ACLs and HBA still compare.
+The runner installer now publishes the new transitive recovery module; its
+import-closure regression and all18 stage-emitter tests passed.254 preflight tests
+passed with zero skips. Broad PG testing exposed these expected qualification
+updates; no gate or historical receipt was removed.
+
+A private6MiB live backup was restored as actual data into canonical immutable
+schema51 in an owned disposable cluster. All101 foreign keys were revalidated;
+M36's documented historical NOT VALID progress rule was recreated from its
+original source after loading grandfathered rows. Applying/verifying52 twice
+preserved all60 data tables byte-for-byte, original51 migration timestamps,
+sequence state and role/ACL metadata. This is source-reconstructed schema plus
+live-data upgrade proof, not a passed raw full-schema pg_dump roundtrip: that
+separate failed strict-catalog restoration (default ACL/deparse representation)
+is retained as evidence. No production migration has run at this checkpoint.
+
+Jenkins125 is checking d1c0bf95; the test-only intentional read_plan snapshot
+correction needs final successor qualification. Jenkins124 was explicitly stopped
+as superseded through the normal provider; trusted cleanup confirmed all build
+processes reaped. Native candidate3622 and its branch reservation are untouched.
+The corrected verifier must be rendered through native_installation_plan so its
+native CONFIG path and matching verifier_sha256 stay consistent. Wait for125
+cleanup before replacing that protected executor; then qualify this successor.
+
+## Latest live telemetry correction — 2026-11-27
+
+The API-only Jenkins stage ingress is now selected by the narrow root-owned
+/etc/homelab-forge/coding-api/jenkins-events.json allowlist. The API remained on
+source5bdedc1a; workers, identities, reservations and DB privileges did not change.
+Build124 proves stage events now arrive before completion. That revealed a second
+bug: v3's45/46command indices were mapped to legacy three-stage labels. The new
+verifier mapping derives contiguous logical-gate intervals from the trusted phase
+plan, starts once at the first command, completes success only after the last,
+and seals any failure against later success. v1/v2 behavior and delivery IDs remain.
+All18 stage emitter tests pass, including full main/branch v3 sequences and failure
+fences. Existing unwired lifecycle producer remains untouched. The corrected
+verifier is not installed at this source checkpoint; wait for current Jenkins124
+to finish before any protected executor replacement. No native task has run CI
+under the newly enabled ingress yet; the observed124 run is operator verification.
+
+Migration52 source is locally checkpointed through ad0e81ed, still not pushed or
+applied live. Jenkins123 exposed the explicit verifier-closure expectation; the
+new verifier was added to that exact closure, and254preflight tests then passed.
+Upgrade assertions now expect52; no check was removed. The actual schema51 upgrade
+and immutable task-history proof passed. Final broad runner tests/branch Jenkins124
+are running. Preserve native feature/codex ownership and the pending migration
+publication/release hold plan below.
+
+# Current: continuation-owned Plan repair — 2026-11-27
+
+PR35 is merged as ea3e42cb; source5bdedc1a has the identical tree and is live.
+Jenkins119 passed45 branch checks and Jenkins120 passed46 full-main checks,
+including browser and1824 runner tests with zero skips. Portal d88a4c00 is deployed.
+Native candidate3622f602 passed all45 Jenkins121 branch checks. Independent review
+correctly requested an initial external Plan instruction fix, then normal code
+repair8909443f stopped before model launch: SQL read_plan couples Plan ownership
+to the historical budget root, although fresh continuation063 owns approved Plan64f81def.
+
+Codex is preparing migration52 continuation_plan_lineage. Applied migrations1–51,
+budget roots and historical receipts remain unchanged. The reader follows only
+bounded, cycle-safe, source-review/candidate/feedback-bound repair ancestry to the
+actual approved Plan owner. Private PlanLineageRecovery uses normal same-task
+Resume after exact failure/stop/reconciliation, current deployment, actual workspace
+and source digests, current grants/readiness/branch and retained-source checks;
+one durable infrastructure retry is charged. No public override or automatic
+failure relabeling is added. Initial focused55 tests passed; existing schema51
+upgrade with task history and subsequent native repair passed. Final source
+qualification and live migration/recovery are pending at this checkpoint.
+
+IMPORTANT: native publisher owns origin/feature/codex candidate3622 and its
+persistent reservation. Root's migration work remains local on feature/codex;
+do not push/reset/advance the remote or clear its reservation for maintenance.
+Qualify the local immutable candidate through protected Jenkins bundle submission,
+then qualify/apply SQL52 while preserving native branch ownership. Hold portal
+release activation while schema52 source is not yet in main: old SQL verifiers
+will correctly reject the new function. Let the existing native repair/review/merge
+finish, then publish migration source through reviewed feature/codex integration
+once its reservation is legitimately released. No native completion is claimed.
+
+Live CI final result projection is verified in portal root and repair responses.
+Publisher lifecycle emitter configuration is absent, so in-progress Jenkins runs
+are not yet projected; investigate/qualify the existing emitter wiring.
+
 # Current: Event-stream autonomy defects — 2026-11-27
 
 Latest follow-up supersedes the earlier rollout status below. PR #34 merged as

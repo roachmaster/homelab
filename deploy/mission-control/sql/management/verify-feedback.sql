@@ -1,3 +1,4 @@
+\ir verify-continuation-plan-lineage.sql
 \ir verify-agent-feature-branches.sql
 -- Full M26 pins precede the exact reviewed historical-body projections below.
 SELECT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=26) AS verify_owner_continuation
@@ -451,7 +452,30 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  END IF;
  IF actual IS DISTINCT FROM $function16$["\nBEGIN\n SELECT scope_plan_decision_id INTO NEW.scope_plan_decision_id FROM forge_agent.coding_tasks\n WHERE owner_id=NEW.owner_id AND project_alias=NEW.project_alias AND id=NEW.task_id;\n RETURN NEW;\nEND;",false,["search_path=pg_catalog, pg_temp"],"v",["forge_agent_owner=X/forge_agent_owner"]]$function16$::jsonb THEN RAISE EXCEPTION 'Feedback function drift: forge_agent.coding_review_scope_plan()';END IF;
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
- SELECT jsonb_build_array(forge_agent._retry_legacy_source(p.oid,p.prosrc),p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.read_plan(uuid,uuid)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
+ SELECT jsonb_build_array(forge_agent._retry_legacy_source(p.oid,CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52) THEN replace(p.prosrc,$new$(x.task_id=t.id OR x.task_id=coalesce(t.repair_root_task_id,t.id) OR EXISTS (
+        WITH RECURSIVE lineage(id,seen) AS (
+            SELECT t.id,ARRAY[t.id]
+            UNION ALL
+            SELECT parent.id,lineage.seen||parent.id
+            FROM lineage
+            JOIN forge_agent.coding_tasks child ON child.owner_id=t.owner_id AND child.project_alias=t.project_alias AND child.id=lineage.id
+            JOIN forge_agent.coding_reviews review ON review.owner_id=child.owner_id AND review.project_alias=child.project_alias
+              AND review.review_id=child.repair_source_review_id AND review.task_id=child.parent_task_id
+              AND review.repair_task_id=child.id AND review.status='repair'
+              AND review.candidate_commit=child.repair_candidate_commit AND review.candidate_commit=child.base_revision
+              AND coalesce(review.plan_decision_id,review.scope_plan_decision_id)=x.decision_id
+            JOIN forge_agent.coding_tasks parent ON parent.owner_id=child.owner_id AND parent.project_alias=child.project_alias
+              AND parent.id=review.task_id AND parent.workflow_id=t.workflow_id
+              AND coalesce(parent.plan_decision_id,parent.scope_plan_decision_id)=x.decision_id
+            JOIN forge_agent.coding_feedback feedback ON feedback.owner_id=child.owner_id AND feedback.project_alias=child.project_alias
+              AND feedback.feedback_id=child.feedback_id AND feedback.feedback_sha256=child.feedback_sha256
+              AND feedback.review_id=review.review_id AND feedback.task_id=child.id AND feedback.parent_attempt_id=review.attempt_id
+            WHERE child.workflow_id=t.workflow_id AND t.workflow_id IS NOT NULL AND x.decision='resume'
+              AND child.scope_plan_decision_id=x.decision_id AND child.plan_decision_id IS NULL
+              AND child.mode='implement' AND parent.mode='implement'
+              AND cardinality(lineage.seen)<32 AND NOT parent.id=ANY(lineage.seen)
+        ) SELECT 1 FROM lineage WHERE lineage.id=x.task_id AND cardinality(lineage.seen)>1
+    ))$new$,$old$(x.task_id=t.id OR x.task_id=coalesce(t.repair_root_task_id,t.id))$old$) ELSE p.prosrc END),p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.read_plan(uuid,uuid)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  ELSE
  SELECT jsonb_build_array(p.prosrc,p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.read_plan(uuid,uuid)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  END IF;

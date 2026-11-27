@@ -49,7 +49,7 @@ class WorkflowContinuationTest(unittest.TestCase):
                         {p: self.config.profiles[p].branch for p in ('agy-v2', 'codex-v2')}):
             return port.execute(command)
 
-    def process_native(self, lease, text, *, shutdown=False, after_run_digest=None):
+    def process_native(self, lease, text, *, shutdown=False, after_run_digest=None,expect_reconcile=False):
         """Real worker lifecycle/DB/context ports; only CLI, Git and CI are fixtures."""
         from work_worker import CodingWorker
         from work_worker_config import parse_config
@@ -88,7 +88,8 @@ class WorkflowContinuationTest(unittest.TestCase):
                 peer_context_provider=PeerReviewContextProvider(self.db,SimpleNamespace(ensure=lambda *args:None)))
             worker.incarnation = self.incarnation
             worker.process(lease)
-        self.assertEqual(self.get(lease.task_id)['status'],'needs_reconcile' if shutdown else 'awaiting_review')
+        self.assertEqual(self.get(lease.task_id)['status'],'needs_reconcile' if shutdown or expect_reconcile else 'awaiting_review',
+                         self.get(lease.task_id).get('attempt'))
         return captured
 
     def test_claim_validation_failure_rolls_back_admission(self):
@@ -296,21 +297,133 @@ class WorkflowContinuationTest(unittest.TestCase):
         self.assertEqual(self.db.project_revisions(),{'homelab':'2'*40})
 
     def test_parented_implementation_revise_reaches_worker_with_bound_feedback(self):
+        self.parented_revise(False)
+
+    def test_linked_repair_reads_continuation_owned_plan(self):
+        self.parented_revise(True)
+
+    def test_second_linked_repair_reads_same_plan(self):
+        self.parented_revise(True,rounds=2)
+
+    def test_linked_repair_rejects_changed_candidate(self):
+        self.parented_revise(True,corrupt="UPDATE forge_agent.coding_tasks SET repair_candidate_commit='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' WHERE id=%s")
+
+    def test_linked_repair_rejects_changed_feedback_binding(self):
+        self.parented_revise(True,corrupt="UPDATE forge_agent.coding_tasks SET feedback_sha256=repeat('e',64) WHERE id=%s")
+
+    def test_linked_repair_rejects_wrong_carried_plan(self):
+        self.parented_revise(True,corrupt="UPDATE forge_agent.coding_tasks SET scope_plan_decision_id=NULL WHERE id=%s")
+
+    def parented_revise(self,new_workspace,*,rounds=1,corrupt=None,prepare_only=False):
         from work_retry_events import RetryEventProvider
         _,admitted=self.submit();wid=self.escalate(admitted['task_id']);port,command=self.command(wid);self.execute(port,command)
         self.flow.retry_events=RetryEventProvider('mission-control')
         self.coordinator.run_once();plan=self.claim('agy-v2');self.process_native(plan,'A fresh bounded Plan.')
         self.coordinator.run_once();peer=self.claim('codex-v2');self.process_native(peer,self.verdict(peer));self.coordinator.run_once()
         author=self.claim('agy-v2');self.process_native(author,'An implementation requiring independent correction.')
-        self.coordinator.run_once();q=self.db.review_claim('fixed-checks')
-        self.db.review_finish(q,{'disposition':'awaiting_review','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[],'verified_finding_ids':[],'fingerprint':None,'summary':'Checked.','cleanup_confirmed':True,'verification':{'checks_passed':True,'candidate_workspace_digest':'b'*64,'repair_requires_new_workspace':False,'cleanup_confirmed':True,'integration_base':author.base_revision,'toolchain':'fixture','checks':[{'check_id':'make-ci','status':'passed','head_sha':'d'*40}]}})
-        self.coordinator.run_once();peer=self.claim('codex-v2');self.process_native(peer,self.verdict(peer,'revise'));self.coordinator.run_once()
-        repair=self.claim('agy-v2');self.assertIsNotNone(repair)
-        self.assertEqual(repair.task_id,author.task_id)
-        self.assertIsNotNone(repair.feedback_id)
-        self.assertIsNone(repair.repair_source_review_id)
-        context=self.process_native(repair,'Corrected independently reviewed implementation.')
+        for index in range(rounds):
+            self.coordinator.run_once();q=self.db.review_claim('fixed-checks')
+            candidate=('d' if index==0 else 'e')*40
+            self.db.review_finish(q,{'disposition':'awaiting_review','candidate_commit':candidate,'gate_manifest_sha256':'e'*64,'findings':[],'verified_finding_ids':[],'fingerprint':None,'summary':'Checked.','cleanup_confirmed':True,'verification':{'checks_passed':True,'candidate_workspace_digest':'b'*64,'repair_requires_new_workspace':new_workspace,'cleanup_confirmed':True,'integration_base':author.base_revision,'toolchain':'fixture','checks':[{'check_id':'make-ci','status':'passed','head_sha':candidate}]}})
+            self.coordinator.run_once();peer=self.claim('codex-v2');self.process_native(peer,self.verdict(peer,'revise'));self.coordinator.run_once()
+            repair=self.claim('agy-v2');self.assertIsNotNone(repair)
+            self.assertEqual(repair.task_id==author.task_id,not new_workspace)
+            self.assertIsNotNone(repair.feedback_id)
+            self.assertEqual(repair.repair_source_review_id is not None,new_workspace)
+            if prepare_only:return repair,plan
+            if corrupt:
+                with self.flow._transaction() as cursor:cursor.execute(corrupt,(repair.task_id,))
+                with self.assertRaises(__import__('work_worker_store').OutcomeConflictError):self.db.read_plan(repair)
+                return
+            context=self.process_native(repair,'Corrected independently reviewed implementation.')
+            self.assertEqual(context['peer_feedback_context'].target_kind,'code')
+            self.assertEqual(context['plan_context']['plan_attempt_id'],plan.attempt_id)
+            author=repair
+
+    def lineage_stop(self):
+        from work_plan_lineage_recovery import PlanLineageRecovery
+        from work_worker_store import OutcomeConflictError
+        repair,plan=self.parented_revise(True,prepare_only=True)
+        with patch.object(self.db,'read_plan',side_effect=OutcomeConflictError()):
+            self.process_native(repair,'No model response.',expect_reconcile=True)
+        self.coordinator.run_once()
+        from test_work_execution_and_usage import make_stop_proof
+        rec=self.db.reconcile(repair,'b'*64,make_stop_proof(repair.unit_name))
+        evidence=lambda task,attempt,receipt:dict(qualified_commit='a'*40,workspace_digest=receipt['workspace_digest'],source_digest='b'*64,candidate_commit=task['base_revision'],scope_stopped=True)
+        port=PlanLineageRecovery(self.flow,evidence)
+        request=dict(project_alias='homelab',task_id=UUID(repair.task_id),attempt_id=UUID(repair.attempt_id),
+            expected_revision=self.get(repair.task_id)['revision'],reconciliation_receipt_id=UUID(rec),idempotency_key=uuid4())
+        return port,request,repair,plan
+
+    def resume_lineage(self,port,request):
+        with patch.dict('work_agent_branch.OWNED_FEATURE_BRANCHES',{p:self.config.profiles[p].branch for p in ('agy-v2','codex-v2')}):
+            return port.resume(**request)
+
+    def test_plan_lineage_recovery_retains_task_plan_review_and_retry_history(self):
+        port,request,old,plan=self.lineage_stop()
+        before=self.rows('SELECT snapshot,plan_revisions FROM forge_agent.coding_workflows WHERE workflow_id=%s',(old.workflow_id,))
+        stopped=self.rows('SELECT to_jsonb(a) FROM forge_agent.coding_attempts a WHERE attempt_id=%s',(old.attempt_id,))
+        receipt=self.resume_lineage(port,request)
+        self.assertEqual(self.resume_lineage(port,request),receipt)
+        self.assertEqual(self.rows('SELECT snapshot,plan_revisions FROM forge_agent.coding_workflows WHERE workflow_id=%s',(old.workflow_id,)),before)
+        self.assertEqual(self.rows('SELECT to_jsonb(a) FROM forge_agent.coding_attempts a WHERE attempt_id=%s',(old.attempt_id,)),stopped)
+        repair=self.claim('agy-v2');self.assertEqual(repair.task_id,old.task_id)
+        context=self.process_native(repair,'Fixed the independently requested source finding.')
+        self.assertEqual(context['plan_context']['plan_attempt_id'],plan.attempt_id)
         self.assertEqual(context['peer_feedback_context'].target_kind,'code')
+        self.assertEqual(self.get(repair.task_id)['workflow']['phase'],'repair')
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'plan-lineage-fix:%%'")[0][0],1)
+
+    def test_plan_lineage_recovery_rejects_changed_live_workspace(self):
+        port,request,old,plan=self.lineage_stop()
+        port.evidence=lambda *args:dict(qualified_commit='a'*40,workspace_digest='c'*64,source_digest='b'*64,candidate_commit=old.base_revision,scope_stopped=True)
+        with self.assertRaises(Rejected):self.resume_lineage(port,request)
+        self.assertEqual(self.get(old.task_id)['status'],'needs_reconcile')
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'plan-lineage-fix:%%'")[0][0],0)
+
+    def test_plan_lineage_recovery_rejects_a_different_failure(self):
+        port,request,old,plan=self.lineage_stop()
+        self.cluster.admin_exec("UPDATE forge_agent.coding_attempts SET summary='Different failure' WHERE attempt_id='"+old.attempt_id+"'",owner=False)
+        with self.assertRaises(Rejected):self.resume_lineage(port,request)
+
+    def test_plan_lineage_recovery_rejects_operator_cancel(self):
+        from work_api import WorkCancel
+        port,request,old,plan=self.lineage_stop()
+        self.service.cancel(WorkCancel('homelab',UUID(old.task_id),request['expected_revision'],'cancel-plan-lineage'))
+        with self.assertRaises(Rejected):self.resume_lineage(port,request)
+
+    def test_existing_schema51_repair_upgrades_without_history_changes(self):
+        import shutil
+        import work_pg_fixture
+        from pathlib import Path
+        with TemporaryDirectory() as directory:
+            sql=Path(directory)/'sql';shutil.copytree(work_pg_fixture.SQL_DIR,sql)
+            apply=sql/'apply.sql';body=apply.read_text();start=body.index('SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=52)')
+            apply.write_text(body[:start]+'COMMIT;\n')
+            with patch('work_pg_fixture.SQL_DIR',sql):cluster=DisposablePostgresCluster().start()
+            self.addCleanup(cluster.stop)
+            self.cluster=cluster;self.setUp()
+            port,request,old,plan=self.lineage_stop()
+            tables=('coding_tasks','coding_attempts','coding_feedback','coding_plan_decisions','coding_reviews')
+            snapshot=lambda:{name:self.rows('SELECT to_jsonb(t) FROM forge_agent.'+name+' t ORDER BY to_jsonb(t)::text') for name in tables}
+            before=snapshot();cluster.apply_and_verify();cluster.apply_and_verify()
+            self.assertEqual(snapshot(),before)
+            self.resume_lineage(port,request);repair=self.claim('agy-v2')
+            context=self.process_native(repair,'Implemented the independently requested correction.')
+            self.assertEqual(context['plan_context']['plan_attempt_id'],plan.attempt_id)
+            self.assertEqual(context['peer_feedback_context'].target_kind,'code')
+
+    def test_plan_lineage_verifier_rejects_body_and_security_drift(self):
+        import work_pg_fixture
+        statement="SELECT pg_get_functiondef('forge_coding_worker_api.read_plan(uuid,uuid)'::regprocedure)"
+        original=self.rows(statement)[0][0]
+        verifier=work_pg_fixture.SQL_DIR/'management/verify-continuation-plan-lineage.sql'
+        for drift in (original.replace('cardinality(lineage.seen)<32','cardinality(lineage.seen)<33'),
+                      "ALTER FUNCTION forge_coding_worker_api.read_plan(uuid,uuid) SECURITY INVOKER"):
+            self.cluster.admin_exec(drift)
+            self.assertNotEqual(self.cluster.run_sql_script(verifier).returncode,0)
+            self.cluster.admin_exec(original)
+            self.assertEqual(self.cluster.run_sql_script(verifier).returncode,0)
 
     def test_unapproved_source_gets_fresh_independently_reviewed_plan(self):
         _, admitted = self.submit()
