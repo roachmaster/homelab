@@ -11,8 +11,10 @@
 //! generates them; the generated lib.rs replaces this file in the final
 //! increment.
 
+pub mod client;
 pub mod config;
 pub mod error;
 
+pub use client::PgSession;
 pub use config::PgConfig;
 pub use error::AdapterError;
