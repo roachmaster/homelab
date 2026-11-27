@@ -7,8 +7,11 @@
 #![doc = include_str!("../README.md")]
 
 mod client;
+pub mod codec;
+pub mod config;
 pub mod events;
 mod observation;
+pub mod strict_json;
 
 #[cfg(feature = "http")]
 pub mod http;

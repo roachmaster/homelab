@@ -56,6 +56,12 @@ impl JenkinsEventKind {
     }
 }
 
+/// Python jenkins_events.coerce_event_kind: an event-kind value string
+/// maps to the enum; anything else is invalid.
+pub fn coerce_event_kind(value: &str) -> Result<JenkinsEventKind, String> {
+    JenkinsEventKind::parse(value)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JenkinsBuildResult {
     Success,
@@ -549,7 +555,7 @@ fn parse_iso_epoch(value: &str) -> Option<(i64, u32)> {
     Some((epoch, micros))
 }
 
-fn format_iso_epoch(epoch: i64, micros: u32) -> String {
+pub(crate) fn format_iso_epoch(epoch: i64, micros: u32) -> String {
     let days = epoch.div_euclid(86400);
     let seconds = epoch.rem_euclid(86400);
     let (year, month, day) = civil_from_days(days);
