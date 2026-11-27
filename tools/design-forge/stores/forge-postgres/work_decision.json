@@ -1,0 +1,23 @@
+{
+ "id": "work_decision",
+ "kind": "trait impl",
+ "file": "work_decision.rs",
+ "summary": "The WorkDecisionPort implementation for PgWorkStore: plan_decide/review_decide/repair/publication_retry/handoff_author delegate to their transaction modules; the two external-workflow operations return the documented v1 unavailable (their Python flows are grant-gated subsystems - plan-override grants and recovery policies - that belong to the v2 coordination slice with maintain_external).",
+ "signature": "impl forge_work::WorkDecisionPort for crate::work_store::PgWorkStore {\n    fn plan_decide(&self, request: &forge_work::PlanDecideRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn review_decide(&self, request: &forge_work::ReviewDecideRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn handoff_author(&self, request: &forge_work::HandoffRequest, authority: &forge_work::HandoffAuthority) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn repair(&self, request: &forge_work::RepairRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn publication_retry(&self, request: &forge_work::PublicationRetryRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn approve_external_plan_override(&self, request: &forge_work::ExternalOverrideRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn recover_external_review_infrastructure(&self, request: &forge_work::ExternalRecoveryRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n}",
+ "responsibilities": [
+  "plan_decide -> work_decision_plan::plan_decide, review_decide -> work_decision_review::review_decide, repair -> work_decision_more::repair, publication_retry -> work_decision_more::publication_retry, handoff_author -> work_decision_more::handoff_author (passing the authority through). Each first calls require_project with the request's project_alias (handoff_author reads project_alias from its command object; a command without one is rejected(400, invalid_request)).",
+  "approve_external_plan_override and recover_external_review_infrastructure: require_project, then Err(WorkError::rejected(503, \"unavailable\")) - the v1 boundary, recorded in forge-work-design.yaml: these flows run on the external-workflow control surface behind grant evidence the port does not carry."
+ ],
+ "invariants": [
+  "The external two are the ONLY stubbed operations in the adapter, and they fail loudly with 503, never silently."
+ ],
+ "pattern": "",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_decision_plan",
+  "work_decision_review",
+  "work_decision_more"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\"); uuid -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>.\n// Tx: query_rows / execute_count / call_json / call_scalar with &[&(dyn ToSql + Sync)] params. Map AdapterError with crate::work_common::work_err. Decision operations run inside session.in_tx(|tx| ...).\n// Receipts are serde_json::Value objects via serde_json::json!; read with .get(\"key\")/.as_str()/.as_i64()."
+}

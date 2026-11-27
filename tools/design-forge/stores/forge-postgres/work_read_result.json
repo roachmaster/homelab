@@ -1,0 +1,26 @@
+{
+ "id": "work_read_result",
+ "kind": "functions",
+ "file": "work_read_result.rs",
+ "summary": "WorkReadPort::result: one bounded, UTF-8-safe window of a published attempt result, ported from WorkStore.result including its cursor format, byte-window chunk query, and content bounds.",
+ "signature": "pub(crate) fn result(store: &crate::work_store::PgWorkStore, project_alias: &str, task_id: uuid::Uuid, attempt_id: uuid::Uuid, cursor: Option<&str>, limit_bytes: i64) -> Result<forge_work::ResultChunk, forge_work::WorkError>;",
+ "responsibilities": [
+  "Validate limit_bytes in 4..=16384 else rejected(400, invalid_request). Parse the cursor: None -> offset 0; Some must match ^([0-9a-f]{64})\\.(0|[1-9][0-9]{0,7})$ and be pure ASCII of length <= 86, else rejected(400, invalid_request); it yields (sha, offset).",
+  "In one read transaction: SELECT result_sha256, result_byte_count, result_chunk_count, published_at FROM forge_agent.coding_attempts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND attempt_id=$4; missing, unpublished, or sha-less -> not_found(result). A cursor whose sha differs -> rejected(409, result_mismatch); an offset outside 0..total_bytes -> rejected(400, invalid_request).",
+  "Run result_chunks_page (pinned) with end_byte=offset and start_byte=offset+limit_bytes. No rows -> rejected(503, unavailable). Concatenate the rows' content as UTF-8 bytes in order; window_start = first row's start_byte; local_start = offset - window_start must be in range, and the byte at local_start must not be a UTF-8 continuation byte (b & 0xC0 == 0x80 -> rejected(400, invalid_request)).",
+  "Take up to limit_bytes from local_start and decode the longest valid UTF-8 prefix (back off at most 3 bytes; failure -> rejected(400, invalid_request)). Then fit the JSON bound: while the JSON-escaped byte length of the content exceeds 32768, drop the last char. Empty content -> rejected(503, unavailable).",
+  "ResultChunk { result_digest: sha, content, offset_bytes: offset, next_cursor: None when offset + content byte length >= total_bytes else Some(format!(\"{sha}.{next_offset}\")) }."
+ ],
+ "invariants": [
+  "The chunk query's parameter names are misleading in Python (end_byte binds the window START offset); the pinned SQL semantics govern: rows with end_byte > $5 AND start_byte < $6 where $5 = offset, $6 = offset + limit_bytes.",
+  "JSON-escaped length is measured as serde_json::to_string(&content) byte length, matching Python's json.dumps(ensure_ascii=False) for this bound check."
+ ],
+ "pattern": "// result_chunks_page (forge_pg_proxy READ_QUERIES, verbatim with $n params):\n// WITH spans AS (SELECT chunk_index, content, byte_length, coalesce(sum(byte_length) OVER (ORDER BY chunk_index ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS start_byte, sum(byte_length) OVER (ORDER BY chunk_index) AS end_byte FROM forge_agent.coding_result_chunks WHERE owner_id = $1 AND project_alias = $2 AND task_id = $3 AND attempt_id = $4) SELECT chunk_index, content, byte_length, start_byte, end_byte FROM spans WHERE end_byte > $5 AND start_byte < $6 ORDER BY chunk_index ASC",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\") for nullable/absent; uuid columns -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>; text[] -> Vec<String>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; call_json(sql, params) -> Result<Option<Value>, AdapterError>. PgSession: query_rows / in_tx(|tx| ...) with the same Tx surface. Map every AdapterError with crate::work_common::work_err.\n// Params are &[&(dyn tokio_postgres::types::ToSql + Sync)]: bind &String/&str for text, &Uuid, &Value for jsonb, &i64, &bool, and &(Option<T>) for nullable params (None binds NULL)."
+}

@@ -1,0 +1,23 @@
+{
+ "id": "work_read",
+ "kind": "trait impl",
+ "file": "work_read.rs",
+ "summary": "The WorkReadPort implementation for PgWorkStore: five thin methods that validate project access and delegate to the per-method free functions in the work_read_* modules. No SQL in this file.",
+ "signature": "impl forge_work::WorkReadPort for crate::work_store::PgWorkStore {\n    fn get(&self, project_alias: &str, task_id: uuid::Uuid) -> Result<forge_work::TaskView, forge_work::WorkError>;\n    fn list_tasks(&self, project_alias: &str, status_filter: Option<&str>, limit: i64, cursor_task_id: Option<uuid::Uuid>, delivery_visible: bool) -> Result<forge_work::TaskPage, forge_work::WorkError>;\n    fn events(&self, project_alias: &str, task_id: uuid::Uuid, after_sequence: i64, limit: i64) -> Result<forge_work::EventPage, forge_work::WorkError>;\n    fn result(&self, project_alias: &str, task_id: uuid::Uuid, attempt_id: uuid::Uuid, cursor: Option<&str>, limit_bytes: i64) -> Result<forge_work::ResultChunk, forge_work::WorkError>;\n    fn cicd_stage_log(&self, project_alias: &str, task_id: uuid::Uuid, correlation_id: uuid::Uuid, action_id: uuid::Uuid, stage_id: &str, view: &str, cursor_token: Option<&str>) -> Result<forge_work::StageLogView, forge_work::WorkError>;\n}",
+ "responsibilities": [
+  "Each method calls work_common::require_project first, then delegates: get -> work_read_get::get, list_tasks -> work_read_list::list_tasks (which itself routes scope filters to work_read_scope::list_scope), events -> work_read_events::events, result -> work_read_result::result, cicd_stage_log -> work_read_cicd::cicd_stage_log. Arguments pass through unchanged."
+ ],
+ "invariants": [
+  "No SQL, no shaping, no error invention in this file: delegation only."
+ ],
+ "pattern": "",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_read_get",
+  "work_read_list",
+  "work_read_events",
+  "work_read_result",
+  "work_read_cicd"
+ ]
+}

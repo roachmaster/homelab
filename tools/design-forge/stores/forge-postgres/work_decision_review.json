@@ -1,0 +1,32 @@
+{
+ "id": "work_decision_review",
+ "kind": "functions",
+ "file": "work_decision_review.rs",
+ "summary": "WorkDecisionPort::review_decide: record a review verdict, ported from WorkStore.review_decide - the _control_task fence, the review row gates, and the five decision branches (approve queues the approved review, repair makes feedback and schedules the repair, retry_infrastructure appends a retry review via work_decision_more::append_review_retry, escalate hands off, cancel cancels). Findings pass through as given (Python's validate_findings normalization is not re-run; callers pass store-shaped findings, so intent digests match).",
+ "signature": "pub(crate) fn review_decide(store: &crate::work_store::PgWorkStore, request: &forge_work::ReviewDecideRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;",
+ "responsibilities": [
+  "Validate note <= 2048 bytes and verified_finding_ids unique and each matching [A-Za-z0-9_.-]{1,64}, else rejected(400, invalid_request). intent = intent_digest({action: \"review_decide\", project_alias, task_id, expected_revision, review_id, decision: decision.as_str(), agent_profile, note, findings, verified_finding_ids}).",
+  "In one transaction: work_control::control_task(action review_decide, intent) -> replay returns outcome_for(receipt.revision, true). status != awaiting_review -> rejected(409, not_reviewable). SELECT * FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND review_id=$4 FOR UPDATE; missing, attempt_id != task.latest_attempt_id, or status in {pending, checking, approved, cancelled} -> rejected(409, not_reviewable).",
+  "result receipt object starts as {project_alias, task_id, base_revision: expected, revision: expected+1, status: task.status, review_id}. Branches:",
+  "approve: requires review.verification.checks_passed == true AND cleanup_confirmed == true AND candidate_commit non-empty AND gate_manifest_sha256 non-empty, else rejected(409, not_reviewable). open finding ids = review.findings entries with status open (default open); verified = review.verified_finding_ids; require request.verified_finding_ids \u2286 open, open - verified - requested empty, (requested non-empty -> note non-blank), and request.findings empty (null or []), else rejected(409, not_reviewable). attestation = {closed_by: \"owner\", owner: store.owner, candidate_commit, gate_manifest_sha256, verified_finding_ids: request's, note}. UPDATE forge_agent.coding_reviews SET status='approved', owner_decision=$1, updated_at=clock_timestamp() WHERE review_id=$2. SELECT forge_agent.coding_queue_approved_review($1) with review_id; a null result -> rejected(409, not_reviewable).",
+  "repair: recipe document via pinned_recipe_for(request.recipe_digest - required for this branch; None digest or no pin -> rejected(503, unavailable)). ledger = open findings from the review, overlaid by request.findings entries keyed by finding_id; empty ledger -> rejected(400, invalid_request). UPDATE forge_agent.coding_reviews SET findings=$1 (ledger array), status='repair', summary=$2 (note), updated_at=clock_timestamp() WHERE review_id=$3. UPDATE the task's agent_profile/pinned_recipe/recipe_digest to the request's pin. SELECT forge_agent.coding_make_feedback($1,$2,'repair',$3,$4) (review_id, task_id, note, ledger) -> feedback_id; UPDATE forge_agent.coding_reviews SET feedback_id=$1 WHERE review_id=$2. SELECT forge_agent.coding_schedule_repair($1,$2) (review_id, feedback_id) -> repair_task_id; result.status = queued when repair_task_id == task_id else task.status; result.repair_task_id set. Then RESTORE the task's original agent_profile/pinned_recipe/recipe_digest (parent completion and original recipe are immutable history, as in Python's repair()).",
+  "retry_infrastructure: new_review_id = work_decision_more::append_review_retry(tx, store, task row, review row, note); result.review_id = new_review_id (string).",
+  "escalate: UPDATE forge_agent.coding_reviews SET status='handoff', reason=$1 (note), updated_at=clock_timestamp() WHERE review_id=$2.",
+  "cancel: task.status == completed -> rejected(409, not_cancellable). UPDATE forge_agent.coding_reviews SET status='cancelled', reason=$1 WHERE review_id=$2. UPDATE forge_agent.coding_tasks SET status='cancelled', cancelled_at=clock_timestamp() WHERE owner_id=$1 AND project_alias=$2 AND id=$3. result.status = cancelled.",
+  "Finish: work_control::control_record(task, expected, key, review_decide, intent, result, actor). outcome_for(expected+1, false)."
+ ],
+ "invariants": [
+  "The repair branch's temporary task re-pin and restore is deliberate: coding_schedule_repair reads the task's pin, and the parent task's own pin is history.",
+  "approve's attestation closed_by is \"owner\" (the authority-attested peer_reviewer variant is a host authority object, outside the port)."
+ ],
+ "pattern": "",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_control",
+  "work_decision_more",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\"); uuid -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>.\n// Tx: query_rows / execute_count / call_json / call_scalar with &[&(dyn ToSql + Sync)] params. Map AdapterError with crate::work_common::work_err. Decision operations run inside session.in_tx(|tx| ...).\n// Receipts are serde_json::Value objects via serde_json::json!; read with .get(\"key\")/.as_str()/.as_i64()."
+}

@@ -1,0 +1,26 @@
+{
+ "id": "work_store",
+ "kind": "functions",
+ "file": "work_store.rs",
+ "summary": "PgWorkStore: the forge-postgres adapter struct implementing forge-work's three driven ports. Holds the session factory, the owner scope, the allowed projects, the pending cap, and the review policy; the port impls live in the work_read / work_admission / work_decision modules and their delegation targets.",
+ "signature": "#[derive(Debug, Clone, PartialEq, Eq)]\npub struct ReviewPolicy {\n    pub version: String,\n    pub max_rounds: i64,\n    pub max_stagnant_rounds: i64,\n    pub max_infrastructure_retries: i64,\n    pub required_hosted_checks: Vec<String>,\n}\nimpl ReviewPolicy { pub fn agent_defaults() -> ReviewPolicy; }\npub struct PgWorkStore {\n    pub(crate) factory: crate::factory::PgSessionFactory,\n    pub(crate) owner: String,\n    pub(crate) allowed_projects: Vec<String>,\n    pub(crate) max_pending: i64,\n    pub(crate) repair_policy: ReviewPolicy,\n}\nimpl PgWorkStore {\n    pub fn new(factory: crate::factory::PgSessionFactory, owner: impl Into<String>, allowed_projects: Vec<String>, max_pending: i64, repair_policy: ReviewPolicy) -> PgWorkStore;\n    pub(crate) fn session(&self) -> Result<crate::client::PgSession, forge_work::WorkError>;\n    pub fn owner(&self) -> &str;\n}",
+ "responsibilities": [
+  "ReviewPolicy mirrors Python's DEFAULT_REPAIR_POLICY; agent_defaults() returns version forge-repair-v1, max_rounds 20, max_stagnant_rounds 20, max_infrastructure_retries 20, required_hosted_checks [check, pr-fast-gate, real-browser] (AGENT_RETRY_LIMIT = 20).",
+  "session() creates a fresh PgSession through the factory's Factory::create (a transient session per operation, the pattern the worker/reconciler surfaces use) and maps AdapterError via work_common::work_err.",
+  "The struct itself implements no port; it is the shared state the three port impls and their delegation targets use."
+ ],
+ "invariants": [
+  "No SQL in this file. No port logic in this file."
+ ],
+ "pattern": "",
+ "collaborators": [
+  "factory",
+  "client",
+  "work_common"
+ ],
+ "idioms": "// forge_core::provider::Factory (exact): fn create(&self) -> Result<PgSession, AdapterError> for PgSessionFactory.",
+ "glossary": [
+  "catalog",
+  "revision"
+ ]
+}

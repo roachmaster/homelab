@@ -1,0 +1,31 @@
+{
+ "id": "work_admission_submit",
+ "kind": "functions",
+ "file": "work_admission_submit.rs",
+ "summary": "WorkAdmissionPort::submit: the admission transaction ported from WorkStore.submit - advisory lock, idempotent replay via the first-event receipt, the pending cap, the workflow base fence, the task insert, the queued event, and the notify. Delivery admission and external-profile enqueue are host concerns outside the port (the request type carries no fields for them).",
+ "signature": "pub(crate) fn submit(store: &crate::work_store::PgWorkStore, request: &forge_work::SubmitRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;",
+ "responsibilities": [
+  "title = work_common::prepare_title(&request.prompt) (propagates its 400). intent = work_common::intent_digest of the object {project_alias, base_revision, mode, agent_profile, prompt, acceptance_criteria} plus auto_repair:true only when request.auto_repair, plus workflow_policy_digest only when present (the exact Python _submit_intent_digest field set; workflow_policy_id does not exist in the Rust request).",
+  "Open session.in_tx. advisory_lock(owner, project). Run task_receipt_by_idempotency (pinned): when a row exists, compare intent_digest: equal -> replay (below); not equal -> also accept the variant digest computed WITHOUT the workflow fields when the stored digest equals it (the digest/id fence-switch tolerance), else rejected(409, idempotency_conflict). Replay: the receipt_json is the stored receipt object; return work_rows::outcome_for(tx, owner, project, receipt.task_id, 1, true).",
+  "Pending cap: SELECT count(*) AS pending FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND status IN ('queued','running','cancel_requested'); pending >= store.max_pending -> rejected(503, queue_full).",
+  "Workflow: when request.workflow_policy_digest is Some, run merge_head (pinned); when it yields a head different from request.base_revision -> rejected(409, result_mismatch). auto_repair is forced true when a workflow is present (effective_auto_repair).",
+  "Recipe document: work_rows::pinned_recipe_for(tx, owner, project, &request.recipe_digest); None -> rejected(503, unavailable) (the digest has never been pinned; recipe documents are catalog data the request deliberately does not carry).",
+  "Insert the task with the pinned INSERT (status queued, revision 1, review_required = (mode == \"implement\"), title, pinned_recipe document, intent). task_id = a fresh uuid::Uuid::new_v4().",
+  "ensure_review_policy(tx, store, project, task_id) via work_control.",
+  "When a workflow is present: INSERT INTO forge_agent.coding_workflows(owner_id,project_alias,root_task_id,policy_digest,snapshot) VALUES($1,$2,$3,$4,$5) RETURNING workflow_id with the request's workflow_snapshot (or {\"policy_digest\": digest} when the snapshot is None); then UPDATE forge_agent.coding_tasks SET workflow_required=true, workflow_id=$1 WHERE owner_id=$2 AND project_alias=$3 AND id=$4. Identity recording (coding_task_identities) runs only when the identity catalog is ready: register the recipe identity (subject \"{agent_profile}:{mode}\", document = the pinned recipe document, legacy digest = recipe_digest) and, for workflows, the workflow_policy identity (subject \"policy\", document = snapshot minus policy_digest, legacy = policy_digest), then INSERT INTO forge_agent.coding_task_identities(owner_id,project_alias,task_id,recipe_id,workflow_id,workflow_policy_id) VALUES($1..$6) with workflow_id/workflow_policy_id null when absent. Registration: SELECT identity_id, generation FROM forge_agent.coding_identity_register($1,$2,$3,$4,$5,$6).",
+  "Build the receipt object {task_id, project_alias, revision: 1, status: \"queued\", recipe_digest, actor: actor_json(request.actor)} and insert_event(kind queued, payload = receipt, actor, first = true). notify. Return outcome_for(tx, ..., 1, false)."
+ ],
+ "invariants": [
+  "One coding_tasks row, one sequence-1 queued event, and the notify commit in ONE transaction; a replay inserts nothing.",
+  "The receipt object is the sequence-1 event payload, exactly as Python stores it."
+ ],
+ "pattern": "// task_receipt_by_idempotency (verbatim with $n params):\n// SELECT t.intent_digest, e.payload AS receipt_json FROM forge_agent.coding_tasks t JOIN forge_agent.coding_events e ON (e.owner_id, e.project_alias, e.task_id) = (t.owner_id, t.project_alias, t.id) AND e.sequence = 1 WHERE t.owner_id = $1 AND t.project_alias = $2 AND t.idempotency_key = $3\n// merge_head (verbatim with $n params):\n// SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w USING (workflow_id) WHERE a.owner_id = $1 AND a.project_alias = $2 AND a.kind = 'merge' AND a.status = 'completed' AND a.finish_receipt->>'status' = 'merged' AND a.finish_receipt->'receipt'->>'merge_commit' = a.intent->>'merge_commit' AND w.phase = 'completed' ORDER BY a.updated_at DESC, a.action_id DESC LIMIT 1\n// task INSERT:\n// INSERT INTO forge_agent.coding_tasks (owner_id, project_alias, id, idempotency_key, intent_digest, base_revision, mode, agent_profile, title, prompt, acceptance_criteria, pinned_recipe, recipe_digest, status, revision, auto_repair, review_required) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'queued',1,$14,$15)",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_control",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\"); uuid -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; execute_count(sql, params) -> Result<u64, AdapterError>; call_json/call_scalar/call_bool/call_void likewise. Map AdapterError with crate::work_common::work_err. Control operations run inside session.in_tx(|tx| ...).\n// Receipts are serde_json::Value objects; build them with serde_json::json! and read fields with .get(\"key\") / .as_str() / .as_i64()."
+}

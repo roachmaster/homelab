@@ -1,0 +1,24 @@
+{
+ "id": "work_read_scope",
+ "kind": "functions",
+ "file": "work_read_scope.rs",
+ "summary": "WorkReadPort::list_tasks scope path (active/attention/history/all): the classified-roots CTE from WorkStore._list_task_scope, native variant (no external workflow joins, delivery projection NULL), keyset-paged by (list_updated_at, id) descending.",
+ "signature": "pub(crate) fn list_scope(store: &crate::work_store::PgWorkStore, project_alias: &str, scope: &str, limit: i64, cursor_task_id: Option<uuid::Uuid>) -> Result<forge_work::TaskPage, forge_work::WorkError>;",
+ "responsibilities": [
+  "In one transaction: when cursor_task_id is present, run the classified CTE (pinned in the pattern) + SELECT id, list_updated_at FROM classified WHERE id=$3; no anchor -> rejected(400, invalid_request).",
+  "Run the CTE + the page SELECT pinned in the pattern: WHERE ($3='all' OR task_scope=$3) AND ($4::timestamptz IS NULL OR (list_updated_at,id)<($4::timestamptz,$5::uuid)) ORDER BY list_updated_at DESC, id DESC LIMIT $6 with limit+1.",
+  "Shape the first `limit` rows with work_rows::summary (the classified row carries every summary column plus computed workflow_required/workflow_phase). next_cursor as in the raw path. Scope counts and the delivery projection are not carried by the Rust TaskPage type (documented v1 subset)."
+ ],
+ "invariants": [
+  "The classification CASE is pinned verbatim; do not simplify it - portal scope membership depends on its exact precedence (delivery scope, terminal phases, escalated/disabled attention, workflow_required attention, raw-status fallback).",
+  "Only workflow roots are listed: (w.workflow_id IS NULL OR t.id = w.root_task_id)."
+ ],
+ "pattern": "// classified CTE (native variant; delivery is NULL::jsonb in v1):\n// WITH classified AS (SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, t.mode, t.agent_profile, t.workflow_id, t.recipe_digest, t.status, t.revision, t.created_at, t.title, (t.workflow_required OR w.phase IS NOT NULL) AS workflow_required, w.phase AS workflow_phase, w.enabled AS workflow_enabled, NULL::jsonb AS delivery, greatest(t.updated_at, coalesce(w.updated_at, t.updated_at), coalesce((SELECT max(member.updated_at) FROM forge_agent.coding_tasks member WHERE (member.owner_id, member.project_alias, member.workflow_id) = (w.owner_id, w.project_alias, w.workflow_id)), t.updated_at)) AS list_updated_at, CASE WHEN w.phase IN ('completed','cancelled') THEN 'history' WHEN w.phase IS NOT NULL THEN CASE WHEN w.phase='escalated' OR NOT w.enabled THEN 'attention' ELSE 'active' END WHEN t.workflow_required THEN 'attention' WHEN t.status IN ('completed','cancelled') THEN 'history' WHEN t.status IN ('queued','running','cancel_requested') THEN 'active' ELSE 'attention' END AS task_scope FROM forge_agent.coding_tasks t LEFT JOIN forge_agent.coding_workflows w ON (w.owner_id, w.project_alias, w.workflow_id) = (t.owner_id, t.project_alias, t.workflow_id) WHERE t.owner_id=$1 AND t.project_alias=$2 AND (w.workflow_id IS NULL OR t.id = w.root_task_id))\n// page SELECT: <CTE> SELECT * FROM classified WHERE ($3='all' OR task_scope=$3) AND ($4::timestamptz IS NULL OR (list_updated_at, id) < ($4::timestamptz, $5::uuid)) ORDER BY list_updated_at DESC, id DESC LIMIT $6",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\") for nullable/absent; uuid columns -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>; text[] -> Vec<String>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; call_json(sql, params) -> Result<Option<Value>, AdapterError>. PgSession: query_rows / in_tx(|tx| ...) with the same Tx surface. Map every AdapterError with crate::work_common::work_err.\n// Params are &[&(dyn tokio_postgres::types::ToSql + Sync)]: bind &String/&str for text, &Uuid, &Value for jsonb, &i64, &bool, and &(Option<T>) for nullable params (None binds NULL)."
+}

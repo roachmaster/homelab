@@ -1,0 +1,28 @@
+{
+ "id": "work_decision_plan",
+ "kind": "functions",
+ "file": "work_decision_plan.rs",
+ "summary": "WorkDecisionPort::plan_decide: decide one exact immutable plan, ported from WorkStore.plan_decide - validation, the intent digest, the plan-decision row, the task transition (resume -> implement/queued, revise -> plan/queued, cancel -> plan/cancelled with a separate cancelled event), and the control receipt. Minus the transition-authority gates and the recipe policy re-validation (host/catalog concerns); the recipe document is re-pinned by digest like the other control ops.",
+ "signature": "pub(crate) fn plan_decide(store: &crate::work_store::PgWorkStore, request: &forge_work::PlanDecideRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;",
+ "responsibilities": [
+  "Validate (else rejected(400, invalid_request)): expected_revision in 1..MAX_REVISION (strictly below MAX), plan_sha256 is 64 lowercase hex, agent_profile matches [A-Za-z0-9_.-]{1,64}, idempotency_key matches [A-Za-z0-9_.-]{1,128}, note <= 2048 UTF-8 bytes with no control chars except \\r\\n\\t, and decision Revise requires a non-blank note. intent = intent_digest({action: \"plan_decide\", project_alias, task_id, expected_revision, plan_attempt_id, plan_sha256, decision: decision.as_str(), agent_profile, note} plus auto_repair:true only when request.auto_repair).",
+  "In one transaction: advisory_lock. SELECT * FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3 FOR UPDATE; no row -> not_found. Receipt replay (action plan_decide) -> outcome_for(receipt.revision, true). revision != expected -> rejected(409, revision_conflict). mode != plan OR status not in {awaiting_review, completed} -> rejected(409, not_reviewable). latest_attempt_id != plan_attempt_id -> rejected(409, result_mismatch).",
+  "Attempt: SELECT * FROM forge_agent.coding_attempts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND attempt_id=$4; missing, phase != stopped, reservation_active, lease_expires_at non-null, published_at null, result_sha256 != plan_sha256, or pinned_recipe.mode != \"plan\" -> rejected(409, result_mismatch). (pinned_recipe is the attempt row's jsonb; read its mode field.)",
+  "For decision != Cancel: workspace digest from SELECT workspace_digest FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND attempt_id=$4 ORDER BY created_at DESC LIMIT 1; missing -> rejected(409, reconcile_required). Pending cap -> rejected(503, queue_full). Next recipe document: pinned_recipe_for(request.recipe_digest) - the request's digest is the NEXT stage's pin (the service resolved it for the post-decision mode); None -> rejected(503, unavailable). For Cancel the task keeps its current pinned_recipe/recipe_digest.",
+  "decision_id = new_v4. mode = implement when Resume else plan; status = cancelled when Cancel else queued. receipt = {project_alias, task_id, base_revision: expected, revision: expected+1, status, mode}. INSERT INTO forge_agent.coding_plan_decisions (decision_id, owner_id, project_alias, task_id, plan_attempt_id, plan_sha256, source_revision, base_revision, decision, agent_profile, note, idempotency_key, receipt_json) VALUES ($1..$13) with source_revision = expected and base_revision = the task's current base_revision. UPDATE the task (pinned): status/mode/revision/agent_profile (the request's, except Cancel keeps the task's)/pinned_recipe/recipe_digest/plan_decision_id/resume_workspace_digest (null for Cancel)/accepted_at NULL/cancelled_at set only when cancelled/review_note = note/auto_repair = request.auto_repair/review_required = (mode == implement), fenced on revision = expected.",
+  "INSERT the control receipt (action plan_decide). Events: decision_payload = receipt + {decision_id, decision, plan_attempt_id, plan_sha256}. Cancel: insert_event(checkpoint, decision_payload) then insert_event(cancelled, {base_revision, revision, decision_id, decision}, cause = request.cause or OperatorRequest, validated allowed_for(Cancelled)). Otherwise insert_event(resumed, decision_payload) and notify. outcome_for(expected+1, false)."
+ ],
+ "invariants": [
+  "The plan decision and the cancellation are separate events (checkpoint + cancelled), exactly as Python emits them.",
+  "The receipt carries mode; ControlOutcome's task summary is re-read by outcome_for."
+ ],
+ "pattern": "// plan UPDATE:\n// UPDATE forge_agent.coding_tasks SET status=$1, mode=$2, revision=$3, agent_profile=$4, pinned_recipe=$5, recipe_digest=$6, plan_decision_id=$7, resume_workspace_digest=$8, accepted_at=NULL, cancelled_at=CASE WHEN $9='cancelled' THEN clock_timestamp() ELSE NULL END, review_note=$10, auto_repair=$11, review_required=$12, updated_at=clock_timestamp() WHERE owner_id=$13 AND project_alias=$14 AND id=$15 AND revision=$16",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_control",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\"); uuid -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>.\n// Tx: query_rows / execute_count / call_json / call_scalar with &[&(dyn ToSql + Sync)] params. Map AdapterError with crate::work_common::work_err. Decision operations run inside session.in_tx(|tx| ...).\n// Receipts are serde_json::Value objects via serde_json::json!; read with .get(\"key\")/.as_str()/.as_i64()."
+}

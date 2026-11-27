@@ -1,0 +1,34 @@
+{
+ "id": "work_common",
+ "kind": "functions",
+ "file": "work_common.rs",
+ "summary": "Shared pure helpers for the work-store adapters: constants, the canonical intent digest, timestamp/title shaping, actor JSON, and the project/lock/notify primitives. All helpers are pub(crate).",
+ "signature": "pub(crate) const ADVISORY_LOCK_SALT: i64 = 2026111901;\npub(crate) const NOTIFY_CHANNEL: &str = \"forge_coding_jobs\";\npub(crate) const MAX_REVISION: i64 = 9007199254740991;\npub(crate) fn work_err(error: crate::error::AdapterError) -> forge_work::WorkError;\npub(crate) fn intent_digest(value: &serde_json::Value) -> String;\npub(crate) fn format_ts(value: chrono::DateTime<chrono::Utc>) -> String;\npub(crate) fn prepare_title(prompt: &str) -> Result<String, forge_work::WorkError>;\npub(crate) fn actor_json(actor: &forge_work::Actor) -> serde_json::Value;\npub(crate) fn parse_actor(payload: &serde_json::Value) -> Option<forge_work::Actor>;\npub(crate) fn require_project(store: &crate::work_store::PgWorkStore, project_alias: &str) -> Result<(), forge_work::WorkError>;\npub(crate) fn advisory_lock(tx: &mut crate::tx::Tx<'_, '_>, owner: &str, project_alias: &str) -> Result<(), forge_work::WorkError>;\npub(crate) fn notify(tx: &mut crate::tx::Tx<'_, '_>) -> Result<(), forge_work::WorkError>;",
+ "responsibilities": [
+  "work_err maps AdapterError to WorkError::store with the error's Display text.",
+  "intent_digest is Python's sha256_canonical: SHA-256 hex of the canonical JSON encoding - object keys sorted ascending, no spaces, non-ASCII emitted as raw UTF-8. Implement a small recursive writer over the Value (sort object keys yourself; do not rely on serde_json Map ordering).",
+  "format_ts is Python's _timestamp: UTC ISO-8601 with a Z suffix; seconds precision when the microsecond component is 0, else exactly 6 fractional digits.",
+  "prepare_title is work_config.prepare_title: first non-blank line of the prompt, whitespace runs collapsed to single spaces, truncated to 128 chars and to 512 UTF-8 bytes (dropping whole chars), right-trimmed; an empty result is rejected(400, invalid_request).",
+  "actor_json builds {\"kind\": kind.as_str(), \"id\": id}; parse_actor reads payload.actor back into an Actor (None when absent or malformed).",
+  "require_project returns rejected(403, denied) when the alias is not in the store's allowed projects.",
+  "advisory_lock runs SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended($1::text, $2::bigint)) with the scope string \"{owner}\\n{project_alias}\" and ADVISORY_LOCK_SALT.",
+  "notify runs SELECT pg_catalog.pg_notify($1, '') with NOTIFY_CHANNEL."
+ ],
+ "invariants": [
+  "Every helper is pub(crate); tokio_postgres::Row never appears in a public signature.",
+  "The canonical digest writer sorts keys at every object depth; arrays keep order; strings are JSON-escaped exactly as serde_json escapes them (use serde_json::to_string on each string scalar)."
+ ],
+ "pattern": "// advisory lock:\n// SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended($1::text, $2::bigint))\n// notify:\n// SELECT pg_catalog.pg_notify($1, '')",
+ "collaborators": [
+  "work_store",
+  "error",
+  "tx"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\") -> T; row.try_get::<_, Option<T>>(\"col\") -> Result<Option<T>, _> for nullable or maybe-absent columns; row.get::<_, serde_json::Value>(\"payload\"); row.get::<_, uuid::Uuid>(\"id\"); row.get::<_, chrono::DateTime<chrono::Utc>>(\"created_at\")\n// params: &[&(dyn tokio_postgres::types::ToSql + Sync)] built as vec of &(value) bindings; text params bind &String or &str; uuid binds &Uuid; jsonb binds &serde_json::Value; Option<T> binds as NULL when None.\n// crate::tx::Tx methods: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; execute_count(sql, params) -> Result<u64, AdapterError>; call_json(sql, params) -> Result<Option<Value>, AdapterError>; call_scalar::<T>(sql, params) -> Result<Option<T>, AdapterError>.\n// crate::client::PgSession methods mirror Tx's, plus in_tx(|tx| ...) -> Result<T, AdapterError>.\n// sha2 (exact): use sha2::{Digest, Sha256}; let mut h = Sha256::new(); h.update(bytes); hex via h.finalize() bytes formatted {:02x}.\n// chrono format: value.format(\"%Y-%m-%dT%H:%M:%SZ\") when value.timestamp_subsec_micros() == 0 else value.format(\"%Y-%m-%dT%H:%M:%S%.6fZ\").",
+ "glossary": [
+  "intent digest",
+  "receipt",
+  "actor",
+  "revision"
+ ]
+}

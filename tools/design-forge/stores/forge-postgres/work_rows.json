@@ -1,0 +1,31 @@
+{
+ "id": "work_rows",
+ "kind": "functions",
+ "file": "work_rows.rs",
+ "summary": "The Row/Tx-bound shared helpers for the work-store adapters: task-summary shaping from a row, the coding_events insert (both sequence forms), the pinned-recipe document lookup, and ControlOutcome assembly. All functions are pub(crate).",
+ "signature": "pub(crate) fn summary(row: &tokio_postgres::Row) -> Result<forge_work::TaskSummary, forge_work::WorkError>;\npub(crate) fn insert_event(tx: &mut crate::tx::Tx<'_, '_>, owner: &str, project_alias: &str, task_id: uuid::Uuid, kind: &str, payload: serde_json::Value, actor: &forge_work::Actor, cause: Option<&str>, first: bool) -> Result<(), forge_work::WorkError>;\npub(crate) fn outcome_for(tx: &mut crate::tx::Tx<'_, '_>, owner: &str, project_alias: &str, task_id: uuid::Uuid, receipt_revision: i64, replayed: bool) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\npub(crate) fn pinned_recipe_for(tx: &mut crate::tx::Tx<'_, '_>, owner: &str, project_alias: &str, recipe_digest: &str) -> Result<Option<serde_json::Value>, forge_work::WorkError>;",
+ "responsibilities": [
+  "summary shapes one coding_tasks row into TaskSummary exactly as Python _summary: task_id from column id, correlation_id, project_alias, base_revision, mode, agent_profile, recipe_digest, status, revision, created_at via format_ts; title included when the column exists and is non-null; workflow_required / workflow_phase included when the column exists (try_get).",
+  "insert_event merges actor (and cause when present) into the payload object - they overwrite same-named payload keys - then inserts into forge_agent.coding_events: with first=true the explicit sequence 1 form, otherwise the SELECT coalesce(max(sequence),0)+1 form. Both forms are pinned in the pattern.",
+  "outcome_for builds a ControlOutcome after a control operation: it re-reads the task row (the tasks summary SELECT pinned in work_read_get's pattern, by owner/project/id) and shapes summary(row); receipt_id is the event_id of the task's event whose payload revision equals receipt_revision (SELECT event_id FROM forge_agent.coding_events WHERE owner/project/task AND payload->>'revision' = $4::text ORDER BY sequence DESC LIMIT 1), falling back to the task's latest event_id when no revision matches.",
+  "pinned_recipe_for finds the recipe document for a digest among the project's existing tasks: SELECT pinned_recipe FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND recipe_digest=$3 ORDER BY created_at DESC LIMIT 1. The Rust requests carry recipes resolved to digests only (no document), so control operations that must re-pin a recipe reuse the document already pinned for that digest; a digest with no pin anywhere is the caller's rejected(503, unavailable) case.",
+  "outcome_for's summary SELECT is the task summary column set: SELECT id, correlation_id, project_alias, base_revision, mode, agent_profile, recipe_digest, status, revision, created_at, title, workflow_required FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3, plus workflow_phase via a LEFT JOIN on coding_workflows when needed - shape it with summary(row) from a row that also selects w.phase AS workflow_phase (LEFT JOIN forge_agent.coding_workflows w ON (w.owner_id, w.project_alias, w.workflow_id) = (t.owner_id, t.project_alias, t.workflow_id) with the task table aliased t)."
+ ],
+ "invariants": [
+  "insert_event's merged payload always carries actor; cause is present only when the caller passes one (negative kinds require it - the caller validates via forge_work::Cause::allowed_for).",
+  "Every helper is pub(crate); tokio_postgres::Row never appears in a public signature."
+ ],
+ "pattern": "// insert_event, first form:\n// INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) VALUES($1,$2,$3,1,$4,$5)\n// insert_event, next form:\n// INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) SELECT $1,$2,$3,coalesce(max(sequence),0)+1,$4,$5 FROM forge_agent.coding_events WHERE owner_id=$6 AND project_alias=$7 AND task_id=$8\n// pinned_recipe_for:\n// SELECT pinned_recipe FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND recipe_digest=$3 ORDER BY created_at DESC LIMIT 1\n// outcome_for event lookup:\n// SELECT event_id FROM forge_agent.coding_events WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND payload->>'revision' = $4::text ORDER BY sequence DESC LIMIT 1",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "tx"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\") for nullable/absent; uuid -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; execute_count(sql, params) -> Result<u64, AdapterError>. Map AdapterError with crate::work_common::work_err.",
+ "glossary": [
+  "intent digest",
+  "receipt",
+  "actor",
+  "revision"
+ ]
+}
