@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":16,"files":files}))
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":17,"files":files}))
                 .unwrap(),
         )
         .unwrap();
@@ -451,6 +451,7 @@ fn configured_host_resources_open_only_at_factory_creation() {
                     allowed_projects: vec!["coding-only".into()],
                     allowed_profiles: vec!["agy-plan-v1".into()],
                     allowed_modes: vec![forge_ide_web_host::WorkMode::Plan],
+                    mcp_presence: None,
                 }),
                 ..config(&files)
             },
@@ -1760,8 +1761,8 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for (abi, expected_error) in (0..=15)
-        .chain([17, 65_535])
+    for (abi, expected_error) in (0..=16)
+        .chain([18, 65_535])
         .map(|abi| (json!(abi), "asset versions/count"))
         .chain(
             [

@@ -2932,6 +2932,14 @@ async function agentsJourney() {
     await check(page.locator('#ide-navigation > :is(button,a)')).toHaveCount(4);
     await chooseTaskScope('attention');
     await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
+    await check(page.locator('#agents-mcp-heading')).toHaveText('MCP connections');
+    await check(page.locator('#agents-mcp-connections')).toContainText('Dot');
+    await check(page.locator('#agents-mcp-connections')).toContainText('Online');
+    await check(page.locator('#agents-mcp-connections')).toContainText('Stale');
+    await check(page.locator('#agents-mcp-connections')).toContainText('Never seen');
+    await check(page.locator('#agents-mcp-connections')).not.toContainText('Codex');
+    await page.locator('#agents-mcp-times summary').click();
+    await check(page.locator('#agents-mcp-heartbeats')).toContainText('No heartbeat received');
     const cards = page.locator('#agents-providers article.fg-metric-card');
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');

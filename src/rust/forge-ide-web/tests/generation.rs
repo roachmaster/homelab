@@ -423,9 +423,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==16"));
+    assert!(worker.contains("wasm.abi_version()!==17"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 16);
+    assert_eq!(manifest["abi_version"], 17);
 }
 
 #[test]
@@ -785,7 +785,7 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
     assert!(main.contains("navigation_checkpoint_saved"));
     assert!(worker.contains("!await localCheckpoint.pending"));
     assert!(worker.contains("restore_agents_navigation"));
-    assert!(worker.contains("wasm.abi_version()!==16"));
+    assert!(worker.contains("wasm.abi_version()!==17"));
 }
 
 #[test]
@@ -1185,6 +1185,6 @@ fn flow_diagram_component_validates_renders_deterministically_and_clears_on_tear
     assert!(main.contains("fg-flow-hop-exact"));
     assert!(main.contains(".fg-flow-diagram"));
     assert!(main.contains("flowDiagramViews=new WeakMap()"));
-    assert!(worker.contains("wasm.abi_version()!==16"));
-    assert_eq!(manifest["abi_version"], 16);
+    assert!(worker.contains("wasm.abi_version()!==17"));
+    assert_eq!(manifest["abi_version"], 17);
 }

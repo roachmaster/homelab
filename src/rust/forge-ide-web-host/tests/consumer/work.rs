@@ -59,6 +59,7 @@ fn settings(files: &Files, upstream: &TcpListener) -> WorkConfig {
         allowed_projects: vec![PROJECT.into()],
         allowed_profiles: vec!["agy-plan-v1".into()],
         allowed_modes: vec![WorkMode::Plan],
+        mcp_presence: None,
     }
 }
 
@@ -1651,4 +1652,128 @@ fn cicd_stage_log_admission_bounds_and_catalog_branch_filtering() {
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0]["kind"], "work_cicd_stage_log");
     assert_eq!(calls[1]["kind"], "work_catalog");
+}
+
+#[test]
+fn mcp_presence_is_host_owned_optional_and_reader_failure_does_not_hide_catalog() {
+    for enabled in [false, true] {
+        let files = Files::new();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let presence = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut value = config(&files);
+        let mut work = settings(&files, &upstream);
+        if enabled {
+            work.mcp_presence = Some(forge_ide_web_host::McpPresenceConfig {
+                endpoint: presence.local_addr().unwrap(),
+                token_file: work.token_file.clone(),
+            });
+        }
+        value.work = Some(work);
+        let host = host_with_config(value).0;
+        let auth = authenticate(&host);
+        let catalog = reply(
+            "work_catalog",
+            json!({"projects":[],"profiles":[],"worker_status":"ready","observed_at":STAMP,
+            "mcp_presence":{"status":"available","report":{"version":1,"agents":[{"agent_id":"forged","label":"Forged client","state":"online","last_seen_at":STAMP}]}}}),
+        );
+        let mut expected = catalog.clone();
+        expected["event"]
+            .as_object_mut()
+            .unwrap()
+            .remove("mcp_presence");
+        if enabled {
+            expected["event"]["mcp_presence"] = json!({"status":"unavailable"});
+        }
+        // A stopped selected MCP reader is an unavailable observation, not offline.
+        drop(presence);
+        let worker = backend(upstream, vec![(200, catalog)]);
+        assert_reply(
+            &host,
+            "ide.work.catalog",
+            json!({"kind":"work_catalog","request_id":"request-1"}),
+            &auth,
+            200,
+            expected,
+        );
+        worker.join().unwrap();
+    }
+}
+
+#[test]
+fn mcp_presence_selected_reader_gets_only_dedicated_bearer_and_projects_typed_data() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let presence = TcpListener::bind("127.0.0.1:0").unwrap();
+    let token_file = files.0.join("presence.token");
+    fs::write(&token_file, "b".repeat(64)).unwrap();
+    fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut value = config(&files);
+    let mut work = settings(&files, &upstream);
+    work.mcp_presence = Some(forge_ide_web_host::McpPresenceConfig {
+        endpoint: presence.local_addr().unwrap(),
+        token_file,
+    });
+    value.work = Some(work);
+    let host = host_with_config(value).0;
+    let auth = authenticate(&host);
+    let report = json!({"version":1,"agents":[{"agent_id":"dot","label":"Dot","state":"never","last_seen_at":null}]});
+    let data = report.clone();
+    let reader = thread::spawn(move || {
+        let (mut socket, _) = presence.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut reader = BufReader::new(&mut socket);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(line, "GET /internal/agent-presence HTTP/1.1\r\n");
+        let mut headers = BTreeMap::new();
+        loop {
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" {
+                break;
+            }
+            let (name, value) = line.trim_end().split_once(": ").unwrap();
+            headers.insert(name.to_ascii_lowercase(), value.to_owned());
+        }
+        assert_eq!(
+            headers["authorization"],
+            format!("Bearer {}", "b".repeat(64))
+        );
+        for forbidden in [
+            "cookie",
+            "origin",
+            "cf-connecting-ip",
+            "forge-target-node",
+            "forge-destination",
+        ] {
+            assert!(!headers.contains_key(forbidden));
+        }
+        let body = serde_json::to_vec(&data).unwrap();
+        write!(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        socket.write_all(&body).unwrap();
+    });
+    let catalog = reply(
+        "work_catalog",
+        json!({"projects":[],"profiles":[],"worker_status":"ready","observed_at":STAMP}),
+    );
+    let mut expected = catalog.clone();
+    expected["event"]["mcp_presence"] = json!({"status":"available","report":report});
+    let worker = backend(upstream, vec![(200, catalog)]);
+    assert_reply(
+        &host,
+        "ide.work.catalog",
+        json!({"kind":"work_catalog","request_id":"request-1"}),
+        &auth,
+        200,
+        expected,
+    );
+    reader.join().unwrap();
+    worker.join().unwrap();
 }

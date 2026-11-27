@@ -243,6 +243,7 @@ fn removed_mail_replies_cannot_decode_or_interfere_with_pending_agents_request()
             worker_status: WorkWorkerStatus::Ready,
             observed_at: None,
             agent_branches: vec![],
+            mcp_presence: None,
         }),
     );
     assert!(o

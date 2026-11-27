@@ -2256,7 +2256,7 @@
     - selector: "#agents-task-technical .fg-disclosure-body,#agents-workflow .fg-disclosure-body"
       declarations:
         - ["overflow-wrap", "anywhere"]
-    - selector: "#agents-tasks-heading,#agents-usage-heading,#agents-external-heading"
+    - selector: "#agents-tasks-heading,#agents-usage-heading,#agents-external-heading,#agents-mcp-heading"
       declarations:
         - ["font-size", ".75rem"]
         - ["letter-spacing", ".08em"]
@@ -2469,7 +2469,7 @@
         - ["min-height", "0"]
         - ["border", "0"]
         - ["padding", "2px 8px"]
-    - selector: "#agents-usage"
+    - selector: "#agents-usage,#agents-mcp"
       declarations:
         - ["margin-top", "20px"]
     - selector: ".fg-metric-cards"

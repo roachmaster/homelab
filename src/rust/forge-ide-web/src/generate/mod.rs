@@ -333,7 +333,7 @@ impl Factory<AssetBundle> for AssetFactory {
         ]);
         let manifest = Manifest {
             format_version: 1,
-            abi_version: 16,
+            abi_version: 17,
             files: files
                 .iter()
                 .map(|(path, bytes)| ManifestFile {

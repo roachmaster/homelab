@@ -408,6 +408,9 @@ pub fn load_config(path: &Path) -> Result<HostConfig, HostError> {
         }),
         work: f.work.map(|mut work| {
             work.token_file = resolve(base, &work.token_file);
+            if let Some(presence) = &mut work.mcp_presence {
+                presence.token_file = resolve(base, &presence.token_file);
+            }
             work
         }),
         usage: f.usage.map(|mut usage| {
