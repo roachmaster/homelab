@@ -65,6 +65,54 @@ impl EventKind {
     }
 }
 
+/// The workflow escalation cause codes (work_events.py
+/// ESCALATION_CAUSES): the escalation reason stays free text for
+/// people; the code is what the portal and tooling branch on.
+pub const ESCALATION_CAUSES: [&str; 11] = [
+    "review_verdict",
+    "retry_exhausted",
+    "budget_exhausted",
+    "grant_revoked",
+    "agent_stopped",
+    "review_unavailable",
+    "verification_failed",
+    "publication_failed",
+    "candidate_repeated",
+    "handoff",
+    "unclassified",
+];
+
+const ESCALATION_RULES: [(&str, &[&str]); 9] = [
+    ("retry_exhausted", &["retry attempts", "exhausted twenty attempts", "exhausted its twenty"]),
+    ("budget_exhausted", &["budget is exhausted"]),
+    ("grant_revoked", &["grant was revoked", "grant is no longer current"]),
+    ("candidate_repeated", &["identical candidate"]),
+    ("publication_failed", &["publication"]),
+    ("verification_failed", &["could not be verified", "trusted verification", "did not report success", "trusted source selection failed"]),
+    ("review_unavailable", &["reviewer", "peer review", "review_unavailable", "workspace_busy"]),
+    ("agent_stopped", &["agent stopped", "author cannot continue", "task was cancelled"]),
+    ("handoff", &["handoff", "needs_reconcile", "revise_plan"]),
+];
+
+/// escalation_cause: the named code when given (validated
+/// against the frozen set), else derived from the reason text,
+/// else "unclassified" so an escalation event never lacks a code.
+pub fn escalation_cause(reason: &str, cause: Option<&str>) -> Result<String, String> {
+    if let Some(cause) = cause {
+        if ESCALATION_CAUSES.contains(&cause) {
+            return Ok(cause.to_string());
+        }
+        return Err(format!("unknown escalation cause {cause:?}"));
+    }
+    let text = reason.to_lowercase();
+    for (code, needles) in ESCALATION_RULES {
+        if needles.iter().any(|needle| text.contains(needle)) {
+            return Ok(code.to_string());
+        }
+    }
+    Ok("unclassified".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

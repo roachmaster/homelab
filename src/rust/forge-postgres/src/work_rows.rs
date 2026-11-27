@@ -71,6 +71,21 @@ pub(crate) fn insert_event(
             object.insert("cause".to_string(), Value::String(cause.to_string()));
         }
     }
+    insert_event_raw(tx, owner, project_alias, task_id, kind, merged, first)
+}
+
+/// Appends one coding_events row with an already-merged payload
+/// (the workflow form additionally merges cause_detail, which the
+/// work-store form never carries).
+pub(crate) fn insert_event_raw(
+    tx: &mut crate::tx::Tx<'_, '_>,
+    owner: &str,
+    project_alias: &str,
+    task_id: Uuid,
+    kind: &str,
+    merged: Value,
+    first: bool,
+) -> Result<(), forge_work::WorkError> {
     if first {
         let params: &[&(dyn ToSql + Sync)] = &[&owner, &project_alias, &task_id, &kind, &merged];
         tx.call_void(
