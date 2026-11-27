@@ -54,3 +54,20 @@ pub trait SessionPort {
         attempt_id: &str,
     ) -> Result<Option<SessionSelection>, WorkerError>;
 }
+
+/// A bounded subprocess call for supervision queries (the
+/// supervisor's systemctl show/stop): returns (returncode, stdout).
+pub trait CommandPort {
+    fn run(&mut self, argv: &[String], timeout_seconds: u64)
+        -> Result<(i32, Vec<u8>), WorkerError>;
+}
+
+/// Consumer build-cache preparation (work_consumer_cache): returns
+/// (source, target) bind pairs for an implementing invocation.
+pub trait ConsumerCachePort {
+    fn prepare(
+        &mut self,
+        workspace: &WorkspaceLease,
+        scratch: &Path,
+    ) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf)>, WorkerError>;
+}

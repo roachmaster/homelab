@@ -528,6 +528,32 @@ pub fn muse_argv(
     argv
 }
 
+/// The Antigravity settings document rendered exactly as the
+/// Python's json.dumps (default separators, insertion order) -
+/// the supervisor byte-compares the staged settings.json against
+/// this form for unattended runs.
+pub fn agy_settings_json(
+    config: &crate::config::WorkerConfig,
+    implement: bool,
+    unattended: bool,
+) -> String {
+    let settings = agy_settings(config, implement, unattended);
+    let list = |value: &serde_json::Value| -> String {
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| serde_json::to_string(item).unwrap())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "{{\"useG1Credits\": false, \"permissions\": {{\"allow\": [{}], \"ask\": [], \"deny\": [{}]}}}}",
+        list(&settings["permissions"]["allow"]),
+        list(&settings["permissions"]["deny"])
+    )
+}
+
 pub fn child_workspace() -> PathBuf {
     PathBuf::from(CHILD_WORKSPACE)
 }

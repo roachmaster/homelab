@@ -51,6 +51,10 @@ pub struct WorkerConfig {
     pub external_reviews: bool,
     pub resource_profile: String,
     pub build_results_root: Option<PathBuf>,
+    /// The file the configuration was loaded from (set by the host
+    /// loader; parse_config leaves it None). The supervisor hides
+    /// it from the child scope.
+    pub source_path: Option<PathBuf>,
 }
 
 impl WorkerConfig {
@@ -550,7 +554,41 @@ pub fn parse_config(raw: &Value) -> Result<WorkerConfig, ConfigError> {
             Some(value) if !value.is_null() => Some(absolute_path(value)?),
             _ => None,
         },
+        source_path: None,
     })
+}
+
+/// Pure grant and policy check, repeated before workspace
+/// acquisition and spawn (work_worker_config.verify_recipe).
+pub fn verify_recipe(config: &WorkerConfig, lease: &crate::lease::Lease) -> bool {
+    let Some(profile) = config.profile(&lease.agent_profile) else {
+        return false;
+    };
+    if !profile.execution_enabled
+        || config.project_path(&lease.project_alias).is_none()
+        || !profile.modes.contains(&lease.mode)
+        || (lease.mode == "implement" && !config.allow_implement)
+    {
+        return false;
+    }
+    let recipe = &lease.recipe;
+    let model = recipe.get("model").and_then(|v| v.as_str());
+    let model_ok = model
+        .map(|m| m == profile.model || profile.backup_models.iter().any(|b| b == m))
+        .unwrap_or(false);
+    if !model_ok {
+        return false;
+    }
+    let expected = serde_json::json!({
+        "version": 2,
+        "backend": profile.backend,
+        "model": model,
+        "resource_profile": config.resource_profile,
+        "mode": lease.mode,
+        "generation_token_limit": null,
+        "policy_digest": config.policy_digest(),
+    });
+    recipe == &expected
 }
 
 #[cfg(test)]
