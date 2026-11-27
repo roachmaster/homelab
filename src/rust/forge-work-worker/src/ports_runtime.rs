@@ -1,6 +1,6 @@
 use crate::error::WorkerError;
 use crate::lease::Lease;
-use crate::types::{CliOutcome, Invocation, SessionSelection, StopProof};
+use crate::types::{CliOutcome, Invocation, StopProof};
 use crate::workspace::WorkspaceLease;
 use std::path::Path;
 
@@ -46,13 +46,31 @@ pub trait SupervisorPort {
 }
 
 /// Provider session selection (work_sessions): explicit, same-task
-/// conversation selections for the backends that support them.
+/// conversation selections for the backends that support them. The
+/// workspace digest is computed through the caller's git runner,
+/// matching the Python provider's use of the workspace lease.
 pub trait SessionPort {
+    fn prepare(&mut self) -> Result<(), WorkerError>;
     fn select(
         &mut self,
-        task_id: &str,
-        attempt_id: &str,
-    ) -> Result<Option<SessionSelection>, WorkerError>;
+        lease: &Lease,
+        workspace: &WorkspaceLease,
+        binary_sha256: &str,
+        git: &mut dyn GitRunner,
+    ) -> Result<crate::types::SessionSelection, WorkerError>;
+    fn invalidate(&mut self, selection: &crate::types::SessionSelection)
+        -> Result<(), WorkerError>;
+    fn remember(
+        &mut self,
+        selection: &crate::types::SessionSelection,
+        workspace: &WorkspaceLease,
+        conversation_id: &str,
+        git: &mut dyn GitRunner,
+    ) -> Result<(), WorkerError>;
+    /// The provider's TTL in seconds, when it has one (Codex).
+    fn ttl_seconds(&self) -> Option<i64> {
+        None
+    }
 }
 
 /// A bounded subprocess call for supervision queries (the

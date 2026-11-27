@@ -7,11 +7,13 @@
 //! increments on these ports.
 
 pub mod branch;
+pub mod build_info;
 pub mod cli_argv;
 pub mod cli_parser;
 pub mod cli_transport;
 pub mod config;
 pub mod config_profile;
+pub mod contexts;
 pub mod error;
 pub mod grok_policy;
 pub mod lease;
@@ -20,8 +22,13 @@ pub mod policy;
 pub mod ports_runtime;
 pub mod ports_store;
 pub mod process;
+pub mod progress;
+pub mod progress_helper;
+pub mod provider_auth;
 pub mod provider_events;
 pub mod quota;
+pub mod runner;
+pub mod sessions;
 pub mod supervisor;
 pub mod types;
 pub mod workspace;

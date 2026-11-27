@@ -139,6 +139,16 @@ impl AuthLease {
         self.credential = None;
         self.directory = None;
     }
+
+    /// A duplicate of the credential descriptor, for the staging
+    /// write that must not consume the lease's own descriptor.
+    pub fn credential_dup(&self) -> Result<std::os::fd::OwnedFd, String> {
+        let credential = self
+            .credential
+            .as_ref()
+            .ok_or("staged credential is closed")?;
+        nix::unistd::dup(credential).map_err(|e| e.to_string())
+    }
 }
 
 impl Drop for AuthLease {
