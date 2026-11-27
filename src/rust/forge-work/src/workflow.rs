@@ -204,10 +204,13 @@ pub trait WorkflowDecisionPort {
 }
 
 /// The execution-policy overlay (work_provider_model_route's
-/// services implement this in F4d): selects future execution
+/// services implement this in F4e): selects future execution
 /// only; historical authority remains in the frozen snapshot.
+/// run_once receives the store because the Python provider's
+/// scan drives store services (the fused split passes it
+/// explicitly instead of holding a back-reference).
 pub trait ExecutionPolicyHook {
-    fn run_once(&self) -> Result<(), WorkError>;
+    fn run_once(&self, flow: &WorkflowStore) -> Result<(), WorkError>;
     fn effective(&self, workflow: &Value) -> Result<Value, WorkError>;
     fn handles_quota(&self, workflow: &Value, task: &Value) -> bool;
 }
@@ -446,6 +449,10 @@ impl WorkflowStore {
 
     pub(crate) fn config(&self) -> &CoordinatorConfig {
         &self.config
+    }
+
+    pub(crate) fn catalog(&self) -> &dyn WorkflowCatalog {
+        &*self.catalog
     }
 
     pub(crate) fn tx_factory(&self) -> &dyn WorkflowTxFactory {
@@ -1196,7 +1203,7 @@ impl WorkflowStore {
     /// claim(): run the recovery passes, then lease one action.
     pub fn claim(&self, worker_id: &str) -> Result<Option<Value>, WorkError> {
         if let Some(hook) = self.execution_policy.borrow().as_ref() {
-            hook.run_once()?;
+            hook.run_once(self)?;
         }
         self.apply_retry_allowances()?;
         if let Some(hook) = self.feedback_recovery.borrow().as_ref() {
@@ -2601,6 +2608,17 @@ mod tests {
         unused!(action_by_source_review, Uuid, Uuid, &str, &str, bool => Result<Option<Value>, WorkError>);
         unused!(insert_workflow_review, &Value => Result<Uuid, WorkError>);
         unused!(insert_readiness_successor, Uuid, Uuid, &str => Result<Uuid, WorkError>);
+        unused!(model_route_actions, &str, Uuid => Result<Vec<Value>, WorkError>);
+        unused!(newer_plan_task_exists, &str, Uuid, Uuid, &str, bool => Result<bool, WorkError>);
+        unused!(workflow_task_blocked, &str, Uuid => Result<bool, WorkError>);
+        unused!(operator_cancel_event_exists, Uuid => Result<bool, WorkError>);
+        unused!(successful_route_attempt, &str, Uuid, &str, &str => Result<Option<Uuid>, WorkError>);
+        unused!(quota_resume_used, Uuid, &str => Result<i64, WorkError>);
+        unused!(workflow_review_open, Uuid => Result<bool, WorkError>);
+        unused!(plan_resume_exists, &str, Uuid, Uuid => Result<bool, WorkError>);
+        unused!(readiness_for_worker, &str, Uuid, &str, &str => Result<Vec<Value>, WorkError>);
+        unused!(binary_pin_busy, &str, Uuid, Uuid, &str => Result<bool, WorkError>);
+        unused!(insert_action_returning, &Value => Result<Option<Uuid>, WorkError>);
     }
 
     fn rows() -> (Value, Value, Value, Value, Value) {

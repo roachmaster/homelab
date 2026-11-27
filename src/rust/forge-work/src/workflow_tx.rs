@@ -42,6 +42,11 @@ pub enum BusyCheck {
     /// PeerSource composite with publications narrowed to
     /// pending/checking/publishing.
     Preparation,
+    /// _wait_or_resume's quiescence gate: tasks
+    /// queued/running/cancelled/cancel_requested or with
+    /// cancelled_at set, actions pending/leased, live
+    /// attempts.
+    QuotaWait,
 }
 
 pub trait WorkflowTx: RetryEvents {
@@ -324,6 +329,78 @@ pub trait WorkflowTx: RetryEvents {
         receipt_id: Uuid,
         summary: &str,
     ) -> Result<Uuid, WorkError>;
+
+    // -- F4e provider model-route probes ------------------------
+
+    /// model_snapshot: completed decide actions under the
+    /// provider-model-route prefix, oldest first, LIMIT 2
+    /// (a second row is itself a reconcile_required signal).
+    fn model_route_actions(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// A newer plan/implement task exists in the workflow
+    /// (created strictly after `created_at`, or at-or-after
+    /// for the binary-pin composite's own task exclusion).
+    fn newer_plan_task_exists(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        created_at: &str,
+        or_equal: bool,
+    ) -> Result<bool, WorkError>;
+    /// Any workflow task is cancelled or in a live/blocking
+    /// status (the model-route "workflow_task_blocked" probe).
+    fn workflow_task_blocked(&mut self, project: &str, workflow_id: Uuid) -> Result<bool, WorkError>;
+    /// An operator cancelled/cancel_requested event exists on
+    /// any task of the workflow.
+    fn operator_cancel_event_exists(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+    /// The latest successful (awaiting_review, published)
+    /// attempt for (profile, model) across the workflow.
+    fn successful_route_attempt(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        profile: &str,
+        model: &str,
+    ) -> Result<Option<Uuid>, WorkError>;
+    /// Completed provider-quota-resume actions spent on one
+    /// quota episode.
+    fn quota_resume_used(&mut self, workflow_id: Uuid, episode: &str) -> Result<i64, WorkError>;
+    /// A workflow review is pending/reviewing.
+    fn workflow_review_open(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+    /// A resume plan decision exists for (root task, plan).
+    fn plan_resume_exists(
+        &mut self,
+        project: &str,
+        root_task_id: Uuid,
+        plan_id: Uuid,
+    ) -> Result<bool, WorkError>;
+    /// Readiness rows for one exact worker incarnation, fresh
+    /// and observed at or after `activated_at`.
+    fn readiness_for_worker(
+        &mut self,
+        worker_id: &str,
+        incarnation: Uuid,
+        policy_digest: &str,
+        activated_at: &str,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// StoppedBinaryPinRecovery's seven-part quiescence
+    /// composite (any part busy fails the recovery as
+    /// not_reviewable, unlike the reconcile_required probes).
+    fn binary_pin_busy(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        created_at: &str,
+    ) -> Result<bool, WorkError>;
+    /// INSERT ... ON CONFLICT DO NOTHING RETURNING action_id
+    /// (the provider-quota-wait marker: Some only when this
+    /// call inserted the row).
+    fn insert_action_returning(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError>;
 }
 
 /// Vends workflow transactions (WorkflowStore._transaction with
@@ -357,4 +434,9 @@ pub trait WorkflowTxFactory {
     /// _recover_source_readiness candidates: handed-off local
     /// reviews with a newer trusted readiness receipt.
     fn readiness_candidates(&self) -> Result<Vec<Value>, WorkError>;
+    /// ExecutionPolicyProvider.run_once candidates:
+    /// quota_blocked plan/implement tasks of enabled
+    /// workflows in an authoring phase, each with its latest
+    /// reconciliation receipt.
+    fn quota_candidates(&self) -> Result<Vec<Value>, WorkError>;
 }

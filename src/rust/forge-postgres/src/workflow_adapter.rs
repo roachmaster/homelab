@@ -195,6 +195,23 @@ impl WorkflowTxFactory for PgWorkflowTxFactory {
         ];
         self.scan_rows(sql, &params)
     }
+
+    fn quota_candidates(&self) -> Result<Vec<Value>, WorkError> {
+        let sql = "SELECT to_jsonb(s) FROM (SELECT t.id, t.project_alias, t.workflow_id, t.latest_attempt_id, t.revision, t.agent_profile, t.pinned_recipe->>'model' AS model, \
+              r.receipt_id FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w \
+              ON(w.owner_id,w.project_alias,w.workflow_id)=(t.owner_id,t.project_alias,t.workflow_id) \
+              JOIN LATERAL(SELECT receipt_id FROM forge_agent.coding_reconciliation_receipts r \
+              WHERE(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.revision) \
+              ORDER BY r.created_at DESC,r.receipt_id DESC LIMIT 1)r ON true \
+              WHERE t.owner_id=$1 AND t.project_alias=ANY($2) AND t.status='quota_blocked' \
+              AND t.mode IN('plan','implement') AND t.workflow_review_id IS NULL AND w.enabled \
+              AND w.phase IN('plan','plan_revision','implement','repair') ORDER BY t.updated_at,t.id LIMIT 64) s";
+        let params: Params = vec![
+            Box::new(self.owner.clone()),
+            Box::new(self.allowed_projects.clone()),
+        ];
+        self.scan_rows(sql, &params)
+    }
 }
 
 impl PgWorkflowTxFactory {
@@ -1213,6 +1230,10 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
             BusyCheck::Preparation => {
                 vec![tasks_broad, attempts, actions, pubs_checking, reviews]
             }
+            BusyCheck::QuotaWait => {
+                let tasks_wait = "EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$1 AND(status IN('queued','running','cancelled','cancel_requested') OR cancelled_at IS NOT NULL))";
+                vec![tasks_wait, actions, attempts]
+            }
         };
         let sql = format!("SELECT {} AS busy", parts.join(" OR "));
         let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
@@ -1470,6 +1491,205 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         rows.first()
             .and_then(|row| row.get::<usize, Option<Uuid>>(0))
             .ok_or_else(|| WorkError::store("insert_readiness_successor returned no id"))
+    }
+
+    // -- F4e provider model-route probes ---------------------------
+
+    fn model_route_actions(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(workflow_id),
+        ];
+        self.many(
+            "SELECT to_jsonb(t) FROM (SELECT source_key,intent,finish_receipt FROM forge_agent.coding_workflow_actions WHERE owner_id=$1 AND project_alias=$2 AND workflow_id=$3 AND kind='decide' AND status='completed' AND source_key LIKE 'provider-model-route:%' ORDER BY created_at,action_id LIMIT 2) t",
+            &params,
+        )
+    }
+
+    fn newer_plan_task_exists(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        created_at: &str,
+        or_equal: bool,
+    ) -> Result<bool, WorkError> {
+        let comparison = if or_equal { ">=" } else { ">" };
+        let sql = format!(
+            "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND workflow_id=$3 AND mode IN('plan','implement') AND id<>$4 AND created_at{comparison}$5::timestamptz) AS newer"
+        );
+        let created = created_at.to_string();
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &self.owner,
+            &project,
+            &workflow_id,
+            &task_id,
+            &created,
+        ];
+        self.tx.call_bool(&sql, params).map_err(work_err)
+    }
+
+    fn workflow_task_blocked(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&self.owner, &project, &workflow_id];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND workflow_id=$3 AND (cancelled_at IS NOT NULL OR status IN('cancelled','cancel_requested','queued','running'))) AS blocked",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn operator_cancel_event_exists(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id) WHERE t.workflow_id=$1 AND e.event_kind IN('cancelled','cancel_requested') AND e.payload->'actor'->>'kind'='operator') AS by_operator",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn successful_route_attempt(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        profile: &str,
+        model: &str,
+    ) -> Result<Option<Uuid>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &self.owner,
+            &project,
+            &workflow_id,
+            &profile,
+            &model,
+        ];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT a.attempt_id FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.owner_id=$1 AND t.project_alias=$2 AND t.workflow_id=$3 AND a.agent_profile=$4 AND a.pinned_recipe->>'model'=$5 AND a.outcome='awaiting_review' AND a.published_at IS NOT NULL ORDER BY a.finished_at DESC,a.attempt_id DESC LIMIT 1",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
+    }
+
+    fn quota_resume_used(&mut self, workflow_id: Uuid, episode: &str) -> Result<i64, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id, &episode];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND kind='decide' AND status='completed' AND source_key LIKE 'provider-quota-resume:%' AND intent->>'episode_id'=$2",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<i64>>(0))
+            .unwrap_or(0))
+    }
+
+    fn workflow_review_open(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_reviews WHERE workflow_id=$1 AND status IN('pending','reviewing')) AS open",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn plan_resume_exists(
+        &mut self,
+        project: &str,
+        root_task_id: Uuid,
+        plan_id: Uuid,
+    ) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&self.owner, &project, &root_task_id, &plan_id];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_plan_decisions WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND decision_id=$4 AND decision='resume') AS resumed",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn readiness_for_worker(
+        &mut self,
+        worker_id: &str,
+        incarnation: Uuid,
+        policy_digest: &str,
+        activated_at: &str,
+    ) -> Result<Vec<Value>, WorkError> {
+        let activated = activated_at.to_string();
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(worker_id.to_string()),
+            Box::new(incarnation),
+            Box::new(policy_digest.to_string()),
+            Box::new(activated),
+        ];
+        self.many(
+            "SELECT to_jsonb(t) FROM (SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=$1 AND worker_id=$2 AND incarnation=$3 AND policy_digest=$4 AND observed_at>=clock_timestamp()-interval '90 seconds' AND observed_at>=$5::timestamptz) t",
+            &params,
+        )
+    }
+
+    fn binary_pin_busy(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        created_at: &str,
+    ) -> Result<bool, WorkError> {
+        let created = created_at.to_string();
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &workflow_id,
+            &task_id,
+            &created,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &self.owner,
+            &project,
+            &task_id,
+            &workflow_id,
+        ];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$1 AND id<>$2 AND mode IN('plan','implement') AND created_at>=$3::timestamptz) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$4 AND(status IN('queued','running','cancelled','cancel_requested') OR cancelled_at IS NOT NULL)) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=$5 AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$6 AND status IN('pending','leased')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_reviews WHERE workflow_id=$7 AND status IN('pending','reviewing')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_plan_decisions WHERE owner_id=$8 AND project_alias=$9 AND task_id=$10 AND decision='resume') \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id) WHERE t.workflow_id=$11 AND e.event_kind IN('cancelled','cancel_requested')) AS busy",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn insert_action_returning(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError> {
+        let (sql, params) = self.insert_sql("coding_workflow_actions", row);
+        let sql = format!("{sql} ON CONFLICT DO NOTHING RETURNING action_id");
+        let rows = self
+            .tx
+            .query_rows(&sql, &refs(&params))
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
     }
 }
 

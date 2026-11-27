@@ -18,6 +18,8 @@ pub mod pinned_recipe;
 pub mod retry_events;
 pub mod revival;
 pub mod workflow;
+pub mod model_route;
+pub mod quota_diagnostics;
 pub mod workflow_ingress;
 pub mod workflow_continuation;
 pub mod workflow_tx;

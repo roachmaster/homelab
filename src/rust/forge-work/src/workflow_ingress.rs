@@ -209,7 +209,7 @@ impl BoundPreparationRetryAuthority {
 /// The workflow row the ingresses act on, checked against the
 /// store owner and the request's project (Python selects with
 /// all three in the WHERE clause).
-fn workflow_in_project(
+pub(crate) fn workflow_in_project(
     store: &WorkflowStore,
     tx: &mut dyn WorkflowTx,
     workflow_id: Uuid,
