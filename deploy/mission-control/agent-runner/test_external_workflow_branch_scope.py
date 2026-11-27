@@ -15,6 +15,24 @@ class ExternalWorkflowBranchScopeTest(unittest.TestCase):
         config = SimpleNamespace(owner='test-owner', external_workflows={})
         return workflow.ExternalWorkflowStore(config, catalog=None)
 
+    def test_every_enqueued_author_stage_binds_shared_policy_in_context(self):
+        for stage in ('plan', 'implement'):
+            with self.subTest(stage=stage):
+                store = self._store()
+                cursor = Mock()
+                assignment = uuid4()
+                cursor.fetchone.return_value = {'assignment_id': assignment}
+                context = {'version': 2, 'stage': stage, 'request_prompt': 'Original request'}
+                original = dict(context)
+                self.assertEqual(store._enqueue(cursor, 'homelab', uuid4(), context), assignment)
+                raw = cursor.execute.call_args.args[1][1]
+                expected = {**context, 'instructions': workflow.AGENT_BRANCH_INSTRUCTIONS}
+                self.assertEqual(json.loads(raw), expected)
+                self.assertEqual(raw, workflow.canonical(expected).decode())
+                self.assertEqual(cursor.execute.call_args.args[1][2],
+                                 workflow.hashlib.sha256(raw.encode()).hexdigest())
+                self.assertEqual(context, original)
+
     def _prepared_step(self, profile=EVENT_PROFILE, source_branch=None):
         store = self._store()
         base = 'a' * 40

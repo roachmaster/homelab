@@ -9,6 +9,7 @@ from uuid import UUID,uuid4
 import copy,hashlib,json,re,unicodedata
 from psycopg2.extras import Json
 from queue_store import Rejected
+from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS
 from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
 from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64,ExternalSourceIntegration
@@ -268,7 +269,9 @@ class ExternalWorkflowStore:
     def _enqueue(self,cursor,project,task_id,context):
         cursor.execute('SELECT forge_external_workflow_api.enqueue_v2(%s,%s,%s) AS assignment_id',(self.owner,project,task_id))
         assignment=cursor.fetchone()['assignment_id']
-        raw=canonical(context).decode()
+        # Every author assignment, including initial admission, carries the policy
+        # in its immutable claim context. Keep the original request untouched.
+        raw=canonical({**context,'instructions':AGENT_BRANCH_INSTRUCTIONS}).decode()
         if len(raw.encode())>1048576:raise ValueError('External execution context exceeds bound')
         cursor.execute('INSERT INTO forge_external_workflow.contexts(assignment_id,content,sha256) VALUES(%s,%s,%s)',(assignment,raw,hashlib.sha256(raw.encode()).hexdigest()))
         return assignment
@@ -883,7 +886,7 @@ class ExternalWorkflowStore:
                 "then parse that canonical JSON as external_context. It contains the original request_prompt and acceptance_criteria, approved_plan, previous_artifact, feedback, base_revision and result_contract. "
                 "Follow the approved Plan and independent feedback at the supplied exact base_revision. Preserve existing work and your feature branch across revisions; rebase it when the trusted base changes. "
                 "Do not merge main or manufacture native process proofs, review approval, Jenkins results or merge receipts. ")
-        return common+("Revise the complete Plan using the supplied feedback; finish with the full revised Plan text."
+        return common+AGENT_BRANCH_INSTRUCTIONS+" "+("Revise the complete Plan using the supplied feedback; finish with the full revised Plan text."
                        if mode=='plan' else
                        "Implement and verify the approved Plan, publish the preserved feature candidate, and finish with ONLY the exact JSON object specified by external_context.result_contract "
                        "(version,candidate_commit,candidate_tree,base_revision,summary, and optional source_branch). No Markdown fences or extra prose; report the actual commit/tree and supplied base_revision.")

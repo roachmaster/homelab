@@ -1,5 +1,16 @@
 # Current Forge implementation
 
+Follow the [persistent agent branch and cache rules](../../AGENTS.md) for every profile
+and configured alias: one permanent `feature/<agent>`, no agent-created per-task
+branches, rebase onto current main before authorized pushes, incremental pushes
+after green tests, and agent-managed local caches. Native workers cannot commit
+or push; Plan/review remain read-only. Older `forge/agent/*` defaults below are
+compatibility bindings requiring receipt-preserving reconciliation before author
+work. The named **legacy machinery-owned publication exception** retains
+`forge/task-<publication-id>` in `work_publication_clients.py:branch_name()` for
+explicit ephemeral policy, legacy identities or missing persistent resolution.
+Preserve frozen receipts; this documentation grants no new permissions.
+
 Reviewed **26 November 2026** against consolidated application source
 `0163a615` in [draft PR29](https://github.com/roachmaster/homelab/pull/29).
 Documentation changes do not attest a new build, deployment or successful task.
@@ -78,7 +89,7 @@ CI/CD stages and bounded Errors/Tests/Console inspection through
 | Capability | Present in source | Next evidence or decision |
 | --- | --- | --- |
 | Author/reviewer workflows | Separate configured author and independent reviewer, retained Plans, immutable feedback, source-bound AGY-to-Codex quota handoff | Qualify the combined source and preserve original workflow authority, workspace and budgets across any selected handoff. |
-| Branch ownership and CI visibility | One default `forge/agent/<profile-slug>` branch, exclusive workflow reservation, main synchronization, cache scope and correlation-stage/log projection | Apply migrations41–50 only in an authorized rollout with matching services/grants. Prove stale-owner, open-PR, restart and paging behavior through the real path. |
+| Branch ownership and CI visibility | Legacy compatibility default `forge/agent/<profile-slug>` branch, exclusive workflow reservation, main synchronization, cache scope and correlation-stage/log projection | Apply migrations41–50 only in an authorized rollout with matching services/grants. Prove stale-owner, open-PR, restart and paging behavior through the real path. |
 | Verification identity and recovery | Opt-in content-v2 manifests/policy generations; retained legacy bindings; private historical-CI pass and completion helpers | Verify actual source, process ownership and genuine receipts. Helpers do not authorize CI, reset event allowances or deploy themselves. |
 | Triage and Workbench | Needs attention, task detail/evidence disclosures, focus/scroll retention; admitted source inspection and opt-in managed writes | Complete current actual-WASM/browser and desktop/narrow visual acceptance. Recheck live write/Studio configuration before describing either as enabled. |
 | Other framework consumers | Durable Rust jobs, local tools, game simulation/assets/replay and static-web Studio service | Keep their contracts distinct from the Python/PostgreSQL delivery workflow; expand them when a concrete consumer and acceptance case require it. |
