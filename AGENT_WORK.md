@@ -1,3 +1,40 @@
+## Native completion and schema52 source integration — 2026-11-27
+
+Migration52 is LIVE from qualified source702cf64e. Jenkins126 passed all45 branch
+checks; actualSQL apply/privilege/config checks passed after a drained seven-service
+hold. All target workflow history, prior51 migration records, roles/ACLs/HBA, the
+complete persistent branch reservation and three deferred release operations
+retained their exact pre-apply checksums. Six services restarted on compatible
+Python source5bdedc1a; no matched Python source upgrade is claimed yet.
+
+Normal same-task Resume queued stopped repair8909443f again, preserving Plan64f81def,
+old attempt06cdab64 and receipt a8280fde. Real attempt da97b36f ran on feature/codex,
+fixed initial external Plan instruction delivery, and passed Jenkins127 all45.
+Independent code review05fb6a56 approved and attested external-initial-plan-policy.
+Normal publication88cd03dd created PR36; its hosted review297336c0 observed real
+passed CI. Normal exact merge e05181b6 completed PR36 as07800f29695ff47af112a196244d17623acda26a.
+Workflow46bcaed7 is completed and the branch reservation released normally asmerged.
+Canonical checkout HEAD/main/index/files remain preserved; source sync updates only
+refs/forge/verified-main. No Grok branch was changed.
+
+Publisher and idle Codex author are paused to serialize root feature publication.
+Use staged m52-release-held-publication config for publisher operations: only release
+activation is disabled; full main verification/source observation remain selected.
+The separate legacy external-delivery service is also held. Do not restart the
+old release-enabled publisher until schema52 source is integrated and verified.
+Fresh old unstarted release plans may be genuinely superseded by the normal actor
+after main advances. Preserve the three older deferred/journalled operations.
+
+A follow-up projection fix uses an actual known-stage timestamp as bounded execution
+evidence when optional build-start events are absent; it never fabricates history.
+Explicit build-start timestamps retain priority, earliest stage time anchors
+staleness, and unknown stages/missing timestamps cannot establish running status.
+All29 pipeline projection tests pass, including six new regressions. This patch
+is not deployed yet; actual Jenkins127 events appeared live but oldAPI5bdedc1a
+conservatively reported unknown run state without build_started. Integrate reviewed
+origin/main07800f29 into feature/codex, verify the combined tree, then publish/main
+integrate schema52 and this projection before normal release/runtime activation.
+
 ## Latest database qualification — 2026-11-27
 
 Final35 focused continuation/upgrade tests passed. The M26 upgrade snapshot now

@@ -45,6 +45,45 @@ def statuses(result):
     return [stage['status'] for stage in result['pipeline_stages']]
 
 
+class StageOnlyProgressTest(unittest.TestCase):
+    def test_real_stage_start_projects_running_without_inventing_build_events(self):
+        events=[event('stage_started',1,stage_name='source-preflight')]
+        result=project(events)
+        self.assertEqual(statuses(result),['running','waiting','waiting'])
+        self.assertEqual(result['pipeline_phase'],'running')
+        self.assertEqual([e['event_kind'] for e in events],['stage_started'])
+
+    def test_stage_only_native_sequence_tracks_actual_next_gate(self):
+        result=project([event('stage_started',1,stage_name='source-preflight'),
+            event('stage_completed',2,stage_name='source-preflight',stage_status='success'),
+            event('stage_started',3,stage_name='check')])
+        self.assertEqual(statuses(result),['passed','running','waiting'])
+        self.assertEqual(result['pipeline_availability'],'available')
+
+    def test_later_progress_does_not_reset_earliest_stage_staleness_bound(self):
+        late=STARTED_AT+timedelta(seconds=PIPELINE_STALENESS_TIMEOUT_SECONDS+60)
+        result=project([event('stage_started',1,stage_name='source-preflight'),
+            event('stage_completed',2,stage_name='source-preflight',stage_status='success'),
+            event('stage_started',3,stage_name='check',occurred_at=late)],now=late)
+        self.assertEqual(result['pipeline_phase'],'unknown')
+        self.assertEqual(statuses(result),['passed','unknown','unknown'])
+
+    def test_unknown_stage_is_not_execution_authority(self):
+        result=project([event('stage_started',1,stage_name='unrecognized')])
+        self.assertEqual(result['pipeline_phase'],'unknown')
+        self.assertEqual(statuses(result),['unknown']*3)
+
+    def test_missing_stage_timestamp_cannot_establish_unbounded_running(self):
+        result=project([event('stage_started',1,stage_name='check',occurred_at=None)])
+        self.assertEqual(result['pipeline_phase'],'unknown')
+
+    def test_explicit_build_start_retains_its_earlier_staleness_bound(self):
+        late=STARTED_AT+timedelta(seconds=PIPELINE_STALENESS_TIMEOUT_SECONDS+60)
+        result=project([event('build_started',1),
+            event('stage_started',2,stage_name='check',occurred_at=late)],now=late)
+        self.assertEqual(result['pipeline_phase'],'unknown')
+
+
 class PlanIdentificationTest(unittest.TestCase):
     def test_disjoint_check_sets_identify_each_frozen_plan(self):
         branch = identify_plan(['source-preflight', 'check', 'in-memory-backend'])
