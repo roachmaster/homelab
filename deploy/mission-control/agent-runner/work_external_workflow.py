@@ -269,7 +269,9 @@ class ExternalWorkflowStore:
     def _enqueue(self,cursor,project,task_id,context):
         cursor.execute('SELECT forge_external_workflow_api.enqueue_v2(%s,%s,%s) AS assignment_id',(self.owner,project,task_id))
         assignment=cursor.fetchone()['assignment_id']
-        raw=canonical(context).decode()
+        # Every author assignment, including initial admission, carries the policy
+        # in its immutable claim context. Keep the original request untouched.
+        raw=canonical({**context,'instructions':AGENT_BRANCH_INSTRUCTIONS}).decode()
         if len(raw.encode())>1048576:raise ValueError('External execution context exceeds bound')
         cursor.execute('INSERT INTO forge_external_workflow.contexts(assignment_id,content,sha256) VALUES(%s,%s,%s)',(assignment,raw,hashlib.sha256(raw.encode()).hexdigest()))
         return assignment

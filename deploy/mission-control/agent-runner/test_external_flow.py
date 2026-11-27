@@ -15,6 +15,7 @@ from work_external_review_context import canonical,validate_target,parse_verdict
 from test_work_execution_and_usage import make_v2_config,make_submit,make_stop_proof
 from work_worker_store import WorkerDB,WorkerAccessError
 from work_external_delivery_store import ExternalDeliveryStoreFactory
+from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS
 from work_external_workflow import derive_branch_scope
 from queue_store import Rejected
 from work_retry_policy import AGENT_RETRY_LIMIT
@@ -87,6 +88,10 @@ class ExternalFlowPGTest(unittest.TestCase):
   receipt=service.submit(command)
   self.call('advertise','homelab',ALIAS,'owned-muse')
   job=self.call('claim','homelab',ALIAS);self.assertEqual(job['task_id'],receipt['task_id']);self.assertIn('external_context',job)
+  self.assertEqual(job['external_context']['instructions'],AGENT_BRANCH_INSTRUCTIONS)
+  self.assertEqual(job['external_context']['request_prompt'],command.prompt)
+  self.assertEqual(json.loads(job['external_context_json']),job['external_context'])
+  self.assertEqual(hashlib.sha256(job['external_context_json'].encode()).hexdigest(),job['external_context_sha256'])
   content='# Full external plan\n'+'detail '*2200
   self.call('finish',job['assignment_id'],job['generation'],job['token'],content,'Plan returned')
   flow=service._store._external.workflow;self.assertTrue(flow.run_once())
@@ -135,6 +140,7 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.review(flow)
   manifest=canonical({'version':1,'candidate_commit':'b'*40,'candidate_tree':'d'*40,'base_revision':'a'*40,'summary':'Implementation complete.'}).decode()
   job=self.author(flow,manifest);self.assertEqual(job['external_context']['stage'],'implement')
+  self.assertEqual(job['external_context']['instructions'],AGENT_BRANCH_INSTRUCTIONS)
   self.assertIn('approved_plan',job['external_context']);self.assertEqual(job['external_context']['base_revision'],'a'*40)
   self.assertIn('claim.external_context_json',job['prompt']);self.assertIn('claim.external_context_sha256',job['prompt'])
   self.assertIn('ONLY the exact JSON object',job['prompt']);self.assertIn('Preserve existing work',job['prompt'])
