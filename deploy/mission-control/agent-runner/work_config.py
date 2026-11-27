@@ -12,7 +12,7 @@ from work_policy import (POLICY_DIGEST, POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIE
                          native_policy_digest, native_policy_matches)
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, POLICY_DIGEST as EXTERNAL_POLICY_DIGEST, MODES as EXTERNAL_MODES, MODEL as EXTERNAL_MODEL, POLICIES as EXTERNAL_POLICIES
 from work_external_flow_config import freeze_external_workflows
-from work_agent_branch import default_agent_branch, validate_persistent_branch
+from work_agent_branch import default_agent_branch, validate_persistent_branch, validate_profile_branch
 
 CONFIG_ENV_VAR = "FORGE_RUNNER_WORK_CONFIG"
 USAGE_CONFIG_ENV_VAR = "FORGE_RUNNER_USAGE_CONFIG"
@@ -159,7 +159,7 @@ class WorkProfile:
         resolved_branch = (
             default_agent_branch(self.alias)
             if self.branch is None
-            else validate_persistent_branch(self.branch, allow_non_forge=self.is_external)
+            else validate_profile_branch(self.alias, self.branch, allow_non_forge=self.is_external)
         )
         object.__setattr__(self, "branch", resolved_branch)
 

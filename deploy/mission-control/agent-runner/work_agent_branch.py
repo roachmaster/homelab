@@ -40,6 +40,12 @@ VALID_RESERVATION_BLOCKERS = frozenset({"open_pr_awaiting_closure"})
 IDENTIFIER_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 BRANCH_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}")
 FORGE_BRANCH_RE = re.compile(r"forge/[A-Za-z0-9][A-Za-z0-9._/-]{0,121}")
+OWNED_FEATURE_BRANCHES = {
+    'grok-primary': 'feature/grok', 'agy-primary': 'feature/agy',
+    'codex-primary': 'feature/codex', 'codex-author': 'feature/codex',
+    'muse-primary': 'feature/muse', 'muse-db-primary': 'feature/muse',
+    'dot-primary': 'feature/dot',
+}
 BRANCH_SLUG_RE = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?")
 SHA1_RE = re.compile(r"[0-9a-f]{40}")
 
@@ -89,6 +95,19 @@ def default_agent_branch(profile_alias: str) -> str:
     """Deterministic default persistent branch for an admitted agent profile."""
     branch = "forge/agent/" + canonical_profile_slug(profile_alias)
     return validate_persistent_branch(branch, allow_non_forge=False)
+
+
+def validate_profile_branch(profile_alias, branch, *, allow_non_forge=False):
+    """Explicit feature assignments are scoped to their configured agent identity.
+
+    Historical forge/* defaults and external branch compatibility are retained.
+    This does not change an existing reservation or a frozen publication receipt.
+    """
+    assigned = OWNED_FEATURE_BRANCHES.get(profile_alias)
+    if isinstance(branch, str) and branch.startswith('feature/') and branch != assigned:
+        raise ValueError('Feature branch does not belong to this agent profile')
+    return validate_persistent_branch(branch,
+        allow_non_forge=allow_non_forge or branch == assigned)
 
 
 def validate_persistent_branch(branch: str, *, allow_non_forge: bool = False) -> str:
@@ -169,8 +188,8 @@ class AgentBranchPolicy:
             if not isinstance(alias, str) or not IDENTIFIER_RE.fullmatch(alias):
                 raise ValueError("Invalid agent profile alias in branch policy")
             allow_non_forge = alias in self.external_profiles
-            normalized_profiles[alias] = validate_persistent_branch(
-                branch, allow_non_forge=allow_non_forge
+            normalized_profiles[alias] = validate_profile_branch(
+                alias, branch, allow_non_forge=allow_non_forge
             )
         if len(set(normalized_profiles.values())) != len(normalized_profiles):
             raise ValueError("Duplicate persistent agent branch across profiles")
@@ -188,7 +207,7 @@ class AgentBranchPolicy:
                 if not isinstance(alias, str) or not IDENTIFIER_RE.fullmatch(alias):
                     raise ValueError("Invalid profile alias in agent_branches")
                 allow_non_forge = alias in self.external_profiles
-                validated = validate_persistent_branch(branch, allow_non_forge=allow_non_forge)
+                validated = validate_profile_branch(alias, branch, allow_non_forge=allow_non_forge)
                 proj_map[alias] = validated
                 effective[alias] = validated
             if len(set(effective.values())) != len(effective):

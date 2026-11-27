@@ -404,4 +404,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=50)
 \ir migrations/0050_delivery_receipt_source_key.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(50,'delivery_receipt_source_key');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=51) AS apply_0051
+\gset
+\if :apply_0051
+\ir migrations/0051_agent_feature_branches.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(51,'agent_feature_branches');
+\endif
 COMMIT;

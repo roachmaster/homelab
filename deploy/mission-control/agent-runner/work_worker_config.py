@@ -7,7 +7,7 @@ import re
 from types import MappingProxyType
 
 from work_policy import POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIES, native_policy_digest
-from work_agent_branch import default_agent_branch, validate_persistent_branch
+from work_agent_branch import default_agent_branch, validate_persistent_branch, validate_profile_branch
 
 CONFIG_ENV = "FORGE_CODING_WORKER_CONFIG"
 MAX_CONFIG_BYTES = 64 * 1024
@@ -86,7 +86,7 @@ class WorkerProfile:
         resolved_branch = (
             default_agent_branch(self.alias)
             if self.branch is None
-            else validate_persistent_branch(self.branch, allow_non_forge=False)
+            else validate_profile_branch(self.alias, self.branch)
         )
         object.__setattr__(self, "branch", resolved_branch)
 
