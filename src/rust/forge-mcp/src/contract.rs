@@ -18,6 +18,7 @@ pub enum McRequest {
     },
     WorkSubmit(Box<WorkSubmit>),
     WorkCancel {
+        project_alias: String,
         task_id: String,
         expected_revision: u64,
     },
@@ -37,11 +38,17 @@ pub struct WorkSubmit {
     pub workflow_policy_digest: String,
 }
 
-/// Decision payload for plan/review decisions.
+/// Decision payload for plan decisions; mirrors the dispatch
+/// `work_plan_decide` DTO field for field (decision itself is
+/// derived: approve -> "resume", otherwise "revise").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Decide {
+    pub project_alias: String,
     pub task_id: String,
     pub expected_revision: u64,
+    pub plan_attempt_id: String,
+    pub plan_sha256: String,
+    pub agent_profile: String,
     pub approve: bool,
     pub idempotency_key: String,
 }
@@ -182,7 +189,7 @@ pub const TOOLS: &[ToolDescriptor] = &[
         name: "forge.decide",
         read_only: false,
         destructive: true,
-        summary: "Approve or reject a plan or review.",
+        summary: "Approve (resume) or send back (revise) a plan through the runner dispatch API.",
     },
 ];
 
@@ -233,6 +240,7 @@ pub fn parse_tool_call(name: &str, args: &Value) -> Result<McRequest, McError> {
             Ok(McRequest::WorkSubmit(Box::new(submit)))
         }
         "forge.work_cancel" => Ok(McRequest::WorkCancel {
+            project_alias: req_str(&obj, "project_alias")?,
             task_id: req_str(&obj, "task_id")?,
             expected_revision: req_u64(&obj, "expected_revision")?,
         }),
@@ -292,9 +300,10 @@ mod tests {
                     "acceptance_criteria": "ac", "idempotency_key": "k",
                     "workflow_policy_digest": "d"
                 }),
-                "forge.work_cancel" => json!({ "task_id": "t1", "expected_revision": 3 }),
+                "forge.work_cancel" => json!({ "project_alias": "homelab", "task_id": "t1", "expected_revision": 3 }),
                 "forge.decide" => json!({
-                    "task_id": "t1", "expected_revision": 3,
+                    "project_alias": "homelab", "task_id": "t1", "expected_revision": 3,
+                    "plan_attempt_id": "a1", "plan_sha256": "s", "agent_profile": "codex-primary",
                     "approve": true, "idempotency_key": "k"
                 }),
                 other => panic!("registry tool {other} has no test payload"),

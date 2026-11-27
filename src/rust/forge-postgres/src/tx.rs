@@ -34,7 +34,9 @@ impl<'t, 'c> Tx<'t, 'c> {
         let handle = self.handle.clone();
         let pg = &mut *self.pg;
         let row = handle.block_on(async move { pg.query_opt(select, params).await })?;
-        Ok(row.map(|row| row.get(0)))
+        // Decode as Option<T>: a SQL NULL first column is no result,
+        // not a decode panic - row.get::<T> panics on NULL.
+        Ok(row.and_then(|row| row.get::<usize, Option<T>>(0)))
     }
 
     /// Executes a statement on the open transaction that returns no result.

@@ -63,7 +63,7 @@ import socket
 import threading
 from contextlib import closing
 from datetime import datetime, timezone
-from http.client import HTTPConnection, HTTPException
+from http.client import HTTPConnection, HTTPException, HTTPSConnection
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -131,8 +131,12 @@ class ProxyClient:
         if payload is not None:
             headers["Content-Type"] = "application/json"
         try:
-            with closing(HTTPConnection(self.host, self.port,
-                                        timeout=self.timeout)) as conn:
+            # The bearer token travels only as far as the transport
+            # protects it: an https base URL gets a TLS connection,
+            # never plaintext HTTP on the TLS port.
+            connection_class = HTTPSConnection if self.secure else HTTPConnection
+            with closing(connection_class(self.host, self.port,
+                                          timeout=self.timeout)) as conn:
                 conn.request(method, self.base_path + path,
                              body=payload, headers=headers)
                 response = conn.getresponse()

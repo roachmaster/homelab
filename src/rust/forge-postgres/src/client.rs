@@ -160,7 +160,12 @@ impl PgSession {
     where
         T: for<'a> tokio_postgres::types::FromSql<'a>,
     {
-        Ok(self.run_query(select, params, true)?.map(|row| row.get(0)))
+        // Decode as Option<T>: a row whose first column is SQL NULL
+        // (e.g. claim finding no eligible task) is no result, not a
+        // decode panic - row.get::<T> panics on NULL.
+        Ok(self
+            .run_query(select, params, true)?
+            .and_then(|row| row.get::<usize, Option<T>>(0)))
     }
 
     /// Executes a query that does not return any result.

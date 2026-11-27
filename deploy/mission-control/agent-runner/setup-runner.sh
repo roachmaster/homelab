@@ -283,7 +283,7 @@ publish_proxy "$directory/forge_pg_proxy.py" "$target/forge_pg_proxy.py"
 publish_proxy "$directory/forge-pg-proxy.service" "$proxy_unit"
 systemctl daemon-reload
 systemctl enable forge-pg-proxy.service
-if grep -q 'map=forge-pg-proxy' /etc/postgresql/16/main/forge-worker-hba.conf 2>/dev/null; then
+if grep -Eq 'map=forge-(pg-proxy|preparation)' /etc/postgresql/16/main/forge-worker-hba.conf 2>/dev/null; then
     if [[ "$proxy_changed" == true ]] && systemctl is-active --quiet forge-pg-proxy.service; then
         systemctl restart forge-pg-proxy.service
     fi

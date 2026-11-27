@@ -64,20 +64,40 @@ impl LivePort {
             .map_err(|e| McError::Unavailable {
                 detail: format!("dispatch send: {e}"),
             })?;
+        let status = resp.status();
         let value: Value = resp.json().await.map_err(|e| McError::Unavailable {
             detail: format!("dispatch reply: {e}"),
         })?;
-        // Dispatch reports domain rejections in-band. result_mismatch is
-        // deliberately NOT collapsed further here: until the dispatch
-        // contract distinguishes stale base / stale digest / revoked
-        // grant (dispatch-digest-diagnosis defect), the detail names
-        // all three rather than guessing one.
-        let text = value.to_string();
-        if text.contains("result_mismatch") {
+        // Dispatch reports domain rejections as a non-2xx status with
+        // a work_failed envelope ({code, reason?}); a bare {"error"}
+        // body is the correlation-less form. Either is a failure -
+        // never a success with an empty receipt.
+        let failed = !status.is_success()
+            || value.pointer("/event/kind").and_then(Value::as_str) == Some("work_failed")
+            || value.get("error").is_some();
+        if failed {
+            let code = value
+                .pointer("/event/code")
+                .and_then(Value::as_str)
+                .or_else(|| value.get("error").and_then(Value::as_str))
+                .unwrap_or("unavailable");
+            let reason = value
+                .pointer("/event/reason")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            // result_mismatch is deliberately NOT collapsed further:
+            // until the dispatch contract distinguishes stale base /
+            // stale digest / revoked grant (dispatch-digest-diagnosis
+            // defect), the detail names all three rather than guessing.
+            if code.contains("result_mismatch") || reason.contains("result_mismatch") {
+                return Err(McError::Unavailable {
+                    detail: "dispatch result_mismatch: stale base, stale digest, or revoked \
+                             grant (indistinguishable until dispatch-digest-diagnosis lands)"
+                        .into(),
+                });
+            }
             return Err(McError::Unavailable {
-                detail: "dispatch result_mismatch: stale base, stale digest, or revoked \
-                         grant (indistinguishable until dispatch-digest-diagnosis lands)"
-                    .into(),
+                detail: format!("dispatch {code}: {reason}"),
             });
         }
         Ok(value)
@@ -127,10 +147,11 @@ impl MissionControlPort for LivePort {
                         enabled: row.get(1),
                     }));
                 }
-                // Native workflows: phase lives in the snapshot JSONB.
+                // Native workflows: the phase column is authoritative
+                // (the snapshot JSONB carries no phase key).
                 let rows = client
                     .query(
-                        "SELECT snapshot->>'phase', enabled FROM forge_agent.coding_workflows \
+                        "SELECT phase, enabled FROM forge_agent.coding_workflows \
                          WHERE workflow_id::text = $1",
                         &[&workflow_id],
                     )
@@ -186,21 +207,26 @@ impl MissionControlPort for LivePort {
                     "workflow_policy_digest": submit.workflow_policy_digest,
                 });
                 let value = self.dispatch("ide.work.submit", body).await?;
+                // The reply envelope is {event: {kind: work_submitted,
+                // task_id, ...}} - the receipt fields live under event.
                 let task_id = value
-                    .pointer("/result/task_id")
-                    .or_else(|| value.get("task_id"))
+                    .pointer("/event/task_id")
                     .and_then(Value::as_str)
-                    .unwrap_or_default()
+                    .ok_or_else(|| McError::Unavailable {
+                        detail: "dispatch work_submit reply carries no event.task_id".into(),
+                    })?
                     .to_owned();
                 Ok(McResponse::Submitted { task_id })
             }
             McRequest::WorkCancel {
+                project_alias,
                 task_id,
                 expected_revision,
             } => {
                 let body = json!({
                     "kind": "work_cancel",
                     "request_id": uuid::Uuid::new_v4().to_string(),
+                    "project_alias": project_alias,
                     "task_id": task_id,
                     "expected_revision": expected_revision,
                     "idempotency_key": uuid::Uuid::new_v4().to_string(),
@@ -209,15 +235,20 @@ impl MissionControlPort for LivePort {
                 Ok(McResponse::Cancelled { task_id })
             }
             McRequest::Decide(decide) => {
-                // NOTE: decide body shape follows the dispatch contract
-                // as documented in the runner API; it has not been
-                // exercised against the live runner from this client.
+                // The runner's plan-decide contract (work_api.decode):
+                // kind work_plan_decide, decision resume|revise, and
+                // the plan identity (attempt + digest) the decision
+                // binds to - a body missing any of these is a 400.
                 let body = json!({
-                    "kind": "work_decide",
+                    "kind": "work_plan_decide",
                     "request_id": uuid::Uuid::new_v4().to_string(),
+                    "project_alias": decide.project_alias,
                     "task_id": decide.task_id,
                     "expected_revision": decide.expected_revision,
-                    "decision": if decide.approve { "approved" } else { "revise" },
+                    "plan_attempt_id": decide.plan_attempt_id,
+                    "plan_sha256": decide.plan_sha256,
+                    "decision": if decide.approve { "resume" } else { "revise" },
+                    "agent_profile": decide.agent_profile,
                     "idempotency_key": decide.idempotency_key,
                 });
                 self.dispatch("ide.work.plan.decide", body).await?;
