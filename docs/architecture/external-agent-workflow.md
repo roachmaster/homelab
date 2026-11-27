@@ -1,5 +1,16 @@
 # External author and native reviewer SDLC
 
+Follow the [persistent agent branch and cache rules](../../AGENTS.md) for every profile
+and configured alias: one permanent `feature/<agent>`, no agent-created per-task
+branches, rebase onto current main before authorized pushes, incremental pushes
+after green tests, and agent-managed local caches. Native workers cannot commit
+or push; Plan/review remain read-only. Older `forge/agent/*` defaults below are
+compatibility bindings requiring receipt-preserving reconciliation before author
+work. The named **legacy machinery-owned publication exception** retains
+`forge/task-<publication-id>` in `work_publication_clients.py:branch_name()` for
+explicit ephemeral policy, legacy identities or missing persistent resolution.
+Preserve frozen receipts; this documentation grants no new permissions.
+
 M22 closes the Muse database handoff through independent review, implementation,
 Jenkins and exact-source merge. It preserves native P10 and old external v1
 recipes; external results never manufacture a native attempt, stop proof,
@@ -216,7 +227,7 @@ review, Jenkins checks, and guarded merge execute unchanged.
 ## Persistent per-agent branch tracking (source M41)
 
 External author profiles (such as `muse-db-primary`) resolve to a single
-persistent non-`main` branch (`forge/agent/muse-db-primary` by default, or an
+persistent non-`main` branch (`forge/agent/muse-db-primary` under legacy defaults, or an
 explicit startup-validated override such as `feature/muse`). External delivery
 enforces the same exclusive active-workflow ownership contract through
 `forge_external_delivery_api.agent_branch_acquire`, `agent_branch_verify_owner`,

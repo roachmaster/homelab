@@ -1,5 +1,16 @@
 # Headless Jenkins on Mission Control
 
+Follow the [persistent agent branch and cache rules](../../../AGENTS.md) for every profile
+and configured alias: one permanent `feature/<agent>`, no agent-created per-task
+branches, rebase onto current main before authorized pushes, incremental pushes
+after green tests, and agent-managed local caches. Native workers cannot commit
+or push; Plan/review remain read-only. Older `forge/agent/*` defaults below are
+compatibility bindings requiring receipt-preserving reconciliation before author
+work. The named **legacy machinery-owned publication exception** retains
+`forge/task-<publication-id>` in `work_publication_clients.py:branch_name()` for
+explicit ephemeral policy, legacy identities or missing persistent resolution.
+Preserve frozen receipts; this documentation grants no new permissions.
+
 Native Jenkins LTS and Java 21 are installed by an explicit local systemd job.
 This does not submit a Forge coding workflow, push GitHub source or trigger CI.
 Review `install.py` and `bootstrap.groovy` before installing them into the
@@ -486,7 +497,7 @@ The next Jenkins build automatically falls back to a clean rebuild (`restore_sta
 - `branch_scope`: echoed validated scope (bound in `work_external_delivery.py:verify()`)
 - `cache`: `{enabled, provider, project_alias, branch_scope, compat_key, restore_status, restore_fallback_reason, restore_elapsed_ms, restored_bytes, restored_files, publish_status, publish_elapsed_ms, published_bytes, published_files, evicted_entries, cache_total_bytes, cache_entry_count}`
 - `stages`: ordered stage timings (`prepare_source`, `cache_restore`, `check_0`, `check_1`, `check_2`, `verify_source_clean`, `cache_publish`, `cleanup`), with `check_0` and `check_1` reporting Cargo-parsed `cargo_compiling_units`, `cargo_finished_count`, and `cargo_compile_ms` (explicitly marked `cargo_reported_cumulative_phase_ms`, distinct from wall-clock stage `elapsed_ms`), plus `ui_qa_stages` from `run.json` on `check_1`.
-- **Persistent per-agent cache reuse & stage diagnostics (source M39)**: Under default `branch_policy = "persistent-agent-v1"`, each profile reuses its single persistent branch (`forge/agent/<profile-slug>` or validated override) so `derive_branch_scope()` targets the same `branch/<canonical-branch-slug>` across successive tasks. `verify-candidate.py` emits `correlation_id`, `action_id`, `branch`, and `branch_scope` on lifecycle events, and `work_cicd_artifacts.py` extracts bounded redacted per-stage console error excerpts, structured test counts, and chunked logs for read-only portal inspection (`ide.work.cicd.stage_log`) without widening approval or merge authority. Live verifier/migration deployment remains a separate authorized step.
+- **Persistent per-agent cache reuse & stage diagnostics (source M39)**: Under default `branch_policy = "persistent-agent-v1"`, each profile reuses its single persistent branch (legacy `forge/agent/<profile-slug>` or validated override) so `derive_branch_scope()` targets the same `branch/<canonical-branch-slug>` across successive tasks. `verify-candidate.py` emits `correlation_id`, `action_id`, `branch`, and `branch_scope` on lifecycle events, and `work_cicd_artifacts.py` extracts bounded redacted per-stage console error excerpts, structured test counts, and chunked logs for read-only portal inspection (`ide.work.cicd.stage_log`) without widening approval or merge authority. Live verifier/migration deployment remains a separate authorized step.
 
 ### Historical measured operator qualification
 

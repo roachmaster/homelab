@@ -46,6 +46,27 @@ OWNED_FEATURE_BRANCHES = {
     'muse-primary': 'feature/muse', 'muse-db-primary': 'feature/muse',
     'dot-primary': 'feature/dot',
 }
+# Instruction text only: never changes permissions, frozen branch bindings or recipes.
+AGENT_BRANCH_INSTRUCTIONS = (
+    "Keep one persistent named feature/<agent> branch per agent, never renamed or replaced. "
+    "Assignments: agy-primary=feature/agy; codex-author and codex-primary=feature/codex; "
+    "grok-primary=feature/grok; muse-primary and muse-db-primary=feature/muse; dot-primary=feature/dot. "
+    "Configured aliases must use their explicitly assigned agent branch; do not infer a new owner from an alias. "
+    "Never create agent-owned per-task branches. Before any authorized push, rebase onto current main, "
+    "rerun required tests, and push incrementally after green tests rather than one final dump. "
+    "Manage your own local build cache outside source using the provisioned cache paths; preserve other agents' caches. "
+    "These rules grant no commit or push permission. Native task workers must not commit or push; "
+    "their authorized publisher owns publication. Plan and review remain read-only pinned snapshots. "
+    "If a receipt-bound author workspace has a different branch, stop and request receipt-preserving reconciliation; "
+    "never rewrite frozen identities or switch another owner's checkout. "
+    "Legacy machinery-owned publication exception: work_publication_clients.py:branch_name() "
+    "retains forge/task-<publication-id> fallback refs for explicit ephemeral-task-v1, legacy identities "
+    "and jobs without persistent profile resolution. Historical forge/agent/<profile-slug> defaults "
+    "remain compatibility bindings, not author branch instructions. Preserve their receipts; "
+    "only a separately authorized transition may reconcile them."
+)
+
+
 BRANCH_SLUG_RE = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?")
 SHA1_RE = re.compile(r"[0-9a-f]{40}")
 

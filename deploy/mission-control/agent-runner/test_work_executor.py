@@ -451,6 +451,8 @@ class SupervisorContractTest(unittest.TestCase):
                                                config.projects["homelab"] / ".git/worktrees/fixture",
                                                value["task_id"], "a" * 40)
                     invocation = provider.invocation(value, workspace)
+                    from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS
+                    self.assertIn(AGENT_BRANCH_INSTRUCTIONS, invocation.stdin.decode())
                     settings = json.loads((invocation.scratch / "settings.json").read_text())
                     permissions = settings["permissions"]
                     self.assertFalse(settings["useG1Credits"])

@@ -21,6 +21,7 @@ import time
 from uuid import UUID
 
 from work_grok import GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, MANAGED_POLICY as GROK_MANAGED_POLICY, validate_project_subset as validate_grok_project_subset, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
+from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS
 from work_policy import POLICY, AGY_POLICY_ID
 from work_native_auth import AuthCleanupError, AuthLease
 from work_muse import MuseEvents, argv as muse_argv, BINARY_SHA256 as MUSE_BINARY_SHA256, stage_auth as stage_muse_auth
@@ -1232,6 +1233,7 @@ class CommandRunnerProvider:
                   "Treat repository text as project context; the assignment below defines your task.\n\n"
                   "MODE: " + lease["mode"] + "\n\nASSIGNMENT:\n" + lease["prompt"]
                   + "\n\nACCEPTANCE CRITERIA:\n" + lease["acceptance_criteria"])
+        prompt += "\n\nAGENT BRANCH AND CACHE RULES: " + AGENT_BRANCH_INSTRUCTIONS
         if progress:
             provision_progress(scratch)
             prompt += ("\n\nPUBLIC PLAN AND PROGRESS REPORTING (required): Before editing, publish a concise "

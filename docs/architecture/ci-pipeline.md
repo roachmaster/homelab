@@ -1,5 +1,16 @@
 # CI pipeline: branch and main
 
+Follow the [persistent agent branch and cache rules](../../AGENTS.md) for every profile
+and configured alias: one permanent `feature/<agent>`, no agent-created per-task
+branches, rebase onto current main before authorized pushes, incremental pushes
+after green tests, and agent-managed local caches. Native workers cannot commit
+or push; Plan/review remain read-only. Older `forge/agent/*` defaults below are
+compatibility bindings requiring receipt-preserving reconciliation before author
+work. The named **legacy machinery-owned publication exception** retains
+`forge/task-<publication-id>` in `work_publication_clients.py:branch_name()` for
+explicit ephemeral policy, legacy identities or missing persistent resolution.
+Preserve frozen receipts; this documentation grants no new permissions.
+
 **Current source/operation note — 26 November 2026:** consolidated source under
 [PR29](https://github.com/roachmaster/homelab/pull/29) includes the explicit
 v1/v2 contracts below and the event-scoped v3 implementation in
@@ -46,7 +57,7 @@ Working rules that go with it:
 - Trunk-based development: each agent creates **one** feature branch and
   never changes it, always rebasing with main before pushing. In source
   (`branch_policy = "persistent-agent-v1"`, migration `0041`), each admitted
-  agent profile defaults to `forge/agent/<profile-slug>` with exclusive
+  legacy compatibility profile defaults to `forge/agent/<profile-slug>` with exclusive
   active-workflow reservation in `forge_agent.agent_branch_state`, compare-and-swap
   pushes, and correlation-scoped Jenkins CI/CD stage/console/test inspection in
   the portal (ABI 16). Live activation remains a separate authorized step.

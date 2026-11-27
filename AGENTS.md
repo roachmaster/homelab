@@ -1,3 +1,29 @@
+## Persistent agent branch and cache rules
+
+Keep one persistent named `feature/<agent>` branch per agent, never renamed or
+replaced: AGY uses `feature/agy`, Codex (including codex-author) `feature/codex`,
+Grok `feature/grok`, Muse (native and muse-db) `feature/muse`, Dot `feature/dot`.
+Configured aliases inherit their explicitly assigned agent ownership; do not
+invent another branch from an alias. Never create agent-owned per-task branches.
+Before each authorized push, rebase onto current main, rerun required tests, and
+push incrementally after green tests rather than one final dump. Manage your own
+local build cache outside source using provisioned paths; preserve other caches.
+
+This grants no publication permission: native task workers cannot commit or push;
+the authorized publisher owns publication. Plan/review retain read-only pinned
+snapshots. Stop on receipt-bound branch mismatches for receipt-preserving
+reconciliation; never rewrite frozen bindings or another owner's checkout.
+
+**Legacy machinery-owned publication exception:**
+`deploy/mission-control/agent-runner/work_publication_clients.py:branch_name()`
+retains `forge/task-<publication-id>` fallback refs for explicit
+`ephemeral-task-v1`, legacy identities, and jobs without persistent profile
+resolution. Historical `forge/agent/<profile-slug>` defaults are compatibility
+bindings, not author branch instructions. Preserve original workspaces and
+receipts; reconciling them requires a separately authorized transition. The
+publisher's compare-and-swap rebase handling does not authorize agent force-pushes.
+
+
 ## Agent branch ownership — user instruction, 2026-11-27
 
 All Homelab agents must develop, edit, commit and push only on their assigned
@@ -18,8 +44,8 @@ branch or another agent's branch, preserve the existing checkout and use an
 isolated worktree for your assigned branch before making changes. Do not switch
 or reset a checkout containing someone else's work.
 
-Fetch current refs and bring reviewed `origin/main` changes into your own feature
-branch when needed. Keep your work and checkpoints on that feature branch; push
+Fetch current refs and rebase onto current `origin/main` before each authorized
+push, then rerun required tests. Push incrementally after green tests. Keep your work and checkpoints on that feature branch; push
 explicitly to its matching `origin/feature/<agent>` destination. Do not create a
 replacement task branch, push to another agent's branch, force-push, delete or
 rename agent branches without a new explicit user instruction.
