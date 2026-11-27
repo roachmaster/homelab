@@ -193,7 +193,7 @@ pub fn validate_external_artifact(value: &Value) -> Result<Value, String> {
 /// (ExternalWorkPort in work_external.py). `Tx` is the workflow
 /// transaction port's session (F4); forge-postgres's ExternalWorkDAO
 /// implements this in F6.
-pub trait ExternalWorkPort<Tx> {
+pub trait ExternalWorkPort<Tx: ?Sized> {
     type Error;
 
     fn profiles(&self) -> &std::collections::BTreeSet<String>;

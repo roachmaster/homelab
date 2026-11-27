@@ -113,6 +113,42 @@ pub fn escalation_cause(reason: &str, cause: Option<&str>) -> Result<String, Str
     Ok("unclassified".to_string())
 }
 
+/// The frozen 'cancelled' cause set (work_events.CAUSES).
+pub const CANCEL_CAUSES: [&str; 4] = [
+    "operator_request",
+    "workflow_cancelled",
+    "budget_exhausted",
+    "superseded",
+];
+
+/// require_actor: a possibly-absent actor resolves to the
+/// store's operator default. (The typed Actor is valid by
+/// construction where Python validates the dict.)
+pub fn require_actor(
+    actor: Option<&crate::work_actors::Actor>,
+    owner: &str,
+) -> crate::work_actors::Actor {
+    actor
+        .cloned()
+        .unwrap_or_else(|| crate::workflow::operator_actor(owner))
+}
+
+/// require_cancel_cause: a possibly-absent cause resolves
+/// to 'operator_request'; a named cause must be in the
+/// frozen cancelled set.
+pub fn require_cancel_cause(
+    cause: Option<&str>,
+) -> Result<String, crate::work_error::WorkError> {
+    match cause {
+        None => Ok("operator_request".to_string()),
+        Some(cause) if CANCEL_CAUSES.contains(&cause) => Ok(cause.to_string()),
+        Some(_) => Err(crate::work_error::WorkError::rejected(
+            400,
+            "invalid_request",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

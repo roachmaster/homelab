@@ -9,6 +9,7 @@ pub mod context_providers;
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod external_adapter;
 pub mod external_context;
 pub mod factory;
 pub mod gpu_adapter;
