@@ -1,3 +1,24 @@
+# Current: Authenticated MCP heartbeat and portal connection presence — 2026-11-27
+
+User authorizes adding an authenticated heartbeat MCP tool and connecting it to
+portal agent presence, including separate Dot (ChatGPT), Gemini, Grok and Muse.
+Codex is the primary orchestrator, distinct from Dot and native worker profiles.
+Keep SQL tools read-only and all PostgreSQL grants/schema50 unchanged. Store only
+presence metadata outside PostgreSQL in service-owned SQLite. Bind identities to
+administrator-configured authenticated static-token/OAuth-client subjects; a caller
+must not supply another agent identity, label, server timestamp or execution role.
+Heartbeat connection presence must not advertise execution readiness or job modes.
+
+Root coordinates integration, publication and matched MCP/portal deployment.
+Separate worktrees own MCP/auth/presence and Rust typed portal/host/UI. Use existing
+Forge provider/UI skills, maintain effects at composition roots, preserve tokens,
+OAuth stores/clients/passwords, private configs, task/event histories and worker
+roles. The live ad20beed Gemini compatibility fix is retained as09d2b0a4 before new
+work. Main wasab65003d with Jenkins103-qualified running ABI16/schema50 portal.
+Do not apply the deferred destructive digest-column migration. Keep three obsolete
+release retry deferrals and their uncertainty intact. Current heartbeat agents
+should appear only after actual calls; never simulate continuous live heartbeats.
+
 # Current: Match portal host admission to generated UI ABI16 — 2026-11-26
 
 The user authorizes fixing verified deployment blockers. Jenkins100 and a clean
