@@ -1690,7 +1690,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             visited.add(source)
             for name in re.findall(r"^\\ir\s+(\S+)\s*$", source.read_text(), re.MULTILINE):
                 pending.append(source.parent / name)
-        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES | {"verify-author-handoff.sql"})
+        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES | {"verify-author-handoff.sql", "verify-continuation-plan-lineage.sql"})
 
     def test_normal_installer_preserves_owner_control_and_installs_event_service(self):
         published = {
