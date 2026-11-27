@@ -96,6 +96,66 @@ class WorkflowContinuationTest(unittest.TestCase):
         self.assertEqual(self.rows('SELECT count(*) FROM forge_agent.coding_attempts')[0][0],0)
         self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_events WHERE event_kind='started'")[0][0],0)
 
+    def unstarted_plan(self):
+        from test_work_execution_and_usage import make_stop_proof
+        _,admitted=self.submit();workflow_id=self.escalate(admitted['task_id'])
+        port,command=self.command(workflow_id);receipt=self.execute(port,command)
+        self.coordinator.run_once();claim=self.claim('agy-v2')
+        self.cluster.admin_exec("UPDATE forge_agent.coding_attempts SET lease_expires_at=clock_timestamp()-interval '1 minute' WHERE attempt_id='"+claim.attempt_id+"'",owner=False)
+        self.db.expire_leases();self.coordinator.run_once()
+        rec=self.db.reconcile(claim,'b'*64,make_stop_proof(claim.unit_name))
+        return port,claim,UUID(rec)
+
+    def attested_materialization(self,claim,rec):
+        from work_events import insert_event,operator_actor
+        with self.flow._transaction() as cursor:
+            cursor.execute("SELECT action_id FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'policy-continuation:%%' AND finish_receipt->'receipt'->>'task_id'=%s",(claim.task_id,));action=cursor.fetchone()['action_id']
+            insert_event(cursor,'mission-control','homelab',UUID(claim.task_id),'checkpoint',
+                {'stage':'unstarted_plan_workspace_materialized','attempt_id':claim.attempt_id,
+                 'materialized_after_failure':True,'workspace_digest':'b'*64,
+                 'reconciliation_receipt_id':str(rec),'source_action_id':str(action),
+                 'recipe_digest':self.get(claim.task_id)['recipe_digest'],'base_revision':claim.base_revision},
+                actor=operator_actor('mission-control'))
+
+    def test_unstarted_plan_resumes_same_child_only_after_attested_reconciliation(self):
+        from work_workflow_continuation import UnstartedPlanResume
+        port,old,rec=self.unstarted_plan()
+        command=UnstartedPlanResume('homelab',UUID(old.task_id),UUID(old.attempt_id),self.get(old.task_id)['revision'],rec,uuid4(),'a'*40)
+        with self.assertRaises(Rejected) as missing:self.resume_unstarted(port,command)
+        self.assertEqual(missing.exception.code,'materialization_not_attested')
+        self.attested_materialization(old,rec)
+        receipt=self.resume_unstarted(port,command)
+        self.assertEqual(receipt['task_id'],old.task_id)
+        self.assertEqual(self.resume_unstarted(port,command),receipt)
+        self.coordinator.run_once();retried=self.claim('agy-v2')
+        self.assertEqual(retried.task_id,old.task_id);self.assertNotEqual(retried.attempt_id,old.attempt_id)
+        context=self.process_native(retried,'Fresh Plan after reconciled startup failure.')
+        self.assertIn('before native launch',context['feedback_context'].legacy_resume_note)
+        self.assertEqual(self.rows('SELECT phase,reservation_active FROM forge_agent.coding_attempts WHERE attempt_id=%s',(old.attempt_id,))[0],('stopped',False))
+
+    def test_unstarted_resume_does_not_ignore_operator_cancellation(self):
+        from work_workflow_continuation import UnstartedPlanResume
+        from work_api import WorkCancel
+        port,old,rec=self.unstarted_plan();self.attested_materialization(old,rec)
+        self.service.cancel(WorkCancel('homelab',UUID(old.task_id),self.get(old.task_id)['revision'],'stop-unstarted-plan'))
+        command=UnstartedPlanResume('homelab',UUID(old.task_id),UUID(old.attempt_id),self.get(old.task_id)['revision'],rec,uuid4(),'a'*40)
+        with self.assertRaises(Rejected):self.resume_unstarted(port,command)
+        self.assertIsNone(self.claim('agy-v2'))
+
+    def resume_unstarted(self,port,command):
+        with patch.dict('work_agent_branch.OWNED_FEATURE_BRANCHES',
+                        {p:self.config.profiles[p].branch for p in ('agy-v2','codex-v2')}):
+            return port.resume_unstarted_plan(command)
+
+    def test_unstarted_resume_rejects_changed_branch_configuration(self):
+        from work_workflow_continuation import UnstartedPlanResume
+        port,old,rec=self.unstarted_plan();self.attested_materialization(old,rec)
+        profiles=dict(self.config.profiles);profiles['agy-v2']=replace(profiles['agy-v2'],branch='forge/different')
+        self.flow.config=replace(self.config,profiles=profiles)
+        command=UnstartedPlanResume('homelab',UUID(old.task_id),UUID(old.attempt_id),self.get(old.task_id)['revision'],rec,uuid4(),'a'*40)
+        with self.assertRaises(Rejected) as changed:self.resume_unstarted(port,command)
+        self.assertEqual(changed.exception.code,'branch_not_qualified')
+
     def test_native_process_continuation_reaches_independent_review_and_exact_merge(self):
         _, admitted = self.submit()
         workflow_id = self.escalate(admitted['task_id'])

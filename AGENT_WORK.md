@@ -30,6 +30,24 @@ genuine systemd/cgroup stop proof + normal reconcile, then bounded server-only
 same-Plan resume authority. Verify/deploy successor through reviewed CI before
 restarting the author. No new DB migration or paid model diagnostics.
 
+16:26UTC update: all six unstarted claims are genuinely reconciled now. The
+private Git-only operation verified absent units/cgroups/no outputs/no workspace,
+materialized pristine pinned-base workspaces through WorkspaceProvider as the
+real worker UID, hashed actual bytes, used normal WorkerDB.reconcile, and
+appended one explicit AFTER-failure materialization attestation per attempt.
+All six are stopped with reservation=false/lease=NULL; original workflow
+snapshots, planning counters and full retry-event rows match admission receipts.
+Private proofs: operations/event-autonomy-20261127/unstarted-materialization-*.
+
+Bounded unstarted-plan resume port/CLI now requires the original continuation,
+exact stopped initial attempt/revision, matching genuine reconciliation and
+operator materialization marker, no output/progress/publication/operator cancel,
+unchanged recipe/owned feature branch, current grants/readiness and retained
+budgets. It resumes the SAME Plan child; no implementation approval. Independent
+Python/SQL reviews found no blockers after adding branch guard parity. Final
+focused tests56 passed, plus ci-preflight254 passed, zero skips. Author remains
+STOPPED pending reviewed successor qualification/deployment.
+
 User requests root-cause fixes for repeated Needs attention and tasks failing to
 reach main. Codex owns feature/codex; one writer. Portal attribution from PR31
 is already deployed (main4db1bdb3, ABI18, Jenkins110 all46 checks), superseding
