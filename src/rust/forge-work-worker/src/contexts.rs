@@ -70,11 +70,11 @@ pub struct ExternalReviewContext {
 }
 
 /// Validate an external review target document against its
-/// digest (work_external_review_context.validate_target), through
-/// the candidate checks. The source-integration and version-2
-/// content-identity tails land with the S3 external-agents slice;
-/// a target exercising them is rejected here rather than
-/// accepted unvalidated.
+/// digest (work_external_review_context.validate_target),
+/// complete: the code branch includes the source-integration
+/// receipt cross-checks and the version-2 content-identity tail
+/// (external_identity), and plan targets plus the protected-gate
+/// attestations are checked for both kinds.
 pub fn validate_target(raw: &str, digest: &str) -> Result<serde_json::Value, String> {
     let bytes = raw.as_bytes();
     if bytes.is_empty() || bytes.len() > MAX_CONTEXT_BYTES || sha256_hex(bytes) != digest {
@@ -185,13 +185,134 @@ pub fn validate_target(raw: &str, digest: &str) -> Result<serde_json::Value, Str
         if candidate["candidate_commit"].as_str() != map["review_base_revision"].as_str() {
             return Err("External review candidate unavailable".to_string());
         }
-        if candidate.contains_key("source_integration") || map["version"].as_i64() == Some(2) {
-            return Err(
-                "External review integration validation lands with the S3 slice".to_string(),
-            );
+        if let Some(integration_value) = candidate.get("source_integration") {
+            validate_source_integration(integration_value, candidate, map, text)?;
         }
+        if map["version"].as_i64() == Some(2) {
+            if candidate.get("identity_protocol").and_then(|v| v.as_str()) != Some("content-v2") {
+                return Err("Missing frozen content protocol".to_string());
+            }
+            let identity = crate::external_identity::validate_content_identity(
+                candidate.get("content_identity").unwrap_or(&serde_json::Value::Null),
+            )?;
+            if identity["verification"]["generation"].as_str()
+                != candidate.get("prepare_action_id").and_then(|v| v.as_str())
+            {
+                return Err(
+                    "Content identity belongs to a different preparation generation".to_string(),
+                );
+            }
+        } else if candidate.contains_key("content_identity")
+            || candidate.get("identity_protocol").and_then(|v| v.as_str()).unwrap_or("legacy-v1") != "legacy-v1"
+        {
+            return Err("Legacy target cannot reinterpret content identity".to_string());
+        }
+    } else if !map["approved_plan"].is_null()
+        || !map["candidate"].is_null()
+        || python_truthy(&map["required_attestations"])
+    {
+        return Err("Plan target carries code authority".to_string());
+    } else if map["version"].as_i64() != Some(1) {
+        return Err("Content identity protocol applies only to code targets".to_string());
+    }
+    let attest = map["required_attestations"]
+        .as_array()
+        .ok_or("Invalid protected gate attestations")?;
+    if attest.len() > 256
+        || attest.iter().any(|item| {
+            !item
+                .as_str()
+                .map(|text| {
+                    !text.is_empty()
+                        && text.len() <= 64
+                        && text
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+                })
+                .unwrap_or(false)
+        })
+        || attest
+            .iter()
+            .map(|item| item.as_str().unwrap_or_default())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != attest.len()
+    {
+        return Err("Invalid protected gate attestations".to_string());
     }
     Ok(value)
+}
+
+/// Python truthiness over a JSON value (the plan target's
+/// attestations guard).
+fn python_truthy(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::Bool(flag) => *flag,
+        serde_json::Value::Number(number) => number.as_f64() != Some(0.0),
+        serde_json::Value::String(text) => !text.is_empty(),
+        serde_json::Value::Array(items) => !items.is_empty(),
+        serde_json::Value::Object(map) => !map.is_empty(),
+    }
+}
+
+/// ExternalSourceIntegration.from_dict + the cross-checks against
+/// the authored manifest and the candidate (work_external_review_context).
+fn validate_source_integration(
+    integration_value: &serde_json::Value,
+    candidate: &serde_json::Map<String, serde_json::Value>,
+    map: &serde_json::Map<String, serde_json::Value>,
+    text: &str,
+) -> Result<(), String> {
+    let invalid_receipt = || "Invalid external source integration receipt".to_string();
+    let integration = integration_value.as_object().ok_or_else(invalid_receipt)?;
+    let fields = [
+        "prepare_action_id",
+        "source_base_revision",
+        "source_candidate_commit",
+        "source_candidate_tree",
+        "integration_base",
+        "candidate_tree",
+    ];
+    if integration.len() != 7
+        || !integration.contains_key("version")
+        || !fields.iter().all(|key| integration.contains_key(*key))
+        || !matches!(&integration["version"], serde_json::Value::Number(n) if n.as_i64() == Some(1))
+    {
+        return Err(invalid_receipt());
+    }
+    canonical_uuid(&integration["prepare_action_id"])
+        .map_err(|_| "Invalid external review identity".to_string())?;
+    for key in fields.iter().skip(1) {
+        if !integration[*key]
+            .as_str()
+            .map(|s| is_hex(s, 40))
+            .unwrap_or(false)
+        {
+            return Err("Invalid external source integration identity".to_string());
+        }
+    }
+    let lost = || "External review integration lost its immutable author source".to_string();
+    let authored = crate::cli_transport::parse_record(text.as_bytes(), "external")
+        .map_err(|_| lost())?;
+    let authored = authored.as_object().ok_or_else(lost)?;
+    let matches = integration["prepare_action_id"].as_str()
+        == candidate["prepare_action_id"].as_str()
+        && integration["source_base_revision"].as_str() == map["source_base_revision"].as_str()
+        && integration["source_base_revision"].as_str() == authored["base_revision"].as_str()
+        && integration["source_candidate_commit"].as_str()
+            == authored["candidate_commit"].as_str()
+        && integration["source_candidate_commit"].as_str()
+            == candidate["author_candidate_commit"].as_str()
+        && integration["source_candidate_tree"].as_str() == authored["candidate_tree"].as_str()
+        && integration["integration_base"].as_str() == candidate["integration_base"].as_str()
+        && integration["candidate_tree"].as_str() == candidate["candidate_tree"].as_str()
+        && integration["integration_base"].as_str()
+            != integration["source_base_revision"].as_str();
+    if !matches {
+        return Err(lost());
+    }
+    Ok(())
 }
 
 /// The admitted repair feedback (work_review_context).
@@ -261,5 +382,111 @@ mod tests {
         };
         assert!(build.validate(Some("f-1"), Some("abc")).is_ok());
         assert!(build.validate(Some("other"), Some("abc")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod target_tail_tests {
+    use super::*;
+
+    fn uuid(n: u8) -> String {
+        format!("{n:08x}-0000-0000-0000-000000000000")
+    }
+
+    fn plan_target() -> serde_json::Value {
+        let source = "the external plan";
+        serde_json::json!({
+            "version": 1, "kind": "external_database_review",
+            "workflow_id": uuid(1), "review_id": uuid(2), "reviewer_task_id": uuid(3),
+            "reviewer_profile": "codex-reviewer", "target_kind": "plan",
+            "source_task_id": uuid(4), "source_assignment_id": uuid(5),
+            "source_sha256": sha256_hex(source.as_bytes()), "source_revision": 1,
+            "source_base_revision": "a".repeat(40), "review_base_revision": "b".repeat(40),
+            "request_prompt": "review", "acceptance_criteria": "",
+            "source_content": source, "approved_plan": null, "candidate": null,
+            "required_attestations": [],
+        })
+    }
+
+    fn digest(raw: &str) -> String {
+        sha256_hex(raw.as_bytes())
+    }
+
+    #[test]
+    fn plan_target_tail() {
+        let target = plan_target();
+        let raw = serde_json::to_string(&target).unwrap();
+        assert!(validate_target(&raw, &digest(&raw)).is_ok());
+        // A v2 plan target is refused (identity is code-only).
+        let mut v2 = plan_target();
+        v2["version"] = serde_json::json!(2);
+        let raw = serde_json::to_string(&v2).unwrap();
+        assert_eq!(
+            validate_target(&raw, &digest(&raw)).unwrap_err(),
+            "Content identity protocol applies only to code targets"
+        );
+        // Attestations must be identifiers.
+        let mut bad = plan_target();
+        bad["required_attestations"] = serde_json::json!(["ok", "not ok!"]);
+        let raw = serde_json::to_string(&bad).unwrap();
+        assert_eq!(
+            validate_target(&raw, &digest(&raw)).unwrap_err(),
+            "Plan target carries code authority"
+        );
+    }
+
+    #[test]
+    fn code_target_integration_tail() {
+        let authored = serde_json::json!({
+            "base_revision": "a".repeat(40),
+            "candidate_commit": "c".repeat(40),
+            "candidate_tree": "d".repeat(40),
+        });
+        let source = serde_json::to_string(&authored).unwrap();
+        let plan_content = "the approved plan";
+        let mut target = plan_target();
+        target["target_kind"] = serde_json::json!("code");
+        target["source_content"] = serde_json::json!(source);
+        target["source_sha256"] = serde_json::json!(sha256_hex(source.as_bytes()));
+        target["approved_plan"] = serde_json::json!({
+            "assignment_id": uuid(6), "sha256": sha256_hex(plan_content.as_bytes()),
+            "content": plan_content,
+        });
+        target["candidate"] = serde_json::json!({
+            "candidate_commit": "b".repeat(40), "candidate_tree": "e".repeat(40),
+            "integration_base": "f".repeat(40),
+            "prepare_action_id": uuid(7),
+            "author_candidate_commit": "c".repeat(40),
+            "source_integration": {
+                "version": 1,
+                "prepare_action_id": uuid(7),
+                "source_base_revision": "a".repeat(40),
+                "source_candidate_commit": "c".repeat(40),
+                "source_candidate_tree": "d".repeat(40),
+                "integration_base": "f".repeat(40),
+                "candidate_tree": "e".repeat(40),
+            },
+        });
+        let raw = serde_json::to_string(&target).unwrap();
+        assert!(validate_target(&raw, &digest(&raw)).is_ok());
+        // Break the integration binding: candidate tree differs.
+        let mut broken = target.clone();
+        broken["candidate"]["source_integration"]["candidate_tree"] =
+            serde_json::json!("0".repeat(40));
+        let raw = serde_json::to_string(&broken).unwrap();
+        assert_eq!(
+            validate_target(&raw, &digest(&raw)).unwrap_err(),
+            "External review integration lost its immutable author source"
+        );
+        // A v2 target without a content identity is refused by name.
+        let mut v2 = target.clone();
+        v2["version"] = serde_json::json!(2);
+        v2["candidate"].as_object_mut().unwrap().remove("source_integration");
+        v2["candidate"]["identity_protocol"] = serde_json::json!("content-v2");
+        let raw = serde_json::to_string(&v2).unwrap();
+        assert_eq!(
+            validate_target(&raw, &digest(&raw)).unwrap_err(),
+            "Invalid external content identity"
+        );
     }
 }

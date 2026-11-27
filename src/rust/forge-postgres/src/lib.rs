@@ -7,6 +7,7 @@ pub mod branch;
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod external_context;
 pub mod factory;
 pub mod gpu_adapter;
 pub mod gpu_worker;

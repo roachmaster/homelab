@@ -16,6 +16,7 @@ pub mod config_profile;
 pub mod consumer_cache;
 pub mod contexts;
 pub mod error;
+pub mod external_identity;
 pub mod gpu;
 pub mod grok_policy;
 pub mod lease;
