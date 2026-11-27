@@ -22,6 +22,7 @@ from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_ma
 from work_store import ADVISORY_LOCK_SALT
 from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
 from work_workflow_policy import WorkflowPolicyFactory
+from work_workflow_continuation import retained_sources, is_retained_source
 from work_events import COORDINATOR_ACTOR, insert_event, operator_actor, escalation_cause
 import unicodedata
 
@@ -294,7 +295,11 @@ class WorkflowStore:
         if not cursor.fetchone()['allowed']:raise Rejected(403,'denied')
 
     def _phase(self,cursor,w,phase):
-        cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND enabled AND phase NOT IN('completed','cancelled','escalated') AND phase IS DISTINCT FROM %s",(phase,w['workflow_id'],phase))
+        cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND enabled AND phase NOT IN('completed','cancelled','escalated') AND phase IS DISTINCT FROM %s RETURNING root_task_id",(phase,w['workflow_id'],phase))
+        changed=cursor.fetchone()
+        if changed:
+            insert_event(cursor,self.store.owner,w['project_alias'],changed['root_task_id'],'checkpoint',
+                {'workflow_id':str(w['workflow_id']),'phase':phase,'summary':'Workflow entered '+phase.replace('_',' ')+'.'},actor=COORDINATOR_ACTOR)
 
     def _retry_scope(self,w):
         from work_retry_events import RetryScope
@@ -313,13 +318,15 @@ class WorkflowStore:
                          {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
                           'workflow_id':str(w['workflow_id'])},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
+        insert_event(cursor,self.store.owner,w['project_alias'],w['root_task_id'],'checkpoint',
+            {'workflow_id':str(w['workflow_id']),'phase':'cancelled','summary':reason},actor=COORDINATOR_ACTOR)
         if self.retry_events is not None:
             self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
 
     def _escalate(self,cursor,w,reason,*,cause=None):
         code=escalation_cause(reason,cause)
         reason=reason[:2048]
-        cursor.execute("SELECT status FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],w['root_task_id']))
+        cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],w['root_task_id']))
         root=cursor.fetchone()
         cursor.execute("SELECT phase FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(w['workflow_id'],))
         current=cursor.fetchone()
@@ -329,7 +336,8 @@ class WorkflowStore:
                 self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
             return
         if (current_phase not in {'completed','cancelled','escalated'} and root is not None and root['status'] in {'cancelled','cancel_requested'}
-                and revival_floor(cursor,w['workflow_id']) is None):
+                and revival_floor(cursor,w['workflow_id']) is None
+                and not is_retained_source(root,retained_sources(cursor,w['workflow_id']))):
             self._cancel_workflow(cursor,w,reason)
             return
         cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=false,phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
@@ -345,6 +353,8 @@ class WorkflowStore:
                          {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
                           'workflow_id':str(w['workflow_id']),'escalation_cause':code},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
+        insert_event(cursor,self.store.owner,w['project_alias'],w['root_task_id'],'checkpoint',
+            {'workflow_id':str(w['workflow_id']),'phase':'escalated','summary':reason,'escalation_cause':code},actor=COORDINATOR_ACTOR)
         if self.retry_events is not None:
             self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
 
@@ -1034,10 +1044,14 @@ class WorkflowStore:
             tasks=cursor.fetchall()
             root=next((t for t in tasks if t['id']==w['root_task_id']),None)
             floor=revival_floor(cursor,w['workflow_id'])
+            retained=retained_sources(cursor,w['workflow_id'])
+            if any(not any(is_retained_source(t,[binding]) for t in tasks) for binding in retained):
+                self._escalate(cursor,w,'Incident continuation source changed; reconciliation is required.')
+                continue
             # A guarded revival keeps earlier cancelled tasks terminal; they are
             # history, not a reason to cancel or escalate the revived workflow.
-            tasks=[t for t in tasks if not superseded_by_revival(t,floor)]
-            if root is not None and root['status'] in {'cancelled','cancel_requested'} and floor is None:
+            tasks=[t for t in tasks if not superseded_by_revival(t,floor) and not is_retained_source(t,retained)]
+            if root is not None and root['status'] in {'cancelled','cancel_requested'} and floor is None and not is_retained_source(root,retained):
                 self._cancel_workflow(cursor,w,'Workflow root task was cancelled.')
                 continue
             try:self._current_policy(w)
@@ -1096,6 +1110,7 @@ class WorkflowStore:
               JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.repair_task_id IS NULL AND q.owner_decision->>'closed_by'='peer_reviewer'
               AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha ORDER BY h.observed_at DESC,h.observation_id DESC LIMIT 1) IS TRUE ORDER BY p.created_at DESC""",(w['workflow_id'],))
             for p in cursor.fetchall():
+                if any(binding['id']==str(p['task_id']) for binding in retained):continue
                 if not w['snapshot']['auto_merge']:continue
                 cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,source_publication_id) VALUES(%s,%s,%s,'merge',%s,%s) ON CONFLICT DO NOTHING",(w['workflow_id'],self.store.owner,w['project_alias'],str(p['publication_id'])+':'+p['commit_sha'],p['publication_id']))
                 cursor.execute("UPDATE forge_agent.coding_workflows SET phase='merging',updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('cancelled','escalated','completed')",(w['workflow_id'],))
@@ -1296,7 +1311,15 @@ class WorkflowStore:
                 if review['target_kind']=='code' and not event_exhausted:
                     self.retry_events.bind_review(cursor,review['source_review_id'],retry_event['event_id'],'peer-revision.'+source)
 
-        if decision=='escalate' or event_exhausted or(review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
+        incident_budget_spent=False
+        if decision=='revise' and retained_sources(cursor,w['workflow_id']):
+            spent=w['plan_revisions']
+            if review['target_kind']=='code':
+                cursor.execute('SELECT repair_rounds FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
+                    (self.store.owner,w['project_alias'],w['root_task_id']))
+                budget=cursor.fetchone();spent=budget['repair_rounds'] if budget else 0
+            incident_budget_spent=spent>=self._retry_limit(w,'max_plan_revisions' if review['target_kind']=='plan' else 'max_code_revisions')
+        if decision=='escalate' or event_exhausted or incident_budget_spent or(review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
             self._escalate(cursor,w,verdict['summary'],cause='review_verdict' if decision=='escalate' else 'retry_exhausted' if event_exhausted else 'budget_exhausted')
             receipt={'status':'escalated','workflow_id':str(w['workflow_id'])}
         elif review['target_kind']=='plan':

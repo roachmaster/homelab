@@ -289,6 +289,34 @@ Mail contents, PostgreSQL or bearer tokens.
 
 ## Event and recovery behavior
 
+Native workflow defaults apply to new admissions. The optional
+`workflow_policy_compatibility: "forge-frozen-workflow-roles-v1"` selector also
+accepts previously admitted roles when their frozen recipes or receipt-bound
+handoffs remain configured and enabled. Current grants, independent review,
+protected checks, merge controls and monotonic retry allowances still apply.
+The default selector, `strict-defaults-v1`, retains legacy behavior.
+
+Policy-rollover incidents have a private operator recovery command in
+`work_external_recovery.py policy-continuation`. Run it from the immutable
+deployed release with `--config`, `--project`, `--workflow` and
+`--deployed-fix-revision` to inspect its source fingerprint. Explicit execution
+also requires `--source-sha256`, `--idempotency-key`, `--note` and `--execute`.
+This admits one fresh Plan in the original workflow, preserving original tasks,
+attempts, approvals, cancellation evidence, workspace receipts and spent budgets.
+Its new Plan requires normal independent review; it never inherits old approval.
+Only the exact default-role incident qualifies. Operator cancellation, changed
+source, live or uncertain attempts, pending checks, any existing publication,
+unqualified branches, unavailable workers, revoked grants and exhausted history
+are refused. Private administrative read-only retry evidence is acquired by the
+operator command, never granted to the HTTP service. Qualify matching API,
+author/reviewer worker and publisher branch configurations before execution;
+ordinary model readiness does not attest branch configuration.
+
+Grok `auto_compact_*` updates are advisory progress, not terminal success or
+accounting authority. Turn-limit notices remain failures. Antigravity's
+`Third-party quota reached` diagnostic follows the configured quota handoff
+path; a generic HTTP429 does not authorize switching models or paid fallback.
+
 The run, submitted messages, and queued event commit together. PostgreSQL
 notifications wake the worker and long-poll clients after commit. The worker
 subscribes before scanning the queue and scans again on wake-up or timeout, so

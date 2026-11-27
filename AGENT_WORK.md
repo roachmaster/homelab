@@ -21,6 +21,41 @@ reached diagnostic now takes the existing quota path; generic429 still does not.
 through independent review/publication/hosted checks/merge and real grant revocation.
 No live deployment or incident recovery is claimed yet.
 
+Source-bound recovery now has a private typed policy-continuation port/CLI.
+It queues a fresh Plan in the SAME workflow and retains the exact old task
+bindings in an immutable action receipt. Replay ignores only those validated
+sources; later source changes require reconciliation. No inherited approvals.
+Current grants/readiness, stopped reconciled attempts, explicit feature-branch
+assignment and quiescent checks are required. Any existing publication requires
+separate reconciliation. Root/task locks match cancellation. Full historical
+retry evidence is read through an operator-only administrative read port, not
+new application grants. Resolved-but-exhausted retry histories are refused.
+Nine real PostgreSQL continuation tests cover fresh independent
+Plan approval, retained original rows, partial spent event history and a
+resolved used20 event refusal, native event links/foreign-link rejection and
+retained planning allowance across new event generations. Legacy revival six
+tests remain green. Final combined qualification:126 tests passed, zero skips,
+178.670s, log /mnt/data/homelab-build/event-autonomy-qualified-20261127.log.
+This includes real Git Codex author feature/codex and detached review snapshots;
+the review-only worker rejects an implementation recipe before workspace/spawn.
+
+Native task event projection previously bound workflow explanations only for
+external database workflows. It now validates native membership too, with
+same-owner/project/workflow child links. Coordinator phase/escalation changes
+and fresh-Plan recovery write readable checkpoints using the existing ABI18
+format. No portal rebuild, migration, historical rewrite or invented cause.
+
+Live configuration gap discovered during qualification: current publisher
+worker config omits codex-author even though eight stranded workflows handed
+off to that author. Only Grok's feature branch is configured end to end.
+Qualify author/reviewer/publisher together before any incident execution;
+do not relax SQL branch uniqueness. Codex-primary is explicitly restricted to
+review-only detached snapshots, excluded from the publisher's publishing
+profiles. Its legacy metadata is retained; it cannot develop or publish there.
+Codex-author is the qualified feature/codex publishing identity. API, author,
+review-only worker, AGY, Grok and publisher configs are staged but NOT activated
+under /etc/homelab-forge/coding-worker/event-autonomy-20261127-*.json.
+
 
 Confirmed defect: _current_policy compares current default roles before checking
 valid execution/handoff authority. Recovery then excludes escalated workflows.
