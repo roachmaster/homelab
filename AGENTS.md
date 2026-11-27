@@ -1,3 +1,45 @@
+## Agent branch ownership — user instruction, 2026-11-27
+
+All Homelab agents must develop, edit, commit and push only on their assigned
+persistent feature branch:
+
+| Agent | Assigned branch |
+|---|---|
+| Codex — primary orchestrator, including its delegated helpers | `feature/codex` |
+| Gemini / Antigravity | `feature/agy` |
+| Dot — separate ChatGPT agent | `feature/dot` |
+| Grok | `feature/grok` |
+| Muse | `feature/muse` |
+
+Before editing, run `git status --short --branch` and `git branch --show-current`,
+then verify the current branch matches your identity above. Inspecting another
+branch is read-only. If you are on `main`, a detached HEAD, a historical task
+branch or another agent's branch, preserve the existing checkout and use an
+isolated worktree for your assigned branch before making changes. Do not switch
+or reset a checkout containing someone else's work.
+
+Fetch current refs and bring reviewed `origin/main` changes into your own feature
+branch when needed. Keep your work and checkpoints on that feature branch; push
+explicitly to its matching `origin/feature/<agent>` destination. Do not create a
+replacement task branch, push to another agent's branch, force-push, delete or
+rename agent branches without a new explicit user instruction.
+
+Codex remains the orchestrator and follows the same feature-branch rule. Main
+integration uses the reviewed, CI-verified merge workflow; agents must not bypass
+it with direct pushes to `main`. Earlier one-off main-push instructions do not
+provide a standing exception to this newer branch policy.
+
+Delegated implementation belongs to the orchestrating agent's assigned branch.
+Keep one writer per worktree and serialize branch publication. Read-only analysis
+may inspect preserved snapshots; do not commit development on detached snapshots.
+If a receipt-bound automated job is pinned to a different branch (including the
+older `forge/agent/*` defaults), stop before editing or publishing and report the
+mismatch to Codex. Preserve its frozen identities, receipts and worktree rather
+than rewriting them to make the branch look compliant.
+
+Read this policy and `AGENT_WORK.md` before every new task. This records branch
+ownership; it does not grant new deployment, merge or paid-credit authority.
+
 # Forge plug-and-play
 
 Start with [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md)

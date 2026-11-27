@@ -1,3 +1,21 @@
+# Current: Record required agent feature branches in shared notes — 2026-11-27
+
+The user explicitly requires all agents to use only their own named feature
+branch. Codex is the primary orchestrator on feature/codex; Dot is a separate
+ChatGPT agent on feature/dot. Gemini/Antigravity uses feature/agy, Grok uses
+feature/grok, and Muse uses feature/muse. These exact remote branches were
+confirmed with git branch -a and a fresh remote fetch. See AGENTS.md for the
+mandatory before-edit check, publication boundaries and receipt preservation.
+
+This notes-only change is developed and published from feature/codex, synchronized
+with origin/main a3ec03b8. Preserve all other branch refs and worktrees. Do not
+push this update directly to main or other agents' branches. Shared Mission Control
+notes and the existing Gemini Drive connection guide carry the same ownership
+rules so local sessions and external MCP agents can pick them up before work.
+Runtime branch defaults are not changed by this documentation update. Automated
+jobs pinned to older forge/agent/* branches must be reported for a separately
+reviewed, identity-preserving transition before those agents edit or publish.
+
 # Current: Authenticated MCP heartbeat and portal connection presence — 2026-11-27
 
 User authorizes adding an authenticated heartbeat MCP tool and connecting it to
