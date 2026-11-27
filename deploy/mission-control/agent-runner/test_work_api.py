@@ -481,6 +481,36 @@ class WorkDecodeTest(unittest.TestCase):
 
 
 class WorkHttpApiTest(unittest.TestCase):
+    def test_cancel_projects_audited_receipts_without_mutating_native_or_external_replays(self):
+        config = work_config.parse_work_config(sample_raw_config())
+        for external in (False, True):
+            with self.subTest(external=external):
+                store = Mock(owner="mission-control")
+                flow = Mock() if external else None
+                public = {"project_alias": "homelab", "task_id": str(TASK_ID),
+                          "base_revision": 1, "revision": 2, "status": "cancelled"}
+                actor = {"kind": "operator", "id": "mission-control"}
+                durable = {**public, "actor": actor}
+                selected = flow if external else store
+                selected.cancel.return_value = durable
+                service = work_api.WorkService(config, config.catalog(), store,
+                                               external_workflow=flow)
+                body = {"kind": "work_cancel", "request_id": REQUEST_ID,
+                        "project_alias": "homelab", "task_id": str(TASK_ID),
+                        "expected_revision": 1, "idempotency_key": "cancel-audited"}
+                with runner_server(work_service=service) as port:
+                    for _ in range(2):
+                        self.assertEqual(work_post(port, work_api.Destination.CANCEL, body),
+                                         (200, reply("work_cancel_recorded", **public), "no-store"))
+                        self.assertEqual(durable, {**public, "actor": actor})
+                self.assertEqual(selected.cancel.call_count, 2)
+                for call in selected.cancel.call_args_list:
+                    self.assertEqual(call.kwargs["idempotency_key"], "cancel-audited")
+                    self.assertEqual(call.kwargs["actor"], actor)
+                    self.assertEqual(call.kwargs["cause"], "operator_request")
+                if external:
+                    store.cancel.assert_not_called()
+
     def test_external_control_uses_only_the_injected_ready_port(self):
         config = work_config.parse_work_config(sample_raw_config())
         store = Mock()

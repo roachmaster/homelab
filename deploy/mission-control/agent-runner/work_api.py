@@ -979,7 +979,12 @@ def dispatch(route, correlation, command, service, *, delivery_version=1):
         return HTTPStatus.OK, common.envelope("work_events", correlation, **page)
     if route is Destination.CANCEL and isinstance(command, WorkCancel):
         receipt = service.cancel(command)
-        return HTTPStatus.OK, common.envelope("work_cancel_recorded", correlation, **receipt)
+        # Durable receipts retain audit metadata. The version-1 portal contract
+        # is strict, so expose only its declared cancellation fields.
+        public_receipt = {key: receipt[key] for key in (
+            "project_alias", "task_id", "base_revision", "revision", "status",
+        )}
+        return HTTPStatus.OK, common.envelope("work_cancel_recorded", correlation, **public_receipt)
     if route is Destination.RESULT and isinstance(command, WorkResult):
         page = service.result(command)
         return HTTPStatus.OK, common.envelope("work_result_page", correlation, **page)
