@@ -196,6 +196,23 @@ class WorkflowContinuationTest(unittest.TestCase):
         self.assertEqual(self.get(receipt['task_id'])['workflow']['phase'],'completed')
         self.assertEqual(self.db.project_revisions(),{'homelab':'2'*40})
 
+    def test_parented_implementation_revise_reaches_worker_with_bound_feedback(self):
+        from work_retry_events import RetryEventProvider
+        _,admitted=self.submit();wid=self.escalate(admitted['task_id']);port,command=self.command(wid);self.execute(port,command)
+        self.flow.retry_events=RetryEventProvider('mission-control')
+        self.coordinator.run_once();plan=self.claim('agy-v2');self.process_native(plan,'A fresh bounded Plan.')
+        self.coordinator.run_once();peer=self.claim('codex-v2');self.process_native(peer,self.verdict(peer));self.coordinator.run_once()
+        author=self.claim('agy-v2');self.process_native(author,'An implementation requiring independent correction.')
+        self.coordinator.run_once();q=self.db.review_claim('fixed-checks')
+        self.db.review_finish(q,{'disposition':'awaiting_review','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[],'verified_finding_ids':[],'fingerprint':None,'summary':'Checked.','cleanup_confirmed':True,'verification':{'checks_passed':True,'candidate_workspace_digest':'b'*64,'repair_requires_new_workspace':False,'cleanup_confirmed':True,'integration_base':author.base_revision,'toolchain':'fixture','checks':[{'check_id':'make-ci','status':'passed','head_sha':'d'*40}]}})
+        self.coordinator.run_once();peer=self.claim('codex-v2');self.process_native(peer,self.verdict(peer,'revise'));self.coordinator.run_once()
+        repair=self.claim('agy-v2');self.assertIsNotNone(repair)
+        self.assertEqual(repair.task_id,author.task_id)
+        self.assertIsNotNone(repair.feedback_id)
+        self.assertIsNone(repair.repair_source_review_id)
+        context=self.process_native(repair,'Corrected independently reviewed implementation.')
+        self.assertEqual(context['peer_feedback_context'].target_kind,'code')
+
     def test_unapproved_source_gets_fresh_independently_reviewed_plan(self):
         _, admitted = self.submit()
         root = admitted['task_id']

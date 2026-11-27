@@ -48,6 +48,15 @@ Python/SQL reviews found no blockers after adding branch guard parity. Final
 focused tests56 passed, plus ci-preflight254 passed, zero skips. Author remains
 STOPPED pending reviewed successor qualification/deployment.
 
+Pre-merge retry-path qualification also reproduced same-task code revisions
+being mistaken for incomplete linked repairs when the implementation has a
+lineage parent. The shared contract now permits digest-bound feedback only for
+approved implementation continuations; Plan feedback spoofing and incomplete
+linked repairs remain rejected. A real-PG CodingWorker.process regression follows
+Plan approval through independent code revise and the corrected next attempt.
+Jenkins115 passed the previous tree; this additional correction requires a new
+exact-head build before PR34 can merge. Six reconciled Plans remain paused.
+
 User requests root-cause fixes for repeated Needs attention and tasks failing to
 reach main. Codex owns feature/codex; one writer. Portal attribution from PR31
 is already deployed (main4db1bdb3, ABI18, Jenkins110 all46 checks), superseding

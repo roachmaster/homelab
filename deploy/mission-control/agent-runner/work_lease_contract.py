@@ -39,8 +39,9 @@ def validate_lease(value):
     elif result.get("workflow_feedback_sha256") is not None:
         raise ValueError("Unbound workflow feedback context")
     # Parentage records lineage, not permission to repair code. Workflow Plan
-    # continuations and their own approved implementation carry no code-repair
-    # candidate. SQL grants and the lease-bound Plan reader retain authority.
+    # continuations and their own approved implementation carry no linked-repair
+    # candidate. Same-task code revisions can carry bound feedback; SQL grants,
+    # the Plan reader and the feedback reader retain their separate authority.
     repair = any(result.get(name) is not None for name in
                  ("repair_source_review_id", "repair_candidate_commit"))
     if repair:
@@ -49,7 +50,8 @@ def validate_lease(value):
             raise ValueError("Incomplete linked repair authority")
     elif result.get("parent_task_id") is not None:
         if (result.get("workflow_id") is None or result.get("workflow_review_id") is not None
-                or result.get("feedback_id") is not None or result["mode"] not in {"plan", "implement"}
+                or result["mode"] not in {"plan", "implement"}
+                or result.get("feedback_id") is not None and result["mode"] != "implement"
                 or result["parent_task_id"] == result["task_id"]
                 or result["mode"] == "implement" and not
                    (result.get("plan_decision_id") or result.get("scope_plan_decision_id"))):
