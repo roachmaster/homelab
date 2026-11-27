@@ -2107,3 +2107,15 @@ pending_reconciliations is the recorded v1 surface debt, replaced by typed
 structs before forge-work-worker builds on top. No live smoke test: the
 forge_coding_worker role's credentials are not available to the generator
 loop (the tunnel role muse_events is a different, read-only schema).
+
+Muse typed-surface update (2026-11-27): the v1 surface debt above is
+CLEARED. Claim lost `raw` and gained the Python Lease's 14 optional
+context fields; advertise takes AdvertisedProject/AdvertisedProfile;
+publish takes ResultManifest/StopProof and returns PublishReceipt;
+renew_deadline returns RenewDeadline; pending_reconciliations returns
+Vec<RecoveryLease>. publish's `usage` stays Value until the S6 usage
+slice owns its DTO; Claim.recipe stays a JSON document (the pinned
+recipe catalog document, addressed by digest in forge-work).
+forge-postgres 16/16 unit tests, fmt + check-deps green. Next per the
+full-migration map (~/workspace/deploy-design/full-migration-map.yaml):
+S2 forge-work-worker.

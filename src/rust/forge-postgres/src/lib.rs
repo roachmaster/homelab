@@ -36,7 +36,10 @@ pub use client::PgSession;
 pub use config::PgConfig;
 pub use error::AdapterError;
 pub use factory::PgSessionFactory;
-pub use reconciler::ReconcilerApi;
+pub use reconciler::{ReconcilerApi, RecoveryLease};
 pub use tx::Tx;
 pub use work_store::{PgWorkStore, ReviewPolicy};
-pub use worker::{Claim, RenewStatus, WorkerApi};
+pub use worker::{
+    AdvertisedProfile, AdvertisedProject, Claim, PublishReceipt, PublishResult, RenewDeadline,
+    RenewStatus, ResultManifest, StopProof, WorkerApi,
+};
