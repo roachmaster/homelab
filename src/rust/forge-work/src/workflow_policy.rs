@@ -5,7 +5,7 @@
 //! This pure check grants no role, changes no snapshot and spends
 //! no retry allowance.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::canonical::{canonical_json, sha256_hex};
 use crate::pinned_recipe::PinnedRecipe;
@@ -24,6 +24,7 @@ const RECIPE_ROLES: [(&str, &str, &str); 3] = [
 /// The catalog surface the compatibility check resolves through
 /// (work_config's catalog: profile lookup plus recipe resolution,
 /// including the explicitly configured AGY backup selection).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogProfile {
     pub execution_enabled: bool,
     pub backend: String,
@@ -213,6 +214,115 @@ impl<'a> WorkflowPolicyProvider<'a> {
     }
 }
 
+/// work_config.WorkflowPolicy: owner-selected role delegation for
+/// one project; recipes and policy identity freeze at admission
+/// via snapshot().
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectWorkflowPolicy {
+    pub author_profile: String,
+    pub reviewer_profile: String,
+    pub max_plan_revisions: i64,
+    pub auto_merge: bool,
+    pub merge_method: String,
+    pub version: String,
+}
+
+impl ProjectWorkflowPolicy {
+    pub fn new(
+        author_profile: &str,
+        reviewer_profile: &str,
+        max_plan_revisions: i64,
+        auto_merge: bool,
+    ) -> Result<ProjectWorkflowPolicy, String> {
+        if !crate::validation::is_identifier(&json!(author_profile)) {
+            return Err("Invalid workflow author identifier".to_string());
+        }
+        if !crate::validation::is_identifier(&json!(reviewer_profile)) {
+            return Err("Invalid workflow reviewer identifier".to_string());
+        }
+        if author_profile == reviewer_profile {
+            return Err(
+                "Workflow author and reviewer must be distinct profiles".to_string(),
+            );
+        }
+        if !(0..=crate::retry_policy::AGENT_RETRY_LIMIT).contains(&max_plan_revisions) {
+            return Err("Invalid workflow revision policy".to_string());
+        }
+        Ok(ProjectWorkflowPolicy {
+            author_profile: author_profile.to_string(),
+            reviewer_profile: reviewer_profile.to_string(),
+            max_plan_revisions,
+            auto_merge,
+            merge_method: "merge".to_string(),
+            version: "forge-autonomy-v1".to_string(),
+        })
+    }
+
+    /// WorkflowPolicy.snapshot: resolve the three role recipes,
+    /// require the current immutable execution policy on each,
+    /// and freeze the document under its canonical digest. The
+    /// Python raises ValueError here; the service maps that to a
+    /// Store error (process() escalates it like a ValueError,
+    /// recover() lets it propagate, exactly as Python does).
+    pub fn snapshot(
+        &self,
+        catalog: &dyn WorkflowCatalog,
+        repair_policy: &Value,
+        native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    ) -> Result<Value, crate::work_error::WorkError> {
+        let stale = || {
+            crate::work_error::WorkError::store(
+                "Workflow requires current immutable execution policy",
+            )
+        };
+        let mut recipes = serde_json::Map::new();
+        for (name, alias, mode) in [
+            ("author_plan", self.author_profile.as_str(), "plan"),
+            ("author_implement", self.author_profile.as_str(), "implement"),
+            ("reviewer_review", self.reviewer_profile.as_str(), "review"),
+        ] {
+            let recipe = catalog
+                .resolve(alias, mode, native_policy_matches)
+                .ok_or_else(stale)?;
+            if recipe.version != 2
+                || !native_policy_matches(
+                    Some(&recipe.resource_profile),
+                    Some(&recipe.backend),
+                    recipe.policy_digest.as_deref(),
+                )
+            {
+                return Err(stale());
+            }
+            recipes.insert(
+                name.to_string(),
+                json!({"recipe": recipe.to_dict(), "digest": recipe.digest}),
+            );
+        }
+        let mut repair = repair_policy.clone();
+        if let Some(object) = repair.as_object_mut() {
+            let checks = object
+                .get("required_hosted_checks")
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            object.insert("required_hosted_checks".to_string(), checks);
+        }
+        let mut result = json!({
+            "version": self.version,
+            "author_profile": self.author_profile,
+            "reviewer_profile": self.reviewer_profile,
+            "max_plan_revisions": self.max_plan_revisions,
+            "max_code_revisions": repair_policy["max_rounds"],
+            "auto_merge": self.auto_merge,
+            "merge_method": self.merge_method,
+            "repair_policy": repair,
+            "recipes": Value::Object(recipes),
+        });
+        let digest = sha256_hex(canonical_json(&result).as_bytes());
+        result["policy_digest"] = json!(digest);
+        Ok(result)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +415,27 @@ mod tests {
             .expect("compatible");
         assert_eq!(selected["author_profile"], json!("codex-author"));
         assert_eq!(selected["reviewer_profile"], json!("codex-reviewer"));
+    }
+
+    #[test]
+    fn project_workflow_snapshot_freezes_recipes_and_digest() {
+        let policy = ProjectWorkflowPolicy::new("codex-author", "codex-reviewer", 20, true)
+            .unwrap();
+        let repair = json!({
+            "max_rounds": 20, "max_stagnant_rounds": 20,
+            "max_infrastructure_retries": 20, "required_hosted_checks": ["ci"],
+        });
+        let snapshot = policy.snapshot(&Catalog, &repair, &matches).unwrap();
+        assert_eq!(snapshot["version"], json!("forge-autonomy-v1"));
+        assert_eq!(snapshot["max_plan_revisions"], json!(20));
+        assert_eq!(snapshot["max_code_revisions"], json!(20));
+        assert_eq!(snapshot["repair_policy"]["required_hosted_checks"], json!(["ci"]));
+        for key in ["author_plan", "author_implement", "reviewer_review"] {
+            assert_eq!(snapshot["recipes"][key]["digest"], json!("digest-x"));
+        }
+        assert!(intact(&snapshot));
+        assert!(ProjectWorkflowPolicy::new("same", "same", 20, true).is_err());
+        assert!(ProjectWorkflowPolicy::new("a", "b", 21, true).is_err());
     }
 
     #[test]

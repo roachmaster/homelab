@@ -42,6 +42,7 @@ pub mod worker_adapter;
 pub mod worker_adapter_reconciler;
 pub mod worker_context;
 pub mod workflow_adapter;
+pub mod workflow_decision;
 
 pub use branch::{AgentBranch, AgentBranchUpsert};
 pub use client::PgSession;

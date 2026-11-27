@@ -17,6 +17,7 @@ pub mod muse_intake;
 pub mod pinned_recipe;
 pub mod retry_events;
 pub mod revival;
+pub mod workflow;
 pub mod workflow_continuation;
 pub mod workflow_tx;
 pub mod workflow_policy;

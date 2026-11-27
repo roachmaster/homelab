@@ -148,6 +148,36 @@ pub trait WorkflowTx: RetryEvents {
     fn queue_count(&mut self, project: &str) -> Result<i64, WorkError>;
     fn max_review_no(&mut self, project: &str, task_id: Uuid) -> Result<Option<i64>, WorkError>;
 
+    // -- process / authority / revival probes ----------------------
+    /// process()'s identity join: (source_task_id, root_task_id)
+    /// for one workflow review.
+    fn review_identity(
+        &mut self,
+        workflow_review_id: Uuid,
+    ) -> Result<Option<(Uuid, Uuid)>, WorkError>;
+    /// SELECT id ... FOR UPDATE (process()'s root lock).
+    fn lock_task(&mut self, task_id: Uuid) -> Result<(), WorkError>;
+    /// The action lease's clock check, done in SQL exactly as
+    /// process() does it.
+    fn lease_valid(&mut self, action_id: Uuid) -> Result<bool, WorkError>;
+    /// BoundDelegatedAuthority.validate's action probe:
+    /// (status, lease_token, lease still valid).
+    fn action_lease_state(
+        &mut self,
+        action_id: Uuid,
+    ) -> Result<Option<(String, Option<String>, bool)>, WorkError>;
+    /// (enabled, phase) for one workflow.
+    fn workflow_state(
+        &mut self,
+        workflow_id: Uuid,
+    ) -> Result<Option<(bool, String)>, WorkError>;
+    /// _revive's live composite: a live attempt, a
+    /// queued/running/cancel_requested task, or a pending/leased
+    /// action exists.
+    fn revival_live(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+    /// _revive's operator-cancelled probe over the event stream.
+    fn operator_cancelled(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+
     // -- row writes ------------------------------------------------
     fn insert_task(&mut self, row: &Value) -> Result<(), WorkError>;
     /// _queue_review's insert: ON CONFLICT DO NOTHING, returning
@@ -232,10 +262,12 @@ pub trait WorkflowTx: RetryEvents {
 
 /// Vends workflow transactions (WorkflowStore._transaction with
 /// its lock/statement timeouts; read_only for the scan passes).
+/// The body returns a Value (Null for unit) so the trait stays
+/// dyn-compatible for the service's boxed factory.
 pub trait WorkflowTxFactory {
-    fn run<T>(
+    fn run(
         &self,
         read_only: bool,
-        body: &mut dyn FnMut(&mut dyn WorkflowTx) -> Result<T, WorkError>,
-    ) -> Result<T, WorkError>;
+        body: &mut dyn FnMut(&mut dyn WorkflowTx) -> Result<Value, WorkError>,
+    ) -> Result<Value, WorkError>;
 }

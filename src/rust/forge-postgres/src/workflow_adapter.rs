@@ -53,11 +53,11 @@ impl PgWorkflowTxFactory {
 }
 
 impl WorkflowTxFactory for PgWorkflowTxFactory {
-    fn run<T>(
+    fn run(
         &self,
         read_only: bool,
-        body: &mut dyn FnMut(&mut dyn WorkflowTx) -> Result<T, WorkError>,
-    ) -> Result<T, WorkError> {
+        body: &mut dyn FnMut(&mut dyn WorkflowTx) -> Result<Value, WorkError>,
+    ) -> Result<Value, WorkError> {
         let mut session = self.factory.create().map_err(work_err)?;
         let slot: std::cell::RefCell<Option<WorkError>> = std::cell::RefCell::new(None);
         let scope = self.scope.fetch_add(1, Ordering::Relaxed);
@@ -687,6 +687,111 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         self.tx
             .call_scalar(
                 "SELECT max(review_no) FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    // -- process / authority / revival probes ----------------------
+
+    fn review_identity(
+        &mut self,
+        workflow_review_id: Uuid,
+    ) -> Result<Option<(Uuid, Uuid)>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_review_id];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT r.source_task_id,w.root_task_id FROM forge_agent.coding_workflow_reviews r JOIN forge_agent.coding_workflows w USING(workflow_id) WHERE r.workflow_review_id=$1",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows.first().map(|row| {
+            (
+                row.get::<usize, Uuid>(0),
+                row.get::<usize, Uuid>(1),
+            )
+        }))
+    }
+
+    fn lock_task(&mut self, task_id: Uuid) -> Result<(), WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(task_id),
+        ];
+        self.many(
+            "SELECT id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND id=$2 FOR UPDATE",
+            &params,
+        )
+        .map(|_| ())
+    }
+
+    fn lease_valid(&mut self, action_id: Uuid) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&action_id];
+        self.tx
+            .call_bool(
+                "SELECT lease_expires_at>clock_timestamp() AS valid FROM forge_agent.coding_workflow_actions WHERE action_id=$1",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn action_lease_state(
+        &mut self,
+        action_id: Uuid,
+    ) -> Result<Option<(String, Option<String>, bool)>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&action_id];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT status,lease_token,lease_expires_at>clock_timestamp() AS valid FROM forge_agent.coding_workflow_actions WHERE action_id=$1 FOR UPDATE",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows.first().map(|row| {
+            (
+                row.get::<usize, String>(0),
+                row.get::<usize, Option<String>>(1),
+                row.get::<usize, Option<bool>>(2).unwrap_or(false),
+            )
+        }))
+    }
+
+    fn workflow_state(
+        &mut self,
+        workflow_id: Uuid,
+    ) -> Result<Option<(bool, String)>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT enabled,phase FROM forge_agent.coding_workflows WHERE workflow_id=$1",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows.first().map(|row| {
+            (
+                row.get::<usize, bool>(0),
+                row.get::<usize, String>(1),
+            )
+        }))
+    }
+
+    fn revival_live(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=$1 AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$1 AND status IN('queued','running','cancel_requested')) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND status IN('pending','leased')) AS live",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn operator_cancelled(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id) WHERE t.workflow_id=$1 AND e.event_kind IN('cancelled','cancel_requested') AND(e.payload->>'cause'='operator_request' OR e.payload->'actor'->>'kind'='operator')) AS by_person",
                 params,
             )
             .map_err(work_err)
