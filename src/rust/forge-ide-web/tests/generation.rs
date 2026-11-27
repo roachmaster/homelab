@@ -518,7 +518,9 @@ fn list_detail_navigation_is_a_reusable_typed_presentation_contract() {
     assert!(html.contains("data-list-detail=\"record-reader\""));
     assert!(html.contains("data-detail-focus=\"record-title\""));
     assert!(html.contains("data-list-scroll=\"record-viewport\""));
-    assert!(html.contains("id=\"record-title\" class=\"fg-selection-heading\" data-bind-text tabindex=\"-1\""));
+    assert!(html.contains(
+        "id=\"record-title\" class=\"fg-selection-heading\" data-bind-text tabindex=\"-1\""
+    ));
     assert!(!html.contains("onclick="));
     let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
     assert!(!main.contains("record-reader"));
@@ -566,7 +568,9 @@ fn agents_triage_discloses_evidence_behind_one_primary_summary() {
         "agents-history-panel",
         "agents-assignment-details",
     ] {
-        assert!(html.contains(&format!("<details id=\"{id}\" class=\"fg-disclosure\"><summary>")));
+        assert!(html.contains(&format!(
+            "<details id=\"{id}\" class=\"fg-disclosure\"><summary>"
+        )));
     }
     assert!(html.contains("id=\"agents-task-prompt\""));
     assert!(html.contains("id=\"agents-task-correlation\""));

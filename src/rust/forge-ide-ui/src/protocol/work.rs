@@ -1113,11 +1113,47 @@ pub struct WorkWorkflowProgress {
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub related_task_id: Option<String>,
+    /// Machine-readable escalation cause; escalated checkpoints only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalation_cause: Option<WorkEscalationCause>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkEscalationCause {
+    ReviewVerdict,
+    RetryExhausted,
+    BudgetExhausted,
+    GrantRevoked,
+    AgentStopped,
+    ReviewUnavailable,
+    VerificationFailed,
+    PublicationFailed,
+    CandidateRepeated,
+    Handoff,
+    Unclassified,
+}
+impl WorkEscalationCause {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ReviewVerdict => "reviewer escalated",
+            Self::RetryExhausted => "retry attempts exhausted",
+            Self::BudgetExhausted => "revision budget exhausted",
+            Self::GrantRevoked => "grant revoked",
+            Self::AgentStopped => "agent stopped",
+            Self::ReviewUnavailable => "review unavailable",
+            Self::VerificationFailed => "verification failed",
+            Self::PublicationFailed => "publication failed",
+            Self::CandidateRepeated => "identical candidate returned",
+            Self::Handoff => "handed off",
+            Self::Unclassified => "unclassified",
+        }
+    }
 }
 impl WorkWorkflowProgress {
     pub fn is_valid(&self) -> bool {
         valid_chat_id(&self.workflow_id)
             && self.related_task_id.as_deref().is_none_or(valid_chat_id)
+            && (self.escalation_cause.is_none() || self.phase == WorkWorkflowPhase::Escalated)
             && valid_chat_text(&self.summary, 4096)
             && self
                 .summary
@@ -2401,6 +2437,27 @@ mod tests {
             summary: "x".repeat(513),
         };
         assert!(!long.is_valid());
+    }
+    #[test]
+    fn escalated_workflow_progress_carries_optional_typed_cause() {
+        let json = r#"{"event_id":"77777777-7777-4777-8777-777777777779","correlation_id":"99999999-9999-4999-8999-999999999999","sequence":7,"kind":"checkpoint","created_at":"2026-11-26T09:00:00Z","workflow_progress":{"workflow_id":"66666666-6666-4666-8666-666666666666","phase":"escalated","summary":"The bounded main integration budget is exhausted.","escalation_cause":"budget_exhausted"}}"#;
+        let event: WorkLogEvent = serde_json::from_str(json).unwrap();
+        let progress = event.workflow_progress.as_ref().unwrap();
+        assert_eq!(
+            progress.escalation_cause,
+            Some(WorkEscalationCause::BudgetExhausted)
+        );
+        assert!(progress.is_valid());
+        assert!(serde_json::from_str::<WorkLogEvent>(
+            &json.replace("budget_exhausted", "sha_mismatch")
+        )
+        .is_err());
+        let old = json.replace(r#","escalation_cause":"budget_exhausted""#, "");
+        let old: WorkLogEvent = serde_json::from_str(&old).unwrap();
+        assert!(old.workflow_progress.unwrap().escalation_cause.is_none());
+        let mut wrong_phase = progress.clone();
+        wrong_phase.phase = WorkWorkflowPhase::Implement;
+        assert!(!wrong_phase.is_valid());
     }
     #[test]
     fn checkpoint_deadline_extension_is_optional_typed_and_bounded() {

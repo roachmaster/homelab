@@ -13,7 +13,7 @@ from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
 from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64,ExternalSourceIntegration
 from work_retry_policy import AGENT_RETRY_LIMIT,AGENT_RETRY_POLICY_ID,effective_limit
-from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause
+from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause, escalation_cause
 
 TERMINAL={'completed','cancelled','escalated'}
 MAX_NATIVE_VERDICT=65536
@@ -226,14 +226,14 @@ class ExternalWorkflowStore:
                      actor=COORDINATOR_ACTOR)
         cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
 
-    def _save(self,cursor,w,summary,*,phase=None,related_task_id=None):
+    def _save(self,cursor,w,summary,*,phase=None,related_task_id=None,details=None):
         if phase is not None:w['phase']=phase
         cursor.execute('''UPDATE forge_external_workflow.workflows SET active_task_id=%s,phase=%s,plan_revisions=%s,code_revisions=%s,
           enabled=%s,state=%s,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND revision=%s RETURNING revision''',
           (w['active_task_id'],w['phase'],w['plan_revisions'],w['code_revisions'],w['enabled'],Json(w['state']),w['workflow_id'],w['revision']))
         row=cursor.fetchone()
         if not row:raise Rejected(409,'result_mismatch')
-        w['revision']=row['revision'];self._event(cursor,w,summary,related_task_id)
+        w['revision']=row['revision'];self._event(cursor,w,summary,related_task_id,details=details)
 
     def _task(self,cursor,w,task_id=None):
         cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(%s,%s,%s) FOR UPDATE',(self.owner,w['project_alias'],task_id or w['active_task_id']))
@@ -812,7 +812,7 @@ class ExternalWorkflowStore:
         cursor.execute('UPDATE forge_external_workflow.reviews SET status=%s,reviewer_attempt_id=%s,reviewer_result_sha256=%s,verdict=%s,receipt=%s,updated_at=clock_timestamp() WHERE review_id=%s',('approved' if verdict['decision']=='approve' else 'revise' if verdict['decision']=='revise' else 'escalated',result['attempt_id'],result['sha256'],Json(verdict),Json(receipt),review['review_id']))
         self._accept_task(cursor,w,critic)
         self._resolve_retry(cursor,w,'reviewer_correction','review:'+str(review['review_id']),result['sha256'])
-        if verdict['decision']=='escalate':self._escalate(cursor,w,verdict['summary']);return True
+        if verdict['decision']=='escalate':self._escalate(cursor,w,verdict['summary'],cause='review_verdict');return True
         if verdict['decision']=='revise':return self._revise(cursor,w,review['target_kind'],verdict,source)
         self._accept_task(cursor,w,task)
         self._resolve_retry(cursor,w,'planning' if review['target_kind']=='plan' else 'review','review:'+str(review['review_id']),result['sha256'])
@@ -1021,7 +1021,7 @@ class ExternalWorkflowStore:
         self._save(cursor,w,'Main changed; selecting the new trusted source before bounded rebase.',phase='repair')
         return True
 
-    def _escalate(self,cursor,w,reason,*,cancel_children=True):
+    def _escalate(self,cursor,w,reason,*,cancel_children=True,cause=None):
         root=self._task(cursor,w,w['root_task_id'])
         if w['phase'] not in TERMINAL|{'merging'} and root['status'] in {'cancelled','cancel_requested'}:
             self._cancel_locked(cursor,w,'Root workflow task was cancelled.',actor=COORDINATOR_ACTOR,cause='workflow_cancelled')
@@ -1035,8 +1035,9 @@ class ExternalWorkflowStore:
         # Keep the complete review artifact separately and preserve whole codepoints.
         safe=''.join(c for c in reason if unicodedata.category(c)!='Cc' or c in '\r\n\t')
         bounded=safe.encode('utf-8')[:2048].decode('utf-8',errors='ignore')
+        code=escalation_cause(reason,cause)
         w['enabled']=False;w['state']['escalation_reason']=bounded
-        self._save(cursor,w,bounded,phase='escalated')
+        self._save(cursor,w,bounded,phase='escalated',details={'escalation_cause':code})
         self._resolve_open_retries(cursor,w)
 
     def _cleanup_action(self,cursor,w,action):

@@ -136,13 +136,17 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 self.assertTrue(fixture.service().workflow_worker._delivery_repair.run_once())
                 names=self.rows(cluster,"SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname<>'schema_migrations' ORDER BY 1,2")
                 owners=dict(self.rows(cluster,'SELECT oid, rolname FROM pg_authid'))
+                # Preserve only relations present before upgrade; the strict
+                # current verifier checks the new M32-M50 authority tables.
+                original_acl_relations=[schema+'.'+name for schema,name in names]
+                original_acl_relations.append('forge_agent.schema_migrations')
                 def snapshot():
                     return {
                         'rows':{schema+'.'+name:self.rows(cluster,"SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM "+schema+'.'+name+' t') for schema,name in names},
                         'migration_history':self.rows(cluster,'SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=31 ORDER BY version'),
                         'credentials':self.rows(cluster,'SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r'),
                         'defaults':self.rows(cluster,'SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
-                        'old_relation_acl':[(schema,name,owner,_normalize_null_acl(relacl,owners.get(owner))) for schema,name,owner,relacl in self.rows(cluster,"SELECT n.nspname,c.relname,c.relowner,c.relacl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname NOT IN('delivery_lineage_handoffs','agent_branch_state','jenkins_stage_results','jenkins_stage_log_chunks','coding_identity_catalog','coding_task_identities','coding_attempt_deadline_extensions') AND NOT(n.nspname='forge_external_workflow' AND c.relname='plan_approve_overrides') ORDER BY 1,2")],
+                        'old_relation_acl':[(schema,name,owner,_normalize_null_acl(relacl,owners.get(owner))) for schema,name,owner,relacl in self.rows(cluster,"SELECT n.nspname,c.relname,c.relowner,c.relacl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND n.nspname||'.'||c.relname=ANY(%s) ORDER BY 1,2",(original_acl_relations,))],
                         'hba':hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest(),
                     }
                 before=snapshot()

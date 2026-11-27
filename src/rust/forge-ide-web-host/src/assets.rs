@@ -464,7 +464,7 @@ impl Assets {
         };
         let m: Manifest = serde_json::from_slice(&read("manifest.json", 16384)?)
             .map_err(|_| HostError::Configuration("asset manifest"))?;
-        if m.format_version != 1 || m.abi_version != 15 || m.files.len() != 5 {
+        if m.format_version != 1 || m.abi_version != 16 || m.files.len() != 5 {
             return Err(HostError::Configuration("asset versions/count"));
         }
         let mut loaded = BTreeMap::new();
@@ -648,7 +648,7 @@ mod tests {
             fs::write(
                 path.join("manifest.json"),
                 serde_json::to_vec(
-                    &json!({"format_version": 1, "abi_version": 15, "files": files}),
+                    &json!({"format_version": 1, "abi_version": 16, "files": files}),
                 )
                 .unwrap(),
             )
@@ -711,6 +711,17 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn current_ui_abi_assets_are_admitted_with_their_hashes_verified() {
+        let bundle = Bundle::new();
+        assert!(Assets::load(&bundle.0, None).is_ok());
+        fs::write(bundle.0.join("app.wasm"), b"modified bytes").unwrap();
+        assert!(matches!(
+            Assets::load(&bundle.0, None),
+            Err(HostError::Configuration("asset hash/duplicate"))
+        ));
     }
 
     #[test]

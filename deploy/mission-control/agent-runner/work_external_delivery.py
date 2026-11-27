@@ -106,6 +106,18 @@ def digest(value):
     return value
 
 
+# The Jenkins gate is a named contract '<profile>:<branch_scope>' (mirrors the
+# verifier's GATE_CONTRACT_RE); a legacy 64-hex manifest digest is still accepted.
+GATE_CONTRACT = re.compile(
+    r'forge-sdlc-jenkins-v[1-3]:(?:main|detached|branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?)')
+
+
+def gate_ref(value):
+    if not isinstance(value, str) or not (DIGEST.fullmatch(value) or GATE_CONTRACT.fullmatch(value)):
+        raise ValueError('Invalid delivery gate')
+    return value
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
 
@@ -201,8 +213,11 @@ def protected_delivery_gate(path, profile=PROFILE):
             or path.rsplit('/', 1)[-1] == 'work_external_delivery.py')
 
 
-def jenkins_gate_manifest(config, files, branch_scope=None):
-    """Compute the source map and operator-owned installed verifier identity."""
+def jenkins_gate_manifest(config, files, branch_scope=None, *, legacy_digest=False):
+    """Compute the source map and operator-owned installed verifier identity.
+
+    legacy_digest=True returns the old canonical-policy digest instead of the
+    contract name; only historical repair proofs need it."""
     contract = contract_for_config(config)
     protected = {path: value for path, value in files.items()
                  if protected_delivery_gate(path, contract.profile)}
@@ -220,7 +235,12 @@ def jenkins_gate_manifest(config, files, branch_scope=None):
         policy['phase_plan'] = [{'phase_id': phase.phase_id, 'kind': phase.kind,
             'argv': list(phase.argv), 'logical_gate': phase.logical_gate}
             for phase in plan.phases]
-    gate = hashlib.sha256(canonical(policy)).hexdigest()
+    if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} and not legacy_digest:
+        # Producers name the gate contract instead of hashing canonical policy
+        # JSON; the verifier still pins verifier_sha256 and the candidate source.
+        gate = contract.profile + ':' + branch_scope
+    else:
+        gate = hashlib.sha256(canonical(policy)).hexdigest()
     return source_digest, helper_digest, gate
 
 
@@ -756,7 +776,7 @@ class TrustedDeliveryPort:
     def _parameters(self, request):
         return dict(zip(PARAMETERS, [uid(request['action_id']), uid(request['workflow_id']),
             sha(request['candidate_commit']), sha(request['candidate_tree']), sha(request['integration_base']),
-            digest(request['gate_manifest_sha256']), uid(request['correlation_id'])]))
+            gate_ref(request['gate_manifest_sha256']), uid(request['correlation_id'])]))
 
     def _assert_content_policy(self,request,plan):
         identity_path=self.config.state_root/'actions'/uid(request['prepare_action_id'])/'identity-manifest.json'
@@ -831,7 +851,7 @@ class TrustedDeliveryPort:
             'workflow_id': uid(request['workflow_id']), 'project_alias': request['project_alias'],
             'candidate_commit': candidate_commit, 'candidate_tree': sha(request['candidate_tree']),
             'expected_main': expected_main, 'branch_scope': branch_scope,
-            'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
+            'gate_manifest_sha256': gate_ref(request['gate_manifest_sha256']),
             'bundle_sha256': hashlib.sha256(bundle).hexdigest(), 'verification_profile': contract.profile,
             'correlation_id': uid(request['correlation_id'])}
         if (path / 'request.json').exists():

@@ -46,7 +46,13 @@ pub fn render_markdown(text: &str) -> Option<String> {
     render_with_limit(text, MAX_RENDERED_HTML_BYTES)
 }
 
-pub(crate) fn render_markdown_file(text: &str) -> Option<String> {
+/// Render a Markdown document or verified text file to sanitized HTML.
+///
+/// Uses the same escaping, tags and external-only links as [`render_markdown`],
+/// with separate bounds: 64 KiB of UTF-8 input, 128 KiB of HTML output and
+/// 4 MiB of inline lookahead work. Returns [`None`] when any bound is exceeded.
+/// Blank input renders an empty string. This pure renderer performs no file I/O.
+pub fn render_markdown_file(text: &str) -> Option<String> {
     if text.len() > MAX_MARKDOWN_FILE_BYTES {
         return None;
     }

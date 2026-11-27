@@ -14,7 +14,7 @@ from psycopg2.extras import Json, RealDictCursor, register_uuid
 from work_retry_policy import AGENT_RETRY_LIMIT
 from queue_store import Rejected
 from work_failure_cause import CAUSE_SUMMARY_BYTES, FAILURE_CAUSES
-from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause
+from work_events import COORDINATOR_ACTOR, ESCALATION_CAUSES, insert_event, require_actor, require_cancel_cause
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
     DEFAULT_MAX_PENDING,
@@ -118,7 +118,7 @@ def _public_external_progress(payload, binding):
 
 def _public_workflow_progress(payload, workflow, related_allowed=False):
     if (not isinstance(payload, dict)
-            or not ({"workflow_id", "phase", "summary"} <= payload.keys() - {"actor"} <= {"workflow_id", "phase", "summary", "related_task_id"})
+            or not ({"workflow_id", "phase", "summary"} <= payload.keys() - {"actor"} <= {"workflow_id", "phase", "summary", "related_task_id", "escalation_cause"})
             or not _projection_actor(payload, "coordinator") or not isinstance(workflow, dict)):
         return None
     try:
@@ -126,7 +126,9 @@ def _public_workflow_progress(payload, workflow, related_allowed=False):
         summary = payload["summary"]
         related = payload.get("related_task_id")
         related_valid = related is None or (related_allowed and isinstance(related,str) and str(UUID(related)) == related)
-        valid = (related_valid and payload["workflow_id"] == identity == workflow["workflow_id"]
+        cause = payload.get("escalation_cause")
+        cause_valid = cause is None or (payload["phase"] == "escalated" and cause in ESCALATION_CAUSES)
+        valid = (related_valid and cause_valid and payload["workflow_id"] == identity == workflow["workflow_id"]
                  and payload["phase"] in {"plan", "plan_review", "plan_revision", "implement", "checks", "code_review", "repair", "publishing", "hosted", "merging", "completed", "cancelled", "escalated"}
                  and isinstance(summary, str) and bool(summary.strip()) and len(summary.encode("utf-8")) <= 4096
                  and all(unicodedata.category(c) != "Cc" or c in "\n\t" for c in summary))
@@ -137,6 +139,8 @@ def _public_workflow_progress(payload, workflow, related_allowed=False):
     projected = {"workflow_id": payload["workflow_id"], "phase": payload["phase"], "summary": summary}
     if related is not None:
         projected["related_task_id"] = related
+    if cause is not None:
+        projected["escalation_cause"] = cause
     return projected
 
 

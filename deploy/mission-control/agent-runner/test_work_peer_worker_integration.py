@@ -135,11 +135,25 @@ class PeerWorkerIntegrationTest(unittest.TestCase):
             self.assertEqual(queued["candidate_commit"], runner.targets[-1]["candidate_commit"])
             class GitHub(GitHubGitFixture):
                 published = False
-                def find(self, _job, _head):
+                def find(self, job, head, *, expected_pr_url=None):
+                    if head != self.head or expected_pr_url not in (None, self.job["pr_url"]):
+                        raise AssertionError("PR lookup changed the exact candidate or URL")
                     return self.job["pr_url"] if self.published else None
-                def create(self, _job, _head):
+                def list_open(self, job):
+                    if not self.published:
+                        return []
+                    return [self._api("GET", "/pulls/1")]
+                def create(self, job, head):
+                    if head != self.head:
+                        raise AssertionError("PR creation changed the exact candidate")
+                    self.branch = job["branch_name"]
                     self.published = True
                     return self.job["pr_url"]
+                def _api(self, method, path, payload=None):
+                    value = super()._api(method, path, payload)
+                    if method == "GET" and "/pulls/" in path:
+                        value["head"]["ref"] = self.branch
+                    return value
             github = GitHub(publication, bare, {**queued, "pr_url": "https://github.com/fixture/project/pull/1"}, queued["candidate_commit"])
             head = queued["candidate_commit"]
             class Hosted:

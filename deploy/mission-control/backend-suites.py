@@ -39,6 +39,7 @@ SUITES = (
     ("deploy/mission-control/agent-driver", "test_*.py"),
     ("deploy/mission-control/agent-runner", "test_*.py"),
     ("deploy/mission-control/studio", "test_*.py"),
+    ("deploy/mission-control/mcp-postgres", "test_*.py"),
 )
 
 # The per-suite runner, run as a child process per suite so each suite

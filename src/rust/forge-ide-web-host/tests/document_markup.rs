@@ -53,10 +53,37 @@ fn document_adaptation_preserves_literal_examples_and_the_untrusted_policy() {
 
 #[test]
 fn document_markers_and_rendering_remain_bounded() {
+    assert!(markup::render_document_markdown("").is_none());
+    assert!(markup::render_document_markdown(" \n\t\n").is_none());
     assert!(
         markup::render_document_markdown("[Reserved](https://forge-docs.invalid/portal/0/)")
             .is_none()
     );
     assert!(markup::render_document_markdown(&"a".repeat(64 * 1024 + 1)).is_none());
-    assert!(markup::render_document_markdown(&"&".repeat(8_000)).is_none());
+    assert!(markup::render_document_markdown(&"&".repeat(64 * 1024)).is_none());
+}
+
+#[test]
+fn embedded_implementation_document_renders_completely_with_file_bounds() {
+    let markdown = include_str!("../../../../docs/design/implementation-status.md");
+    let html = markup::render_document_markdown(markdown).unwrap();
+    assert!(html.len() > 32 * 1024);
+    assert!(html.len() <= 128 * 1024);
+    assert!(html.starts_with("<h1>Current Forge implementation</h1>"));
+    assert!(html.contains("<h2>Source and verification</h2>"));
+    assert!(html.contains("rather than a permanent claim that every future revision passes."));
+    assert!(html.contains("href=\"/design/forge-workers\""));
+    assert!(!html.contains("target=\"_blank\""));
+    assert!(!html.contains("forge-docs.invalid"));
+}
+
+#[test]
+fn document_budget_does_not_raise_reply_or_inline_work_limits() {
+    let text = "x".repeat(36 * 1024);
+    assert_eq!(
+        markup::render_document_markdown(&text).unwrap(),
+        format!("<p>{text}</p>")
+    );
+    assert!(forge_ide_ui::render_markdown(&text).is_none());
+    assert!(markup::render_document_markdown(&"[".repeat(64 * 1024)).is_none());
 }

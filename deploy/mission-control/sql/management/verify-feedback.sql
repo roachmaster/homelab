@@ -22,7 +22,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
  -- M30 verifies every widened expression/default before normalizing only
  -- those exact numeric allowance catalog fields for predecessor verification.
@@ -70,7 +70,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
  -- M30 verifies every widened expression/default before normalizing only
  -- those exact numeric allowance catalog fields for predecessor verification.
@@ -123,7 +123,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
  -- M30 verifies every widened expression/default before normalizing only
  -- those exact numeric allowance catalog fields for predecessor verification.
@@ -171,7 +171,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
  -- M30 verifies every widened expression/default before normalizing only
  -- those exact numeric allowance catalog fields for predecessor verification.
@@ -219,7 +219,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
  -- M30 verifies every widened expression/default before normalizing only
  -- those exact numeric allowance catalog fields for predecessor verification.
@@ -267,7 +267,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
  -- M21 additions are verified exactly before removing only those additions
  -- from this frozen historical snapshot. Every other historical field survives.
@@ -332,7 +332,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
   -- M23 exact guards and native capability extension were checked by
   -- verify-agy-unattended.sql before projecting this historical snapshot.
@@ -389,7 +389,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
  -- M30 verifies every widened expression/default before normalizing only
  -- those exact numeric allowance catalog fields for predecessor verification.
@@ -437,7 +437,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF expected.name=ANY(ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts']) THEN
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
-     WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+     WHERE NOT (entry IN (to_jsonb('muse_events=r/forge_agent_owner'::text),to_jsonb('homelab_mcp=r/forge_agent_owner'::text)))),'[]'::jsonb));
  END IF;
  -- M30 verifies every widened expression/default before normalizing only
  -- those exact numeric allowance catalog fields for predecessor verification.
