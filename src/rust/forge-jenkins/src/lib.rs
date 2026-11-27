@@ -16,6 +16,8 @@ pub mod emitter;
 pub mod events;
 mod observation;
 pub mod store;
+#[cfg(feature = "provisioning")]
+pub mod provisioning;
 pub mod strict_json;
 
 #[cfg(feature = "http")]
