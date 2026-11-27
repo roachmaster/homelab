@@ -33,7 +33,7 @@ PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects", "identity_protocol"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects", "identity_protocol", "workflow_policy_compatibility"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
 PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled", "backup_models", "quota_handoff_profile", "branch"}
 
@@ -437,8 +437,11 @@ class WorkConfig:
     delivery_enabled: bool = False
     delivery_repair_projects: frozenset[str] = field(default_factory=frozenset)
     identity_protocol: str = 'legacy-v1'
+    workflow_policy_compatibility: str = 'strict-defaults-v1'
 
     def __post_init__(self):
+        if self.workflow_policy_compatibility not in ('strict-defaults-v1','forge-frozen-workflow-roles-v1'):
+            raise ValueError('Invalid workflow policy compatibility')
         if self.identity_protocol not in ('legacy-v1','content-v2'):
             raise ValueError('Invalid artifact identity protocol')
         repair_policy=freeze_repair_policy(self.repair_policy)
@@ -589,6 +592,7 @@ def parse_work_config(raw):
         delivery_enabled=raw.get('delivery_enabled',False),
         delivery_repair_projects=raw.get('delivery_repair_projects',()),
         identity_protocol=raw.get('identity_protocol','legacy-v1'),
+        workflow_policy_compatibility=raw.get('workflow_policy_compatibility','strict-defaults-v1'),
     )
 
 

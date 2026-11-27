@@ -106,6 +106,26 @@ class NativeReviewerGrantScope:
         return scope()
 
 
+class NativeRetryEvidence:
+    """Private read-only history port, acquired only by the root operator CLI.
+
+    The application role intentionally cannot enumerate the retry tables.
+    Never inject this administrative reader into the HTTP service.
+    """
+    def __init__(self, connect_factory):
+        self._connect = connect_factory
+
+    def read(self, owner, project, workflow_id):
+        from contextlib import closing
+        with closing(self._connect()) as connection:
+            with connection, connection.cursor() as cursor:
+                cursor.execute('SET TRANSACTION READ ONLY')
+                cursor.execute('''SELECT coalesce(jsonb_agg(to_jsonb(e) ORDER BY event_id),'[]'::jsonb)
+                  FROM forge_agent.coding_retry_events e WHERE owner_id=%s AND project_alias=%s
+                  AND scope_kind='native_workflow' AND scope_id=%s''', (owner,project,workflow_id))
+                return cursor.fetchone()[0]
+
+
 def revive_main(argv):
     """Operator entry point for the guarded revival of one disabled+escalated native workflow.
 
@@ -133,6 +153,7 @@ def revive_main(argv):
 
 def main():
     import sys
+    if sys.argv[1:2]==['policy-continuation']:raise SystemExit(continuation_main(sys.argv[2:]))
     if sys.argv[1:2]==['revive']:raise SystemExit(revive_main(sys.argv[2:]))
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config',required=True)
@@ -157,6 +178,35 @@ def main():
     service=WorkServiceFactory(load_work_config(args.config),lambda:peer_connect('forge_agent'),external_factory=lambda config:ExternalWorkProviderFactory(config,recovery_grant_provider=grants).create()).create()
     if service is None:raise RuntimeError('Configured external service is unavailable')
     print(json.dumps(service.recover_external_review_infrastructure(command),sort_keys=True))
+
+def continuation_main(argv):
+    """Inspect first, then explicitly execute an exact source-bound fresh Plan."""
+    parser=argparse.ArgumentParser(description=continuation_main.__doc__)
+    parser.add_argument('--config',required=True)
+    parser.add_argument('--project',required=True)
+    parser.add_argument('--workflow',type=UUID,required=True)
+    parser.add_argument('--deployed-fix-revision',required=True)
+    parser.add_argument('--source-sha256')
+    parser.add_argument('--idempotency-key',type=UUID)
+    parser.add_argument('--note')
+    parser.add_argument('--execute',action='store_true')
+    args=parser.parse_args(argv)
+    if os.geteuid()!=0:raise RuntimeError('Private incident recovery requires root')
+    verified_deployed_fix(__file__,args.deployed_fix_revision)
+    from work_config import load_work_config
+    from work_api import WorkServiceFactory
+    from work_workflow_continuation import WorkflowContinuation,PolicyIncidentContinuation
+    service=WorkServiceFactory(load_work_config(args.config),lambda:peer_connect('forge_agent')).create()
+    if service is None or service.workflow_worker is None:raise RuntimeError('Native workflow coordinator is unavailable')
+    port=WorkflowContinuation(service.workflow_worker.store,NativeRetryEvidence(lambda:peer_connect('postgres')))
+    if args.execute:
+        command=PolicyIncidentContinuation(args.project,args.workflow,args.source_sha256,args.idempotency_key,args.note)
+        result=port.execute(command)
+    else:
+        result=port.inspect(args.project,args.workflow)
+    print(json.dumps(result,sort_keys=True))
+    return 0
+
 
 if __name__=='__main__':
     import work_external_recovery as _canonical

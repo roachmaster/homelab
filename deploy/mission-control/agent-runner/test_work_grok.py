@@ -66,6 +66,25 @@ class GrokParserTest(unittest.TestCase):
  def test_missing_prompt_bucket_never_invents_full_input(self):
   value=SPEND.copy();del value['cache_creation_input_tokens']
   u=normalize_attempt_usage('grok',value);self.assertIsNone(u['input_tokens']);self.assertEqual(u['coverage'],'partial')
+ def test_auto_compaction_metadata_does_not_kill_a_long_run_or_supply_completion(self):
+  for kind in ('auto_compact_started','auto_compact_progress','auto_compact_finished'):
+   event={'type':kind,'tokens_used':206251,'context_window':256000,'percentage':81,
+          'reason':'fixture-context-pressure','usage':{'total_tokens':999999}}
+   outcome=parse([event,*records()])
+   self.assertEqual(outcome.status,'awaiting_review')
+   self.assertEqual(outcome.text,'Final answer')
+   self.assertEqual(outcome.usage,SPEND)
+   self.assertEqual(parse([event]).status,'failed')
+  with self.assertRaises(ExecutionError):parse([{'type':'auto_compact_'+'x'*49},*records()])
+  with self.assertRaises(ExecutionError):parse([{'type':'unknown_control'},*records()])
+  with self.assertRaises(ExecutionError):parse([*records(),{'type':'auto_compact_started'}])
+ def test_max_turns_advisory_is_never_completion_and_retains_bound_final_usage(self):
+  self.assertEqual(parse([{'type':'max_turns_reached'}]).status,'failed')
+  outcome=parse([{'type':'max_turns_reached'},*records()])
+  self.assertEqual(outcome.status,'failed')
+  self.assertEqual(outcome.usage,SPEND)
+  self.assertEqual(outcome.text,'')
+
 class GrokBoundaryTest(unittest.TestCase):
  def raw(self,root,enabled=None):
   raw=raw_config(root);p={'backend':'grok','model':'fixture-model','modes':['plan','review','implement']}

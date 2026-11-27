@@ -200,6 +200,7 @@ class FeedbackRecoveryFactoryTest(unittest.TestCase):
 
     def test_selected_ready_provider_is_injected_without_effects(self):
         config = Mock()
+        config.workflow_policy_compatibility = 'strict-defaults-v1'
         factory = Mock()
         selected = Mock()
         factory.return_value.create.return_value = selected

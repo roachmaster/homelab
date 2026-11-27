@@ -21,6 +21,8 @@ from work_config import PinnedRecipe,sha256_canonical,prepare_title
 from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_matches
 from work_store import ADVISORY_LOCK_SALT
 from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
+from work_workflow_policy import WorkflowPolicyFactory
+from work_workflow_continuation import retained_sources, is_retained_source
 from work_events import COORDINATOR_ACTOR, insert_event, operator_actor, escalation_cause
 import unicodedata
 
@@ -138,6 +140,7 @@ class WorkflowStore:
         self.peer_feedback_recovery = None
         self.superseding_review = None
         self.execution_policy = None
+        self.policy_compatibility = None
         self._retry_allowance_position = None
         self._manual_allowance_position = None
 
@@ -179,13 +182,25 @@ class WorkflowStore:
         fence=getattr(type(self.store),'policy_drifted',None)
         drifted=fence(self.store,workflow['workflow_id'],current) if fence is not None and 'workflow_id' in workflow else None
         if drifted is None:drifted=current['policy_digest']!=workflow['policy_digest']
-        if drifted and not budget_compatible_snapshot(workflow['snapshot'],current):
-            raise Rejected(403,'denied')
         if not {'plan','review','implement'}<=self.config.allowed_modes:
             raise Rejected(403,'denied')
-        if self.execution_policy is not None:
-            self.execution_policy.effective(workflow)
+        # Validate the durable overlay before comparing future admission defaults.
+        effective = self._snapshot(workflow)
+        if (drifted and not budget_compatible_snapshot(workflow['snapshot'],current)
+                and (self.policy_compatibility is None
+                    or self.policy_compatibility.select(workflow['snapshot'],current,effective) is None)):
+            raise Rejected(403,'denied')
         return policy
+
+    def _allowance_snapshot(self,workflow,policy):
+        current=policy.snapshot(self.catalog,self.config.repair_policy)
+        if budget_compatible_snapshot(workflow['snapshot'],current):
+            return current
+        selected=(self.policy_compatibility.select(workflow['snapshot'],current,self._snapshot(workflow))
+                  if self.policy_compatibility is not None else None)
+        if selected is None:
+            raise Rejected(403,'denied')
+        return selected
 
     def _snapshot(self,workflow):
         """Select future execution only; historical authority remains in snapshot."""
@@ -194,7 +209,7 @@ class WorkflowStore:
 
     def _retry_limit(self,workflow,key):
         policy=self._current_policy(workflow)
-        return effective_limit(workflow['snapshot'],key,policy.snapshot(self.catalog,self.config.repair_policy))
+        return effective_limit(workflow['snapshot'],key,self._allowance_snapshot(workflow,policy))
 
     def _repair_limit(self,workflow,key):
         self._current_policy(workflow)
@@ -280,7 +295,11 @@ class WorkflowStore:
         if not cursor.fetchone()['allowed']:raise Rejected(403,'denied')
 
     def _phase(self,cursor,w,phase):
-        cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND enabled AND phase NOT IN('completed','cancelled','escalated') AND phase IS DISTINCT FROM %s",(phase,w['workflow_id'],phase))
+        cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND enabled AND phase NOT IN('completed','cancelled','escalated') AND phase IS DISTINCT FROM %s RETURNING root_task_id",(phase,w['workflow_id'],phase))
+        changed=cursor.fetchone()
+        if changed:
+            insert_event(cursor,self.store.owner,w['project_alias'],changed['root_task_id'],'checkpoint',
+                {'workflow_id':str(w['workflow_id']),'phase':phase,'summary':'Workflow entered '+phase.replace('_',' ')+'.'},actor=COORDINATOR_ACTOR)
 
     def _retry_scope(self,w):
         from work_retry_events import RetryScope
@@ -299,13 +318,15 @@ class WorkflowStore:
                          {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
                           'workflow_id':str(w['workflow_id'])},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
+        insert_event(cursor,self.store.owner,w['project_alias'],w['root_task_id'],'checkpoint',
+            {'workflow_id':str(w['workflow_id']),'phase':'cancelled','summary':reason},actor=COORDINATOR_ACTOR)
         if self.retry_events is not None:
             self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
 
     def _escalate(self,cursor,w,reason,*,cause=None):
         code=escalation_cause(reason,cause)
         reason=reason[:2048]
-        cursor.execute("SELECT status FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],w['root_task_id']))
+        cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],w['root_task_id']))
         root=cursor.fetchone()
         cursor.execute("SELECT phase FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(w['workflow_id'],))
         current=cursor.fetchone()
@@ -315,7 +336,8 @@ class WorkflowStore:
                 self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
             return
         if (current_phase not in {'completed','cancelled','escalated'} and root is not None and root['status'] in {'cancelled','cancel_requested'}
-                and revival_floor(cursor,w['workflow_id']) is None):
+                and revival_floor(cursor,w['workflow_id']) is None
+                and not is_retained_source(root,retained_sources(cursor,w['workflow_id']))):
             self._cancel_workflow(cursor,w,reason)
             return
         cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=false,phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
@@ -331,6 +353,8 @@ class WorkflowStore:
                          {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
                           'workflow_id':str(w['workflow_id']),'escalation_cause':code},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
+        insert_event(cursor,self.store.owner,w['project_alias'],w['root_task_id'],'checkpoint',
+            {'workflow_id':str(w['workflow_id']),'phase':'escalated','summary':reason,'escalation_cause':code},actor=COORDINATOR_ACTOR)
         if self.retry_events is not None:
             self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
 
@@ -1020,10 +1044,14 @@ class WorkflowStore:
             tasks=cursor.fetchall()
             root=next((t for t in tasks if t['id']==w['root_task_id']),None)
             floor=revival_floor(cursor,w['workflow_id'])
+            retained=retained_sources(cursor,w['workflow_id'])
+            if any(not any(is_retained_source(t,[binding]) for t in tasks) for binding in retained):
+                self._escalate(cursor,w,'Incident continuation source could not be verified; reconciliation is required.')
+                continue
             # A guarded revival keeps earlier cancelled tasks terminal; they are
             # history, not a reason to cancel or escalate the revived workflow.
-            tasks=[t for t in tasks if not superseded_by_revival(t,floor)]
-            if root is not None and root['status'] in {'cancelled','cancel_requested'} and floor is None:
+            tasks=[t for t in tasks if not superseded_by_revival(t,floor) and not is_retained_source(t,retained)]
+            if root is not None and root['status'] in {'cancelled','cancel_requested'} and floor is None and not is_retained_source(root,retained):
                 self._cancel_workflow(cursor,w,'Workflow root task was cancelled.')
                 continue
             try:self._current_policy(w)
@@ -1082,6 +1110,7 @@ class WorkflowStore:
               JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.repair_task_id IS NULL AND q.owner_decision->>'closed_by'='peer_reviewer'
               AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha ORDER BY h.observed_at DESC,h.observation_id DESC LIMIT 1) IS TRUE ORDER BY p.created_at DESC""",(w['workflow_id'],))
             for p in cursor.fetchall():
+                if any(binding['id']==str(p['task_id']) for binding in retained):continue
                 if not w['snapshot']['auto_merge']:continue
                 cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,source_publication_id) VALUES(%s,%s,%s,'merge',%s,%s) ON CONFLICT DO NOTHING",(w['workflow_id'],self.store.owner,w['project_alias'],str(p['publication_id'])+':'+p['commit_sha'],p['publication_id']))
                 cursor.execute("UPDATE forge_agent.coding_workflows SET phase='merging',updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('cancelled','escalated','completed')",(w['workflow_id'],))
@@ -1282,7 +1311,15 @@ class WorkflowStore:
                 if review['target_kind']=='code' and not event_exhausted:
                     self.retry_events.bind_review(cursor,review['source_review_id'],retry_event['event_id'],'peer-revision.'+source)
 
-        if decision=='escalate' or event_exhausted or(review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
+        incident_budget_spent=False
+        if decision=='revise' and retained_sources(cursor,w['workflow_id']):
+            spent=w['plan_revisions']
+            if review['target_kind']=='code':
+                cursor.execute('SELECT repair_rounds FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
+                    (self.store.owner,w['project_alias'],w['root_task_id']))
+                budget=cursor.fetchone();spent=budget['repair_rounds'] if budget else 0
+            incident_budget_spent=spent>=self._retry_limit(w,'max_plan_revisions' if review['target_kind']=='plan' else 'max_code_revisions')
+        if decision=='escalate' or event_exhausted or incident_budget_spent or(review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
             self._escalate(cursor,w,verdict['summary'],cause='review_verdict' if decision=='escalate' else 'retry_exhausted' if event_exhausted else 'budget_exhausted')
             receipt={'status':'escalated','workflow_id':str(w['workflow_id'])}
         elif review['target_kind']=='plan':
@@ -1384,7 +1421,7 @@ class WorkflowCoordinatorFactory:
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,execution_policy_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,execution_policy_factory=None,policy_compatibility_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
         self.config,self.catalog,self.store=config,catalog,store
         self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
         self.reviewer_correction_factory=reviewer_correction_factory
@@ -1392,6 +1429,7 @@ class WorkflowStoreFactory:
         self.peer_feedback_recovery_factory=peer_feedback_recovery_factory
         self.superseding_review_factory=superseding_review_factory
         self.execution_policy_factory=execution_policy_factory
+        self.policy_compatibility_factory=policy_compatibility_factory
     def create(self):
         from work_reviewer_correction import ReviewerCorrectionFactory
         from work_context_recovery import FeedbackRecoveryFactory
@@ -1399,6 +1437,9 @@ class WorkflowStoreFactory:
         from work_superseding_review import SupersedingReviewFactory
         from work_provider_model_route import ExecutionPolicyFactory
         flow=WorkflowStore(self.config,self.catalog,self.store,retry_events=self.retry_events)
+        flow.policy_compatibility=(self.policy_compatibility_factory or WorkflowPolicyFactory)(self.config,self.catalog).create()
+        if not callable(getattr(flow.policy_compatibility,'select',None)):
+            raise TypeError('Workflow policy compatibility requires a ready selector')
         flow.execution_policy=(self.execution_policy_factory or ExecutionPolicyFactory)(flow).create()
         if not all(callable(getattr(flow.execution_policy,name,None))for name in('effective','run_once','handles_quota')):
             raise TypeError('Execution policy requires a ready generation selection port')

@@ -1,3 +1,95 @@
+# Current: Event-stream autonomy defects — 2026-11-27
+
+User requests root-cause fixes for repeated Needs attention and tasks failing to
+reach main. Codex owns feature/codex; one writer. Portal attribution from PR31
+is already deployed (main4db1bdb3, ABI18, Jenkins110 all46 checks), superseding
+its pending rollout checkpoint below.
+
+Live attention12: eight disabled policy-escalated workflows from the Nov26
+AGY/default-to-Grok change, two genuine agent failures, two obsolete standalone
+connectivity diagnostics. Active0/history50/all62. No retries or state rewrites
+have been performed in this investigation.
+
+Core corrections implemented on feature/codex: explicit opt-in
+forge-frozen-workflow-roles-v1 compatibility, validating current enabled effective
+recipes and preserving non-role controls; default selector remains legacy strict.
+Grok's documented auto_compact_* advisory namespace no longer becomes malformed
+output, while final session/accounting authority remains end/error only and a
+max-turns advisory cannot complete work. Antigravity's observed Third-party quota
+reached diagnostic now takes the existing quota path; generic429 still does not.
+106 focused tests passed, including disposable PostgreSQL handoff/default-rollover
+through independent review/publication/hosted checks/merge and real grant revocation.
+No live deployment or incident recovery is claimed yet.
+
+Source-bound recovery now has a private typed policy-continuation port/CLI.
+It queues a fresh Plan in the SAME workflow and retains the exact old task
+bindings in an immutable action receipt. Replay ignores only those validated
+sources; later source changes require reconciliation. No inherited approvals.
+Current grants/readiness, stopped reconciled attempts, explicit feature-branch
+assignment and quiescent checks are required. Any existing publication requires
+separate reconciliation. Root/task locks match cancellation. Full historical
+retry evidence is read through an operator-only administrative read port, not
+new application grants. Resolved-but-exhausted retry histories are refused.
+Ten real PostgreSQL continuation tests cover fresh independent
+Plan approval, retained original rows, partial spent event history and a
+resolved used20 event refusal, native event links/foreign-link rejection and
+retained planning allowance across new event generations. Legacy revival six
+tests remain green. Final combined qualification:126 tests passed, zero skips,
+178.670s, log /mnt/data/homelab-build/event-autonomy-qualified-20261127.log.
+This includes real Git Codex author feature/codex and detached review snapshots;
+the review-only worker rejects an implementation recipe before workspace/spawn.
+
+Native task event projection previously bound workflow explanations only for
+external database workflows. It now validates native membership too, with
+same-owner/project/workflow child links. Coordinator phase/escalation changes
+and fresh-Plan recovery write readable checkpoints using the existing ABI18
+format. No portal rebuild, migration, historical rewrite or invented cause.
+
+Live configuration gap discovered during qualification: current publisher
+worker config omits codex-author even though eight stranded workflows handed
+off to that author. Only Grok's feature branch is configured end to end.
+Qualify author/reviewer/publisher together before any incident execution;
+do not relax SQL branch uniqueness. Codex-primary is explicitly restricted to
+review-only detached snapshots, excluded from the publisher's publishing
+profiles. Its legacy metadata is retained; it cannot develop or publish there.
+Codex-author is the qualified feature/codex publishing identity. API, author,
+review-only worker, AGY, Grok and publisher configs are staged but NOT activated
+under /etc/homelab-forge/coding-worker/event-autonomy-20261127-*.json.
+
+PR33 opened for b602bc851+1bbf68af6. Jenkins111 stopped at preflight: two
+existing effect-free composition tests supplied None/a test-double without the
+new selector. Corrected absent config to legacy strict and supplied explicit
+strict selection in the independent factory-substitution fixture. The exact
+local ci-preflight now passes, zero skips (runner fast inventory254). A fresh
+successor candidate/CI operation is required; Jenkins111 failure is preserved.
+No activation/recovery has occurred. The first immutable source staging under
+/opt/homelab-forge/releases/event-autonomy-1bbf68af6265 is not a live deployment.
+
+Jenkins112 passed checks0–43, then its complete memory inventory executed1215
+tests and found one missing classification for the new retained-source refusal
+literal. The reason now maps to verification_failed using the existing closed
+vocabulary. Added a real PostgreSQL regression proving changed retained evidence
+stops replay and exposes that classified reason. All16 classification/projection/
+continuation tests pass, zero skips. Jenkins112's failure remains evidence; a
+fresh successor candidate must pass all checks before merge/activation.
+The acceptance audit for typed renew and failed-event causes also passed all11
+focused tests. These two old requests already have implementations in main
+(fa11c0637 /846556ff1 families); review their disposition after deployment rather
+than restarting obsolete implementations. Other six incidents need fresh scope
+audits. Two standalone failed connectivity diagnostics have no supported archive
+operation; do not rewrite their statuses or fake completion to clear a badge.
+
+
+Confirmed defect: _current_policy compares current default roles before checking
+valid execution/handoff authority. Recovery then excludes escalated workflows.
+Implement versioned frozen-role compatibility while preserving original snapshots,
+current grants, independent review, required checks, merge controls and counters.
+Investigate native Grok protocol/permission failures from private evidence before
+retrying. Branch-mismatched receipt-bound attempts remain stopped and preserved.
+Of eight policy incidents, three have approved Plans and five do not; no blanket
+implementation revival or fabricated approval. Assess already-shipped requests
+before creating any successor. Historical operator cancellations remain terminal.
+
 # Current: Portal stop-event reasons — 2026-11-27
 
 User requests cancellation reasons in the portal sub-event reader. Codex owns
