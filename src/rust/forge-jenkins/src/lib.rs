@@ -7,8 +7,11 @@
 #![doc = include_str!("../README.md")]
 
 mod client;
+pub mod api;
 pub mod codec;
 pub mod config;
+pub mod consumer;
+pub mod emit_tool;
 pub mod emitter;
 pub mod events;
 mod observation;

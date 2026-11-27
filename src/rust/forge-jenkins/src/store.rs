@@ -397,7 +397,7 @@ pub trait JenkinsListener {
 
 /// The durable Jenkins event store (JenkinsStore's method surface).
 #[allow(clippy::too_many_arguments)]
-pub trait JenkinsStorePort {
+pub trait JenkinsStorePort: Send {
     fn owner(&self) -> &str;
     fn emit(&mut self, event: &JenkinsEventEmit) -> Result<Value, JenkinsStoreError>;
     fn list_events(
