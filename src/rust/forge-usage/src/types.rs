@@ -239,7 +239,7 @@ fn is_int(value: &Value) -> bool {
     value.is_i64() || value.is_u64()
 }
 
-fn int_in_range(value: &Value, low: i64, high: i64) -> bool {
+pub fn int_in_range(value: &Value, low: i64, high: i64) -> bool {
     if let Some(integer) = value.as_i64() {
         return (low..=high).contains(&integer);
     }
