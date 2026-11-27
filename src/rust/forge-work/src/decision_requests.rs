@@ -60,7 +60,7 @@ pub struct ReviewDecideRequest {
     pub expected_revision: i64,
     pub review_id: Uuid,
     pub decision: ReviewDecision,
-    pub agent_profile: String,
+    pub agent_profile: Option<String>,
     pub note: String,
     pub idempotency_key: String,
     pub findings: Value,

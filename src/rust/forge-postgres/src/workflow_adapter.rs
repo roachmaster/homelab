@@ -91,6 +91,143 @@ impl WorkflowTxFactory for PgWorkflowTxFactory {
             },
         }
     }
+
+    fn native_timeout_candidates(
+        &self,
+        retry_events: bool,
+        native_digests: &[String],
+    ) -> Result<Vec<Value>, WorkError> {
+        let author = if self.handoff_available()? {
+            "coalesce(forge_agent.coding_workflow_author_handoff(w.workflow_id)->'intent'->>'target_profile',w.snapshot->>'author_profile')"
+        } else {
+            "w.snapshot->>'author_profile'"
+        };
+        let sql = format!(
+            "SELECT to_jsonb(s) FROM (SELECT t.project_alias, t.id, t.revision, r.receipt_id, a.attempt_id \
+              FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w \
+              ON(w.owner_id,w.project_alias,w.workflow_id)=(t.owner_id,t.project_alias,t.workflow_id) \
+              JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id) \
+              JOIN forge_agent.coding_reconciliation_receipts r ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.revision) \
+              WHERE t.owner_id=$1 AND t.project_alias=ANY($2) AND t.workflow_required AND t.mode='implement' \
+              AND t.status IN('needs_reconcile','failed') AND w.phase IN('implement','repair','escalated') \
+              AND(w.enabled OR w.phase='escalated') \
+              AND(w.phase<>'escalated' OR w.escalation_reason IN('Agent stopped: needs_reconcile','Agent stopped: failed')) \
+              AND t.cancelled_at IS NULL AND t.workflow_review_id IS NULL AND a.result_sha256 IS NULL \
+              AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL \
+              AND a.finished_at>=a.deadline_at AND r.created_at>=a.deadline_at \
+              AND a.pinned_recipe->>'policy_digest'=ANY($3) \
+              AND t.agent_profile={author} \
+              AND EXISTS(SELECT 1 FROM forge_agent.coding_events e WHERE(e.owner_id,e.project_alias,e.task_id)=(t.owner_id,t.project_alias,t.id) \
+                AND e.event_kind='needs_reconcile' AND e.payload->>'attempt_id'=a.attempt_id::text \
+                AND e.payload->>'reason' IN('deadline_exceeded','stopped_without_publication') AND e.created_at>=a.deadline_at) \
+              AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=w.workflow_id \
+                 AND x.kind='decide' AND (x.source_key='native-deadline-retry:'||a.attempt_id::text \
+                   OR($4 AND x.source_key LIKE 'native-deadline-retry:%'))) \
+              ORDER BY r.created_at DESC LIMIT 64) s"
+        );
+        let params: Params = vec![
+            Box::new(self.owner.clone()),
+            Box::new(self.allowed_projects.clone()),
+            Box::new(native_digests.to_vec()),
+            Box::new(!retry_events),
+        ];
+        self.scan_rows(&sql, &params)
+    }
+
+    fn peer_verdict_candidates(&self) -> Result<Vec<Value>, WorkError> {
+        let sql = "SELECT to_jsonb(s) FROM (SELECT r.workflow_review_id, r.target_sha256, r.source_revision, t.project_alias, a.attempt_id, a.result_sha256 \
+              FROM forge_agent.coding_workflow_reviews r JOIN forge_agent.coding_workflows w USING(workflow_id) \
+              JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(r.owner_id,r.project_alias,r.reviewer_task_id) \
+              JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id) \
+              WHERE r.owner_id=$1 AND r.project_alias=ANY($2) AND r.target_kind='code' AND r.status='escalated' \
+              AND w.phase='escalated' AND NOT w.enabled AND w.escalation_reason=$3 AND t.status='awaiting_review' \
+              AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL AND a.result_sha256 IS NOT NULL \
+              AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=w.workflow_id AND x.source_key LIKE 'peer-verdict-replay:%') \
+              ORDER BY r.updated_at DESC LIMIT 64) s";
+        let params: Params = vec![
+            Box::new(self.owner.clone()),
+            Box::new(self.allowed_projects.clone()),
+            Box::new(forge_work::workflow::PEER_WIRE_ERROR.to_string()),
+        ];
+        self.scan_rows(sql, &params)
+    }
+
+    fn preparation_candidates(&self) -> Result<Vec<Value>, WorkError> {
+        let sql = "SELECT to_jsonb(s) FROM (SELECT t.project_alias, t.id, t.revision, q.review_id, q.reconciliation_receipt_id FROM forge_agent.coding_tasks t \
+              JOIN forge_agent.coding_workflows w USING(workflow_id) JOIN forge_agent.coding_reviews q \
+              ON(q.owner_id,q.project_alias,q.task_id,q.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id) \
+              WHERE t.owner_id=$1 AND t.project_alias=ANY($2) AND t.workflow_required AND t.parent_task_id IS NOT NULL \
+              AND t.mode='implement' AND t.status='awaiting_review' AND t.cancelled_at IS NULL \
+              AND w.phase='escalated' AND NOT w.enabled AND w.escalation_reason='publication_command_failed' \
+              AND q.status='handoff' AND q.phase='local' AND q.reason='publication_command_failed' AND q.candidate_commit IS NULL \
+              AND q.verification->'checks_passed'='false'::jsonb AND q.verification->'checks'='[]'::jsonb \
+              AND q.verification->'cleanup_confirmed'='true'::jsonb AND q.source_revision=t.revision \
+              AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff' \
+              AND q.finish_receipt->'outcome'->>'reason'='publication_command_failed' \
+              AND q.infrastructure_retries<coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)),(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer) \
+              ORDER BY q.updated_at DESC LIMIT 64) s";
+        let params: Params = vec![
+            Box::new(self.owner.clone()),
+            Box::new(self.allowed_projects.clone()),
+        ];
+        self.scan_rows(sql, &params)
+    }
+
+    fn readiness_candidates(&self) -> Result<Vec<Value>, WorkError> {
+        let sql = "SELECT to_jsonb(s) FROM (SELECT t.project_alias, t.id, t.revision, q.review_id, r.receipt_id FROM forge_agent.coding_tasks t \
+              JOIN forge_agent.coding_workflows w USING(workflow_id) JOIN forge_agent.coding_reviews q \
+              ON(q.owner_id,q.project_alias,q.task_id,q.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id) \
+              JOIN forge_agent.coding_reconciliation_receipts r ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.revision) \
+              WHERE t.owner_id=$1 AND t.project_alias=ANY($2) AND t.workflow_required AND t.parent_task_id IS NOT NULL \
+              AND t.status='awaiting_review' AND t.cancelled_at IS NULL AND w.phase='escalated' AND NOT w.enabled \
+              AND q.phase='local' AND q.status='handoff' AND q.candidate_commit IS NULL AND q.source_revision=t.revision \
+              AND q.reason IN('review_unavailable','workspace_busy') AND w.escalation_reason=q.reason \
+              AND q.infrastructure_retries IN((w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer, \
+                coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)),(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer)) \
+              AND q.infrastructure_retries>0 AND r.created_at>q.updated_at AND r.workspace_digest=q.workspace_digest \
+              AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff' \
+              AND q.finish_receipt->'outcome'->'verification'->'checks'='[]'::jsonb \
+              AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions a WHERE a.workflow_id=w.workflow_id AND a.source_key LIKE 'source-readiness-delivery:%') \
+              ORDER BY r.created_at DESC LIMIT 64) s";
+        let params: Params = vec![
+            Box::new(self.owner.clone()),
+            Box::new(self.allowed_projects.clone()),
+        ];
+        self.scan_rows(sql, &params)
+    }
+}
+
+impl PgWorkflowTxFactory {
+    /// One read-only scan transaction (the Python _recover_*
+    /// passes): statement timeouts as in run(), rows rendered
+    /// by the query's own to_jsonb projection.
+    fn scan_rows(&self, sql: &str, params: &Params) -> Result<Vec<Value>, WorkError> {
+        let mut session = self.factory.create().map_err(work_err)?;
+        let rows = session
+            .in_tx(|tx| {
+                tx.call_void("SET TRANSACTION READ ONLY", &[])?;
+                tx.call_void("SET LOCAL lock_timeout='5s'", &[])?;
+                tx.call_void("SET LOCAL statement_timeout='10s'", &[])?;
+                tx.query_rows(sql, &refs(params))
+            })
+            .map_err(work_err)?;
+        Ok(rows
+            .iter()
+            .map(|row| row.get::<usize, Option<Value>>(0).unwrap_or(Value::Null))
+            .collect())
+    }
+
+    fn handoff_available(&self) -> Result<bool, WorkError> {
+        let mut session = self.factory.create().map_err(work_err)?;
+        session
+            .in_tx(|tx| {
+                tx.call_bool(
+                    "SELECT to_regprocedure('forge_agent.coding_workflow_author_handoff(uuid)') IS NOT NULL AS available",
+                    &[],
+                )
+            })
+            .map_err(work_err)
+    }
 }
 
 struct WorkflowTxImpl<'x, 't, 'c, 'o> {
@@ -1179,6 +1316,160 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         };
         self.release_savepoint("retry_allowance_scope")?;
         outcome
+    }
+
+    fn control_receipt(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(task_id),
+            Box::new(idempotency_key.to_string()),
+        ];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_control_receipts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND idempotency_key=$4) t",
+            &params,
+        )
+    }
+
+    fn deadline_witnessed(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+        deadline_at: &str,
+    ) -> Result<bool, WorkError> {
+        let owner = self.owner.to_string();
+        let attempt = attempt_id.to_string();
+        let params: &[&(dyn ToSql + Sync)] = &[&owner, &task_id, &attempt, &deadline_at];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events WHERE owner_id=$1 AND task_id=$2 AND event_kind='needs_reconcile' AND payload->>'attempt_id'=$3 AND payload->>'reason' IN('deadline_exceeded','stopped_without_publication') AND created_at>=$4::timestamptz) AS witnessed",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn blocked_event(&mut self, task_id: Uuid, started_at: &str) -> Result<bool, WorkError> {
+        let owner = self.owner.to_string();
+        let params: &[&(dyn ToSql + Sync)] = &[&owner, &task_id, &started_at];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events WHERE owner_id=$1 AND task_id=$2 AND created_at>=$3::timestamptz AND (event_kind IN('quota_blocked','blocked_auth','blocked_permission','cancel_requested','cancelled') OR payload->>'status' IN('quota_blocked','blocked_auth','blocked_permission','cancel_requested','cancelled'))) AS blocked",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn sibling_failure(&mut self, workflow_id: Uuid, task_id: Uuid) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id, &task_id];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$1 AND id<>$2 AND status IN('failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) AS sibling_failure",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn legacy_deadline_actions(
+        &mut self,
+        workflow_id: Uuid,
+        project: &str,
+        task_id: Uuid,
+        attempt_started_at: &str,
+    ) -> Result<Vec<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(forge_work::workflow::NATIVE_DEADLINE_POLICY.to_string()),
+            Box::new(task_id.to_string()),
+            Box::new(task_id),
+            Box::new(attempt_started_at.to_string()),
+        ];
+        let sql = "SELECT to_jsonb(x) FROM (SELECT a.* FROM forge_agent.coding_workflow_actions a WHERE a.workflow_id=$1 \
+          AND a.owner_id=$2 AND a.project_alias=$3 AND a.kind='decide' AND a.status='completed' \
+          AND a.source_key LIKE 'native-deadline-retry:%' AND a.intent->>'policy'=$4 \
+          AND a.intent->>'task_id'=$5 AND NOT EXISTS( \
+            SELECT FROM forge_agent.coding_attempts p WHERE(p.owner_id,p.project_alias,p.task_id)=(a.owner_id,a.project_alias,$6) \
+            AND p.phase='stopped' AND p.result_sha256 IS NOT NULL AND NOT p.reservation_active AND p.lease_expires_at IS NULL \
+            AND p.published_at>a.created_at AND p.published_at<$7::timestamptz \
+            AND EXISTS(SELECT FROM forge_agent.coding_reconciliation_receipts r WHERE(r.owner_id,r.project_alias,r.task_id,r.attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id))) \
+          ORDER BY a.created_at,a.action_id) x";
+        self.many(sql, &params)
+    }
+
+    fn retained_resume_receipt(
+        &mut self,
+        task_id: Uuid,
+        receipt_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(task_id),
+            Box::new(receipt_id),
+            Box::new(idempotency_key.to_string()),
+        ];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT r.attempt_id,r.task_revision,r.workspace_digest,c.receipt_json               FROM forge_agent.coding_reconciliation_receipts r               JOIN forge_agent.coding_control_receipts c ON(c.owner_id,c.project_alias,c.task_id)=(r.owner_id,r.project_alias,r.task_id)               WHERE r.task_id=$2 AND r.receipt_id=$3               AND c.action='resume' AND c.idempotency_key=$4 AND c.base_revision=r.task_revision               AND c.result_revision=r.task_revision+1 AND r.owner_id=$1) t",
+            &params,
+        )
+    }
+
+    fn action_by_source_review(
+        &mut self,
+        workflow_id: Uuid,
+        review_id: Uuid,
+        kind: &str,
+        source_key: &str,
+        for_update: bool,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(review_id),
+            Box::new(kind.to_string()),
+            Box::new(source_key.to_string()),
+        ];
+        let lock = if for_update { " FOR UPDATE" } else { "" };
+        let sql = format!(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND workflow_review_id=$2 AND kind=$3 AND source_key=$4{lock}) t"
+        );
+        self.one(&sql, &params)
+    }
+
+    fn insert_workflow_review(&mut self, row: &Value) -> Result<Uuid, WorkError> {
+        let (sql, params) = self.insert_sql("coding_workflow_reviews", row);
+        let sql = format!("{sql} RETURNING workflow_review_id");
+        let rows = self
+            .tx
+            .query_rows(&sql, &refs(&params))
+            .map_err(work_err)?;
+        rows.first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0))
+            .ok_or_else(|| WorkError::store("insert_workflow_review returned no id"))
+    }
+
+    fn insert_readiness_successor(
+        &mut self,
+        review_id: Uuid,
+        receipt_id: Uuid,
+        summary: &str,
+    ) -> Result<Uuid, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&receipt_id, &summary, &review_id];
+        let rows = self
+            .tx
+            .query_rows(
+                "INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,task_id,attempt_id,plan_decision_id,scope_plan_decision_id,reconciliation_receipt_id,               base_revision,workspace_digest,parent_result_sha256,source_revision,review_no,round,stagnant_rounds,infrastructure_retries,previous_review_id,               findings,verified_finding_ids,verification,summary,phase,owner_decision)               SELECT owner_id,project_alias,task_id,attempt_id,plan_decision_id,scope_plan_decision_id,$1,               base_revision,workspace_digest,parent_result_sha256,source_revision,review_no+1,round,stagnant_rounds,infrastructure_retries,review_id,               findings,verified_finding_ids,verification-'failure_stage'-'exception_type',$2,phase,owner_decision               FROM forge_agent.coding_reviews WHERE review_id=$3 RETURNING review_id",
+                params,
+            )
+            .map_err(work_err)?;
+        rows.first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0))
+            .ok_or_else(|| WorkError::store("insert_readiness_successor returned no id"))
     }
 }
 

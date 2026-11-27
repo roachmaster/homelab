@@ -42,6 +42,56 @@ use crate::workflow_tx::{WorkflowTx, WorkflowTxFactory};
 
 pub const MAX_TARGET_BYTES: usize = 64 * 1024 * 1024 + 65536;
 
+/// work_workflow.py's recovery-ingress constants.
+pub const NATIVE_DEADLINE_POLICY: &str = "forge-native-deadline-recovery-v1";
+pub const NATIVE_DEADLINE_EVENT_POLICY: &str = "forge-native-deadline-event-recovery-v1";
+pub const NATIVE_DEADLINE_RETRIES: i64 = 1;
+pub const PEER_WIRE_REPLAY_POLICY: &str = "forge-peer-wire-replay-v1";
+pub const PEER_CORRECTION_POLICY: &str = "forge-peer-correction-v1";
+pub const PEER_WIRE_ERROR: &str = "Peer review could not safely continue: PeerReviewError";
+pub const NATIVE_DEADLINE_NOTE: &str = "The previous writer stopped at its deadline; the reconciled workspace is preserved. Continue the SAME approved Plan. Inspect existing files and retained evidence, preserve completed work, finish focused checks and publish the final report promptly. Do not repeat full cold repository CI in this native turn: the independent verifier still runs ALL required fixed CI afterwards. Do not weaken checks, add skips, commit, push or change scope.";
+
+/// work_policy.NATIVE_POLICIES digests (the readiness probe's
+/// policy filter). The canonical definitions live in
+/// forge-work-worker's policy module and are pinned there by
+/// tests; the worker crate is a sibling forge-work cannot
+/// import, so the values are mirrored here.
+pub const NATIVE_POLICY_DIGESTS: [&str; 2] = [
+    "58a3f1c876630627ee01220b0d45524557cf3f4f685993f027ee31d9fe52d523",
+    "223cba6fa54a1d6c809ed8ab84d7b96b140962e5dbe026bc28cc3a42a29b3130",
+];
+
+/// work_workflow._ready_for_recipe: a fresh readiness row
+/// covers the project and carries a profile entry whose
+/// backend/model/mode match the pinned recipe exactly.
+pub(crate) fn ready_for_recipe(
+    rows: &[Value],
+    project: &str,
+    profile: &str,
+    mode: &str,
+    recipe: &crate::pinned_recipe::PinnedRecipe,
+) -> bool {
+    if recipe.version != 2 {
+        return false;
+    }
+    rows.iter().any(|row| {
+        let projects = row["projects"].as_array().cloned().unwrap_or_default();
+        if !projects.iter().any(|entry| entry.as_str() == Some(project)) {
+            return false;
+        }
+        let profiles = row["profiles"].as_array().cloned().unwrap_or_default();
+        profiles.iter().any(|entry| {
+            entry["alias"].as_str() == Some(profile)
+                && entry["backend"].as_str() == Some(recipe.backend.as_str())
+                && entry["model"].as_str() == Some(recipe.model.as_str())
+                && entry["modes"]
+                    .as_array()
+                    .map(|modes| modes.iter().any(|m| m.as_str() == Some(mode)))
+                    .unwrap_or(false)
+        })
+    })
+}
+
 pub fn coordinator_actor() -> Actor {
     Actor::new(ActorKind::Coordinator, "forge-coordinator")
 }
@@ -50,7 +100,7 @@ pub fn operator_actor(owner: &str) -> Actor {
     Actor::new(ActorKind::Operator, owner)
 }
 
-fn actor_json(actor: &Actor) -> Value {
+pub(crate) fn actor_json(actor: &Actor) -> Value {
     json!({"kind": actor.kind.as_str(), "id": actor.id})
 }
 
@@ -74,34 +124,34 @@ pub fn prepare_title(prompt: &str) -> Result<String, WorkError> {
     Ok(trimmed)
 }
 
-fn native_deadline_phase(task_id: Uuid) -> String {
+pub(crate) fn native_deadline_phase(task_id: Uuid) -> String {
     format!("native_execution.deadline.{task_id}")
 }
 
-fn text<'a>(row: &'a Value, key: &str) -> &'a str {
+pub(crate) fn text<'a>(row: &'a Value, key: &str) -> &'a str {
     row.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
-fn uuid_of(row: &Value, key: &str) -> Uuid {
+pub(crate) fn uuid_of(row: &Value, key: &str) -> Uuid {
     row.get(key)
         .and_then(Value::as_str)
         .and_then(|value| Uuid::parse_str(value).ok())
         .unwrap_or_default()
 }
 
-fn int_of(row: &Value, key: &str) -> i64 {
+pub(crate) fn int_of(row: &Value, key: &str) -> i64 {
     row.get(key).and_then(Value::as_i64).unwrap_or_default()
 }
 
-fn bool_of(row: &Value, key: &str) -> bool {
+pub(crate) fn bool_of(row: &Value, key: &str) -> bool {
     row.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn present(row: &Value, key: &str) -> bool {
+pub(crate) fn present(row: &Value, key: &str) -> bool {
     row.get(key).map(|value| !value.is_null()).unwrap_or(false)
 }
 
-fn truncate_chars(value: &str, limit: usize) -> String {
+pub(crate) fn truncate_chars(value: &str, limit: usize) -> String {
     value.chars().take(limit).collect()
 }
 
@@ -109,7 +159,7 @@ fn truncate_chars(value: &str, limit: usize) -> String {
 /// and store failures, PeerReviewError where process() needs the
 /// diagnostics.
 #[derive(Debug)]
-pub enum FlowError {
+pub(crate) enum FlowError {
     Work(WorkError),
     Peer(PeerReviewError),
 }
@@ -132,13 +182,13 @@ impl From<String> for FlowError {
     }
 }
 
-type FlowResult<T> = Result<T, FlowError>;
+pub(crate) type FlowResult<T> = Result<T, FlowError>;
 
-fn denied() -> WorkError {
+pub(crate) fn denied() -> WorkError {
     WorkError::rejected(403, "denied")
 }
 
-fn mismatch() -> WorkError {
+pub(crate) fn mismatch() -> WorkError {
     WorkError::rejected(409, "result_mismatch")
 }
 
@@ -394,12 +444,47 @@ impl WorkflowStore {
         &self.config.owner
     }
 
-    fn native(&self) -> &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool {
+    pub(crate) fn config(&self) -> &CoordinatorConfig {
+        &self.config
+    }
+
+    pub(crate) fn tx_factory(&self) -> &dyn WorkflowTxFactory {
+        self.tx_factory.as_ref()
+    }
+
+    pub(crate) fn decisions(&self) -> &dyn WorkflowDecisionPort {
+        self.decisions.as_ref()
+    }
+
+    pub(crate) fn retry_events_enabled(&self) -> bool {
+        self.retry_events_enabled
+    }
+
+    pub(crate) fn superseding_present(&self) -> bool {
+        self.superseding_review.borrow().is_some()
+    }
+
+    /// WorkStore._require_project.
+    pub(crate) fn require_project(&self, project: &str) -> Result<(), WorkError> {
+        if self.config.allowed_projects.iter().any(|p| p == project) {
+            Ok(())
+        } else {
+            Err(denied())
+        }
+    }
+
+    /// _repair_limit: the configured repair-policy value (the
+    /// caller has already run current_policy, as Python does).
+    pub(crate) fn repair_limit(&self, key: &str) -> i64 {
+        self.config.repair_policy[key].as_i64().unwrap_or(0)
+    }
+
+    pub(crate) fn native(&self) -> &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool {
         &*self.native_policy_matches
     }
 
     /// _snapshot: select future execution only.
-    fn snapshot_of(&self, workflow: &Value) -> Result<Value, WorkError> {
+    pub(crate) fn snapshot_of(&self, workflow: &Value) -> Result<Value, WorkError> {
         if let Some(hook) = self.execution_policy.borrow().as_ref() {
             return hook.effective(workflow);
         }
@@ -408,7 +493,7 @@ impl WorkflowStore {
 
     /// _current_policy: the configured policy, gated on the
     /// mode grant, the M44 drift fence, and compatibility.
-    fn current_policy(
+    pub(crate) fn current_policy(
         &self,
         tx: &mut dyn WorkflowTx,
         workflow: &Value,
@@ -481,7 +566,7 @@ impl WorkflowStore {
     }
 
     /// _retry_limit.
-    fn retry_limit(
+    pub(crate) fn retry_limit(
         &self,
         tx: &mut dyn WorkflowTx,
         workflow: &Value,
@@ -494,7 +579,7 @@ impl WorkflowStore {
     }
 
     /// _grant.
-    fn grant(
+    pub(crate) fn grant(
         &self,
         tx: &mut dyn WorkflowTx,
         workflow: &Value,
@@ -511,7 +596,7 @@ impl WorkflowStore {
         Ok(())
     }
 
-    fn retry_scope(&self, workflow: &Value) -> Result<RetryScope, WorkError> {
+    pub(crate) fn retry_scope(&self, workflow: &Value) -> Result<RetryScope, WorkError> {
         RetryScope::new(
             &self.config.owner,
             text(workflow, "project_alias"),
@@ -607,7 +692,7 @@ impl WorkflowStore {
     }
 
     /// _escalate.
-    fn escalate(
+    pub(crate) fn escalate(
         &self,
         tx: &mut dyn WorkflowTx,
         workflow: &Value,
@@ -1120,9 +1205,13 @@ impl WorkflowStore {
         if let Some(hook) = self.peer_feedback_recovery.borrow().as_ref() {
             hook.run_once()?;
         }
+        self.recover_source_readiness()?;
+        self.recover_preparations()?;
+        self.recover_peer_verdicts()?;
         if let Some(hook) = self.superseding_review.borrow().as_ref() {
             hook.recover()?;
         }
+        self.recover_native_timeouts()?;
         let mut projects = self.config.allowed_projects.clone();
         projects.sort();
         let claimed = self.tx_factory.run(false, &mut |tx| {
@@ -1252,7 +1341,7 @@ impl WorkflowStore {
     }
 
     /// _admit_reviewer.
-    fn admit_reviewer(
+    pub(crate) fn admit_reviewer(
         &self,
         tx: &mut dyn WorkflowTx,
         workflow: &Value,
@@ -1816,7 +1905,7 @@ impl WorkflowStore {
                     } else {
                         crate::decision_requests::ReviewDecision::Repair
                     },
-                    agent_profile: text(&snapshot, "author_profile").to_string(),
+                    agent_profile: Some(text(&snapshot, "author_profile").to_string()),
                     note: text(&verdict, "summary").to_string(),
                     idempotency_key: key.clone(),
                     findings: verdict["findings"].clone(),
@@ -2215,7 +2304,7 @@ impl WorkflowStore {
 
 /// WorkflowCoordinator: the run_once loop body. The LISTEN wait
 /// and thread lifecycle are host concerns (S7); the pass-through
-/// ingresses land with their F4d/F5 services.
+/// ingresses are the store's own methods (F4d).
 pub struct WorkflowCoordinator {
     pub store: WorkflowStore,
     pub worker_id: String,
@@ -2289,12 +2378,98 @@ impl WorkflowCoordinator {
         self.store
             .revive_workflow(project_alias, workflow_id, idempotency_key, note, actor)
     }
+
+    /// retry_native_timeout pass-through.
+    #[allow(clippy::too_many_arguments)]
+    pub fn retry_native_timeout(
+        &self,
+        project_alias: &str,
+        task_id: Uuid,
+        expected_revision: i64,
+        reconciliation_receipt_id: Uuid,
+        idempotency_key: &str,
+        note: &str,
+    ) -> Result<Value, WorkError> {
+        self.store.retry_native_timeout(
+            project_alias,
+            task_id,
+            expected_revision,
+            reconciliation_receipt_id,
+            idempotency_key,
+            note,
+        )
+    }
+
+    /// retry_peer_verdict pass-through.
+    #[allow(clippy::too_many_arguments)]
+    pub fn retry_peer_verdict(
+        &self,
+        project_alias: &str,
+        workflow_review_id: Uuid,
+        expected_revision: i64,
+        reviewer_attempt_id: Uuid,
+        reviewer_result_sha256: &str,
+        target_sha256: &str,
+        idempotency_key: &str,
+    ) -> Result<Value, WorkError> {
+        self.store.retry_peer_verdict(
+            project_alias,
+            workflow_review_id,
+            expected_revision,
+            reviewer_attempt_id,
+            reviewer_result_sha256,
+            target_sha256,
+            idempotency_key,
+        )
+    }
+
+    /// retry_preparation pass-through.
+    #[allow(clippy::too_many_arguments)]
+    pub fn retry_preparation(
+        &self,
+        project_alias: &str,
+        task_id: Uuid,
+        expected_revision: i64,
+        review_id: Uuid,
+        reconciliation_receipt_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Value, WorkError> {
+        self.store.retry_preparation(
+            project_alias,
+            task_id,
+            expected_revision,
+            review_id,
+            reconciliation_receipt_id,
+            idempotency_key,
+        )
+    }
+
+    /// defer_source_readiness pass-through.
+    #[allow(clippy::too_many_arguments)]
+    pub fn defer_source_readiness(
+        &self,
+        project_alias: &str,
+        task_id: Uuid,
+        expected_revision: i64,
+        review_id: Uuid,
+        reconciliation_receipt_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Value, WorkError> {
+        self.store.defer_source_readiness(
+            project_alias,
+            task_id,
+            expected_revision,
+            review_id,
+            reconciliation_receipt_id,
+            idempotency_key,
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::retry_events::RetryScope;
+    use crate::retry_events::{RetryEvents, RetryScope};
 
     #[test]
     fn prepare_title_collapses_and_bounds() {
@@ -2417,6 +2592,15 @@ mod tests {
         unused!(allowance_workflows, Option<(&str, Uuid)> => Result<Vec<Value>, WorkError>);
         unused!(allowance_manual_tasks, &Value, Option<(&str, Uuid)> => Result<Vec<Value>, WorkError>);
         unused!(amend_retry_allowance, &str, Uuid, &Value => Result<(), WorkError>);
+        unused!(control_receipt, &str, Uuid, &str => Result<Option<Value>, WorkError>);
+        unused!(deadline_witnessed, Uuid, Uuid, &str => Result<bool, WorkError>);
+        unused!(blocked_event, Uuid, &str => Result<bool, WorkError>);
+        unused!(sibling_failure, Uuid, Uuid => Result<bool, WorkError>);
+        unused!(legacy_deadline_actions, Uuid, &str, Uuid, &str => Result<Vec<Value>, WorkError>);
+        unused!(retained_resume_receipt, Uuid, Uuid, &str => Result<Option<Value>, WorkError>);
+        unused!(action_by_source_review, Uuid, Uuid, &str, &str, bool => Result<Option<Value>, WorkError>);
+        unused!(insert_workflow_review, &Value => Result<Uuid, WorkError>);
+        unused!(insert_readiness_successor, Uuid, Uuid, &str => Result<Uuid, WorkError>);
     }
 
     fn rows() -> (Value, Value, Value, Value, Value) {

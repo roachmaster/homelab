@@ -258,6 +258,72 @@ pub trait WorkflowTx: RetryEvents {
         root_task_id: Uuid,
         policy: &Value,
     ) -> Result<(), WorkError>;
+
+    // F4d ingress probes and writes (work_workflow.py recovery
+    // ingresses: native deadline, peer verdict, preparation,
+    // source readiness).
+
+    /// coding_control_receipts by (task, idempotency key): the
+    /// retry_preparation replay probe.
+    fn control_receipt(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Option<Value>, WorkError>;
+    /// A needs_reconcile event witnessed the deadline stop.
+    fn deadline_witnessed(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+        deadline_at: &str,
+    ) -> Result<bool, WorkError>;
+    /// A blocking event (quota/auth/permission/cancel) exists
+    /// at or after the attempt start.
+    fn blocked_event(&mut self, task_id: Uuid, started_at: &str) -> Result<bool, WorkError>;
+    /// Another task of the workflow sits in a stop state.
+    fn sibling_failure(&mut self, workflow_id: Uuid, task_id: Uuid) -> Result<bool, WorkError>;
+    /// Completed legacy native-deadline-retry decide actions
+    /// whose writer did not publish a newer stopped attempt
+    /// before the current attempt started.
+    fn legacy_deadline_actions(
+        &mut self,
+        workflow_id: Uuid,
+        project: &str,
+        task_id: Uuid,
+        attempt_started_at: &str,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// The control receipt retained by a legacy deadline
+    /// action, joined to its reconciliation receipt.
+    fn retained_resume_receipt(
+        &mut self,
+        task_id: Uuid,
+        receipt_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Option<Value>, WorkError>;
+    /// Workflow action by (workflow, review, kind, source key).
+    fn action_by_source_review(
+        &mut self,
+        workflow_id: Uuid,
+        review_id: Uuid,
+        kind: &str,
+        source_key: &str,
+        for_update: bool,
+    ) -> Result<Option<Value>, WorkError>;
+    /// Plain INSERT INTO coding_workflow_reviews ... RETURNING
+    /// workflow_review_id (the superseding-correction insert;
+    /// queue_workflow_review is the ON CONFLICT admission form).
+    fn insert_workflow_review(&mut self, row: &Value) -> Result<Uuid, WorkError>;
+    /// The defer_source_readiness successor: INSERT ... SELECT
+    /// copying the handed-off review at review_no + 1 with the
+    /// failure_stage/exception_type keys stripped from its
+    /// verification document.
+    fn insert_readiness_successor(
+        &mut self,
+        review_id: Uuid,
+        receipt_id: Uuid,
+        summary: &str,
+    ) -> Result<Uuid, WorkError>;
 }
 
 /// Vends workflow transactions (WorkflowStore._transaction with
@@ -270,4 +336,25 @@ pub trait WorkflowTxFactory {
         read_only: bool,
         body: &mut dyn FnMut(&mut dyn WorkflowTx) -> Result<Value, WorkError>,
     ) -> Result<Value, WorkError>;
+
+    // F4d recovery scans: each runs in its own read-only
+    // transaction (the Python _recover_* passes) and returns the
+    // projected candidate rows the ingress driver replays.
+
+    /// _recover_native_timeouts candidates: reconciled deadline
+    /// stops with no deadline-retry action yet.
+    fn native_timeout_candidates(
+        &self,
+        retry_events: bool,
+        native_digests: &[String],
+    ) -> Result<Vec<Value>, WorkError>;
+    /// _recover_peer_verdicts candidates: escalated code
+    /// reviews stopped on the peer wire error.
+    fn peer_verdict_candidates(&self) -> Result<Vec<Value>, WorkError>;
+    /// _recover_preparations candidates: handed-off local
+    /// reviews stopped on publication_command_failed.
+    fn preparation_candidates(&self) -> Result<Vec<Value>, WorkError>;
+    /// _recover_source_readiness candidates: handed-off local
+    /// reviews with a newer trusted readiness receipt.
+    fn readiness_candidates(&self) -> Result<Vec<Value>, WorkError>;
 }
