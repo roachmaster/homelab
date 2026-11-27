@@ -20,6 +20,12 @@ pub enum WorkerError {
     AuthCleanup(String),
     HeartbeatCleanup(String),
     Protocol(String),
+    /// A malformed CLI transport record (work_cli_transport): the
+    /// summary is the fixed ExecutionError text; the payload is the
+    /// canonical JSON of the structural diagnostic dict.
+    Transport {
+        diagnostic: String,
+    },
 }
 
 impl WorkerError {
@@ -88,6 +94,9 @@ impl std::fmt::Display for WorkerError {
                 write!(f, "heartbeat cleanup failed: {m}")
             }
             WorkerError::Protocol(m) => write!(f, "protocol error: {m}"),
+            WorkerError::Transport { .. } => {
+                write!(f, "The coding agent returned malformed machine output.")
+            }
         }
     }
 }

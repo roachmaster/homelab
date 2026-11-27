@@ -8,6 +8,8 @@
 
 pub mod branch;
 pub mod cli_argv;
+pub mod cli_parser;
+pub mod cli_transport;
 pub mod config;
 pub mod config_profile;
 pub mod error;
@@ -16,6 +18,7 @@ pub mod native_auth;
 pub mod policy;
 pub mod ports_runtime;
 pub mod ports_store;
+pub mod provider_events;
 pub mod quota;
 pub mod types;
 pub mod workspace;
