@@ -8,6 +8,8 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod factory;
+pub mod gpu_adapter;
+pub mod gpu_worker;
 pub mod reconciler;
 pub mod registrar;
 pub mod tx;
