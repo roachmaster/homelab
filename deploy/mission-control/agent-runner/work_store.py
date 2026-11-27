@@ -982,6 +982,20 @@ class WorkStore:
                 detail["correlation_cicd"] = correlation_cicd
             return detail
 
+    @staticmethod
+    def _delivery_main_binding(delivery):
+        """Only the task-authorized delivery projection can widen CI visibility."""
+        if not isinstance(delivery, dict) or not isinstance(delivery.get('verification'), dict):
+            return None, None
+        action, commit = delivery.get('verification_id'), delivery.get('commit_sha')
+        try:
+            if (not isinstance(action, str) or str(UUID(action)) != action
+                    or not isinstance(commit, str) or not re.fullmatch('[0-9a-f]{40}', commit)):
+                return None, None
+        except ValueError:
+            return None, None
+        return action, commit
+
     def _correlation_cicd_projection(self, cursor, task, *, delivery=None):
         from work_agent_branch import branch_scope_for_branch, default_agent_branch
         from work_pipeline_projection import project_correlation_cicd
@@ -990,6 +1004,7 @@ class WorkStore:
             return None
         project_alias = task["project_alias"]
         corr_str = str(correlation_id)
+        main_action, main_commit = self._delivery_main_binding(delivery)
 
         def _can_select(relation_name):
             cursor.execute(
@@ -1103,10 +1118,12 @@ class WorkStore:
                        test_summary, error_excerpt, log_sha256, log_byte_count, log_chunk_count,
                        created_at
                 FROM forge_agent.jenkins_stage_results
-                WHERE owner_id = %s AND project_alias = %s AND correlation_id = ANY(%s)
+                WHERE owner_id = %s AND project_alias = %s
+                  AND (correlation_id = ANY(%s) OR (action_id = %s AND commit_sha = %s
+                       AND branch_scope = 'main' AND pipeline_scope = 'main'))
                 ORDER BY created_at ASC, action_id ASC, stage_index ASC
                 LIMIT 512
-            """, (self._owner, project_alias, linked_corrs))
+            """, (self._owner, project_alias, linked_corrs, main_action, main_commit))
             for r in cursor.fetchall():
                 item = dict(r)
                 item["action_id"] = str(r["action_id"])
@@ -1127,27 +1144,24 @@ class WorkStore:
             """)
             has_m39_cols = cursor.fetchone()["has_m39_cols"]
             extra_cols = ", action_id, branch_scope" if has_m39_cols else ""
+            predicates = ["correlation_id = ANY(%s)"]
+            parameters = [self._owner, project_alias, linked_corr_strs]
             if candidate_commits:
-                cursor.execute(f"""
+                predicates.append("commit_sha = ANY(%s)")
+                parameters.append(candidate_commits)
+            if has_m39_cols and main_action is not None:
+                predicates.append("(action_id = %s AND commit_sha = %s AND branch_scope = 'main')")
+                parameters.extend((main_action, main_commit))
+            cursor.execute(f"""
                     SELECT event_kind, job_name, build_number, queue_id, commit_sha, branch,
                            build_result, stage_name, stage_status, occurred_at, sequence,
                            correlation_id {extra_cols}
                     FROM forge_agent.jenkins_events
                     WHERE owner_id = %s AND project_alias = %s
-                      AND (correlation_id = ANY(%s) OR commit_sha = ANY(%s))
+                      AND ({' OR '.join(predicates)})
                     ORDER BY sequence ASC
                     LIMIT 512
-                """, (self._owner, project_alias, linked_corr_strs, candidate_commits))
-            else:
-                cursor.execute(f"""
-                    SELECT event_kind, job_name, build_number, queue_id, commit_sha, branch,
-                           build_result, stage_name, stage_status, occurred_at, sequence,
-                           correlation_id {extra_cols}
-                    FROM forge_agent.jenkins_events
-                    WHERE owner_id = %s AND project_alias = %s AND correlation_id = ANY(%s)
-                    ORDER BY sequence ASC
-                    LIMIT 512
-                """, (self._owner, project_alias, linked_corr_strs))
+                """, parameters)
             for r in cursor.fetchall():
                 item = dict(r)
                 if item.get("occurred_at") is not None:
@@ -1230,6 +1244,8 @@ class WorkStore:
                     LIMIT 64
                 """, (self._owner, project_alias, correlation_id, root_id, root_id))
             allowed_corrs = list({r["correlation_id"] for r in cursor.fetchall()} | {correlation_id})
+            main_action, main_commit = self._delivery_main_binding(
+                self._delivery_projection(cursor, project_alias, task_id))
 
             cursor.execute("SELECT to_regclass('forge_agent.jenkins_stage_results') IS NOT NULL AS has_table")
             if not cursor.fetchone()["has_table"]:
@@ -1241,10 +1257,13 @@ class WorkStore:
                        error_excerpt, log_sha256, log_byte_count, log_chunk_count
                 FROM forge_agent.jenkins_stage_results
                 WHERE owner_id = %s AND project_alias = %s
-                  AND action_id = %s AND correlation_id = ANY(%s)
+                  AND action_id = %s AND (correlation_id = ANY(%s)
+                       OR (action_id = %s AND commit_sha = %s
+                           AND branch_scope = 'main' AND pipeline_scope = 'main'))
                   AND (logical_stage_id = %s OR phase_id = %s)
                 ORDER BY stage_index ASC
-            """, (self._owner, project_alias, action_id, allowed_corrs, stage_id, stage_id))
+            """, (self._owner, project_alias, action_id, allowed_corrs,
+                  main_action, main_commit, stage_id, stage_id))
             stage_rows = cursor.fetchall()
             if not stage_rows:
                 raise Rejected(404, "not_found")

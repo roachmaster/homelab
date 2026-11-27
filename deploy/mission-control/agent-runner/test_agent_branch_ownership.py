@@ -696,6 +696,69 @@ class AgentBranchOwnershipPostgresTest(unittest.TestCase):
             )
         self.assertEqual(rej.exception.status, 403)
 
+    def test_authorized_main_delivery_joins_generated_events_and_stage_logs_only(self):
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+        from jenkins_config import parse_jenkins_config
+        from jenkins_events import JenkinsEventEmit
+        from jenkins_store import JenkinsStore
+
+        owner = f"owner-{uuid4().hex[:8]}@example.invalid"
+        db = self._worker_db(owner)
+        task, correlation = self._insert_task(owner, 'homelab', 'agy-primary')
+        unrelated, unrelated_correlation = self._insert_task(owner, 'homelab', 'codex-primary')
+        action, generated = uuid4(), uuid4()
+        commit = 'b' * 40
+        delivery = {'verification_id': str(action), 'commit_sha': commit,
+                    'verification': {'status': 'queued'}}
+        store = work_store.WorkStore(owner, ('homelab',), lambda: self.cluster.connect('forge_agent'))
+        config = parse_jenkins_config(dict(owner=owner, allowed_projects=['homelab'],
+            allowed_instances={'ci-primary': {'origin': 'https://jenkins.internal'}},
+            allowed_jobs={'homelab': ['forge-native-candidate']},
+            consumers=[dict(name='observation', handler='observation', enabled=False)]))
+        emitter = JenkinsStore(config, lambda: self.cluster.connect('forge_agent'))
+        now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        # Same merge commit is insufficient: another action must stay private.
+        for selected in (action, uuid4()):
+            emitter.emit(JenkinsEventEmit(project_alias='homelab', jenkins_instance='ci-primary',
+                job_name='forge-native-candidate', delivery_id=str(uuid4()), event_kind='stage_started',
+                occurred_at=now, summary='Main check started', build_number=131, commit_sha=commit,
+                branch='main', stage_name='check', correlation_id=str(generated),
+                action_id=str(selected), branch_scope='main'))
+        with patch.object(store, '_delivery_projection',
+                          side_effect=lambda _cursor, _project, selected: delivery if selected == task else None):
+            live = store.get(project_alias='homelab', task_id=task)['correlation_cicd']['runs']
+            self.assertEqual([r['action_id'] for r in live], [str(action)])
+            self.assertEqual(live[0]['status'], 'running')
+            self.assertEqual(store.get(project_alias='homelab', task_id=unrelated)
+                             ['correlation_cicd']['runs'], [])
+
+            receipt = {'verification_profile': 'forge-ci-event-v3',
+                'checks': [{'index': 0, 'returncode': 0}],
+                'stages': [{'name': 'check_0', 'label': 'preflight', 'elapsed_ms': 10}],
+                'phase_results': [{'index': 0, 'phase_id': 'source-preflight', 'kind': 'verification'}]}
+            raw = b'FORGE_FIXED_CHECK_START 0\nMain diagnostic\nFORGE_FIXED_CHECK_END 0 rc=0 elapsed_ms=10\n'
+            for selected, selected_commit, scope in ((action, commit, 'main'),
+                    (uuid4(), commit, 'main'), (uuid4(), 'c'*40, 'main'),
+                    (uuid4(), commit, 'branch/other')):
+                for evidence, chunks in work_cicd_artifacts.extract_stage_evidence_from_receipt(
+                        receipt, raw, project_alias='homelab', action_id=str(selected),
+                        correlation_id=str(generated), task_id=None, job_name='forge-native-candidate',
+                        commit_sha=selected_commit, branch_scope=scope,
+                        pipeline_scope='main' if scope == 'main' else 'branch',
+                        receipt_sha256='d'*64, build_number=131, branch_name='main'):
+                    db.record_jenkins_stage_evidence(evidence, chunks)
+            final = store.get(project_alias='homelab', task_id=task)['correlation_cicd']['runs']
+            self.assertEqual([r['action_id'] for r in final], [str(action)])
+            stage_id = final[0]['stages'][0]['stage_id']
+            page = store.cicd_stage_log(project_alias='homelab', task_id=task,
+                correlation_id=correlation, action_id=action, stage_id=stage_id, view='console')
+            self.assertIn('Main diagnostic', page['content'])
+            with self.assertRaises(work_store.Rejected) as denied:
+                store.cicd_stage_log(project_alias='homelab', task_id=unrelated,
+                    correlation_id=unrelated_correlation, action_id=action, stage_id=stage_id, view='console')
+            self.assertEqual(denied.exception.status, 404)
+
     def test_sql_privilege_and_constraint_enforcement(self):
         # Runtime forge_agent role must be SELECT-only on M39 tables.
         with closing(self.cluster.connect("forge_agent")) as conn:

@@ -1,4 +1,35 @@
-## Native completion and schema52 source integration — 2026-11-27
+## Baseline recovery and main-CI linkage — source qualification pending, 2026-11-27
+
+PR37/main4c2ba8b9 passed Jenkins130 all46 checks, real browser and all four
+zero-skip backend suites (1846 runner tests). Portal releaseeee7d464 and six
+matched API/worker/publisher services are live from immutable4c2ba8b9 source.
+Schema52 and privilege checks pass. Normal automation then merged PR38 as
+ef54565c; Jenkins131 passed its full main verification and portal release
+da51e83a is deployed. Canonical homelab HEAD remains e9b2921 with its original
+untracked caches. Native publication still owns the remote feature/codex branch;
+root maintenance must not advance it until that reservation is released.
+
+The local source adds exact authorized delivery action/commit/main-scope joins
+for generated-correlation main events, artifacts and logs. It preserves the
+caller's task correlation and does not authorize another task's same-commit run.
+Two real PostgreSQL regressions passed. Existing branch stage-only running
+projection is proven live by Jenkins132 on task2411dd36 and its parent.
+
+Implementation258e6354 stopped without edits because its old approved Plan kept
+an unresolved baseline prerequisite at a51e83d. A separate private, once-only
+baseline continuation requires the genuine no_source_changes review handoff,
+unchanged stopped native workspace, exact source/Plan/review evidence, independently
+verified current main and a qualified API source. It creates a new Plan in the
+same workflow with independent review; original tasks, approvals, receipts,
+branch ownership and spent budgets remain intact. One planning transition is
+charged without resetting repair counters. Typed replay support must be selected
+in the API/coordinator before admission. Fifteen focused tests passed, including
+six owned PostgreSQL cases. This source is not yet qualified, deployed or admitted;
+do not stretch the older incident or exact-note resume authorities to perform it.
+No migration is added; applied schema52 and the reserved digest-column drop stay
+unchanged. Keep the three older deferred release journals untouched.
+
+## Native completion and schema52 source integration — 2026-11-27 (historical)
 
 Migration52 is LIVE from qualified source702cf64e. Jenkins126 passed all45 branch
 checks; actualSQL apply/privilege/config checks passed after a drained seven-service
