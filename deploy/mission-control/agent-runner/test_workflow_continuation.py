@@ -413,6 +413,18 @@ class WorkflowContinuationTest(unittest.TestCase):
             self.assertEqual(context['plan_context']['plan_attempt_id'],plan.attempt_id)
             self.assertEqual(context['peer_feedback_context'].target_kind,'code')
 
+    def test_plan_lineage_verifier_rejects_body_and_security_drift(self):
+        import work_pg_fixture
+        statement="SELECT pg_get_functiondef('forge_coding_worker_api.read_plan(uuid,uuid)'::regprocedure)"
+        original=self.rows(statement)[0][0]
+        verifier=work_pg_fixture.SQL_DIR/'management/verify-continuation-plan-lineage.sql'
+        for drift in (original.replace('cardinality(lineage.seen)<32','cardinality(lineage.seen)<33'),
+                      "ALTER FUNCTION forge_coding_worker_api.read_plan(uuid,uuid) SECURITY INVOKER"):
+            self.cluster.admin_exec(drift)
+            self.assertNotEqual(self.cluster.run_sql_script(verifier).returncode,0)
+            self.cluster.admin_exec(original)
+            self.assertEqual(self.cluster.run_sql_script(verifier).returncode,0)
+
     def test_unapproved_source_gets_fresh_independently_reviewed_plan(self):
         _, admitted = self.submit()
         root = admitted['task_id']
