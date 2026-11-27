@@ -1,0 +1,263 @@
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use tokio_postgres::types::ToSql;
+use uuid::Uuid;
+
+use crate::work_common::{col, run_tx, work_err};
+use crate::work_store::PgWorkStore;
+
+/// The stage-log page size in bytes (Python's stage log window).
+const STAGE_LOG_WINDOW: usize = 32768;
+
+/// Parses a "{sha256}.{offset}" cursor token (same pinned format as
+/// the result cursor).
+fn parse_token(token: &str) -> Option<i64> {
+    if token.len() > 86 || !token.is_ascii() {
+        return None;
+    }
+    let (sha, offset) = token.split_once('.')?;
+    if sha.len() != 64
+        || !sha
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return None;
+    }
+    if offset.is_empty() || offset.len() > 8 || !offset.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if offset.len() > 1 && offset.starts_with('0') {
+        return None;
+    }
+    offset.parse().ok()
+}
+
+fn sha256_hex(text: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// WorkReadPort::cicd_stage_log: one window of a Jenkins stage log
+/// for the task's workflow family. The three views assemble from
+/// the stage rows: errors (excerpts), tests (summary JSON), console
+/// (stage headers + excerpts, the v1 subset of Python's Jenkins
+/// event assembly). The byte window and digest cursor follow
+/// Python's stage-log paging.
+pub(crate) fn cicd_stage_log(
+    store: &PgWorkStore,
+    project_alias: &str,
+    task_id: Uuid,
+    correlation_id: Uuid,
+    action_id: Uuid,
+    stage_id: &str,
+    view: &str,
+    cursor_token: Option<&str>,
+) -> Result<forge_work::work_types::StageLogView, forge_work::WorkError> {
+    let invalid = || forge_work::WorkError::rejected(400, "invalid_request");
+    if stage_id.is_empty()
+        || stage_id.len() > 64
+        || !stage_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+    {
+        return Err(invalid());
+    }
+    if !["errors", "tests", "console"].contains(&view) {
+        return Err(invalid());
+    }
+    let offset = match cursor_token {
+        None => 0,
+        Some(token) => parse_token(token).ok_or_else(invalid)?,
+    };
+    run_tx(store, |tx| {
+        let params: &[&(dyn ToSql + Sync)] = &[&store.owner, &project_alias, &task_id];
+        let tasks = tx
+            .query_rows(
+                "SELECT id, correlation_id, workflow_id, repair_root_task_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3",
+                params,
+            )
+            .map_err(work_err)?;
+        let task = tasks
+            .first()
+            .ok_or_else(|| forge_work::WorkError::not_found("task"))?;
+        if col::<Uuid>(task, "correlation_id")? != correlation_id {
+            return Err(forge_work::WorkError::rejected(403, "denied"));
+        }
+        let workflow_id: Option<Uuid> = col(task, "workflow_id")?;
+        let root: Uuid = col::<Option<Uuid>>(task, "repair_root_task_id")?.unwrap_or(task_id);
+        let family_params: &[&(dyn ToSql + Sync)] = &[
+            &store.owner,
+            &project_alias,
+            &correlation_id,
+            &workflow_id,
+            &root,
+        ];
+        let family = tx
+            .query_rows(
+                "SELECT id, correlation_id FROM forge_agent.coding_tasks WHERE owner_id = $1 AND project_alias = $2 AND (correlation_id = $3 OR workflow_id = $4 OR id = $5 OR repair_root_task_id = $5) LIMIT 64",
+                family_params,
+            )
+            .map_err(work_err)?;
+        let mut family_ids: Vec<Uuid> = vec![correlation_id];
+        for row in &family {
+            let id: Uuid = row
+                .try_get("correlation_id")
+                .map_err(|e| forge_work::WorkError::store(e.to_string()))?;
+            if !family_ids.contains(&id) {
+                family_ids.push(id);
+            }
+        }
+        let exists_rows = tx
+            .query_rows(
+                "SELECT to_regclass('forge_agent.jenkins_stage_results') IS NOT NULL AS present",
+                &[],
+            )
+            .map_err(work_err)?;
+        let present: bool = exists_rows
+            .first()
+            .and_then(|row| row.try_get("present").ok())
+            .unwrap_or(false);
+        if !present {
+            return Err(forge_work::WorkError::not_found("stage log"));
+        }
+        let stage_params: &[&(dyn ToSql + Sync)] = &[
+            &store.owner,
+            &project_alias,
+            &action_id,
+            &family_ids,
+            &stage_id,
+        ];
+        let rows = tx
+            .query_rows(
+                "SELECT stage_index, phase_id, logical_stage_id, label, status, returncode, tests_passed, tests_failed, tests_skipped, test_summary, error_excerpt, log_sha256, log_byte_count, log_chunk_count FROM forge_agent.jenkins_stage_results WHERE owner_id = $1 AND project_alias = $2 AND action_id = $3 AND correlation_id = ANY($4::uuid[]) AND (logical_stage_id = $5 OR phase_id = $5) ORDER BY stage_index ASC",
+                stage_params,
+            )
+            .map_err(work_err)?;
+        if rows.is_empty() {
+            return Err(forge_work::WorkError::not_found("stage log"));
+        }
+        let text = assemble(view, &rows)?;
+        let digest = sha256_hex(&text);
+        let bytes = text.as_bytes();
+        let start = (offset as usize).min(bytes.len());
+        let end = (start + STAGE_LOG_WINDOW).min(bytes.len());
+        let slice = &bytes[start..end];
+        let content = match std::str::from_utf8(slice) {
+            Ok(text) => text.to_string(),
+            Err(error) => {
+                if error.error_len().is_some() {
+                    return Err(invalid());
+                }
+                std::str::from_utf8(&slice[..error.valid_up_to()])
+                    .map_err(|_| invalid())?
+                    .to_string()
+            }
+        };
+        let consumed = start + content.len();
+        let next_cursor = if consumed < bytes.len() {
+            Some(format!("{digest}.{consumed}"))
+        } else {
+            None
+        };
+        Ok(forge_work::work_types::StageLogView {
+            stage_id: stage_id.to_string(),
+            content,
+            next_cursor,
+        })
+    })
+}
+
+/// Assembles the full view text from the stage rows.
+fn assemble(view: &str, rows: &[tokio_postgres::Row]) -> Result<String, forge_work::WorkError> {
+    match view {
+        "errors" => {
+            let mut parts: Vec<String> = Vec::new();
+            for row in rows {
+                let excerpt: Option<String> = col(row, "error_excerpt")?;
+                if let Some(excerpt) = excerpt {
+                    if !excerpt.is_empty() {
+                        parts.push(excerpt);
+                    }
+                }
+            }
+            let joined = parts.join("\n\n");
+            let bytes = joined.as_bytes();
+            if bytes.len() <= 4096 {
+                return Ok(joined.trim_end().to_string());
+            }
+            let mut cut = 4096;
+            while cut > 0 && bytes[cut] & 0xC0 == 0x80 {
+                cut -= 1;
+            }
+            Ok(joined[..cut].trim_end().to_string())
+        }
+        "tests" => {
+            let mut passed: Option<i64> = None;
+            let mut failed: Option<i64> = None;
+            let mut skipped: Option<i64> = None;
+            let mut cases: Vec<Value> = Vec::new();
+            for row in rows {
+                if let Some(value) = col::<Option<i64>>(row, "tests_passed")? {
+                    passed = Some(passed.unwrap_or(0) + value);
+                }
+                if let Some(value) = col::<Option<i64>>(row, "tests_failed")? {
+                    failed = Some(failed.unwrap_or(0) + value);
+                }
+                if let Some(value) = col::<Option<i64>>(row, "tests_skipped")? {
+                    skipped = Some(skipped.unwrap_or(0) + value);
+                }
+                let summary: Option<Value> = col(row, "test_summary")?;
+                if let Some(cases_value) = summary
+                    .as_ref()
+                    .and_then(|value| value.get("cases"))
+                    .and_then(Value::as_array)
+                {
+                    for case in cases_value {
+                        if cases.len() >= 64 {
+                            break;
+                        }
+                        let name = case.get("name").and_then(Value::as_str).unwrap_or_default();
+                        let status = case
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default();
+                        cases.push(serde_json::json!({
+                            "name": name.chars().take(160).collect::<String>(),
+                            "status": status,
+                        }));
+                    }
+                }
+            }
+            Ok(serde_json::json!({
+                "passed": passed,
+                "failed": failed,
+                "skipped": skipped,
+                "cases": cases,
+            })
+            .to_string())
+        }
+        _ => {
+            let mut out = String::new();
+            for row in rows {
+                let label: Option<String> = col(row, "label")?;
+                let logical: String = col(row, "logical_stage_id")?;
+                let status: String = col(row, "status")?;
+                let name = label.filter(|value| !value.is_empty()).unwrap_or(logical);
+                out.push_str(&format!("## {name} [{status}]\n"));
+                let excerpt: Option<String> = col(row, "error_excerpt")?;
+                if let Some(excerpt) = excerpt {
+                    if !excerpt.is_empty() {
+                        out.push_str(&excerpt);
+                        out.push('\n');
+                    }
+                }
+            }
+            Ok(out)
+        }
+    }
+}
