@@ -7,6 +7,7 @@ pub mod error;
 pub mod factory;
 pub mod reconciler;
 pub mod registrar;
+pub mod tx;
 pub mod worker;
 
 pub use client::PgSession;
@@ -14,4 +15,5 @@ pub use config::PgConfig;
 pub use error::AdapterError;
 pub use factory::PgSessionFactory;
 pub use reconciler::ReconcilerApi;
+pub use tx::Tx;
 pub use worker::{Claim, RenewStatus, WorkerApi};

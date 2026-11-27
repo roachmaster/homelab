@@ -20,7 +20,8 @@ impl PgSession {
     /// sets the statement timeout, and runs a readiness probe.
     pub fn connect(config: PgConfig) -> Result<PgSession, AdapterError> {
         config.validate()?;
-        let rt = Builder::new_current_thread()
+        let rt = Builder::new_multi_thread()
+            .worker_threads(2)
             .enable_all()
             .build()
             .map_err(|e| AdapterError::Protocol(e.to_string()))?;
@@ -69,6 +70,36 @@ impl PgSession {
     /// Returns the configuration for the session.
     pub fn config(&self) -> &PgConfig {
         &self.config
+    }
+
+    /// Runs `f` inside one owner-scoped transaction: the same envelope as
+    /// every call_* (BEGIN, the owner set_config, COMMIT on success), but
+    /// the closure's statements all run on the one open transaction through
+    /// the Tx handle. An error from the closure or from any statement drops
+    /// the transaction uncommitted, which rolls it back. The closure is
+    /// synchronous and must only talk to the database through the handle.
+    pub fn in_tx<T>(
+        &mut self,
+        f: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, AdapterError>,
+    ) -> Result<T, AdapterError> {
+        let owner = self.config.owner.clone();
+        let handle = self.rt.handle().clone();
+        let client = &mut self.client;
+        let out = self.rt.block_on(async {
+            let mut tx = client.transaction().await?;
+            tx.execute(
+                "SELECT set_config('forge.coding_owner', $1, true)",
+                &[&owner],
+            )
+            .await?;
+            let value = {
+                let mut handle_tx = crate::tx::Tx::new(&mut tx, handle);
+                tokio::task::block_in_place(|| f(&mut handle_tx))?
+            };
+            tx.commit().await?;
+            Ok::<_, AdapterError>(value)
+        });
+        Ok(out?)
     }
 
     /// Executes a query and returns the result as a scalar value.
