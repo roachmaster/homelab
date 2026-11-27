@@ -857,7 +857,7 @@ NATIVE_CI_CONTEXT_RECOVERY_PATHS = frozenset({
 
 # Audited opt-in content identity source; no applied SQL or legacy authority change.
 CONTENT_IDENTITY_CONTEXT_SHA256 = {
-    'AGENT_WORK.md': 'cae1a06868275cd7fd079c13582e8a81add491c1f87c9ce79a0ff207b88a5f33',
+    'AGENT_WORK.md': '0618692a67377f33869343d611b3df69ad62baf0c48319d5dbacb7be8e378add',
     'deploy/mission-control/agent-runner/setup-runner.sh': 'ec31e0762a1d6b274d0561d15008a8d5a5655aefe9c8b78ac0fc56214151087c',
     'deploy/mission-control/agent-runner/test_external_content_identity.py': '23ccf8560f2f14c22cd4938f7ed778673e9b745021623a68cc68a629b675c3e4',
     'deploy/mission-control/agent-runner/test_native_content_identity.py': '63d133ae4d6c3bed213ce00c48edd511c0a2a258f95a9b4b4c75457cff3d9d95',
@@ -1142,7 +1142,7 @@ CODEX_AUTHOR_HANDOFF_SQL_PATHS = frozenset(('deploy/mission-control/sql/apply.sq
  'deploy/mission-control/sql/management/verify-retry-events.sql',
  'deploy/mission-control/sql/management/verify.sql',
  'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql'))
-CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': 'cae1a06868275cd7fd079c13582e8a81add491c1f87c9ce79a0ff207b88a5f33',
+CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '0618692a67377f33869343d611b3df69ad62baf0c48319d5dbacb7be8e378add',
  'deploy/mission-control/agent-runner/README.md': 'b0e3da0d7761ae7ebf80d3b2fe115be89ca0eb4dec549b2eefbd4b74d4be5671',
  'deploy/mission-control/agent-runner/quota-handoff-config.example.json': 'f4c2a2841f0cea15b6739c6b965566a26b476242a7b4947ebf7e4a083b9172aa',
  'deploy/mission-control/agent-runner/setup-runner.sh': 'ec31e0762a1d6b274d0561d15008a8d5a5655aefe9c8b78ac0fc56214151087c',

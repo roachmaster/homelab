@@ -2072,3 +2072,15 @@ repair.py. Increment 1 landed: error.rs + config.rs, 3 unit tests green,
 fmt clean. Remaining in build order: client, worker, reconciler, factory,
 registrar, generated lib.rs. Workspace membership + check-deps guard entries
 added for forge-postgres (and the pre-existing forge-mcp/forge-mcp-host gap).
+
+COMPLETE 2026-11-26: all eight files generated and reviewed — client
+(PgSession), worker (10 SQL functions), reconciler (4), factory
+(PgSessionFactory), registrar (register_worker/register_reconciler in the
+forge-jobs shape: dotted group ids, fixed-literal .expect), generated lib.rs.
+7 unit tests green, fmt clean, make check-deps green. v1 scope is the worker
++ reconciler SQL surfaces only (publication/usage stay out, per the design's
+non_goals); raw serde_json::Value in Claim::raw / publish /
+pending_reconciliations is the recorded v1 surface debt, replaced by typed
+structs before forge-work-worker builds on top. No live smoke test: the
+forge_coding_worker role's credentials are not available to the generator
+loop (the tunnel role muse_events is a different, read-only schema).

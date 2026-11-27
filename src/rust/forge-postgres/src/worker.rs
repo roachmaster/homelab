@@ -1,4 +1,3 @@
-use crate::client::PgSession;
 use crate::error::AdapterError;
 use serde_json::Value;
 use uuid::Uuid;
