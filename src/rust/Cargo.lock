@@ -354,7 +354,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0b1fab2ae45819af2d0731d60f2afe17227ebb1a1538a236da84c93e9a60162"
 dependencies = [
  "dispatch2",
- "nix",
+ "nix 0.31.3",
  "windows-sys 0.61.2",
 ]
 
@@ -523,11 +523,21 @@ dependencies = [
  "forge-remote",
  "forge-remote-https",
  "forge-system",
- "nix",
+ "nix 0.31.3",
  "rcgen",
  "rustls",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "forge-agent-driver"
+version = "0.1.0"
+dependencies = [
+ "nix 0.30.1",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
 ]
 
 [[package]]
@@ -546,7 +556,7 @@ dependencies = [
  "cap-std",
  "forge-core",
  "forge-remote",
- "nix",
+ "nix 0.31.3",
  "proc-macro2",
  "quote",
  "serde",
@@ -667,7 +677,7 @@ dependencies = [
  "forge-work",
  "forge-work-publication",
  "forge-work-worker",
- "nix",
+ "nix 0.31.3",
  "serde_json",
  "sha2 0.10.9",
  "tokio",
@@ -724,7 +734,7 @@ dependencies = [
  "forge-jenkins",
  "forge-jobs",
  "forge-local",
- "nix",
+ "nix 0.31.3",
  "serde",
  "serde_json",
 ]
@@ -770,7 +780,7 @@ version = "0.1.0"
 dependencies = [
  "forge-core",
  "forge-usage",
- "nix",
+ "nix 0.31.3",
  "serde_json",
  "sha2 0.10.9",
  "uuid",
@@ -1354,6 +1364,18 @@ dependencies = [
  "libc",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]

@@ -1,0 +1,15 @@
+[package]
+name = "forge-agent-driver"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+
+[dependencies]
+nix = { version = "0.30", features = ["fs", "user", "hostname"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "=0.10.0"
+
+[lints]
+workspace = true
