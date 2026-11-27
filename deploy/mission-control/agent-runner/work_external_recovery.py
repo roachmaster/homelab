@@ -153,6 +153,7 @@ def revive_main(argv):
 
 def main():
     import sys
+    if sys.argv[1:2]==['approved-plan-direction']:raise SystemExit(unstarted_plan_main(sys.argv[2:],approved_direction=True))
     if sys.argv[1:2]==['unstarted-plan']:raise SystemExit(unstarted_plan_main(sys.argv[2:]))
     if sys.argv[1:2]==['policy-continuation']:raise SystemExit(continuation_main(sys.argv[2:]))
     if sys.argv[1:2]==['revive']:raise SystemExit(revive_main(sys.argv[2:]))
@@ -209,8 +210,10 @@ def continuation_main(argv):
     return 0
 
 
-def unstarted_plan_main(argv):
-    parser=argparse.ArgumentParser(description='Resume one reconciled, never-launched policy-continuation Plan')
+def unstarted_plan_main(argv,*,approved_direction=False):
+    description=('Resume one approved implementation affected by stale Plan-only retry direction' if approved_direction
+                 else 'Resume one reconciled, never-launched policy-continuation Plan')
+    parser=argparse.ArgumentParser(description=description)
     parser.add_argument('--config',required=True)
     parser.add_argument('--project',required=True)
     parser.add_argument('--task',type=UUID,required=True)
@@ -225,13 +228,15 @@ def unstarted_plan_main(argv):
     verified_deployed_fix(__file__,args.deployed_fix_revision)
     from work_config import load_work_config
     from work_api import WorkServiceFactory
-    from work_workflow_continuation import WorkflowContinuation,UnstartedPlanResume
+    from work_workflow_continuation import WorkflowContinuation,UnstartedPlanResume,ApprovedPlanDirectionResume
     service=WorkServiceFactory(load_work_config(args.config),lambda:peer_connect('forge_agent')).create()
     if service is None or service.workflow_worker is None:raise RuntimeError('Native workflow coordinator is unavailable')
-    command=UnstartedPlanResume(args.project,args.task,args.attempt,args.expected_revision,
+    contract=ApprovedPlanDirectionResume if approved_direction else UnstartedPlanResume
+    command=contract(args.project,args.task,args.attempt,args.expected_revision,
         args.reconciliation_receipt,args.idempotency_key,args.deployed_fix_revision)
     port=WorkflowContinuation(service.workflow_worker.store,NativeRetryEvidence(lambda:peer_connect('postgres')))
-    print(json.dumps(port.resume_unstarted_plan(command),sort_keys=True))
+    result=port.resume_approved_plan_direction(command) if approved_direction else port.resume_unstarted_plan(command)
+    print(json.dumps(result,sort_keys=True))
     return 0
 
 

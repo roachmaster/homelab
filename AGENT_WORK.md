@@ -1,5 +1,37 @@
 # Current: Event-stream autonomy defects — 2026-11-27
 
+Latest follow-up supersedes the earlier rollout status below. PR #34 merged as
+2bcf146a; Jenkins #116 passed 45 branch checks and Jenkins #117 passed 46 main checks,
+including real browser and 1,815 runner tests with zero skips. Portal release
+0b78ab10 is deployed; six matched services execute source e1ae80606. Live database
+privilege/config checks and portal legacy/ABI 18 negotiation passed. All six same
+Plan children resumed, reaching 6 active / 4 attention / 52 history. Two Plans passed
+independent review and entered implementation on feature/codex.
+
+Actual model execution then exposed a separate direction defect: the legacy
+startup-resume note telling the author to produce a fresh Plan persisted into
+the already-approved implementation prompt. First child 06360355 returned another
+Plan, made no edits and reached terminal no_source_changes review. Codex stopped
+the author normally; child 872ec2f’s two partial files and genuine reconciliation
+remain. Four Plans are queued, no leases/reservations active. Current portal is
+4 active / 6 attention / 52 history. Author stays STOPPED pending this next deployment.
+
+Correction: omit only legacy note-only delivery from the prior approved Plan
+attempt when the mode advances to implementation, using exact Plan decision and
+attempt identities. Retain immutable historical notes and all typed repair,
+peer feedback and later implementation notes. Tests assert the actual CLI prompt
+and artifacts as well as the real Worker/PG Plan-to-implementation chain.
+Private approved-plan-direction recovery binds the original continuation and
+startup recovery, exact first implementation, approved Plan and stale note,
+real stop/reconciliation, terminal empty-source review or interrupted/no-result
+scope, current recipe/branch/readiness and cancellation guards. It preserves
+partial work, results/reviews, counters and the same Plan/task, and charges one
+durable feedback-delivery retry. No migration or public override is introduced.
+Independent review caught that normal worker shutdown publishes needs_reconcile
+without a result; the private port now validates that exact publication receipt
+instead of requiring published_at=NULL. The regression uses actual Worker
+shutdown/publication/reconciliation with partial source, not a record_stop shortcut.
+
 Live checkpoint16:05UTC supersedes pending-rollout text below: PR33 merged as
 a51e83dae (tree5d601ff4); Jenkins113 branch45 and Jenkins114 main46 passed,
 including real browser and1805 runner tests with zero skips. Portal release

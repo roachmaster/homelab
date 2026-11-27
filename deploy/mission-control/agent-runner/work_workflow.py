@@ -127,6 +127,30 @@ class BoundUnstartedPlanAuthority:
 
 
 @dataclass(frozen=True)
+class BoundPlanDirectionAuthority:
+    """Once-only retry of a verified Plan-to-code instruction delivery defect."""
+    store:object
+    cursor:object
+    workflow_id:object
+    task_id:object
+    attempt_id:object
+    revision:int
+    review_id:object
+
+    def validate(self,cursor,task,kind):
+        if (cursor is not self.cursor or kind!='plan_direction' or task['id']!=self.task_id
+                or task.get('workflow_id')!=self.workflow_id or task['latest_attempt_id']!=self.attempt_id
+                or task['revision']!=self.revision or task['mode']!='implement'
+                or task['status'] not in {'awaiting_review','needs_reconcile'}):
+            raise Rejected(403,'denied')
+
+    def allows_review(self,review):
+        return (review['review_id']==self.review_id and review['attempt_id']==self.attempt_id
+                and review['status']=='handoff' and review['reason']=='no_source_changes'
+                and review['candidate_commit'] is None)
+
+
+@dataclass(frozen=True)
 class BoundPreparationRetryAuthority:
     """One existing-budget check retry; never code-review approval authority."""
     store:object

@@ -67,6 +67,24 @@ class ReviewContext:
     author_handoff: BuildAuthorHandoffContext | None = None
 
 
+def current_phase_context(lease, context, plan_context):
+    """A Plan's resume direction expires when that Plan is approved for code.
+
+    The immutable note stays in history. Only legacy note-only delivery is
+    omitted, using the verified Plan attempt identity; repair packets and
+    notes from subsequent implementation attempts keep their authority.
+    """
+    expected_plan = lease.get('plan_decision_id') or lease.get('scope_plan_decision_id')
+    if (isinstance(context, ReviewContext) and context.feedback_id is None
+            and lease.get('mode') == 'implement' and isinstance(plan_context, dict)
+            and expected_plan is not None and plan_context.get('decision_id') == expected_plan
+            and plan_context.get('decision') == 'resume'
+            and lease.get('resume_attempt_id') is not None
+            and lease['resume_attempt_id'] == plan_context.get('plan_attempt_id')):
+        return None
+    return context
+
+
 def validate_context(lease, workspace, envelope):
     """Validate exact persisted bytes; SQL JSON text is never reserialized."""
     expected_id = lease.get("feedback_id")
