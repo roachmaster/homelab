@@ -2107,7 +2107,9 @@ class WorkStore:
 
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
             from work_workflow import BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority
-            transition_kind=('plan_direction' if isinstance(_authority,BoundPlanDirectionAuthority)
+            from work_plan_lineage_recovery import BoundPlanLineageAuthority
+            transition_kind=('plan_lineage_fix' if isinstance(_authority,BoundPlanLineageAuthority)
+                             else 'plan_direction' if isinstance(_authority,BoundPlanDirectionAuthority)
                              else 'native_startup' if isinstance(_authority,BoundUnstartedPlanAuthority)
                              else 'stopped_binary_pin' if isinstance(_authority,BoundBinaryPinAuthority)
                              else 'provider_model_route' if isinstance(_authority,BoundProviderModelAuthority)
@@ -2295,7 +2297,8 @@ class WorkStore:
             from work_reviewer_correction import BoundReviewerCorrectionAuthority
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
             from work_agent_handoff import BoundAuthorHandoffAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority)) or authority.store is not self:
+            from work_plan_lineage_recovery import BoundPlanLineageAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority,BoundPlanLineageAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 

@@ -1,3 +1,38 @@
+# Current: continuation-owned Plan repair — 2026-11-27
+
+PR35 is merged as ea3e42cb; source5bdedc1a has the identical tree and is live.
+Jenkins119 passed45 branch checks and Jenkins120 passed46 full-main checks,
+including browser and1824 runner tests with zero skips. Portal d88a4c00 is deployed.
+Native candidate3622f602 passed all45 Jenkins121 branch checks. Independent review
+correctly requested an initial external Plan instruction fix, then normal code
+repair8909443f stopped before model launch: SQL read_plan couples Plan ownership
+to the historical budget root, although fresh continuation063 owns approved Plan64f81def.
+
+Codex is preparing migration52 continuation_plan_lineage. Applied migrations1–51,
+budget roots and historical receipts remain unchanged. The reader follows only
+bounded, cycle-safe, source-review/candidate/feedback-bound repair ancestry to the
+actual approved Plan owner. Private PlanLineageRecovery uses normal same-task
+Resume after exact failure/stop/reconciliation, current deployment, actual workspace
+and source digests, current grants/readiness/branch and retained-source checks;
+one durable infrastructure retry is charged. No public override or automatic
+failure relabeling is added. Initial focused55 tests passed; existing schema51
+upgrade with task history and subsequent native repair passed. Final source
+qualification and live migration/recovery are pending at this checkpoint.
+
+IMPORTANT: native publisher owns origin/feature/codex candidate3622 and its
+persistent reservation. Root's migration work remains local on feature/codex;
+do not push/reset/advance the remote or clear its reservation for maintenance.
+Qualify the local immutable candidate through protected Jenkins bundle submission,
+then qualify/apply SQL52 while preserving native branch ownership. Hold portal
+release activation while schema52 source is not yet in main: old SQL verifiers
+will correctly reject the new function. Let the existing native repair/review/merge
+finish, then publish migration source through reviewed feature/codex integration
+once its reservation is legitimately released. No native completion is claimed.
+
+Live CI final result projection is verified in portal root and repair responses.
+Publisher lifecycle emitter configuration is absent, so in-progress Jenkins runs
+are not yet projected; investigate/qualify the existing emitter wiring.
+
 # Current: Event-stream autonomy defects — 2026-11-27
 
 Latest follow-up supersedes the earlier rollout status below. PR #34 merged as
