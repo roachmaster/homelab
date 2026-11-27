@@ -11,6 +11,18 @@ from work_ci_phases import ALL_FEATURES, CiPhase, EVENT_PROFILE, FEATURE_VARIANT
 
 LEGACY_PROFILE = 'forge-sdlc-jenkins-v1'
 SCOPED_PROFILE = 'forge-sdlc-jenkins-v2'
+GATE_REFERENCE_RE = re.compile(
+    r'forge-sdlc-jenkins-v[1-3]:(?:main|detached|branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?)')
+
+
+def validate_gate_reference(value):
+    """Admit named Jenkins contracts and immutable legacy receipt references."""
+    if not isinstance(value, str) or not (
+            re.fullmatch(r'[0-9a-f]{64}', value) or GATE_REFERENCE_RE.fullmatch(value)):
+        raise ValueError('Invalid delivery gate')
+    return value
+
+
 LEGACY_CHECKS = (
     ('/usr/bin/make', 'ci'),
     ('/usr/bin/make', 'ui-qa'),
