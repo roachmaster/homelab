@@ -26,6 +26,7 @@ pub mod retry_evidence;
 pub mod review_store;
 pub mod registrar;
 pub mod tx;
+pub mod usage_store_adapter;
 pub mod work_admission;
 pub mod work_admission_ops;
 pub mod work_admission_resume;

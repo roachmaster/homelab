@@ -8,9 +8,11 @@
 //! the injected process ports in `rpc` and `muse_process`.
 #![doc = include_str!("../README.md")]
 
+pub mod api;
 pub mod collector;
 pub mod diagnostics;
 pub mod muse_process;
 pub mod provider;
 pub mod rpc;
+pub mod store;
 pub mod types;

@@ -663,6 +663,7 @@ dependencies = [
  "chrono",
  "forge-core",
  "forge-jenkins",
+ "forge-usage",
  "forge-work",
  "forge-work-publication",
  "forge-work-worker",
