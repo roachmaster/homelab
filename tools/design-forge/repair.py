@@ -21,7 +21,14 @@ def main():
     llm.set_out_dir(out_dir)
     cards, glossary, rules = load_store(store_dir)
     card = cards[target]
-    packet = build_packet(target, cards, glossary, rules)
+    # Lean repair packet (Leonardo's rule: do not give it too much context).
+    # The current file already embodies the design; a repair needs the house
+    # rules, the target's own card, the file and the errors - not collaborator
+    # signatures or the glossary slice.
+    lean = dict(card)
+    lean["collaborators"] = []
+    lean["glossary"] = []
+    packet = build_packet(target, {target: lean}, {}, rules)
     path = os.path.join(out_dir, "src", card["file"])
     with open(path) as f:
         current = f.read()

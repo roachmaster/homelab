@@ -1,13 +1,5 @@
 {
- "collaborators": [
-  "error",
-  "config",
-  "client",
-  "worker",
-  "reconciler",
-  "factory",
-  "registrar"
- ],
+ "collaborators": [],
  "file": "lib.rs",
  "glossary": [
   "lease"

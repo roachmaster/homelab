@@ -60,6 +60,8 @@ def build_packet(target_id, cards, glossary, rules):
         for inv in card["invariants"]:
             lines.append(f"- {inv}")
     lines.append(f"Public signature to implement exactly:\n{card['signature']}")
+    if card.get("pattern"):
+        lines.append(f"Decided pattern for this file (implement with this structure):\n{card['pattern']}")
     collabs = [c for c in card.get("collaborators", []) if c in cards]
     if collabs:
         lines.append("")
