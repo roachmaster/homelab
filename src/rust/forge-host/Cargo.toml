@@ -7,6 +7,7 @@ description = "Forge host composition binaries: the production process roots tha
 
 [dependencies]
 forge-postgres = { workspace = true }
+forge-work-publication = { workspace = true }
 forge-work-worker = { workspace = true }
 serde_json = "1"
 ctrlc = { version = "=3.5.2", features = ["termination"] }
@@ -14,3 +15,7 @@ ctrlc = { version = "=3.5.2", features = ["termination"] }
 [[bin]]
 name = "forge-coding-worker"
 path = "src/bin/forge-coding-worker.rs"
+
+[[bin]]
+name = "forge-publication-worker"
+path = "src/bin/forge-publication-worker.rs"

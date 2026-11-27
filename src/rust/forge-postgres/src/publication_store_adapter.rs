@@ -397,3 +397,133 @@ impl PublicationClaimPort for PgPublicationStore {
         .map(|value| value.unwrap_or(json!({})))
     }
 }
+
+/// The publication worker's queue listener (WorkerDB.listen/wait
+/// over NOTIFY_CHANNEL "forge_coding_jobs"): a dedicated connection
+/// whose notifications wake the run loop. Mirrors PgJenkinsListener.
+pub struct PgPublicationListener {
+    _runtime: tokio::runtime::Runtime,
+    _client: tokio_postgres::Client,
+    _driver: tokio::task::JoinHandle<()>,
+    receiver: std::sync::mpsc::Receiver<()>,
+}
+
+impl PgPublicationListener {
+    pub fn connect(config: &PgConfig) -> Result<Self, AdapterError> {
+        use std::task::Poll;
+        use tokio_postgres::{AsyncMessage, NoTls};
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .map_err(|error| AdapterError::Unavailable(error.to_string()))?;
+        let (client, connection) = runtime
+            .block_on(config.to_tokio_config().connect(NoTls))
+            .map_err(|error| AdapterError::Unavailable(error.to_string()))?;
+        let (sender, receiver) = std::sync::mpsc::channel::<()>();
+        let driver = runtime.spawn(async move {
+            let mut connection = connection;
+            let _ = std::future::poll_fn(|cx| loop {
+                match connection.poll_message(cx) {
+                    Poll::Ready(Some(Ok(AsyncMessage::Notification(_)))) => {
+                        let _ = sender.send(());
+                    }
+                    Poll::Ready(Some(Ok(_))) => continue,
+                    Poll::Ready(Some(Err(_))) | Poll::Ready(None) => {
+                        return Poll::Ready(());
+                    }
+                    Poll::Pending => return Poll::Pending,
+                }
+            })
+            .await;
+        });
+        runtime
+            .block_on(client.simple_query("LISTEN forge_coding_jobs"))
+            .map_err(|error| AdapterError::Unavailable(error.to_string()))?;
+        Ok(Self {
+            _runtime: runtime,
+            _client: client,
+            _driver: driver,
+            receiver,
+        })
+    }
+}
+
+impl forge_work_publication::publication::PublicationListenerPort for PgPublicationListener {
+    fn wait(&mut self, seconds: f64) -> bool {
+        use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_secs_f64(seconds.max(0.0));
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            match self.receiver.recv_timeout(remaining) {
+                Ok(()) => {
+                    while self.receiver.try_recv().is_ok() {}
+                    return true;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => return false,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return false,
+            }
+        }
+    }
+}
+
+impl PgPublicationStore {
+    /// Open the dedicated LISTEN connection for the run loop.
+    pub fn listener(&self) -> Result<PgPublicationListener, AdapterError> {
+        PgPublicationListener::connect(&self.config)
+    }
+}
+
+/// A PublicationListenerPort that (re)connects lazily: Python's
+/// run loop catches a failed LISTEN inside its retry loop; here a
+/// failed connect waits out the interval and retries on the next
+/// wait, so the worker polls at the same cadence meanwhile.
+pub struct RetryingPublicationListener {
+    config: PgConfig,
+    inner: Option<PgPublicationListener>,
+}
+
+impl RetryingPublicationListener {
+    pub fn new(config: PgConfig) -> RetryingPublicationListener {
+        RetryingPublicationListener {
+            config,
+            inner: None,
+        }
+    }
+}
+
+impl forge_work_publication::publication::PublicationListenerPort
+    for RetryingPublicationListener
+{
+    fn wait(&mut self, seconds: f64) -> bool {
+        if self.inner.is_none() {
+            match PgPublicationListener::connect(&self.config) {
+                Ok(listener) => self.inner = Some(listener),
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_secs_f64(
+                        seconds.max(0.0),
+                    ));
+                    return false;
+                }
+            }
+        }
+        let listener = self.inner.as_mut().expect("listener installed");
+        let started = std::time::Instant::now();
+        if listener.wait(seconds) {
+            return true;
+        }
+        // A wait that returns almost immediately signals a dead
+        // connection (the receiver disconnected): wait out the
+        // interval here and reconnect on the next call, mirroring
+        // the Python loop's warn-and-retry cadence.
+        if seconds > 0.05 && started.elapsed() < std::time::Duration::from_millis(10) {
+            self.inner = None;
+            std::thread::sleep(std::time::Duration::from_secs_f64(seconds.max(0.0)));
+        }
+        false
+    }
+}

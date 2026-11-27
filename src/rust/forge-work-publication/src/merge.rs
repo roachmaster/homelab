@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use forge_work_worker::native_identity::iso_epoch_seconds;
 use forge_work_worker::review_candidate::{sha1_hex, ReviewedCandidateProvider};
-use forge_work_worker::review_ports::ReviewError;
+use forge_work_worker::review_ports::{HostedChecksPort, ReviewError};
 
 use crate::delivery_stores::{error_code, MergeStorePort, NativeMergeFailureError, RequireLease};
 use crate::hosted_checks::GitHubHostedChecksProvider;
@@ -157,7 +157,7 @@ pub struct GitHubExactTreeMergeProvider {
     pub client: GitHubPullRequestClient,
     pub git: GitRepositoryProvider,
     pub candidates: ReviewedCandidateProvider,
-    pub hosted: GitHubHostedChecksProvider,
+    pub hosted: Box<dyn HostedChecksPort>,
     pub now: Box<dyn Fn() -> String + Send>,
 }
 
@@ -226,7 +226,14 @@ impl GitHubExactTreeMergeProvider {
             }
             None => false,
         };
-        if !valid || self.hosted.observe_inner(job)?.status != "passed" {
+        if !valid
+            || self
+                .hosted
+                .observe(job)
+                .map_err(|error| PublicationError::new(&error.to_string()))?
+                .status
+                != "passed"
+        {
             return Err(PublicationError::Code(
                 "merge_hosted_checks_not_green".to_string(),
             ));

@@ -29,7 +29,7 @@ use crate::publication_clients::ProviderError;
 use crate::delivery_worker::ReleaseWorker;
 use crate::jenkins_lifecycle::IntentDrain;
 use crate::merge::MergeWorker;
-use crate::native_jenkins::{BranchProviderObject, NativeJenkinsVerification};
+use crate::native_jenkins::{BranchProviderObject, SharedNativeCi};
 use crate::post_merge::PostMergeWorker;
 use crate::publication_clients::{
     branch_name, GitHubPullRequestClient, GitRepositoryProvider, PublicationError,
@@ -120,6 +120,15 @@ pub trait PublicationClaimPort: Send + Sync {
     ) -> Result<Value, ProviderError>;
 }
 
+/// Optional queue-notification surface (WorkerDB.listen/wait):
+/// the host composition supplies a dedicated LISTEN connection;
+/// run_forever waits on it when idle instead of polling blind.
+pub trait PublicationListenerPort: Send {
+    /// Wait up to `seconds` for a queue notification; true when
+    /// one arrived (notifications are hints — claims re-check).
+    fn wait(&mut self, seconds: f64) -> bool;
+}
+
 /// The full pull-request surface PublicationWorker drives (the
 /// publication clients trait carries list_open only).
 pub trait PublicationPullRequestsFull: Send {
@@ -201,7 +210,8 @@ pub struct PublicationWorker {
     pub candidates: ReviewedCandidateProvider,
     pub reviewer: Option<ReviewWorker>,
     pub merger: Option<MergeWorker>,
-    pub native_ci: Option<NativeJenkinsVerification>,
+    pub native_ci: Option<SharedNativeCi>,
+    pub listener: Option<Box<dyn PublicationListenerPort>>,
     pub post_merge: Option<PostMergeWorker>,
     pub source_observer: Option<SourceObserver>,
     pub release: Option<ReleaseWorker>,
@@ -235,6 +245,7 @@ impl PublicationWorker {
             reviewer: None,
             merger: None,
             native_ci: None,
+            listener: None,
             post_merge: None,
             source_observer: None,
             release: None,
@@ -447,7 +458,7 @@ impl PublicationWorker {
         self.git
             .verify(&repository, &head)
             .map_err(|error| failure(error.code()))?;
-        if let Some(native_ci) = &mut self.native_ci {
+        if let Some(native_ci) = &self.native_ci {
             job = native_ci
                 .publication_job(&job)
                 .map_err(|error| failure(error.code()))?;
@@ -748,7 +759,7 @@ impl PublicationWorker {
         if self.stop.load(Ordering::SeqCst) {
             return Ok(false);
         }
-        if let Some(native_ci) = &mut self.native_ci {
+        if let Some(native_ci) = &self.native_ci {
             native_ci.reconcile_once(16)?;
         }
         if let Some(provider) = &mut self.branch_provider {
@@ -841,6 +852,92 @@ impl PublicationWorker {
         let Some(job) = job else { return Ok(false) };
         self.process(&job)?;
         Ok(true)
+    }
+}
+
+impl PublicationWorker {
+    /// The host run loop (work_publication.py's run_forever): the
+    /// intent drain runs on its own thread; the main loop subscribes
+    /// before scanning, runs passes until idle, then waits on the
+    /// queue listener (or the stop flag) for five seconds. A failed
+    /// pass is logged and the loop re-enters after a pause — no
+    /// remote action is replayed.
+    pub fn run_forever(&mut self) {
+        let (drain_done, drain_thread) = match self.jenkins_drain.take() {
+            Some(mut drain) => {
+                let stop = Arc::clone(&self.stop);
+                let (sender, receiver) = std::sync::mpsc::channel::<()>();
+                let thread = std::thread::spawn(move || {
+                    drain.run(&stop);
+                    let _ = sender.send(());
+                });
+                (Some(receiver), Some(thread))
+            }
+            None => (None, None),
+        };
+        let listener: Option<
+            std::sync::Arc<std::sync::Mutex<Box<dyn PublicationListenerPort>>>,
+        > = self
+            .listener
+            .take()
+            .map(|listener| std::sync::Arc::new(std::sync::Mutex::new(listener)));
+        while !self.stop.load(Ordering::SeqCst) {
+            // Subscribe before scanning: install the wait drain so
+            // long native CI waits keep the listener drained.
+            if let (Some(native_ci), Some(listener)) = (&self.native_ci, &listener) {
+                let drain_listener = std::sync::Arc::clone(listener);
+                native_ci.set_drain(Some(Box::new(move || {
+                    if let Ok(mut listener) = drain_listener.lock() {
+                        listener.wait(0.0);
+                    }
+                })));
+            }
+            let outcome = self.run_until_idle(&listener);
+            if let Some(native_ci) = &self.native_ci {
+                native_ci.set_drain(None);
+            }
+            if outcome.is_err() {
+                eprintln!("Publication queue unavailable; no remote action replayed");
+                self.wait_stop(5.0);
+            }
+        }
+        if let (Some(receiver), Some(_thread)) = (drain_done, drain_thread) {
+            // Bounded shutdown: a stuck drain is abandoned (the
+            // process is exiting; the thread dies with it).
+            let _ = receiver.recv_timeout(std::time::Duration::from_secs_f64(
+                crate::jenkins_lifecycle::DRAIN_SHUTDOWN_TIMEOUT_SECONDS,
+            ));
+        }
+    }
+
+    fn run_until_idle(
+        &mut self,
+        listener: &Option<
+            std::sync::Arc<std::sync::Mutex<Box<dyn PublicationListenerPort>>>,
+        >,
+    ) -> Result<(), PublicationError> {
+        while !self.stop.load(Ordering::SeqCst) {
+            if self.run_once()? {
+                continue;
+            }
+            match listener {
+                Some(listener) => {
+                    if let Ok(mut listener) = listener.lock() {
+                        listener.wait(5.0);
+                    }
+                }
+                None => self.wait_stop(5.0),
+            }
+        }
+        Ok(())
+    }
+
+    fn wait_stop(&self, seconds: f64) {
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds.max(0.0));
+        while !self.stop.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
 }
 

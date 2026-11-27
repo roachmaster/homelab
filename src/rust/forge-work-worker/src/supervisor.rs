@@ -118,17 +118,17 @@ fn verify_staged_file(
 
 pub struct SystemdSupervisor {
     config: WorkerConfig,
-    command: Box<dyn CommandPort>,
+    command: Box<dyn CommandPort + Send>,
     cgroup_root: PathBuf,
-    consumer_caches: Option<Box<dyn ConsumerCachePort>>,
+    consumer_caches: Option<Box<dyn ConsumerCachePort + Send>>,
     euid: u32,
 }
 
 impl SystemdSupervisor {
     pub fn new(
         config: WorkerConfig,
-        command: Box<dyn CommandPort>,
-        consumer_caches: Option<Box<dyn ConsumerCachePort>>,
+        command: Box<dyn CommandPort + Send>,
+        consumer_caches: Option<Box<dyn ConsumerCachePort + Send>>,
     ) -> SystemdSupervisor {
         SystemdSupervisor {
             config,

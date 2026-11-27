@@ -554,6 +554,7 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "forge-postgres",
+ "forge-work-publication",
  "forge-work-worker",
  "serde_json",
 ]

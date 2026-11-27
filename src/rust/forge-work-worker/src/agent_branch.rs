@@ -982,3 +982,32 @@ mod tests {
         );
     }
 }
+
+/// The review worker's branch surface over this provider (the
+/// publication factory passes the same provider Python shares).
+impl<S: BranchProviderPort + Send> crate::review_ports::ReviewBranchPort
+    for AgentBranchProvider<S>
+{
+    fn persistent_enabled(&self) -> bool {
+        AgentBranchProvider::persistent_enabled(self)
+    }
+
+    fn acquire(
+        &mut self,
+        job: &Value,
+        review_id: &str,
+    ) -> Result<
+        Option<crate::review_ports::BranchReservationData>,
+        crate::review_ports::ReviewError,
+    > {
+        let reservation = AgentBranchProvider::acquire(self, job, Some(review_id), None)
+            .map_err(|error| crate::review_ports::ReviewError::other(error.to_string()))?;
+        Ok(reservation.map(|reservation| {
+            crate::review_ports::BranchReservationData {
+                agent_profile: reservation.agent_profile,
+                branch_name: reservation.branch_name,
+                reservation_epoch: reservation.reservation_epoch,
+            }
+        }))
+    }
+}

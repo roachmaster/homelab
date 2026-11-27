@@ -59,7 +59,7 @@ pub struct JenkinsEventsList {
     pub limit: i64,
     pub job_name: Option<String>,
     pub event_kind: Option<String>,
-    pub correlation_id: Option<String>,
+    pub commit_sha: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -240,7 +240,7 @@ pub fn decode(
                         .map_err(|_| bad_request())?,
                 ),
             },
-            correlation_id: optional_string(body, "correlation_id")?,
+            commit_sha: optional_string(body, "commit_sha")?,
         })),
         JenkinsDestination::Get => {
             let event_id = required_string(body, "event_id")?;
@@ -354,9 +354,8 @@ impl JenkinsService {
         if let Some(job_name) = &query.job_name {
             crate::events::validate_job_name(job_name).map_err(|_| bad_request())?;
         }
-        if let Some(correlation_id) = &query.correlation_id {
-            crate::events::validate_correlation_id(correlation_id)
-                .map_err(|_| bad_request())?;
+        if let Some(commit_sha) = &query.commit_sha {
+            crate::events::validate_commit_sha(commit_sha).map_err(|_| bad_request())?;
         }
         let kind = match &query.event_kind {
             None => None,
@@ -368,7 +367,7 @@ impl JenkinsService {
             query.limit,
             query.job_name.as_deref(),
             kind,
-            query.correlation_id.as_deref(),
+            query.commit_sha.as_deref(),
         )
     }
 
@@ -426,6 +425,12 @@ impl JenkinsService {
 
 /// Effect-free composition root for Jenkins ingress (the consumer
 /// worker is opt-in, matching create_jenkins_service's with_consumers).
+impl crate::emitter::JenkinsEmitService for JenkinsService {
+    fn emit(&mut self, event: &JenkinsEventEmit) -> Result<Value, JenkinsStoreError> {
+        JenkinsService::emit(self, event)
+    }
+}
+
 pub struct JenkinsServiceFactory {
     pub config: Option<JenkinsConfig>,
     store_factory: StoreFactory,

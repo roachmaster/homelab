@@ -15,6 +15,7 @@
 //! forge-work-worker.
 
 use crate::durable_files::{durable_json, read_private};
+use crate::publication_clients::ProviderError;
 use crate::publication_clients::{GitRepositoryProvider, PublicationError};
 use crate::publication_config::PublicationConfig;
 use forge_work::canonical::{canonical_json, sha256_hex};
@@ -443,6 +444,23 @@ impl BranchFirstRepairProvider {
             "delivery_failure": details,
             "no_merge_confirmed": true,
         }))
+    }
+}
+
+/// The merge worker's repair surface over the same provider
+/// (the factory passes one repair provider to both workers).
+impl crate::merge::MergeRepairPort for BranchFirstRepairProvider {
+    fn prepare(
+        &mut self,
+        job: &Value,
+        current_main: &str,
+        require_lease: crate::delivery_stores::RequireLease,
+    ) -> Result<Value, ProviderError> {
+        let mut lease = || {
+            require_lease().map_err(|error| ReviewError::other(error.code().to_string()))
+        };
+        BranchFirstRepairProvider::prepare(self, job, current_main, &mut lease)
+            .map_err(|error| ProviderError::Other(error.to_string()))
     }
 }
 

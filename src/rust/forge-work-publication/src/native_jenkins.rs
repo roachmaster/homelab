@@ -321,6 +321,13 @@ impl NativeJenkinsVerification {
         ListenScope { owner: self }
     }
 
+    /// Set or clear the wait drain directly (the host run loop
+    /// installs it for the duration of a listen scope, where the
+    /// guard form cannot be held across the worker's own borrows).
+    pub fn set_drain(&mut self, drain: Option<Box<dyn FnMut() + Send>>) {
+        self.drain = drain;
+    }
+
     fn scope(&self, value: &Value, job: &Value) -> Result<Map<String, Value>, PublicationError> {
         if !value.is_object()
             || text(value, "owner_id") != self.config.worker.owner
@@ -949,6 +956,125 @@ impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send> BranchProvid
             &mut ClientPullRequests(pull_requests),
             repositories,
         )
+    }
+}
+
+
+/// Rebuild a BranchReservation from its serialized form (the
+/// inverse of reservation_value, for the value-carrying ports).
+pub(crate) fn reservation_from_value(value: &Value) -> Result<BranchReservation, BranchError> {
+    let text = |key: &str| {
+        value[key]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| BranchError::Value(format!("reservation {key} missing")))
+    };
+    let optional = |key: &str| value[key].as_str().map(str::to_string);
+    Ok(BranchReservation {
+        project_alias: text("project_alias")?,
+        agent_profile: text("agent_profile")?,
+        branch_name: text("branch_name")?,
+        branch_scope: text("branch_scope")?,
+        scope_kind: text("scope_kind")?,
+        scope_id: text("scope_id")?,
+        root_task_id: text("root_task_id")?,
+        task_id: text("task_id")?,
+        reservation_epoch: value["reservation_epoch"]
+            .as_i64()
+            .ok_or_else(|| BranchError::Value("reservation epoch missing".to_string()))?,
+        head_commit_sha: optional("head_commit_sha"),
+        active_candidate_commit: optional("active_candidate_commit"),
+        active_pr_url: optional("active_pr_url"),
+        reentrant: value["reentrant"].as_bool().unwrap_or(false),
+        reservation_blocker: optional("reservation_blocker"),
+    })
+}
+
+fn branch_provider_error(error: BranchError) -> ProviderError {
+    match error {
+        BranchError::Conflict(conflict) => {
+            ProviderError::Publication(PublicationError::Code(conflict.code.clone()))
+        }
+        other => ProviderError::Other(other.to_string()),
+    }
+}
+
+/// The merge worker's branch surface over the shared provider.
+impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send>
+    crate::merge::MergeBranchPort for AgentBranchProvider<S>
+{
+    fn persistent_enabled(&self) -> bool {
+        AgentBranchProvider::persistent_enabled(self)
+    }
+
+    fn verify_merge_owner(
+        &mut self,
+        job: &Value,
+    ) -> Result<Option<crate::merge::MergeReservation>, ProviderError> {
+        let reservation = AgentBranchProvider::verify_merge_owner(self, job)
+            .map_err(branch_provider_error)?;
+        Ok(reservation.map(|reservation| crate::merge::MergeReservation {
+            agent_profile: reservation.agent_profile.clone(),
+            branch_name: reservation.branch_name.clone(),
+            raw: reservation_value(&reservation),
+        }))
+    }
+
+    fn release(
+        &mut self,
+        reservation: &crate::merge::MergeReservation,
+        release_reason: &str,
+        remote_open_pr_confirmed_none: bool,
+        merge_commit: Option<&str>,
+    ) -> Result<Value, ProviderError> {
+        let reservation = reservation_from_value(&reservation.raw)
+            .map_err(branch_provider_error)?;
+        AgentBranchProvider::release(
+            self,
+            &reservation,
+            release_reason,
+            remote_open_pr_confirmed_none,
+            merge_commit,
+        )
+        .map_err(branch_provider_error)
+    }
+}
+
+/// The git provider's branch surface over the shared provider.
+impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send>
+    crate::publication_clients::PublicationBranchPort for AgentBranchProvider<S>
+{
+    fn record_sync(
+        &mut self,
+        record: &crate::publication_clients::BranchSyncRecord,
+    ) -> crate::publication_clients::ProviderResult<()> {
+        AgentBranchProvider::record_sync(
+            self,
+            &record.project_alias,
+            &record.agent_profile,
+            record.branch_name.as_deref().unwrap_or_default(),
+            None,
+            record.fetched_main_sha.as_deref(),
+            record.fetched_main_at.as_deref(),
+            record.sync_status.as_deref(),
+            record.conflict_paths.clone(),
+            None,
+            record.last_task_id.as_deref(),
+            record.last_correlation_id.as_deref(),
+        )
+        .map(|_| ())
+        .map_err(branch_provider_error)
+    }
+
+    fn verify_owner(
+        &mut self,
+        reservation: &Value,
+    ) -> crate::publication_clients::ProviderResult<()> {
+        let reservation =
+            reservation_from_value(reservation).map_err(branch_provider_error)?;
+        AgentBranchProvider::verify_owner(self, &reservation)
+            .map(|_| ())
+            .map_err(branch_provider_error)
     }
 }
 
@@ -3001,6 +3127,94 @@ impl MergeNativeCiPort for NativeJenkinsVerification {
     fn publication_job(&mut self, job: &Value) -> Result<Value, ProviderError> {
         NativeJenkinsVerification::publication_job(self, job)
             .map_err(ProviderError::Publication)
+    }
+}
+
+/// Shared ownership of the one verification object: Python's
+/// factory passes the same NativeJenkinsVerification to the
+/// publication worker, the reviewer, the merger and the repair
+/// provider. The Rust composition shares it through this handle;
+/// every port locks per call (the composition is single-threaded
+/// in the same interleaving as Python's).
+#[derive(Clone)]
+pub struct SharedNativeCi(pub Arc<std::sync::Mutex<NativeJenkinsVerification>>);
+
+impl SharedNativeCi {
+    pub fn new(verification: NativeJenkinsVerification) -> SharedNativeCi {
+        SharedNativeCi(Arc::new(std::sync::Mutex::new(verification)))
+    }
+
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, NativeJenkinsVerification> {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn reconcile_once(&self, limit: i64) -> Result<(), PublicationError> {
+        self.lock().reconcile_once(limit)
+    }
+
+    pub fn publication_job(&self, job: &Value) -> Result<Value, PublicationError> {
+        self.lock().publication_job(job)
+    }
+
+    pub fn set_drain(&self, drain: Option<Box<dyn FnMut() + Send>>) {
+        self.lock().set_drain(drain);
+    }
+}
+
+impl ChecksPort for SharedNativeCi {
+    fn quiesce(&mut self, job: &Value) -> Result<(), ReviewError> {
+        ChecksPort::quiesce(&mut *self.lock(), job)
+    }
+
+    fn run(
+        &mut self,
+        job: &Value,
+        repo: &Path,
+        lost: &AtomicBool,
+    ) -> Result<forge_work_worker::review_ports::VerificationReportData, VerificationFailure> {
+        ChecksPort::run(&mut *self.lock(), job, repo, lost)
+    }
+}
+
+impl HostedChecksPort for SharedNativeCi {
+    fn observe(&mut self, job: &Value) -> Result<HostedReportData, ReviewError> {
+        HostedChecksPort::observe(&mut *self.lock(), job)
+    }
+}
+
+impl NativeCiPort for SharedNativeCi {
+    fn prepare_identity(
+        &mut self,
+        job: &Value,
+        repo: &Path,
+    ) -> Result<Option<Value>, ReviewError> {
+        NativeCiPort::prepare_identity(&mut *self.lock(), job, repo)
+    }
+
+    fn evidence(&mut self, job: &Value, repo: &Path) -> Result<Option<Value>, ReviewError> {
+        NativeCiPort::evidence(&mut *self.lock(), job, repo)
+    }
+
+    fn failure_context(&mut self, job: &Value) -> Result<Option<Value>, ReviewError> {
+        NativeCiPort::failure_context(&mut *self.lock(), job)
+    }
+
+    fn identity_reference(&mut self, snapshot: &Value) -> Result<Value, ReviewError> {
+        NativeCiPort::identity_reference(&mut *self.lock(), snapshot)
+    }
+}
+
+impl MergeNativeCiPort for SharedNativeCi {
+    fn publication_job(&mut self, job: &Value) -> Result<Value, ProviderError> {
+        MergeNativeCiPort::publication_job(&mut *self.lock(), job)
+    }
+}
+
+impl crate::native_repair::RepairNativeCiPort for SharedNativeCi {
+    fn build_reference(&mut self, job: &Value) -> Result<Value, ReviewError> {
+        self.lock()
+            .build_reference(job)
+            .map_err(|error| ReviewError::other(error.code()))
     }
 }
 

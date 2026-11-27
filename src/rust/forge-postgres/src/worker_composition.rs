@@ -32,7 +32,7 @@ use crate::worker::WorkerApi;
 
 /// Read one entry from a libpq passfile (host:port:database:user:
 /// password, `*` wildcards, backslash escapes).
-fn passfile_password(
+pub(crate) fn passfile_password(
     path: &Path,
     host: &str,
     port: u16,

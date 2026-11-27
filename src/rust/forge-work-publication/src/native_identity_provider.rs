@@ -419,6 +419,25 @@ impl NativeVerificationIdentityProvider {
 
 /// Factory parity with Python: the config type and a callable
 /// acquire are required at construction.
+/// The candidate provider's content-identity surface over this
+/// provider (the factory passes the same provider Python shares).
+impl forge_work_worker::review_ports::ContentIdentityPort
+    for NativeVerificationIdentityProvider
+{
+    fn acquire(
+        &mut self,
+        job: &Value,
+        repo: &std::path::Path,
+        reference: &Value,
+    ) -> Result<(), forge_work_worker::review_ports::ReviewError> {
+        self.acquire(job, repo, Some(reference))
+            .map(|_| ())
+            .map_err(|error| {
+                forge_work_worker::review_ports::ReviewError::code(error.code().to_string())
+            })
+    }
+}
+
 pub struct NativeVerificationIdentityFactory {
     pub config: NativeIdentityConfig,
     pub owner: u32,

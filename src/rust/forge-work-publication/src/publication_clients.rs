@@ -2419,3 +2419,107 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+/// Host adapter: the coding worker's WorkspaceProvider behind the
+/// snapshot workspace surface. Its inspect path verifies the same
+/// durable workspace metadata Python's shared provider verifies;
+/// the publication job supplies the recovery-lease identity fields
+/// it reads (task, project, base revision, attempt). The provider
+/// is not Send (its git port is a plain trait object), so it lives
+/// in a thread-local: the publication worker is single-threaded,
+/// exactly as in Python, and the provider's lock map stays on the
+/// thread that runs the worker.
+pub struct CodingWorkspacesAdapter {
+    pub config: forge_work_worker::config::WorkerConfig,
+}
+
+thread_local! {
+    static CODING_WORKSPACES: std::cell::RefCell<
+        Option<forge_work_worker::workspace_provider::WorkspaceProvider>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+impl CodingWorkspacesAdapter {
+    pub fn new(config: forge_work_worker::config::WorkerConfig) -> CodingWorkspacesAdapter {
+        CodingWorkspacesAdapter { config }
+    }
+
+    fn with_provider<R>(
+        &self,
+        action: impl FnOnce(
+            &mut forge_work_worker::workspace_provider::WorkspaceProvider,
+        ) -> Result<R, ReviewError>,
+    ) -> Result<R, ReviewError> {
+        CODING_WORKSPACES.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(forge_work_worker::workspace_provider::WorkspaceProvider::new(
+                    self.config.clone(),
+                    Box::new(forge_work_worker::ports_runtime::CommandGitRunner::default()),
+                    None,
+                    None,
+                ));
+            }
+            action(slot.as_mut().expect("provider installed"))
+        })
+    }
+
+    /// The factory's workspaces.prepare() step.
+    pub fn prepare(&self) -> Result<(), ReviewError> {
+        self.with_provider(|provider| {
+            use forge_work_worker::ports_runtime::WorkspacePort;
+            provider
+                .prepare()
+                .map_err(|error| ReviewError::other(error.to_string()))
+        })
+    }
+}
+
+impl SnapshotWorkspacesPort for CodingWorkspacesAdapter {
+    fn inspect(&mut self, job: &Value) -> Result<InspectedWorkspace, ReviewError> {
+        use forge_work_worker::ports_runtime::WorkspacePort;
+        let lease = forge_work_worker::types::RecoveryLease {
+            owner_id: text_of(job, "owner_id").to_string(),
+            task_id: text_of(job, "task_id").to_string(),
+            project_alias: text_of(job, "project_alias").to_string(),
+            base_revision: text_of(job, "base_revision").to_string(),
+            attempt_id: text_of(job, "attempt_id").to_string(),
+            worker_id: text_of(job, "worker_id").to_string(),
+            incarnation: String::new(),
+            unit_name: String::new(),
+        };
+        let lease = self.with_provider(|provider| {
+            provider.inspect(&lease).map_err(|error| match error {
+                forge_work_worker::error::WorkerError::WorkspaceBusy(_) => ReviewError::Busy,
+                other => ReviewError::other(other.to_string()),
+            })
+        })?;
+        Ok(InspectedWorkspace { lease })
+    }
+}
+
+/// Shared snapshot provider: Python's factory builds one snapshot
+/// provider and passes it to both the publication worker and the
+/// review worker.
+#[derive(Clone)]
+pub struct SharedSnapshots(
+    pub std::sync::Arc<std::sync::Mutex<WorkspaceSnapshotProvider>>,
+);
+
+impl SharedSnapshots {
+    pub fn new(provider: WorkspaceSnapshotProvider) -> SharedSnapshots {
+        SharedSnapshots(std::sync::Arc::new(std::sync::Mutex::new(provider)))
+    }
+}
+
+impl SnapshotPort for SharedSnapshots {
+    fn create(
+        &mut self,
+        job: &Value,
+    ) -> Result<forge_work_worker::review_ports::ReviewSnapshot, ReviewError> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .create(job)
+    }
+}

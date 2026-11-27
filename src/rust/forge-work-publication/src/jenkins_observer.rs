@@ -68,6 +68,71 @@ pub trait ObserverClock {
 }
 
 /// The std reader: read_immutable from the Python module.
+/// Production observer execution: a bounded subprocess with both
+/// streams drained (the runner's `command` port shape).
+pub struct ProcessObserverExecute;
+
+impl ObserverExecute for ProcessObserverExecute {
+    fn execute(
+        &self,
+        argv: &[String],
+        env: &[(String, String)],
+        timeout_seconds: f64,
+    ) -> ObserverResult<Vec<u8>> {
+        use std::io::Read;
+        let mut command = std::process::Command::new(
+            argv.first().ok_or_else(|| invalid("Empty observer command"))?,
+        );
+        command
+            .args(&argv[1..])
+            .env_clear()
+            .envs(env.iter().cloned())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = command
+            .spawn()
+            .map_err(|error| invalid(&format!("Observer command failed: {error}")))?;
+        let mut stdout_pipe = child.stdout.take().expect("piped stdout");
+        let stdout_thread = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stdout_pipe.read_to_end(&mut bytes);
+            bytes
+        });
+        let mut stderr_pipe = child.stderr.take().expect("piped stderr");
+        let stderr_thread = std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stderr_pipe.read_to_end(&mut bytes);
+            bytes
+        });
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_secs_f64(timeout_seconds.max(0.0));
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let stdout = stdout_thread.join().unwrap_or_default();
+                    let _ = stderr_thread.join();
+                    if status.success() {
+                        return Ok(stdout);
+                    }
+                    return Err(invalid("Observer command failed"));
+                }
+                Ok(None) => {
+                    if std::time::Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(invalid("Observer command timed out"));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => {
+                    return Err(invalid(&format!("Observer command failed: {error}")));
+                }
+            }
+        }
+    }
+}
+
 pub struct ImmutableReader;
 
 impl ObserverReader for ImmutableReader {
