@@ -16,6 +16,7 @@
 //! back, converging with Python's outcome.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -2365,7 +2366,7 @@ impl WorkflowStore {
 /// and thread lifecycle are host concerns (S7); the pass-through
 /// ingresses are the store's own methods (F4d).
 pub struct WorkflowCoordinator {
-    pub store: WorkflowStore,
+    pub store: Arc<WorkflowStore>,
     pub worker_id: String,
     pub interval_seconds: u64,
     external_maintenance: RefCell<Option<Box<dyn RunOnceHook>>>,
@@ -2375,7 +2376,7 @@ pub struct WorkflowCoordinator {
 }
 
 impl WorkflowCoordinator {
-    pub fn new(store: WorkflowStore, worker_id: &str, interval_seconds: u64) -> Self {
+    pub fn new(store: Arc<WorkflowStore>, worker_id: &str, interval_seconds: u64) -> Self {
         WorkflowCoordinator {
             store,
             worker_id: worker_id.to_string(),

@@ -29,6 +29,7 @@ pub mod workflow_feedback;
 pub mod context_recovery;
 pub mod revival;
 pub mod workflow;
+pub mod workflow_factory;
 pub mod model_route;
 pub mod quota_diagnostics;
 pub mod workflow_ingress;
