@@ -9,4 +9,6 @@
 #![doc = include_str!("../README.md")]
 
 pub mod diagnostics;
+pub mod muse_process;
+pub mod rpc;
 pub mod types;
