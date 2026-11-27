@@ -9,6 +9,7 @@ pub mod context_providers;
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod delivery_repair_adapter;
 pub mod external_adapter;
 pub mod external_delivery_adapter;
 pub mod external_context;
