@@ -202,13 +202,22 @@ class ActorConfig:
     source_github_config_dir: Path
     candidate_port: int
     expected_abi: int
+    mcp_presence: dict | None = None
 
     @classmethod
     def parse(cls, raw):
         names = set(cls.__dataclass_fields__)
-        if not isinstance(raw, dict) or set(raw) != names:
+        if (not isinstance(raw, dict) or not names - {'mcp_presence'} <= set(raw)
+                or set(raw) - names):
             raise ValueError('Invalid fixed release configuration')
         values = dict(raw)
+        values.setdefault('mcp_presence', None)
+        presence = values['mcp_presence']
+        if presence is not None and (not isinstance(presence, dict)
+                or set(presence) != {'endpoint', 'token_file'}
+                or presence['endpoint'] != '127.0.0.1:8791'
+                or presence['token_file'] != '/etc/homelab-forge/web/mcp-presence-reader.token'):
+            raise ValueError('MCP presence must use the fixed local read-only reader')
         for name in names:
             if name.endswith(('_root', '_repo', '_dir')) or name == 'override':
                 value = values[name]
@@ -228,7 +237,7 @@ class ActorConfig:
                 or not values['override'].name.endswith('.conf')
                 or not isinstance(values['owner'], str) or not 1 <= len(values['owner']) <= 128
                 or type(values['candidate_port']) is not int or not 1024 < values['candidate_port'] < 65536
-                or type(values['expected_abi']) is not int or values['expected_abi'] not in {14, 15, 16}):
+                or type(values['expected_abi']) is not int or values['expected_abi'] not in {14, 15, 16, 17}):
             raise ValueError('Release configuration exceeds the fixed portal boundary')
         return cls(**values)
 
@@ -676,6 +685,13 @@ class PortalReleaseActor:
         os.chmod(release, 0o555)
         self._archive(state['before'])
         config = dict(state['before']['value'])
+        presence = getattr(self.config, 'mcp_presence', None)
+        if presence is not None:
+            if not isinstance(config.get('work'), dict):
+                raise ValueError('MCP presence requires the existing scoped Work relay')
+            # Root selects this reader independently of candidate artifacts. Never
+            # mutate the frozen predecessor configuration needed for rollback.
+            config['work'] = {**config['work'], 'mcp_presence': dict(presence)}
         config.update(assets=str(release / 'assets'), cooked_replay_archive=str(self.config.replay_archive_root))
         live_path = self.config.web_config_root / ('automatic-' + state['job']['release_id'] + '.json')
         self.write(live_path, canonical(config) + b'\n', mode=0o640, group=web_gid)
