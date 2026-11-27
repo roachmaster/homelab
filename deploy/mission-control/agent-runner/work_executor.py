@@ -27,7 +27,7 @@ from work_muse import MuseEvents, argv as muse_argv, BINARY_SHA256 as MUSE_BINAR
 from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
 from work_sessions import SessionError, SessionSelection
-from work_review_context import MAX_FEEDBACK_BYTES, ReviewContext
+from work_review_context import MAX_FEEDBACK_BYTES, ReviewContext, current_phase_context
 from work_build_context import BuildContext, BUILD_INFO_SCRIPT
 from work_consumer_cache import ConsumerCacheError
 from work_candidate_source import CandidateSourceError, linked_candidate_input
@@ -1362,6 +1362,8 @@ class CommandRunnerProvider:
                     or (feedback_context.feedback_id is not None
                         and feedback_context.sha256 != lease.get("feedback_sha256"))):
                 raise ExecutionError("needs_reconcile", "The admitted repair feedback changed before execution.")
+            feedback_context = current_phase_context(lease, feedback_context, plan_context)
+        if feedback_context is not None:
             feedback_file = scratch / "review-feedback.json"
             try:
                 descriptor = os.open(feedback_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)

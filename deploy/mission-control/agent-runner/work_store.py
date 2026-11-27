@@ -1802,8 +1802,9 @@ class WorkStore:
                 return dict(existing["receipt_json"])
 
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
-            from work_workflow import BoundUnstartedPlanAuthority
-            transition_kind=('native_startup' if isinstance(_authority,BoundUnstartedPlanAuthority)
+            from work_workflow import BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority
+            transition_kind=('plan_direction' if isinstance(_authority,BoundPlanDirectionAuthority)
+                             else 'native_startup' if isinstance(_authority,BoundUnstartedPlanAuthority)
                              else 'stopped_binary_pin' if isinstance(_authority,BoundBinaryPinAuthority)
                              else 'provider_model_route' if isinstance(_authority,BoundProviderModelAuthority)
                              else 'reviewer_correction' if task['mode']=='review' else 'native_timeout')
@@ -1811,12 +1812,22 @@ class WorkStore:
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
 
-            if self._publication_busy(cursor,task):
+            if isinstance(_authority,BoundPlanDirectionAuthority) and _authority.review_id is not None:
+                # A terminal empty-source review has no candidate/outbox to
+                # finish. Still refuse ANY real publication before retrying.
+                cursor.execute('SELECT 1 FROM forge_agent.coding_publications WHERE owner_id=%s AND project_alias=%s AND task_id=%s',
+                               (self._owner,project_alias,task_id))
+                if cursor.fetchone() is not None:raise Rejected(409,'reconcile_required')
+            elif self._publication_busy(cursor,task):
                 raise Rejected(409,"reconcile_required")
             if task['review_required'] and task['mode']=='implement':
-                cursor.execute("SELECT 1 FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s",
+                cursor.execute("SELECT review_id,attempt_id,status,reason,candidate_commit FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s",
                     (self._owner,project_alias,task_id,task['latest_attempt_id']))
-                if cursor.fetchone() is not None:
+                existing_review=cursor.fetchone()
+                if (isinstance(_authority,BoundPlanDirectionAuthority) and _authority.review_id is not None
+                        and existing_review is None):raise Rejected(409,'not_reviewable')
+                if existing_review is not None and not (isinstance(_authority,BoundPlanDirectionAuthority)
+                                                       and _authority.allows_review(existing_review)):
                     raise Rejected(409,'not_reviewable')
             if (task["mode"] == "plan" and task["status"] == "awaiting_review"
                     or task["status"] in NON_RESUMABLE_STATUSES or task["latest_attempt_id"] is None):
@@ -1973,11 +1984,11 @@ class WorkStore:
         if authority is None:
             with self._transaction() as cursor:yield cursor
         else:
-            from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority
+            from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority
             from work_reviewer_correction import BoundReviewerCorrectionAuthority
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
             from work_agent_handoff import BoundAuthorHandoffAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority)) or authority.store is not self:
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 

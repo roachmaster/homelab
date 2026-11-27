@@ -19,7 +19,7 @@ from work_executor import (
 )
 from work_policy import POLICY, POLICY_DIGEST
 from work_sessions import AntigravitySessionProvider, CodexSessionProvider
-from work_review_context import FeedbackDeliveryUnavailable, ReviewContextError, ReviewContextProvider
+from work_review_context import FeedbackDeliveryUnavailable, ReviewContextError, ReviewContextProvider, current_phase_context
 from work_context_recovery_contract import RECOVERY_SUMMARY
 from work_build_context import BuildContextProvider
 from work_consumer_cache import configured_consumer_caches
@@ -397,7 +397,8 @@ class CodingWorker:
                         try:
                             if self.review_contexts is None:
                                 raise ReviewContextError()
-                            feedback = self.review_contexts.acquire(lease, workspace)
+                            feedback = current_phase_context(lease, self.review_contexts.acquire(lease, workspace),
+                                                             arguments.get("plan_context"))
                             if feedback is not None:
                                 arguments["feedback_context"] = feedback
                         except FeedbackDeliveryUnavailable:
