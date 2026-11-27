@@ -1,6 +1,6 @@
 -- Apply ONLY the proxy cutover migration (52). This file is the
 -- single entry point for cutover: apply.sql deliberately stops at
--- migration 51 (preparation), so an ordinary upgrade can never
+-- migration 52 (preparation), so an ordinary upgrade can never
 -- revoke direct writes or rewrite admission on its own. Run this
 -- only from deploy/mission-control/proxy-cutover.sh, after the
 -- quiescence checks pass. It refuses to run unless the preparation
@@ -23,20 +23,20 @@ CREATE TABLE IF NOT EXISTS forge_agent.schema_migrations (
 DO $apply_cutover_guard$
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM forge_agent.schema_migrations
-               WHERE version = 51 AND name = 'pg_proxy_preparation') THEN
+               WHERE version = 52 AND name = 'pg_proxy_preparation') THEN
   RAISE EXCEPTION 'cutover requires the preparation migration (51) first';
  END IF;
 END
 $apply_cutover_guard$;
 
 SELECT NOT EXISTS (
-    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 52
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 53
 ) AS apply_0052
 \gset
 
 \if :apply_0052
-\ir migrations/0052_pg_proxy_cutover.sql
-INSERT INTO forge_agent.schema_migrations(version,name) VALUES(52,'pg_proxy_cutover');
+\ir migrations/0053_pg_proxy_cutover.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(53,'pg_proxy_cutover');
 \endif
 
 COMMIT;

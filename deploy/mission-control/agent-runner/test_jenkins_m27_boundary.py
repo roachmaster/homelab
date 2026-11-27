@@ -807,8 +807,8 @@ TASK_RECOVERY_GUARDS = frozenset({
 # privilege/catalogue checks were added. This qualifies no applied migration
 # or other SQL authority.
 M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256 = {
-    'deploy/mission-control/sql/management/verify.sql': '8dc230998a77ce2fc214550cf6c8f04f873e3e7b8c0c17858a08dd112b3b0589',
-    'deploy/mission-control/sql/management/verify-task-events.sql': '61c7583536d885cfe7027bc265cb2e8107be110db539e2f18b20caa461b87d8c',
+    'deploy/mission-control/sql/management/verify.sql': '33d7d72a8f47fe94c1c68e224e5896e99787cc038a6d5c56314eec8d9d2c736b',
+    'deploy/mission-control/sql/management/verify-task-events.sql': '153e806769fad9ad8bc471fbc5ca568c7d436e4e7e6edbb80f52c43fad996487',
 }
 # Already accepted on main57a0aca: exact M36 legacy-progress grandfathering
 # verifier bytes. This qualifies no applied migration or other SQL authority.
@@ -858,7 +858,7 @@ NATIVE_CI_CONTEXT_RECOVERY_PATHS = frozenset({
 # Audited opt-in content identity source; no applied SQL or legacy authority change.
 CONTENT_IDENTITY_CONTEXT_SHA256 = {
     'AGENT_WORK.md': '7ac6f7204526cfed34553e35272af61f1d108cd89dd1e92b3dc549d55c67d3de',
-    'deploy/mission-control/agent-runner/setup-runner.sh': 'b561a9f2c6c8a2b4548fa1578cacb0ba2bdf296a7172ca90ffe022130fad7a96',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'ec31e0762a1d6b274d0561d15008a8d5a5655aefe9c8b78ac0fc56214151087c',
     'deploy/mission-control/agent-runner/test_external_content_identity.py': '872bda34f49a3ba1a3cfc5bc0c0b37858308d78d428640f883bab653701e2148',
     'deploy/mission-control/agent-runner/test_native_content_identity.py': '63d133ae4d6c3bed213ce00c48edd511c0a2a258f95a9b4b4c75457cff3d9d95',
     'deploy/mission-control/agent-runner/test_work_artifact_identity.py': 'fe2066e23a7eb505c38de3d68da8846036ba55ada85710ab3477315784f77a99',
@@ -987,7 +987,7 @@ VERIFIER_POLICY_PARITY_CONTEXT_PATHS = frozenset({
 # applied M01-M38 SQL, protected gate paths, and legacy authority AST pins.
 TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '429f440a04d06cc2e6f20c5373910dab755c22d99c9dc5a4cb856b731efa9617',
-    'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '0d2abde078bb6c8cf4dcc80338f6237993cc1973796983ec176dc19666e9b3fe',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '1d17b9aff893ab2e96b36065440fc1713b94b94f5862fc52289991a95fa80243',
     'deploy/mission-control/agent-runner/test_muse_read_access.py': 'd4ee0fe0cd1a8717da89fb9d90c45deb1c721a52ca84d4ecf93d56a6e7ff76d0',
     'deploy/mission-control/agent-runner/test_native_ci_postfix.py': 'a5f8a3de0c906663333bc773289164fb64631a105dfc1883e6545fab37e3fa01',
     'deploy/mission-control/agent-runner/test_native_deadline_events.py': '3f597b988104a2af1c50748b4e8d45e3883c53d4e84aac5d2208c6049fe850ac',
@@ -1002,8 +1002,8 @@ TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_store.py': 'cd26f19629bf54b6d954509d832740b715a0579930508a10c52717487669cb53',
     'deploy/mission-control/agent-runner/work_worker_store.py': '0ff93592cd17e29d63dbbef2c445fd394ee672d5d35fc9c9bd734631fe4427d4',
     'deploy/mission-control/agent-runner/work_workflow.py': 'fa0ff2e7a1fe4e8e6e0ac0686c11eb36b34e0fe305ad6c80b183f662b722aa48',
-    'deploy/mission-control/sql/apply.sql': '2c29d13fa8f7897e7f965fd7252543af40c5af6df7a8a58ddc3116abd0637c0b',
-    'deploy/mission-control/sql/management/grant-runner.sql': 'c95f8f803f33adad0097ccc4182ecda75bb58551afa29a2805e8c1d4bdfbdad0',
+    'deploy/mission-control/sql/apply.sql': 'aba387619b83a8330dda635ba7825799890163f2a2df55be0dbdbdea71b9337e',
+    'deploy/mission-control/sql/management/grant-runner.sql': 'b3c42606e1d2717cfb0f8e08cf336483331087838ce92cc1268c7d0304f4163f',
     'deploy/mission-control/sql/management/repair-stale-terminal-projections.sql': '306c2530b863b16fc62d3812f9cda1b447ea593510c2a524d0d5b4a8f05aa4d5',
     'deploy/mission-control/sql/migrations/0039_terminal_retry_settlement.sql': 'a1707d8137a103a0fa351c71e1646334059ff16d00a1688380ecd6a4b77a00ee',
     'src/rust/forge-ide-ui/src/model/agents/tests/workflow.rs': 'd6e052128285b455a11e28d9fe2c3eb48e5ceb445c8d231902860c7e337abadd',
@@ -1145,11 +1145,11 @@ CODEX_AUTHOR_HANDOFF_SQL_PATHS = frozenset(('deploy/mission-control/sql/apply.sq
 CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '7ac6f7204526cfed34553e35272af61f1d108cd89dd1e92b3dc549d55c67d3de',
  'deploy/mission-control/agent-runner/README.md': 'b0e3da0d7761ae7ebf80d3b2fe115be89ca0eb4dec549b2eefbd4b74d4be5671',
  'deploy/mission-control/agent-runner/quota-handoff-config.example.json': 'f4c2a2841f0cea15b6739c6b965566a26b476242a7b4947ebf7e4a083b9172aa',
- 'deploy/mission-control/agent-runner/setup-runner.sh': 'b561a9f2c6c8a2b4548fa1578cacb0ba2bdf296a7172ca90ffe022130fad7a96',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'ec31e0762a1d6b274d0561d15008a8d5a5655aefe9c8b78ac0fc56214151087c',
  'deploy/mission-control/agent-runner/test_agent_handoff.py': 'b87380af8bc0829982948bd9f0399b185b265790518bcbcd48ccab03552210bd',
  'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '429f440a04d06cc2e6f20c5373910dab755c22d99c9dc5a4cb856b731efa9617',
  'deploy/mission-control/agent-runner/test_author_handoff_schema.py': '0aa57b30b5e577081661d9bd4a8e9abb64c0c72d06c90d82f065d9d4f879973f',
- 'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '0d2abde078bb6c8cf4dcc80338f6237993cc1973796983ec176dc19666e9b3fe',
+ 'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '1d17b9aff893ab2e96b36065440fc1713b94b94f5862fc52289991a95fa80243',
  'deploy/mission-control/agent-runner/test_muse_read_access.py': 'd4ee0fe0cd1a8717da89fb9d90c45deb1c721a52ca84d4ecf93d56a6e7ff76d0',
  'deploy/mission-control/agent-runner/test_quota_handoff_config.py': 'd0f2cf25353cf76d2a3f20ea4a166d82ae59e7ef2f1f591da0533d106248a643',
  'deploy/mission-control/agent-runner/test_superseding_review_schema.py': 'ff88fbeb081ad0ebfbc6ee155c803ce1c02e11a055faf98c536c89969ba85ce0',
@@ -1173,13 +1173,13 @@ CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '7ac6f7204526cfed34553e3
  'deploy/mission-control/agent-runner/work_superseding_review.py': '69f6ae31bd4f400bb400a64b135bce0981c4fc9c70e0586c4ffd6596609b2c31',
  'deploy/mission-control/agent-runner/work_workflow.py': 'fa0ff2e7a1fe4e8e6e0ac0686c11eb36b34e0fe305ad6c80b183f662b722aa48',
  'deploy/mission-control/jenkins/verify-candidate.py': 'b1edb0d6ba10ac2cd9d198865d6941041915c81198348256f5ffafbcc62e379e',
- 'deploy/mission-control/sql/apply.sql': '2c29d13fa8f7897e7f965fd7252543af40c5af6df7a8a58ddc3116abd0637c0b',
+ 'deploy/mission-control/sql/apply.sql': 'aba387619b83a8330dda635ba7825799890163f2a2df55be0dbdbdea71b9337e',
  'deploy/mission-control/sql/management/verify-agy-unattended.sql': 'f41755769362c0ec6197d03cd2a7d712f2045ea41f9cbc0a0435a0319fb146d0',
  'deploy/mission-control/sql/management/verify-author-handoff.sql': '431e163f102cfeea9aafd6c815b245dd4bd917d36ea5da25dc93ed592ef80ea8',
- 'deploy/mission-control/sql/management/verify-autonomy.sql': 'e2db3961fae3619851a88e87be491b6c34fece379f683fe935095f5e528f694d',
- 'deploy/mission-control/sql/management/verify-feedback.sql': '833c1e7a7c55a51d3da9f1b4c463978a23314e38e9fb9c9176f25a60dbbbfe02',
- 'deploy/mission-control/sql/management/verify-retry-events.sql': '7d599b2e8b5b7ee8645a96e7decefe265630cc4b91b90e53899b80a4d750194e',
- 'deploy/mission-control/sql/management/verify.sql': '8dc230998a77ce2fc214550cf6c8f04f873e3e7b8c0c17858a08dd112b3b0589',
+ 'deploy/mission-control/sql/management/verify-autonomy.sql': '6c87cdd7841913add5e2e04ed6f0d6ce23b4411d2631c8d748c95feec7dae16f',
+ 'deploy/mission-control/sql/management/verify-feedback.sql': 'ed96d45fe6fde087236173a93f428624ce1b98e718a64045017d34ea98893432',
+ 'deploy/mission-control/sql/management/verify-retry-events.sql': '4e4bc6fdeeb20e4529dfe33287df98b8b9f95096994d3723e056a17ecead4dbe',
+ 'deploy/mission-control/sql/management/verify.sql': '33d7d72a8f47fe94c1c68e224e5896e99787cc038a6d5c56314eec8d9d2c736b',
  'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql': '0f884ee5db7f90be8ed2caefd20e8455fff4c106f3b87aaf1390848fdf40b6b8',
  'docs/architecture/agent-quota-handoff.md': 'a9d3d2ff414573be316f50e2b5fc5106832c2cf2ea4e1f55a2cae5adfb542ba2'}
 # M40 author-handoff main. The 34 historical qualification scopes above remain
@@ -1188,25 +1188,27 @@ CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '7ac6f7204526cfed34553e3
 # -> 0042/0043 on feature/muse, then 0042/0043 -> 0050/0051 in the
 # backup/main merge, then 0050/0051 -> 0051/0052 in the 2026-11-26
 # backup/main merge (backup/main took 0050 for
-# delivery_receipt_source_key): stage gates, proxy coordinator reads and
+# delivery_receipt_source_key), then 0051/0052 -> 0052/0053 on
+# feature/muse for the merge with main (main took 0051 for
+# agent_feature_branches): stage gates, proxy coordinator reads and
 # owner-control guards),
 # so this context heads the qualification chain for exactly those files.
 PG_PROXY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': '97348b5db6d9c5eac164bb54e5c6c134ba6a61116e108595fcc56f95a1a16535',
-    'deploy/mission-control/agent-runner/test_work_event_attribution.py': '8073b11dd2d4c86b7fb0fd21c735b98feab31108e8e115f0f5ac877e9c5191c6',
+    'deploy/mission-control/agent-runner/test_work_event_attribution.py': '17d91b292c5bfe30d75d866f59a795058efd45717236ff91b95dc01bcece8a01',
     'deploy/mission-control/agent-runner/work_owner_control.py': '38a3edda0caec8f079deb6533592f48786254038f3016423754b15ff652185a0',
     'deploy/mission-control/agent-runner/work_owner_reverification.py': '28c6f3314a4f93ab007299cca3234452bc84f0de72022c9726506930b3bd11b6',
     'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
     'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
     'deploy/mission-control/agent-runner/work_worker.py': 'c3330f2c16fa34f6d5a6af745afa4cdee14d58c03fc4739a3036ef02770e510a',
     'deploy/mission-control/agent-runner/work_worker_config.py': '28047ea7d4dcbec448b72fc147817d1b369a2fd91188f46d9ba971330740fc6c',
-    'deploy/mission-control/sql/management/grant-external-workflows.sql': '5141a9a32a3522791744322491eda993f9b5c04e4a4d774f3d4f78e3ca77cc02',
-    'deploy/mission-control/sql/management/grant-runner.sql': 'c2caa79d187b457aacb1fd368e7bb0f6938aa3e4bb4170b74c6b1f924e966be3',
-    'deploy/mission-control/sql/management/verify-external-agent.sql': 'c7ea747bd57acd93421eb71f6e5c4fd3726ca3d9ff0d4d7626521fad6881cfe1',
-    'deploy/mission-control/sql/management/verify-external-workflows.sql': '38c8962fbd86f0079fe9a481c7e36fd35733e972a45f70dd34754b986d4601ad',
-    'deploy/mission-control/sql/management/verify-jenkins-events.sql': 'dfb5790002f7ee1bd0a9662aedeec079acf4929c13a26efcb460dc98418394b6',
-    'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '066f20b3fd8943b51c8ba4f8b002b3a922c2ed834eba1196702ebc93448a8298',
-    'deploy/mission-control/sql/management/verify-task-events.sql': 'dcd9c2b26b6445fe5476732681fb42cc7400366607c51a6c8a8fd5f7ea3ffe88',
+    'deploy/mission-control/sql/management/grant-external-workflows.sql': '4dec068db6250819e1388ec4d2c6c60a2557d98ee36778156959e67eaf489a67',
+    'deploy/mission-control/sql/management/grant-runner.sql': 'b3c42606e1d2717cfb0f8e08cf336483331087838ce92cc1268c7d0304f4163f',
+    'deploy/mission-control/sql/management/verify-external-agent.sql': '18149b72731e222fb78953f8657f302d7669095785e5ad1eb6887b378dee66db',
+    'deploy/mission-control/sql/management/verify-external-workflows.sql': '2ef0c8e66bd26b9639e064302fa8b074e2f9e9f5790df971ca11f688e38b4144',
+    'deploy/mission-control/sql/management/verify-jenkins-events.sql': 'd04d4d8a26af204f5c8070c665bad3e0c28bf39f15faee01456510092258359a',
+    'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '7910216fd4c2adb94056b707dfd7a38122d2bdad1874ef3e4fe0b723f8632e2c',
+    'deploy/mission-control/sql/management/verify-task-events.sql': '153e806769fad9ad8bc471fbc5ca568c7d436e4e7e6edbb80f52c43fad996487',
 }
 PG_PROXY_GUARD_AST_SHA256 = {
     'work_owner_control.py::_owner_source_history': 'f71a44834f5108ae24224c80f74f9f1d469b619356ef74618ff55e60657f5493',

@@ -1,4 +1,4 @@
--- M50: Postgres proxy preparation (additive; changes no existing behavior).
+-- M52: Postgres proxy preparation (additive; changes no existing behavior).
 -- Creates the audit log and entry points, grants the
 -- writer principal the mutating external EXECUTE, grants
 -- each caller role SELECT on its allowlisted read tables

@@ -37,8 +37,8 @@ BEGIN
  IF e.access='service' THEN expected:=expected||'forge_agent'::name;END IF;
  IF e.access='external' AND external_enabled THEN expected:=expected||'muse_events'::name;END IF;
  IF e.access='external_writer' THEN
-  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52) AND external_enabled THEN expected:=expected||'muse_events'::name;END IF;
-  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51) THEN expected:=expected||'muse_proxy_writer'::name;END IF;
+  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53) AND external_enabled THEN expected:=expected||'muse_events'::name;END IF;
+  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52) THEN expected:=expected||'muse_proxy_writer'::name;END IF;
  END IF;
  SELECT array_agg(r.rolname ORDER BY r.rolname) INTO actual FROM aclexplode(p.proacl) a JOIN pg_roles r ON r.oid=a.grantee WHERE a.privilege_type='EXECUTE' AND NOT a.is_grantable;
  SELECT array_agg(x ORDER BY x) INTO expected FROM unnest(expected) x;
@@ -46,7 +46,7 @@ BEGIN
  END LOOP;
  SELECT count(*) INTO n FROM pg_proc WHERE pronamespace IN('forge_external_agent'::regnamespace,'forge_external_agent_api'::regnamespace);
  IF n<>(20+CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=21) THEN 1 ELSE 0 END) THEN RAISE EXCEPTION 'Unexpected external functions';END IF;
- FOR e IN SELECT * FROM(VALUES('forge_external_agent',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_preparation') THEN ARRAY['forge_agent_owner','forge_agent','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner']::name[] END),('forge_external_agent_api',CASE WHEN NOT external_enabled THEN CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51) THEN ARRAY['forge_agent_owner','forge_agent','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner','forge_agent']::name[] END WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51) THEN ARRAY['forge_agent_owner','forge_agent','muse_events','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner','forge_agent','muse_events']::name[] END)) AS schemas(name,roles) LOOP
+ FOR e IN SELECT * FROM(VALUES('forge_external_agent',CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_preparation') THEN ARRAY['forge_agent_owner','forge_agent','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner']::name[] END),('forge_external_agent_api',CASE WHEN NOT external_enabled THEN CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52) THEN ARRAY['forge_agent_owner','forge_agent','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner','forge_agent']::name[] END WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52) THEN ARRAY['forge_agent_owner','forge_agent','muse_events','muse_proxy_writer']::name[] ELSE ARRAY['forge_agent_owner','forge_agent','muse_events']::name[] END)) AS schemas(name,roles) LOOP
  SELECT array_agg(r.rolname ORDER BY r.rolname) INTO actual FROM pg_namespace n,LATERAL aclexplode(n.nspacl) a JOIN pg_roles r ON r.oid=a.grantee WHERE n.nspname=e.name AND a.privilege_type='USAGE' AND NOT a.is_grantable;
  SELECT array_agg(x ORDER BY x) INTO expected FROM unnest(e.roles) x;
  IF actual IS DISTINCT FROM expected OR EXISTS(SELECT FROM pg_namespace n,LATERAL aclexplode(n.nspacl) a WHERE n.nspname=e.name AND (a.grantee=0 OR a.grantor<>'forge_agent_owner'::regrole OR (a.grantee<>'forge_agent_owner'::regrole AND(a.privilege_type<>'USAGE' OR a.is_grantable)))) THEN RAISE EXCEPTION 'External schema ACL drift: %',e.name;END IF;
@@ -67,7 +67,7 @@ BEGIN
  -- M39 grants the proxy read surface (forge_agent and muse_proxy_writer
  -- SELECT) on every external table; the pinned catalog expects exactly
  -- those entries from here on.
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_preparation') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_preparation') THEN
   catalogue.data:=jsonb_set(catalogue.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=r/forge_agent_owner","muse_proxy_writer=r/forge_agent_owner"]'::jsonb);
  END IF;
  IF schema_actual IS DISTINCT FROM catalogue.data THEN RAISE EXCEPTION 'External table catalog drift: %',catalogue.name;END IF;

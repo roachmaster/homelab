@@ -10,7 +10,7 @@ BEGIN
  ) AS expected(name,data,runner) LOOP
   -- M51 cutover revokes every direct forge_agent table write; the
   -- runner keeps SELECT only on these tables from there on.
-  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_cutover') THEN
+  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53 AND name='pg_proxy_cutover') THEN
    item.runner:=ARRAY['SELECT']::text[];
   END IF;
   SELECT jsonb_build_object('kind',c.relkind,'persistence',c.relpersistence,'row_security',c.relrowsecurity,'force_row_security',c.relforcerowsecurity,'owner',pg_get_userbyid(c.relowner),

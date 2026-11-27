@@ -39,14 +39,14 @@ proxy_cutover() {
     # Prints t when the cutover migration is applied, f otherwise.
     # A missing database (first install) reports f.
     psql_as postgres forge_agent -Atc \
-        "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_cutover')" 2>/dev/null || echo f
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=53 AND name='pg_proxy_cutover')" 2>/dev/null || echo f
 }
 
 proxy_preparation() {
     # Prints t when the preparation migration is applied, f otherwise.
     # A missing database (first install) reports f.
     psql_as postgres forge_agent -Atc \
-        "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_preparation')" 2>/dev/null || echo f
+        "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_preparation')" 2>/dev/null || echo f
 }
 
 install_auth_files() {
@@ -117,8 +117,8 @@ check_cluster() {
     [[ "$configuration" == "16|$data_directory|$loopback" ]] ||
         fail "Unexpected cluster configuration: $configuration"
     local cutover preparation
-    cutover="$(psql_as postgres forge_agent -Atc "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_cutover')")"
-    preparation="$(psql_as postgres forge_agent -Atc "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=51 AND name='pg_proxy_preparation')")"
+    cutover="$(psql_as postgres forge_agent -Atc "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=53 AND name='pg_proxy_cutover')")"
+    preparation="$(psql_as postgres forge_agent -Atc "SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_preparation')")"
     local worker_access
     if [[ "$cutover" == t ]]; then
         # Post-cutover: the write-capable roles are admitted only via

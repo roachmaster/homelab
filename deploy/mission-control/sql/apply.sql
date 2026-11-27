@@ -404,13 +404,13 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=50)
 \ir migrations/0050_delivery_receipt_source_key.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(50,'delivery_receipt_source_key');
 \endif
-SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=51) AS apply_0051
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=52) AS apply_0052
 \gset
-\if :apply_0051
-\ir migrations/0051_pg_proxy_preparation.sql
-INSERT INTO forge_agent.schema_migrations(version,name) VALUES(51,'pg_proxy_preparation');
+\if :apply_0052
+\ir migrations/0052_pg_proxy_preparation.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(52,'pg_proxy_preparation');
 \endif
--- Migration 52 (pg_proxy_cutover) is NOT applied here. Cutover is an
+-- Migration 53 (pg_proxy_cutover) is NOT applied here. Cutover is an
 -- explicitly gated operator step (rollout step 4): it revokes direct
 -- writes and rewrites admission, so an ordinary upgrade must never
 -- perform it. Apply it only via sql/apply-cutover.sql from

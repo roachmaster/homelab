@@ -204,7 +204,7 @@ PY
 # --- forge-pg-proxy -------------------------------------------------------
 # Publish the proxy alongside the runner. The proxy is enabled
 # unconditionally but only started once the proxy HBA rules are
-# installed (preparation, migration 50, or cutover, migration 51);
+# installed (preparation, migration 52, or cutover, migration 53);
 # before that it cannot reach Postgres and would only serve 503
 # on /health. Starting at preparation lets the operator run the
 # pre-cutover proxy verification sequence (proxy_verify.py) before
@@ -315,5 +315,5 @@ PY
     /usr/bin/python3 "$directory/proxy_verify.py" \
         --config-dir "$proxy_config_directory"
 else
-    printf '%s\n' 'Forge Postgres proxy published but not started: proxy HBA rules are not installed (preparation, migration 50, not yet applied).'
+    printf '%s\n' 'Forge Postgres proxy published but not started: proxy HBA rules are not installed (preparation, migration 52, not yet applied).'
 fi
