@@ -7,8 +7,11 @@
 //! increments on these ports.
 
 pub mod branch;
+pub mod config;
+pub mod config_profile;
 pub mod error;
 pub mod lease;
+pub mod policy;
 pub mod ports_runtime;
 pub mod ports_store;
 pub mod types;
@@ -16,6 +19,10 @@ pub mod workspace;
 pub mod workspace_digest;
 
 pub use branch::{AgentBranch, AgentBranchUpsert};
+pub use config::{parse_config, ConfigError, WorkerConfig};
+pub use config_profile::{
+    AccountConfig, DatabaseConfig, UsageConfig, UsageOnlyProfile, WorkerProfile,
+};
 pub use error::WorkerError;
 pub use lease::Lease;
 pub use types::{
