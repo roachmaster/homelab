@@ -1,0 +1,20 @@
+{
+ "collaborators": [
+  "forge_core_ingress"
+ ],
+ "file": "forge-core/src/bridge.rs (external - do not implement)",
+ "glossary": [
+  "destination",
+  "route"
+ ],
+ "id": "forge_core_bridge",
+ "invariants": [
+  "Never generate this file."
+ ],
+ "kind": "external API",
+ "responsibilities": [
+  "Exist as a collaborator signature only."
+ ],
+ "signature": "// forge-core::bridge (already exists - do not implement)\npub struct RegistryBuilder<'a, P: Payload, C, R, E> { /* private */ }\nimpl<'a, P: Payload, C, R, E> RegistryBuilder<'a, P, C, R, E> {\n    pub fn new() -> Self;\n    pub fn register<F>(&mut self, route: RouteKey, expected: P::Kind, handler: F)\n        -> Result<(), DuplicateRoute>\n    where F: Fn(P, &C) -> Result<R, E> + 'a;\n    pub fn freeze(self) -> Registry<'a, P, C, R, E>;\n}\npub struct DuplicateRoute(pub RouteKey);\npub struct Bridge<'a, P: Payload, C, R, E, A> { /* private */ }\nimpl<'a, P: Payload, C, R, E, A: AdmissionPolicy<C>> Bridge<'a, P, C, R, E, A> {\n    pub fn new(registry: Registry<'a, P, C, R, E>, admission: A) -> Self;\n    pub fn dispatch(&self, request: Envelope<P>, context: &C) -> Result<Response<R>, DispatchError<E>>;\n}",
+ "summary": "forge-core's Bridge: routes are registered on a builder with an expected payload Kind, frozen into a Registry; dispatch checks the header route, runs the AdmissionPolicy, verifies payload kind == expected, then calls the handler."
+}

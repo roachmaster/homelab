@@ -1,0 +1,12 @@
+{
+ "admission": "The checked entry of new work: intent digest idempotency, recipe policy digest pinning, and base_revision currency are verified before a task exists.",
+ "catalog": "The frozen reference data (projects, agent profiles, recipes, workflow policy) staged at startup; a change is a restart with a new catalog.",
+ "control receipt": "The coding_control_receipts row that makes a control operation idempotent: one row per (operation, idempotency_key); duplicates collapse onto it.",
+ "destination": "One named bridge route (e.g. work.submit); the header destination must match the payload kind before any handler runs.",
+ "intent digest": "The hash of a control operation's intent fields; a repeat submission with the same digest returns the original outcome instead of acting twice.",
+ "policy digest": "The pinned hash of a recipe or workflow policy snapshot; admission pins it and dispatch re-verifies it.",
+ "projection": "A bounded, purpose-shaped read view of stored rows (never a whole-row dump).",
+ "revision": "A task's optimistic-concurrency counter; control operations carry expected_revision and fail if it has moved.",
+ "route": "A RouteKey (destination + version) registered on the bridge builder and frozen at startup.",
+ "workflow": "The multi-task plan/review/implement sequence a submitted task may belong to, coordinated above the admission layer."
+}

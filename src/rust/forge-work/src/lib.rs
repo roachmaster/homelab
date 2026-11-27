@@ -1,0 +1,31 @@
+/// forge-work is the typed work-admission capability (frozen catalog, canonical event vocabulary, bridge-fronted service, three driven store ports); adapters live in forge-postgres; this crate has no SQL and no I/O.
+pub mod catalog;
+pub mod catalog_registrar;
+pub mod decision_requests;
+pub mod port_admission;
+pub mod port_decision;
+pub mod port_read;
+pub mod routes_admission;
+pub mod routes_decision;
+pub mod routes_read;
+pub mod work_actors;
+pub mod work_error;
+pub mod work_events;
+pub mod work_payload;
+pub mod work_requests;
+pub mod work_response;
+pub mod work_service;
+pub mod work_types;
+
+pub use catalog::WorkCatalog;
+pub use catalog_registrar::{register_catalog, WorkCatalogFactory};
+pub use port_admission::WorkAdmissionPort;
+pub use port_decision::WorkDecisionPort;
+pub use port_read::WorkReadPort;
+pub use work_actors::{Actor, ActorKind, Cause};
+pub use work_error::WorkError;
+pub use work_events::EventKind;
+pub use work_payload::{WorkCategory, WorkKind, WorkPayload};
+pub use work_response::{WorkContext, WorkResponse};
+pub use work_service::{work_bridge, WorkAdmissionPolicy, WorkBridge};
+pub use work_types::{ControlOutcome, PolicyIdentity, TaskSummary, TaskView};

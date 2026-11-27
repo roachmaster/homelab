@@ -1,0 +1,24 @@
+{
+ "collaborators": [
+  "work_actors"
+ ],
+ "file": "decision_requests.rs",
+ "glossary": [
+  "control receipt",
+  "revision"
+ ],
+ "id": "decision_requests",
+ "invariants": [
+  "ReviewDecision is exactly Python's review_decide set {approve, repair, escalate, retry_infrastructure, cancel}; no variant is added or renamed.",
+  "HandoffAuthority is opaque: its field is private and only the host constructs it (from its configured authority value); adapters compare, never mint.",
+  "The two external requests target the external-workflow control surface, NOT coding_tasks - their doc comments say so (the design's reconciliation note)."
+ ],
+ "kind": "types",
+ "pattern": "// Structs derive Debug, Clone, PartialEq (findings Value prevents Eq\n// on ReviewDecideRequest/RepairRequest - derive PartialEq only there);\n// ReviewDecision derives Debug, Clone, Copy, PartialEq, Eq.\n// HandoffAuthority derives Debug, Clone, PartialEq, Eq with a PRIVATE\n// field. Tests in-file: ReviewDecision round-trips all five strings;\n// HandoffAuthority matches only its own value.",
+ "responsibilities": [
+  "The decision-side request values: PlanDecideRequest, ReviewDecideRequest, RepairRequest, PublicationRetryRequest, HandoffRequest, and the two external requests.",
+  "ReviewDecision with as_str/parse round-trip, and the opaque HandoffAuthority capability value."
+ ],
+ "signature": "pub enum ReviewDecision { Approve, Repair, Escalate, RetryInfrastructure, Cancel }\n// as_str: approve, repair, escalate, retry_infrastructure, cancel\npub struct PlanDecideRequest {\n    pub project_alias: String, pub task_id: uuid::Uuid,\n    pub expected_revision: i64, pub plan_attempt_id: uuid::Uuid,\n    pub plan_sha256: String,\n    pub decision: crate::work_requests::PlanDecision,\n    pub agent_profile: String, pub idempotency_key: String,\n    pub note: String, pub recipe_digest: String,\n    pub auto_repair: bool, pub actor: crate::work_actors::Actor,\n    pub cause: Option<crate::work_actors::Cause>,\n}\npub struct ReviewDecideRequest {\n    pub project_alias: String, pub task_id: uuid::Uuid,\n    pub expected_revision: i64, pub review_id: uuid::Uuid,\n    pub decision: ReviewDecision, pub agent_profile: String,\n    pub note: String, pub idempotency_key: String,\n    pub findings: serde_json::Value,\n    pub verified_finding_ids: Vec<uuid::Uuid>,\n    pub recipe_digest: Option<String>,\n    pub actor: crate::work_actors::Actor,\n}\npub struct RepairRequest {\n    pub project_alias: String, pub task_id: uuid::Uuid,\n    pub expected_revision: i64, pub candidate_commit: String,\n    pub agent_profile: String, pub note: String,\n    pub findings: serde_json::Value, pub idempotency_key: String,\n    pub recipe_digest: Option<String>,\n    pub actor: crate::work_actors::Actor,\n}\npub struct PublicationRetryRequest {\n    pub project_alias: String, pub task_id: uuid::Uuid,\n    pub expected_revision: i64, pub publication_id: uuid::Uuid,\n    pub candidate_commit: String, pub note: String,\n    pub idempotency_key: String, pub actor: crate::work_actors::Actor,\n}\npub struct HandoffRequest {\n    pub command: serde_json::Value, pub target_profile: String,\n    pub recipe_digest: String, pub workspace_digest: String,\n}\npub struct HandoffAuthority { /* private: value: String */ }\nimpl HandoffAuthority {\n    pub fn new(value: impl Into<String>) -> HandoffAuthority;\n    pub fn matches(&self, presented: &str) -> bool;\n}\npub struct ExternalOverrideRequest {\n    pub project_alias: String, pub workflow_id: uuid::Uuid,\n    pub task_id: uuid::Uuid, pub expected_revision: i64,\n    pub idempotency_key: String, pub note: String,\n    pub actor: crate::work_actors::Actor,\n}\npub struct ExternalRecoveryRequest {\n    pub project_alias: String, pub workflow_id: uuid::Uuid,\n    pub idempotency_key: String, pub note: String,\n    pub actor: crate::work_actors::Actor,\n}",
+ "summary": "Decision-side request values: plan/review/repair/publication intents, the bound-authority handoff, and the two external-workflow operations."
+}

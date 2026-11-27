@@ -1,0 +1,25 @@
+{
+ "collaborators": [
+  "work_events",
+  "work_actors"
+ ],
+ "file": "work_types.rs",
+ "glossary": [
+  "projection",
+  "revision"
+ ],
+ "id": "work_types",
+ "invariants": [
+  "TaskSummary mirrors the Python _summary projection field-for-field; field names and optionality do not drift from it.",
+  "Timestamps are ISO strings exactly as the Python _timestamp helper emits them; this crate does not parse dates.",
+  "TaskView.projection is a serde_json::Value in v1 - the recorded bring-up debt of this crate family (as in forge-postgres's Claim::raw): the public progress/workflow projections get typed structs in a later increment, never silently."
+ ],
+ "kind": "types",
+ "pattern": "// Every struct derives Debug, Clone, PartialEq (EventView and TaskView\n// too - serde_json::Value is PartialEq). No impls, no tests in this\n// file: pure data. Doc comment on TaskView.projection names the v1\n// bring-up debt explicitly.",
+ "responsibilities": [
+  "The bounded read views the read port returns: TaskSummary, TaskView, EventView, ResultChunk, StageLogView, and the two page types.",
+  "The control outcome and policy identity the writer ports return."
+ ],
+ "signature": "pub struct TaskSummary {\n    pub task_id: uuid::Uuid, pub correlation_id: uuid::Uuid,\n    pub project_alias: String, pub base_revision: String,\n    pub mode: String, pub agent_profile: String,\n    pub recipe_digest: String, pub status: String,\n    pub revision: i64, pub created_at: String,\n    pub title: Option<String>, pub workflow_required: Option<bool>,\n    pub workflow_phase: Option<String>,\n}\npub struct TaskView { pub summary: TaskSummary, pub projection: serde_json::Value }\npub struct EventView {\n    pub sequence: i64, pub kind: crate::work_events::EventKind,\n    pub actor: Option<crate::work_actors::Actor>,\n    pub cause: Option<String>, pub payload: serde_json::Value,\n    pub created_at: String,\n}\npub struct ResultChunk {\n    pub result_digest: String, pub content: String,\n    pub offset_bytes: i64, pub next_cursor: Option<String>,\n}\npub struct StageLogView {\n    pub stage_id: String, pub content: String,\n    pub next_cursor: Option<String>,\n}\npub struct TaskPage { pub items: Vec<TaskSummary>, pub next_cursor: Option<uuid::Uuid> }\npub struct EventPage { pub items: Vec<EventView>, pub next_after: i64 }\npub struct ControlOutcome {\n    pub receipt_id: uuid::Uuid, pub task: TaskSummary, pub replayed: bool,\n}\npub struct PolicyIdentity { pub kind: String, pub digest: String }",
+ "summary": "The domain data of the work surface: task/event/result views, pages, the control outcome (receipt + task + replay flag), and the policy identity."
+}

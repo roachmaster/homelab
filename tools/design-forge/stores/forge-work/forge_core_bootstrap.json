@@ -1,0 +1,15 @@
+{
+ "collaborators": [],
+ "file": "forge-core/src/bootstrap.rs (external - do not implement)",
+ "glossary": [],
+ "id": "forge_core_bootstrap",
+ "invariants": [
+  "Never generate this file."
+ ],
+ "kind": "external API",
+ "responsibilities": [
+  "Exist as a collaborator signature only."
+ ],
+ "signature": "// forge-core::bootstrap (already exists - do not implement)\npub struct PreparedGroup<F> { /* private */ }\nimpl<F> PreparedGroup<F> {\n    pub fn new(id: impl Into<String>, provides: &[&str], requires: &[&str], factories: F)\n        -> Result<Self, RegistrationError>;\n}\npub struct RegistrationError { /* opaque; implements Display + Error */ }",
+ "summary": "forge-core's bootstrap PreparedGroup: one registrar stages one cohesive factory group under a dotted id with provides/requires capability names."
+}

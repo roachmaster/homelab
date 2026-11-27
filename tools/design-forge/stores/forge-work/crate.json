@@ -1,0 +1,10 @@
+{
+ "package": "forge-work",
+ "edition": "2021",
+ "dependencies": [
+  "forge-core = { path = \"../forge-core\" }",
+  "serde_json = \"1\"",
+  "uuid = \"1\""
+ ],
+ "note": "Path deps resolve when the crate is placed in the workspace (src/rust/forge-work). forge-work depends on forge-core only: never on forge-postgres or tokio-postgres (dependency direction decided in the forge-postgres design review, 2026-11-26)."
+}

@@ -1,0 +1,28 @@
+{
+ "collaborators": [
+  "work_requests",
+  "decision_requests",
+  "work_error",
+  "forge_core_ingress"
+ ],
+ "file": "work_payload.rs",
+ "glossary": [
+  "destination",
+  "route"
+ ],
+ "id": "work_payload",
+ "invariants": [
+  "Exactly 15 payload variants and 15 kinds, one per destination (resolved 2026-11-26); the destination strings are fixed literals and route_key always uses version 1.",
+  "kind() is a pure, faithful classification of the variant (the Payload contract); it never chooses the route - the header does.",
+  "category() is a derived grouping only (Read/Control/Decision) for metrics and policy; routing never uses it."
+ ],
+ "kind": "types",
+ "pattern": "// WorkKind and WorkCategory derive Debug, Clone, Copy, PartialEq, Eq;\n// WorkPayload derives Debug, Clone, PartialEq. route_key is\n// RouteKey::new(kind.destination(), 1) with the HeaderError mapped to\n// WorkError::rejected(500, \"invalid_destination\"). Tests in-file:\n// every kind's destination string is exact; category counts are\n// 5 Read / 4 Control / 6 Decision; kind() matches each variant\n// (spot-check three, including one external).",
+ "responsibilities": [
+  "WorkKind: the 15 destination kinds, each with its fixed destination string and its category.",
+  "WorkPayload: the request sum the bridge carries; control variants wrap the request structs, read variants carry their fields inline.",
+  "The Payload impl and the route_key helper the route registrars use."
+ ],
+ "signature": "pub enum WorkKind {\n    Submit, Get, List, Events, Cancel, Result, Accept, Resume,\n    PlanDecide, ReviewDecide, Repair, PublicationRetry, CicdStageLog,\n    ApproveExternalPlanOverride, RecoverExternalReviewInfrastructure,\n}\npub enum WorkCategory { Read, Control, Decision }\nimpl WorkKind {\n    pub fn destination(&self) -> &'static str;\n    pub fn category(&self) -> WorkCategory;\n}\n// destinations: Submit->\"work.submit\", Get->\"work.get\", List->\"work.list\",\n//   Events->\"work.events\", Cancel->\"work.cancel\", Result->\"work.result\",\n//   Accept->\"work.accept\", Resume->\"work.resume\",\n//   PlanDecide->\"work.plan_decide\", ReviewDecide->\"work.review_decide\",\n//   Repair->\"work.repair\", PublicationRetry->\"work.publication_retry\",\n//   CicdStageLog->\"work.cicd_stage_log\",\n//   ApproveExternalPlanOverride->\"work.approve_external_plan_override\",\n//   RecoverExternalReviewInfrastructure->\"work.recover_external_review_infrastructure\"\n// categories: Read = Get, List, Events, Result, CicdStageLog;\n//   Control = Submit, Cancel, Accept, Resume;\n//   Decision = PlanDecide, ReviewDecide, Repair, PublicationRetry,\n//   ApproveExternalPlanOverride, RecoverExternalReviewInfrastructure\npub enum WorkPayload {\n    Submit(crate::work_requests::SubmitRequest),\n    Get { project_alias: String, task_id: uuid::Uuid },\n    List { project_alias: String, status_filter: Option<String>,\n        limit: i64, cursor_task_id: Option<uuid::Uuid>, delivery_visible: bool },\n    Events { project_alias: String, task_id: uuid::Uuid, after_sequence: i64, limit: i64 },\n    Cancel(crate::work_requests::CancelRequest),\n    Result { project_alias: String, task_id: uuid::Uuid, attempt_id: uuid::Uuid,\n        cursor: Option<String>, limit_bytes: i64 },\n    Accept(crate::work_requests::AcceptRequest),\n    Resume(crate::work_requests::ResumeRequest),\n    PlanDecide(crate::decision_requests::PlanDecideRequest),\n    ReviewDecide(crate::decision_requests::ReviewDecideRequest),\n    Repair(crate::decision_requests::RepairRequest),\n    PublicationRetry(crate::decision_requests::PublicationRetryRequest),\n    CicdStageLog { project_alias: String, task_id: uuid::Uuid,\n        correlation_id: uuid::Uuid, action_id: uuid::Uuid,\n        stage_id: String, view: String, cursor_token: Option<String> },\n    ApproveExternalPlanOverride(crate::decision_requests::ExternalOverrideRequest),\n    RecoverExternalReviewInfrastructure(crate::decision_requests::ExternalRecoveryRequest),\n}\nimpl forge_core::ingress::Payload for WorkPayload {\n    type Kind = WorkKind;\n    fn kind(&self) -> WorkKind;\n}\npub fn route_key(kind: WorkKind)\n    -> Result<forge_core::ingress::RouteKey, crate::work_error::WorkError>;",
+ "summary": "The bridge payload: 15 typed destinations with fixed route strings, one kind per destination, and a derived read/control/decision grouping."
+}

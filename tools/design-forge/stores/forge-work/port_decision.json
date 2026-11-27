@@ -1,0 +1,25 @@
+{
+ "collaborators": [
+  "work_types",
+  "decision_requests",
+  "work_error"
+ ],
+ "file": "port_decision.rs",
+ "glossary": [
+  "control receipt",
+  "revision"
+ ],
+ "id": "port_decision",
+ "invariants": [
+  "Every method is a control operation: expected_revision + idempotency_key ride in the request, the receipt + event + task change commit in one transaction, exactly as the admission writers.",
+  "approve_external_plan_override and recover_external_review_infrastructure target the external-workflow control surface (forge_external_agent schema), NOT coding_tasks; their doc comments say so and their adapter calls that schema's existing SQL API functions (resolved 2026-11-26).",
+  "publication_retry is the OPERATION only: the publication machinery belongs to forge-work-publication, not this crate."
+ ],
+ "kind": "trait",
+ "pattern": "// Trait only: no impls, no tests in this file. Each method carries a\n// /// doc comment naming the Python surface it ports (WorkStore methods\n// for the first five; work_api.py destinations routed to the\n// external-workflow control surface for the last two).",
+ "responsibilities": [
+  "WorkDecisionPort: decision-class control operations on admitted tasks - plan_decide, review_decide, handoff_author, repair, publication_retry - plus the two reconciled external-workflow operations."
+ ],
+ "signature": "pub trait WorkDecisionPort {\n    fn plan_decide(&self, request: &crate::decision_requests::PlanDecideRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn review_decide(&self, request: &crate::decision_requests::ReviewDecideRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn handoff_author(&self, request: &crate::decision_requests::HandoffRequest,\n        authority: &crate::decision_requests::HandoffAuthority)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn repair(&self, request: &crate::decision_requests::RepairRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn publication_retry(&self, request: &crate::decision_requests::PublicationRetryRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn approve_external_plan_override(&self, request: &crate::decision_requests::ExternalOverrideRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn recover_external_review_infrastructure(&self, request: &crate::decision_requests::ExternalRecoveryRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n}",
+ "summary": "The decision port: plan/review/repair/publication decisions on admitted tasks, the bound-authority author handoff, and the two external-workflow operations."
+}

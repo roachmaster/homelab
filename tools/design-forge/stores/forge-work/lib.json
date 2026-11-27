@@ -1,0 +1,16 @@
+{
+ "collaborators": [],
+ "file": "lib.rs",
+ "glossary": [],
+ "id": "lib",
+ "invariants": [
+  "Crate doc states: forge-work is the typed work-admission capability (frozen catalog, canonical event vocabulary, bridge-fronted service, three driven store ports); adapters live in forge-postgres; this crate has no SQL and no I/O."
+ ],
+ "kind": "module root",
+ "responsibilities": [
+  "Open with the crate doc comment from the invariants.",
+  "Declare the 17 modules and re-export the public surface in the signature."
+ ],
+ "signature": "pub mod catalog;\npub mod catalog_registrar;\npub mod decision_requests;\npub mod port_admission;\npub mod port_decision;\npub mod port_read;\npub mod routes_admission;\npub mod routes_decision;\npub mod routes_read;\npub mod work_actors;\npub mod work_error;\npub mod work_events;\npub mod work_payload;\npub mod work_requests;\npub mod work_response;\npub mod work_service;\npub mod work_types;\n\npub use catalog::WorkCatalog;\npub use catalog_registrar::{register_catalog, WorkCatalogFactory};\npub use port_admission::WorkAdmissionPort;\npub use port_decision::WorkDecisionPort;\npub use port_read::WorkReadPort;\npub use work_actors::{Actor, ActorKind, Cause};\npub use work_error::WorkError;\npub use work_events::EventKind;\npub use work_payload::{WorkCategory, WorkKind, WorkPayload};\npub use work_response::{WorkContext, WorkResponse};\npub use work_service::{work_bridge, WorkAdmissionPolicy, WorkBridge};\npub use work_types::{ControlOutcome, PolicyIdentity, TaskSummary, TaskView};",
+ "summary": "The crate root: the doc comment, the module list, and the re-exports."
+}
