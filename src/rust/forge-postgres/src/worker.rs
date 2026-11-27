@@ -454,6 +454,31 @@ impl WorkerApi {
         )
     }
 
+    /// Records a checkpoint summary for the given claim
+    /// (forge_coding_worker_api.checkpoint).
+    pub fn checkpoint(&mut self, claim: &Claim, summary: &str) -> Result<(), AdapterError> {
+        self.session.call_void(
+            "SELECT forge_coding_worker_api.checkpoint($1, $2, $3)",
+            &[&claim.attempt_id, &claim.attempt_token, &summary],
+        )
+    }
+
+    /// Appends one result chunk for the given claim
+    /// (forge_coding_worker_api.append_result; index 0..1024, content
+    /// 1..=16384 UTF-8 bytes - bounds enforced server-side and by the
+    /// worker crate's spool).
+    pub fn append_result(
+        &mut self,
+        claim: &Claim,
+        index: i32,
+        content: &str,
+    ) -> Result<(), AdapterError> {
+        self.session.call_void(
+            "SELECT forge_coding_worker_api.append_result($1, $2, $3, $4)",
+            &[&claim.attempt_id, &claim.attempt_token, &index, &content],
+        )
+    }
+
     /// Reports progress for the given claim.
     pub fn report_progress(
         &mut self,

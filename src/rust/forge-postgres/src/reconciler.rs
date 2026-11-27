@@ -85,6 +85,29 @@ impl ReconcilerApi {
         items.iter().map(RecoveryLease::from_json).collect()
     }
 
+    /// Reconciles one recovered lease: the workspace digest plus the
+    /// stop proof for its scope (forge_coding_reconciler_api.reconcile;
+    /// returns the reconciliation outcome as text).
+    pub fn reconcile(
+        &mut self,
+        lease: &RecoveryLease,
+        workspace_digest: &str,
+        stop_proof: &crate::worker::StopProof,
+    ) -> Result<String, AdapterError> {
+        let proof_json = stop_proof.to_json();
+        self.session
+            .call_text(
+                "SELECT forge_coding_reconciler_api.reconcile($1, $2, $3, $4)",
+                &[
+                    &lease.task_id,
+                    &lease.attempt_id,
+                    &workspace_digest,
+                    &proof_json,
+                ],
+            )?
+            .ok_or_else(|| AdapterError::Protocol("reconcile returned no row".to_string()))
+    }
+
     /// Check if post-merge is available for the given owner.
     pub fn post_merge_available(&mut self, owner: &str) -> Result<bool, AdapterError> {
         self.session.call_bool(
