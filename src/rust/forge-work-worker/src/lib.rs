@@ -16,6 +16,7 @@ pub mod config;
 pub mod config_profile;
 pub mod consumer_cache;
 pub mod contexts;
+pub mod cooldown;
 pub mod diagnostic;
 pub mod error;
 pub mod external_identity;

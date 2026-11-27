@@ -549,6 +549,16 @@ name = "forge-game-runtime"
 version = "0.1.0"
 
 [[package]]
+name = "forge-host"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "forge-postgres",
+ "forge-work-worker",
+ "serde_json",
+]
+
+[[package]]
 name = "forge-ide"
 version = "0.1.0"
 dependencies = [

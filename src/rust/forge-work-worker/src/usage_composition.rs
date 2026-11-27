@@ -421,3 +421,41 @@ mod tests {
         assert_eq!(String::from_utf8(text).unwrap(), "codex-cli 1.2.3\n");
     }
 }
+
+/// UsageCollectorPort adapter over forge-usage's UsageCollector:
+/// the collector reports per-poll outcomes as a bool internally;
+/// the worker port surface is fallible-only, so the bool is
+/// discarded (Python's collector likewise swallows poll failures).
+pub struct WorkerUsageCollector {
+    inner: UsageCollector,
+}
+
+impl WorkerUsageCollector {
+    pub fn new(inner: UsageCollector) -> WorkerUsageCollector {
+        WorkerUsageCollector { inner }
+    }
+}
+
+impl crate::ports_worker::UsageCollectorPort for WorkerUsageCollector {
+    fn run_once(&mut self) -> Result<(), crate::error::WorkerError> {
+        let _ = self.inner.run_once();
+        Ok(())
+    }
+}
+
+/// The CollectorFactory product for the host: builds the poll store
+/// through the injected store factory (the factory receives only
+/// the config, so the store is composed per call, as in Python).
+pub fn usage_collector_factory(
+    store_factory: Arc<dyn Fn(&WorkerConfig) -> Arc<dyn UsagePollStore> + Send + Sync>,
+) -> crate::worker::CollectorFactory {
+    Box::new(move |config: &WorkerConfig| {
+        let store = store_factory(config);
+        match create_worker_usage_collector(config, store) {
+            Ok(Some(collector)) => Ok(Some(Box::new(WorkerUsageCollector::new(collector))
+                as Box<dyn crate::ports_worker::UsageCollectorPort>)),
+            Ok(None) => Ok(None),
+            Err(message) => Err(crate::error::WorkerError::protocol(message)),
+        }
+    })
+}

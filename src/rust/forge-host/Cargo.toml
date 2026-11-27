@@ -1,0 +1,16 @@
+[package]
+name = "forge-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Forge host composition binaries: the production process roots that wire the forge-* crates to PostgreSQL and the host (Rust port of the deploy/mission-control host entry points)."
+
+[dependencies]
+forge-postgres = { workspace = true }
+forge-work-worker = { workspace = true }
+serde_json = "1"
+ctrlc = { version = "=3.5.2", features = ["termination"] }
+
+[[bin]]
+name = "forge-coding-worker"
+path = "src/bin/forge-coding-worker.rs"
