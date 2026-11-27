@@ -153,6 +153,7 @@ def revive_main(argv):
 
 def main():
     import sys
+    if sys.argv[1:2]==['unstarted-plan']:raise SystemExit(unstarted_plan_main(sys.argv[2:]))
     if sys.argv[1:2]==['policy-continuation']:raise SystemExit(continuation_main(sys.argv[2:]))
     if sys.argv[1:2]==['revive']:raise SystemExit(revive_main(sys.argv[2:]))
     parser=argparse.ArgumentParser(description=__doc__)
@@ -205,6 +206,32 @@ def continuation_main(argv):
     else:
         result=port.inspect(args.project,args.workflow)
     print(json.dumps(result,sort_keys=True))
+    return 0
+
+
+def unstarted_plan_main(argv):
+    parser=argparse.ArgumentParser(description='Resume one reconciled, never-launched policy-continuation Plan')
+    parser.add_argument('--config',required=True)
+    parser.add_argument('--project',required=True)
+    parser.add_argument('--task',type=UUID,required=True)
+    parser.add_argument('--attempt',type=UUID,required=True)
+    parser.add_argument('--expected-revision',type=int,required=True)
+    parser.add_argument('--reconciliation-receipt',type=UUID,required=True)
+    parser.add_argument('--idempotency-key',type=UUID,required=True)
+    parser.add_argument('--deployed-fix-revision',required=True)
+    parser.add_argument('--execute',action='store_true',required=True)
+    args=parser.parse_args(argv)
+    if os.geteuid()!=0:raise RuntimeError('Private unstarted Plan recovery requires root')
+    verified_deployed_fix(__file__,args.deployed_fix_revision)
+    from work_config import load_work_config
+    from work_api import WorkServiceFactory
+    from work_workflow_continuation import WorkflowContinuation,UnstartedPlanResume
+    service=WorkServiceFactory(load_work_config(args.config),lambda:peer_connect('forge_agent')).create()
+    if service is None or service.workflow_worker is None:raise RuntimeError('Native workflow coordinator is unavailable')
+    command=UnstartedPlanResume(args.project,args.task,args.attempt,args.expected_revision,
+        args.reconciliation_receipt,args.idempotency_key,args.deployed_fix_revision)
+    port=WorkflowContinuation(service.workflow_worker.store,NativeRetryEvidence(lambda:peer_connect('postgres')))
+    print(json.dumps(port.resume_unstarted_plan(command),sort_keys=True))
     return 0
 
 

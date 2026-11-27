@@ -312,6 +312,21 @@ operator command, never granted to the HTTP service. Qualify matching API,
 author/reviewer worker and publisher branch configurations before execution;
 ordinary model readiness does not attest branch configuration.
 
+The claimed-lease contract distinguishes workflow Plan/approved implementation
+lineage from a reviewed code repair. Parentage alone does not imply a repair
+candidate. WorkerDB decodes and validates that contract inside the claim
+transaction, so a decoder rejection rolls back its reservation and started event.
+The worker validates the same contract before processing.
+
+`work_external_recovery.py unstarted-plan` is a private, bounded repair for an
+initial policy-continuation Plan claim rejected before launch. It requires a
+genuine stopped-scope receipt and an operator attestation that the absent,
+pristine workspace was explicitly materialized and digested after the failure.
+It refuses output/progress, repeated attempts, changed bindings, cancellation
+and unqualified branches. The same Plan resumes with its own recorded workspace;
+its eventual implementation still requires independent Plan approval. It cannot
+manufacture stop/workspace evidence or convert an unknown scope into success.
+
 Grok `auto_compact_*` updates are advisory progress, not terminal success or
 accounting authority. Turn-limit notices remain failures. Antigravity's
 `Third-party quota reached` diagnostic follows the configured quota handoff

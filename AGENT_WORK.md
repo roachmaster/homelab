@@ -1,5 +1,62 @@
 # Current: Event-stream autonomy defects — 2026-11-27
 
+Live checkpoint16:05UTC supersedes pending-rollout text below: PR33 merged as
+a51e83dae (tree5d601ff4); Jenkins113 branch45 and Jenkins114 main46 passed,
+including real browser and1805 runner tests with zero skips. Portal release
+dad4a957 is deployed; API/workers/publisher sourceaa141028 and matched staged
+configs activated. Nine services passed health probes; three deferred release
+operations retained exact row fingerprints. Two delivered workflows (typed
+renew0e8dcdc6 and failure causes21f9d7d6) retired through normal operator Cancel,
+with11 acceptance tests plus full-main proof; original task histories retained.
+
+Six policy continuations were admitted, but LIVE execution exposed a worker
+boundary defect missed by DB-only continuation tests: _lease treated ANY parent
+as code-repair linkage. Fresh child Plans failed before heartbeat/workspace/
+sandbox/model startup, then their claims expired. Six exact attempts are now
+needs_reconcile/unknown with reservations; all units are absent. Dedicated
+forge-codex-author-worker is intentionally STOPPED to prevent further claims.
+Do not replay, cancel, rewrite or invent stop/workspace evidence. Preserve the
+six source-bound receipts under operations/event-autonomy-20261127.
+
+Correction in progress: shared pure lease contract distinguishes workflow Plan
+and approved implementation lineage from reviewed code-repair authority; SQL
+claim decoding/validation now stays INSIDE the claim transaction so validation
+errors roll back reservation/events. Existing malformed repair guards remain.
+36 focused tests pass, including ACTUAL CodingWorker.process on real PG through
+fresh Plan, independent review, implementation context, checks/publication and
+exact merge; claim decode failure leaves zero attempts/started events.
+Next: audited Git-only materialization of truly absent pristine Plan workspaces,
+genuine systemd/cgroup stop proof + normal reconcile, then bounded server-only
+same-Plan resume authority. Verify/deploy successor through reviewed CI before
+restarting the author. No new DB migration or paid model diagnostics.
+
+16:26UTC update: all six unstarted claims are genuinely reconciled now. The
+private Git-only operation verified absent units/cgroups/no outputs/no workspace,
+materialized pristine pinned-base workspaces through WorkspaceProvider as the
+real worker UID, hashed actual bytes, used normal WorkerDB.reconcile, and
+appended one explicit AFTER-failure materialization attestation per attempt.
+All six are stopped with reservation=false/lease=NULL; original workflow
+snapshots, planning counters and full retry-event rows match admission receipts.
+Private proofs: operations/event-autonomy-20261127/unstarted-materialization-*.
+
+Bounded unstarted-plan resume port/CLI now requires the original continuation,
+exact stopped initial attempt/revision, matching genuine reconciliation and
+operator materialization marker, no output/progress/publication/operator cancel,
+unchanged recipe/owned feature branch, current grants/readiness and retained
+budgets. It resumes the SAME Plan child; no implementation approval. Independent
+Python/SQL reviews found no blockers after adding branch guard parity. Final
+focused tests56 passed, plus ci-preflight254 passed, zero skips. Author remains
+STOPPED pending reviewed successor qualification/deployment.
+
+Pre-merge retry-path qualification also reproduced same-task code revisions
+being mistaken for incomplete linked repairs when the implementation has a
+lineage parent. The shared contract now permits digest-bound feedback only for
+approved implementation continuations; Plan feedback spoofing and incomplete
+linked repairs remain rejected. A real-PG CodingWorker.process regression follows
+Plan approval through independent code revise and the corrected next attempt.
+Jenkins115 passed the previous tree; this additional correction requires a new
+exact-head build before PR34 can merge. Six reconciled Plans remain paused.
+
 User requests root-cause fixes for repeated Needs attention and tasks failing to
 reach main. Codex owns feature/codex; one writer. Portal attribution from PR31
 is already deployed (main4db1bdb3, ABI18, Jenkins110 all46 checks), superseding
