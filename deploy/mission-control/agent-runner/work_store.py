@@ -1438,6 +1438,8 @@ class WorkStore:
         author while an internal reviewer or repair task performs the next step.
         The independent external provider retains its existing scope guard.
         """
+        from work_diagnostic_archive import archive_activity
+        archived_at = archive_activity()
         external = self._external_workflow_for(project_alias)
         external_join = ""
         external_filter = ""
@@ -1469,7 +1471,7 @@ class WorkStore:
                        (t.workflow_required OR {phase} IS NOT NULL) AS workflow_required,
                        {phase} AS workflow_phase, {enabled} AS workflow_enabled,
                        {delivery} AS delivery,
-                       greatest(t.updated_at,coalesce(({delivery}->>'updated_at')::timestamptz,t.updated_at),coalesce(w.updated_at,t.updated_at),coalesce((
+                       greatest(t.updated_at,coalesce({archived_at},t.updated_at),coalesce(({delivery}->>'updated_at')::timestamptz,t.updated_at),coalesce(w.updated_at,t.updated_at),coalesce((
                            SELECT max(member.updated_at) FROM forge_agent.coding_tasks member
                            WHERE (member.owner_id,member.project_alias,member.workflow_id)=
                                  (w.owner_id,w.project_alias,w.workflow_id)
@@ -1479,6 +1481,7 @@ class WorkStore:
                             WHEN {phase} IS NOT NULL THEN
                                 CASE WHEN {phase}='escalated' OR NOT {enabled} THEN 'attention' ELSE 'active' END
                             WHEN t.workflow_required THEN 'attention'
+                            WHEN {archived_at} IS NOT NULL THEN 'history'
                             WHEN t.status IN ('completed','cancelled') THEN 'history'
                             WHEN t.status IN ('queued','running','cancel_requested') THEN 'active'
                             ELSE 'attention' END AS task_scope

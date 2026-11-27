@@ -501,7 +501,9 @@ def _build_run_from_stage_results(action_id, rows, events_for_run, *, release_st
             "sub_phases": sub_phases,
         })
 
-    started_at = next((e.get("occurred_at") for e in events_for_run if e.get("event_kind") == "build_started"), None)
+    event_plan = CiGateContractFactory(SCOPED_PROFILE).create().plan(
+        "main" if pipeline_scope == "main" else "detached")
+    started_at = _recorded_run_start(events_for_run, event_plan.logical_checks)
     completed_at = next((e.get("occurred_at") for e in reversed(events_for_run) if e.get("event_kind") == "build_completed"), None)
     if completed_at is None:
         completed_at = first.get("created_at")
@@ -523,6 +525,19 @@ def _build_run_from_stage_results(action_id, rows, events_for_run, *, release_st
         "completed_at": completed_at,
         "stages": stages,
     }
+
+
+def _recorded_run_start(events, logical_names):
+    """Use the same real execution witness for run ordering and stage state."""
+    explicit = [e for e in events if e.get("event_kind") == "build_started"]
+    if explicit:
+        return next((e.get("occurred_at") for e in explicit
+                     if _as_utc(e.get("occurred_at")) is not None), None)
+    witnesses = [(instant, e.get("occurred_at")) for e in events
+                 if e.get("event_kind") in {"stage_started", "stage_completed"}
+                 and e.get("stage_name") in logical_names
+                 and (instant := _as_utc(e.get("occurred_at"))) is not None]
+    return min(witnesses, key=lambda item: item[0])[1] if witnesses else None
 
 
 def _build_run_from_events_only(run_key, events_for_run, observation=None, *, pipeline_scope=None, now=None):
@@ -554,7 +569,7 @@ def _build_run_from_events_only(run_key, events_for_run, observation=None, *, pi
             "log_byte_count": 0,
             "sub_phases": [],
         })
-    started_at = next((e.get("occurred_at") for e in ordered if e.get("event_kind") == "build_started"), None)
+    started_at = _recorded_run_start(ordered, plan.logical_checks)
     completed_at = next((e.get("occurred_at") for e in reversed(ordered) if e.get("event_kind") == "build_completed"), None)
     build_number = next((e.get("build_number") for e in reversed(ordered) if isinstance(e.get("build_number"), int)), None)
     action_id = next((str(e["action_id"]) for e in ordered if e.get("action_id")), None)
