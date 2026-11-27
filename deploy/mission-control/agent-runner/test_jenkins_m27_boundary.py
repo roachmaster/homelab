@@ -1214,9 +1214,9 @@ PG_PROXY_GUARD_AST_SHA256 = {
     'work_owner_control.py::_owner_source_history': 'f71a44834f5108ae24224c80f74f9f1d469b619356ef74618ff55e60657f5493',
     'work_owner_control.py::NativeOwnerControl.review_decide': '876249058b642c33458c138406529b6f712817795425a40416d49b27c65a0338',
     'work_store.py::WorkStore._append_review_retry': '5b54a9b5ee8997bd2a78d9fd3d752f5de2efe6e31804e2e3e8fb17da8f760e7a',
-    'work_workflow.py::WorkflowStore.retry_native_timeout': '5b7d50bfe4ee2cc61fba45840dcfa3f6e4681bf4094cc008d81183a7b2ebd071',
-    'work_workflow.py::WorkflowStore.retry_peer_verdict': '4f53a835459ee5b76460334dea912a12ea3efc89946e533d12770499ca323612',
-    'work_workflow.py::WorkflowStore.retry_preparation': '7e6971b8c0d3549f511eca50e5208db4ea96b17ca6de5e07eb30012565a468c5',
+    'work_workflow.py::WorkflowStore.retry_native_timeout': '4f260de8444a5467f762f02a94baa5949d50eee7350ff2df3edbab69ff422cf8',
+    'work_workflow.py::WorkflowStore.retry_peer_verdict': '909f97fd129487202654b7c131ff15f9f6944f95b54e5d0d45f8806b6902b5ec',
+    'work_workflow.py::WorkflowStore.retry_preparation': 'cc948756f1707d4f8393ab4eb2c5adc1c6d065e2e65d32304707dd456514c259',
 }
 CODEX_AUTHOR_HANDOFF_CONTEXT_PATHS = frozenset({
     'AGENT_WORK.md',
