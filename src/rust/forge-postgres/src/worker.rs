@@ -498,6 +498,26 @@ impl WorkerApi {
             ],
         )
     }
+
+    /// Shared claim-scoped JSON call for the context reads
+    /// (worker_context.rs): every read authenticates with the
+    /// attempt (id, token) pair and returns one jsonb value.
+    pub(crate) fn call_json_for_claim(
+        &mut self,
+        select: &str,
+        claim: &Claim,
+    ) -> Result<Option<Value>, AdapterError> {
+        self.session
+            .call_json(select, &[&claim.attempt_id, &claim.attempt_token])
+    }
+
+    /// Shared no-argument JSON call for the context reads.
+    pub(crate) fn call_json_no_args(
+        &mut self,
+        select: &str,
+    ) -> Result<Option<Value>, AdapterError> {
+        self.session.call_json(select, &[])
+    }
 }
 
 #[cfg(test)]

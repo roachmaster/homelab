@@ -1,0 +1,12 @@
+{
+ "collaborators": [],
+ "file": "branch.rs",
+ "glossary": [],
+ "id": "branch",
+ "idioms": "",
+ "invariants": [],
+ "kind": "module",
+ "responsibilities": [],
+ "signature": "AgentBranch::from_json(Value) -> Result<AgentBranch, AdapterError>; AgentBranchUpsert (Default struct of Option fields). impl ReconcilerApi: agent_branch_get(project, profile) -> Result<Option<AgentBranch>>; agent_branch_upsert(project, profile, branch_name, branch_scope, &AgentBranchUpsert) -> Result<AgentBranch>; agent_branch_acquire(project, profile, branch_name, branch_scope, scope_kind, scope_id, root_task_id, task_id, review_id, publication_id) -> Result<AgentBranch>; agent_branch_verify_owner / record_publication / set_blocker / release (epoch-fenced) -> Result<AgentBranch>; agent_branch_reconcilable_reservations(limit) -> Result<Vec<Value>>; task_branch_scope(project, task_id) -> Result<Option<Value>>.",
+ "summary": "Agent branch ownership surface on ReconcilerApi (S2 adapter increment, 2026-11-27): AgentBranch decodes _branch_row_json (migration 0041, 29 keys); get/upsert/acquire/verify_owner/record_publication/set_blocker/release return the typed row; reconcilable_reservations and task_branch_scope stay JSON (the Python store returns them unvalidated)."
+}

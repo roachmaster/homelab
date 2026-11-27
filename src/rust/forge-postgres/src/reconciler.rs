@@ -108,6 +108,16 @@ impl ReconcilerApi {
             .ok_or_else(|| AdapterError::Protocol("reconcile returned no row".to_string()))
     }
 
+    /// Shared parameterized JSON call for the branch surface
+    /// (branch.rs), whose methods take varying argument lists.
+    pub(crate) fn call_json_params(
+        &mut self,
+        select: &str,
+        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
+    ) -> Result<Option<Value>, AdapterError> {
+        self.session.call_json(select, params)
+    }
+
     /// Check if post-merge is available for the given owner.
     pub fn post_merge_available(&mut self, owner: &str) -> Result<bool, AdapterError> {
         self.session.call_bool(

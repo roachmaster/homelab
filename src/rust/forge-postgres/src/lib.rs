@@ -1,3 +1,4 @@
+pub mod branch;
 /// This adapter provides a synchronous facade over tokio-postgres, dedicated to PostgreSQL operations.
 /// It uses explicit leases, which are values that expire server-side and are not cleaned up by Drop.
 /// The transport decision is handled by forge-postgres, and this crate does not route through forge-pg-proxy.
@@ -31,7 +32,9 @@ pub mod work_read_scope;
 pub mod work_rows;
 pub mod work_store;
 pub mod worker;
+pub mod worker_context;
 
+pub use branch::{AgentBranch, AgentBranchUpsert};
 pub use client::PgSession;
 pub use config::PgConfig;
 pub use error::AdapterError;
@@ -43,3 +46,4 @@ pub use worker::{
     AdvertisedProfile, AdvertisedProject, Claim, PublishReceipt, PublishResult, RenewDeadline,
     RenewStatus, ResultManifest, StopProof, WorkerApi,
 };
+pub use worker_context::NativeDeliveryContext;
