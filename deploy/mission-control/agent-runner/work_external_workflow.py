@@ -13,6 +13,7 @@ from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
 from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64,ExternalSourceIntegration
 from work_retry_policy import AGENT_RETRY_LIMIT,AGENT_RETRY_POLICY_ID,effective_limit
+from work_ci_contract import validate_gate_reference
 from work_events import COORDINATOR_ACTOR, insert_event, require_actor, require_cancel_cause, escalation_cause
 
 TERMINAL={'completed','cancelled','escalated'}
@@ -682,7 +683,10 @@ class ExternalWorkflowStore:
                     raise ValueError('Prepared integration differs from its immutable author source')
             elif candidate['candidate_tree']!=manifest['candidate_tree'] or candidate['integration_base']!=manifest['base_revision']:
                 raise ValueError('Prepared source differs from author candidate or trusted base')
-            if any(not isinstance(candidate.get(key),str) or not HEX64.fullmatch(candidate[key]) for key in ('diff_sha256','gate_source_sha256','gate_manifest_sha256')):raise ValueError('Candidate lacks exact gate/diff digests')
+            if any(not isinstance(candidate.get(key),str) or not HEX64.fullmatch(candidate[key]) for key in ('diff_sha256','gate_source_sha256')):raise ValueError('Candidate lacks exact gate/diff digests')
+            gate = validate_gate_reference(candidate.get('gate_manifest_sha256'))
+            if ':' in gate and gate != str(candidate.get('verification_profile')) + ':' + str(candidate.get('branch_scope')):
+                raise ValueError('Prepared gate contract differs from its verification profile or branch scope')
             if identity_protocol=='content-v2':
                 from work_external_identity import validate_content_identity
                 if candidate.get('identity_protocol')!='content-v2':raise ValueError('Prepared candidate lost its content protocol')

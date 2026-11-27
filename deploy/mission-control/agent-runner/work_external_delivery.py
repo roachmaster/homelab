@@ -26,7 +26,8 @@ from work_publication_clients import artifact_guard, command, PublicationError
 from work_review import protected_gate_path
 from work_external_delivery_store import ExternalDeliveryStoreFactory
 from work_ci_contract import (LEGACY_CHECKS, LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE,
-    CiGateContractFactory, contract_for_config, verify_verifier_policy_parity)
+    CiGateContractFactory, contract_for_config, verify_verifier_policy_parity,
+    GATE_REFERENCE_RE, validate_gate_reference)
 from work_verification import protected_retry_observation
 from work_external_review_context import EXTERNAL_DIFF_FLAGS, ExternalSourceIntegration
 
@@ -108,14 +109,11 @@ def digest(value):
 
 # The Jenkins gate is a named contract '<profile>:<branch_scope>' (mirrors the
 # verifier's GATE_CONTRACT_RE); a legacy 64-hex manifest digest is still accepted.
-GATE_CONTRACT = re.compile(
-    r'forge-sdlc-jenkins-v[1-3]:(?:main|detached|branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?)')
+GATE_CONTRACT = GATE_REFERENCE_RE
 
 
 def gate_ref(value):
-    if not isinstance(value, str) or not (DIGEST.fullmatch(value) or GATE_CONTRACT.fullmatch(value)):
-        raise ValueError('Invalid delivery gate')
-    return value
+    return validate_gate_reference(value)
 
 
 def canonical(value):

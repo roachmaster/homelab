@@ -1,3 +1,4 @@
+\ir verify-agent-feature-branches.sql
 -- Full M26 pins precede the exact reviewed historical-body projections below.
 SELECT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=26) AS verify_owner_continuation
 \gset
@@ -423,6 +424,10 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53 AND name='pg_proxy_cutover') THEN
   expected.data:=jsonb_set(expected.data,'{acl}',coalesce((SELECT jsonb_agg(CASE WHEN entry::text LIKE '"forge_agent=%' THEN to_jsonb('forge_agent=r/forge_agent_owner'::text) ELSE entry END ORDER BY ord)
    FROM jsonb_array_elements(expected.data->'acl') WITH ORDINALITY AS acl(entry,ord)),'[]'::jsonb));
+ IF expected.name='coding_publications' AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51) THEN
+  actual:=jsonb_set(actual,'{constraints}',(SELECT jsonb_agg(CASE WHEN item->>0='coding_publications_branch_check'
+   THEN jsonb_set(item,'{2}',(SELECT old->2 FROM jsonb_array_elements(expected.data->'constraints') old WHERE old->>0=item->>0))
+   ELSE item END ORDER BY ord) FROM jsonb_array_elements(actual->'constraints') WITH ORDINALITY rows(item,ord)));
  END IF;
  IF actual IS DISTINCT FROM expected.data THEN RAISE EXCEPTION 'Feedback schema drift: %',expected.name;END IF;
  END LOOP;
@@ -619,7 +624,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  END IF;
  IF actual IS DISTINCT FROM $function12$["\nBEGIN\n    UPDATE forge_agent.coding_publications p SET lease_expires_at=clock_timestamp()+interval '60 seconds',updated_at=clock_timestamp()\n    FROM forge_agent.coding_tasks t\n    WHERE p.publication_id=p_publication_id AND p.lease_token=p_lease_token\n      AND p.owner_id=current_setting('forge.coding_owner',true) AND p.status IN ('checking','publishing')\n      AND p.lease_expires_at>clock_timestamp() AND (t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.plan_decision_id) IS NOT DISTINCT FROM\n          (p.owner_id,p.project_alias,p.task_id,p.attempt_id,p.plan_decision_id)\n      AND t.mode='implement' AND t.status IN ('awaiting_review','completed') AND(NOT t.review_required OR forge_agent.coding_review_authorized(p.review_id));\n    RETURN FOUND;\nEND; ",true,["search_path=pg_catalog, pg_temp"],"v",["forge_agent_owner=X/forge_agent_owner","forge_coding_reconciler=X/forge_agent_owner"]]$function12$::jsonb THEN RAISE EXCEPTION 'Feedback function drift: forge_coding_reconciler_api.publication_renew(uuid,uuid)';END IF;
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
- SELECT jsonb_build_array(forge_agent._retry_legacy_source(p.oid,p.prosrc),p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_reconciler_api.publication_finish(uuid,uuid,text,text,text,text,text)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
+ SELECT jsonb_build_array(forge_agent._retry_legacy_source(p.oid,CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51) THEN replace(p.prosrc,$n$(p_branch!~'^forge/[A-Za-z0-9][A-Za-z0-9._/-]*$' AND p_branch NOT IN('feature/codex','feature/agy','feature/dot','feature/grok','feature/muse'))$n$,$o$p_branch!~'^forge/[A-Za-z0-9][A-Za-z0-9._/-]*$'$o$) ELSE p.prosrc END),p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_reconciler_api.publication_finish(uuid,uuid,text,text,text,text,text)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  ELSE
  SELECT jsonb_build_array(p.prosrc,p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_reconciler_api.publication_finish(uuid,uuid,text,text,text,text,text)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  END IF;
