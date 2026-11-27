@@ -6,6 +6,7 @@ never open a resource or choose a command, provider or next agent.
 """
 
 from copy import deepcopy
+from work_defect import validate_defect_context
 from work_retry_policy import AGENT_RETRY_LIMIT
 import hashlib
 import json
@@ -127,8 +128,9 @@ def _json(encoded):
 def validate_review_target(value):
     """Validate a target BEFORE serialization; no private helper key is accepted."""
     try:
-        _require(isinstance(value, dict) and set(value) == TARGET_FIELDS
+        _require(isinstance(value, dict) and set(value)-{'task_kind','defect','triage_instructions'} == TARGET_FIELDS
                  and type(value["version"]) is int and value["version"] == 1, "target.fields")
+        validate_defect_context(value)
         for field in ("workflow_id", "workflow_review_id", "reviewer_task_id",
                       "source_task_id", "source_attempt_id"):
             _uuid(value[field], "target.uuid." + field)

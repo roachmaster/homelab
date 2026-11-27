@@ -1,5 +1,6 @@
 """Lease-bound external-source review material for real native read-only reviewers."""
 from dataclasses import dataclass
+from work_defect import validate_defect_context
 import hashlib,json,re
 from uuid import UUID
 from work_feedback import validate_findings
@@ -75,8 +76,9 @@ def validate_target(raw,digest):
         raise ValueError('External review context digest mismatch')
     value=strict_json(raw)
     keys={'version','kind','workflow_id','review_id','reviewer_task_id','reviewer_profile','target_kind','source_task_id','source_assignment_id','source_sha256','source_revision','source_base_revision','review_base_revision','request_prompt','acceptance_criteria','source_content','approved_plan','candidate','required_attestations'}
-    if not isinstance(value,dict) or set(value)!=keys or type(value['version']) is not int or value['version'] not in (1,2) or value['kind']!='external_database_review' or value['target_kind'] not in {'plan','code'}:
+    if not isinstance(value,dict) or set(value)-{'task_kind','defect','triage_instructions'}!=keys or type(value['version']) is not int or value['version'] not in (1,2) or value['kind']!='external_database_review' or value['target_kind'] not in {'plan','code'}:
         raise ValueError('Invalid external review target')
+    validate_defect_context(value)
     for key in ('workflow_id','review_id','reviewer_task_id','source_task_id','source_assignment_id'):uuid(value[key])
     for key in ('source_base_revision','review_base_revision'):
         if not isinstance(value[key],str) or not HEX40.fullmatch(value[key]):raise ValueError('Invalid review revision')

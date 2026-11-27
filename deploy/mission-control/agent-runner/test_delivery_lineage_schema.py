@@ -41,7 +41,7 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 original_acl_relations.append('forge_agent.schema_migrations')
                 def snapshot():
                     return {
-                        'rows':{schema+'.'+name:self.rows(cluster,"SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM "+schema+'.'+name+' t') for schema,name in names},
+                        'rows':{schema+'.'+name:self.rows(cluster,"SELECT coalesce(jsonb_agg("+("to_jsonb(t)-ARRAY['task_kind','defect']" if (schema,name)==('forge_agent','coding_tasks') else 'to_jsonb(t)')+" ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM "+schema+'.'+name+' t') for schema,name in names},
                         'migration_history':self.rows(cluster,'SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=31 ORDER BY version'),
                         'credentials':self.rows(cluster,'SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r'),
                         'defaults':self.rows(cluster,'SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
@@ -52,7 +52,7 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
-                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(52,)])
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(53,)])
                 self.assertEqual(self.rows(cluster,'SELECT count(*) FROM forge_agent.delivery_lineage_handoffs'),[(0,)])
                 self.assertEqual(self.rows(cluster,"SELECT has_table_privilege('muse_events','forge_agent.delivery_lineage_handoffs','SELECT')"),[(False,)])
                 # verify.sql itself starts BEGIN READ ONLY and pins the exact

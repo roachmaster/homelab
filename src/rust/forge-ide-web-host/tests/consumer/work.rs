@@ -492,6 +492,14 @@ fn work_denies_grants_and_malformed_dtos_before_upstream_effects() {
     escaped["prompt"] = json!("\"".repeat(8192));
     let mut oversized = post(&host, "ide.work.submit", escaped, &auth);
     // Admission must reject the declared framing before waiting for its body.
+    let declared = oversized.split_once("\r\n\r\n").unwrap().1.len();
+    oversized = oversized.replace(
+        &format!("Content-Length: {declared}"),
+        &format!(
+            "Content-Length: {}",
+            HostLimits::default().request_bytes + 1
+        ),
+    );
     oversized.truncate(oversized.find("\r\n\r\n").unwrap() + 4);
     assert!(exchange(&host, oversized).starts_with("HTTP/1.1 413 "));
     for destination in ["ide.work.result", "ide.work.resume", "ide.work.accept"] {
@@ -1812,6 +1820,64 @@ fn recorded_cancellation_attribution_is_typed_and_rejects_invented_causes() {
         &host,
         "ide.work.events",
         task_request("work_events"),
+        &auth,
+        503,
+        failure("unavailable"),
+    );
+    worker.join().unwrap();
+}
+
+#[test]
+fn defect_submission_and_filtered_portal_projection_use_the_normal_relay() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let mut metadata = json!({"summary":"Opening fails", "location":{"repo_path":"src/editor.rs","function":"open","commit":"a".repeat(40)},
+        "observed_behavior":"Document stays closed","expected_behavior":"Document opens", "severity":"high", "evidence":"Failing regression"});
+    metadata["evidence"] = json!("e".repeat(8192));
+    let mut task = summary();
+    task["task_kind"] = json!("defect");
+    task["defect"] = metadata.clone();
+    let response = reply(
+        "work_listed",
+        json!({"project_alias":PROJECT,"tasks":[task],"next_cursor":null}),
+    );
+    let worker = backend(
+        upstream,
+        vec![
+            (202, receipt()),
+            (200, response.clone()),
+            (200, response.clone()),
+        ],
+    );
+    let mut request = submit();
+    request["task_kind"] = json!("defect");
+    request["defect"] = metadata;
+    request["prompt"] = json!("p".repeat(8192));
+    assert!(serde_json::to_vec(&request).unwrap().len() > 16_384);
+    let mut malformed = request.clone();
+    malformed["defect"]["severity"] = json!("urgent");
+    assert_reply(
+        &host,
+        "ide.work.submit",
+        malformed,
+        &auth,
+        400,
+        reply(
+            "work_failed",
+            json!({"code":"invalid_request", "reason":"defect.fields"}),
+        ),
+    );
+    assert_reply(&host, "ide.work.submit", request, &auth, 202, receipt());
+    let mut list = common("work_list");
+    list["task_kind_filter"] = json!("defect");
+    assert_reply(&host, "ide.work.list", list.clone(), &auth, 200, response);
+    list["task_kind_filter"] = json!("feature");
+    assert_reply(
+        &host,
+        "ide.work.list",
+        list,
         &auth,
         503,
         failure("unavailable"),

@@ -102,6 +102,8 @@ class Lease:
     lease_expires_at: str
     deadline_at: str
     unit_name: str
+    task_kind: str = "feature"
+    defect: dict | None = None
     resume_workspace_digest: str | None = None
     resume_attempt_id: str | None = None
     plan_decision_id: str | None = None
@@ -120,6 +122,8 @@ class Lease:
     def to_dict(self):
         return {
             "task_id": self.task_id,
+            "task_kind": self.task_kind,
+            "defect": self.defect,
             "project_alias": self.project_alias,
             "base_revision": self.base_revision,
             "mode": self.mode,
@@ -398,7 +402,17 @@ class WorkerDB:
             payload = cursor.fetchone()[0]
             if payload is None:
                 return None
+            cursor.execute("SELECT to_regprocedure('forge_coding_worker_api.read_defect(uuid,uuid)') IS NOT NULL")
+            if cursor.fetchone()[0]:
+                cursor.execute("SELECT forge_coding_worker_api.read_defect(%s,%s)",
+                               (payload["attempt_id"], payload["attempt_token"]))
+                metadata = cursor.fetchone()[0]
+            else:
+                # Before schema53 there are no defect tasks; retain feature leases
+                # while an existing installation is upgraded.
+                metadata = {"task_kind":"feature", "defect":None}
             lease = Lease(
+                task_kind=metadata['task_kind'], defect=metadata['defect'],
                 task_id=str(payload["task_id"]),
                 project_alias=payload["project_alias"],
                 base_revision=payload["base_revision"],

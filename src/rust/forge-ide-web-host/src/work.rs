@@ -6,9 +6,9 @@ use crate::{
 };
 use forge_core::ingress::Header;
 use forge_core::provider::Factory;
-use forge_ide_ui::protocol::WorkPlanDecision;
 use forge_ide_ui::protocol::{valid_work_name, WorkReply, WorkRequest};
 pub use forge_ide_ui::protocol::{WorkFailure as Failure, WorkMode};
+use forge_ide_ui::protocol::{WorkFailureReason, WorkPlanDecision};
 use hyper::body::Bytes;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, net::SocketAddr, path::PathBuf, time::Instant};
@@ -175,14 +175,17 @@ impl WorkRelay {
         body: &[u8],
         deadline: Instant,
     ) -> Result<(u16, Bytes), Rejection> {
-        if body.len() > 16_384 {
+        // Structured defect evidence shares the existing single submission envelope.
+        if body.len() > 32_768 {
             return failed(header, Failure::InvalidRequest);
         }
         let Ok(request) = serde_json::from_slice::<WorkRequest>(body) else {
-            return failed(header, Failure::InvalidRequest);
+            return invalid_submission(header, body);
         };
-        if !request.is_valid()
-            || request.request_id() != header.request_id()
+        if !request.is_valid() {
+            return invalid_submission(header, body);
+        }
+        if request.request_id() != header.request_id()
             || request.destination() != header.route().destination()
         {
             return failed(header, Failure::InvalidRequest);
@@ -259,13 +262,32 @@ impl WorkRelay {
         }
     }
 }
+fn invalid_submission(header: &Header, bytes: &[u8]) -> Result<(u16, Bytes), Rejection> {
+    let reason = serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|body| {
+            (body.get("kind").and_then(|v| v.as_str()) == Some("work_submit")
+                && (body.get("defect").is_some_and(|v| !v.is_null())
+                    || body.get("task_kind").is_some_and(|v| v != "feature")))
+            .then_some(WorkFailureReason::DefectFields)
+        });
+    failure_with_reason(header, Failure::InvalidRequest, reason)
+}
+
 pub(crate) fn failed(header: &Header, code: Failure) -> Result<(u16, Bytes), Rejection> {
+    failure_with_reason(header, code, None)
+}
+fn failure_with_reason(
+    header: &Header,
+    code: Failure,
+    reason: Option<WorkFailureReason>,
+) -> Result<(u16, Bytes), Rejection> {
     let body = Envelope {
         protocol_version: 1,
         event: WorkReply::WorkFailed {
             request_id: header.request_id().to_owned(),
             code,
-            reason: None,
+            reason,
         },
     };
     Ok((

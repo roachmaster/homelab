@@ -6,6 +6,7 @@ const SECOND: &str = "22222222-2222-4222-8222-222222222222";
 
 fn request(filter: Option<WorkListFilter>) -> WorkRequest {
     WorkRequest::WorkList {
+        task_kind_filter: None,
         request_id: "scope-list".into(),
         project_alias: "homelab".into(),
         status_filter: filter,

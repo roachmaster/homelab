@@ -400,13 +400,14 @@ class WorkflowContinuationTest(unittest.TestCase):
             sql=Path(directory)/'sql';shutil.copytree(work_pg_fixture.SQL_DIR,sql)
             apply=sql/'apply.sql';body=apply.read_text();start=body.index('SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=52)')
             apply.write_text(body[:start]+'COMMIT;\n')
-            with patch('work_pg_fixture.SQL_DIR',sql):cluster=DisposablePostgresCluster().start()
+            from test_work_policy_upgrade import PreUpgradeCluster
+            cluster=PreUpgradeCluster(sql).start()
             self.addCleanup(cluster.stop)
             self.cluster=cluster;self.setUp()
             port,request,old,plan=self.lineage_stop()
             tables=('coding_tasks','coding_attempts','coding_feedback','coding_plan_decisions','coding_reviews')
-            snapshot=lambda:{name:self.rows('SELECT to_jsonb(t) FROM forge_agent.'+name+' t ORDER BY to_jsonb(t)::text') for name in tables}
-            before=snapshot();cluster.apply_and_verify();cluster.apply_and_verify()
+            snapshot=lambda:{name:self.rows('SELECT '+("to_jsonb(t)-ARRAY['task_kind','defect']" if name=='coding_tasks' else 'to_jsonb(t)')+' FROM forge_agent.'+name+' t ORDER BY to_jsonb(t)::text') for name in tables}
+            before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
             self.assertEqual(snapshot(),before)
             self.resume_lineage(port,request);repair=self.claim('agy-v2')
             context=self.process_native(repair,'Implemented the independently requested correction.')

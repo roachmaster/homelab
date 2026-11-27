@@ -240,3 +240,21 @@ test('history page denial survives watermark and other-task reads, then retries 
     { request_id: retry.request_id, task_id, after_sequence: 50, denied: false },
   ]);
 });
+
+test('defect browser fixture preserves metadata, discovery links and kind-scoped paging', async t => {
+  const { relay, post } = await relayFixture(t);
+  relay.enableExternal();
+  const corpus = relay.seedTriage();
+  const defectId = relay.seedDefects(corpus.automatic);
+  const defects = (await post('work_list', { status_filter: 'active', task_kind_filter: 'defect', limit: 1 })).body.event;
+  assert.equal(defects.tasks.length, 1);
+  assert.equal(defects.tasks[0].task_id, defectId);
+  assert.equal(defects.tasks[0].task_kind, 'defect');
+  assert.equal(defects.tasks[0].defect.severity, 'high');
+  assert.equal(defects.next_cursor, null);
+  assert.equal(defects.scope_counts.active, 1);
+  const features = (await post('work_list', { status_filter: 'active', task_kind_filter: 'feature', limit: 20 })).body.event;
+  assert(!features.tasks.some(task => task.task_id === defectId));
+  const discovering = (await post('work_get', { task_id: corpus.automatic })).body.event.task;
+  assert.deepEqual(discovering.filed_defects.map(link => link.task_id), [defectId]);
+});

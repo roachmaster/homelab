@@ -25,7 +25,7 @@ pub struct HostLimits {
 impl Default for HostLimits {
     fn default() -> Self {
         Self {
-            request_bytes: 16_384,
+            request_bytes: 32_768,
             response_bytes: 8 * 1024 * 1024,
             request_timeout: Duration::from_secs(5),
             pairing_ttl: Duration::from_secs(300),

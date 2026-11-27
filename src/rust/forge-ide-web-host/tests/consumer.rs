@@ -1009,7 +1009,11 @@ fn workspace_checkpoint_isolates_tabs_and_keeps_the_newest_revision_across_resum
     latest["chat"]["conversations"]
         .as_array_mut()
         .unwrap()
-        .extend([long_conversation.clone(), long_conversation]);
+        .extend([
+            long_conversation.clone(),
+            long_conversation.clone(),
+            long_conversation,
+        ]);
     assert!(latest.to_string().len() > HostLimits::default().request_bytes);
     latest["workbench_open"] = true.into();
     let mut older = latest.clone();
@@ -3050,7 +3054,7 @@ fn host_error_display_names_each_failure_exactly() {
 #[test]
 fn default_host_limits_are_exact_and_boundaries_are_enforced() {
     let limits = HostLimits::default();
-    assert_eq!(limits.request_bytes, 16_384);
+    assert_eq!(limits.request_bytes, 32_768);
     assert_eq!(limits.response_bytes, 8 * 1024 * 1024);
     assert_eq!(limits.request_timeout, Duration::from_secs(5));
     assert_eq!(limits.pairing_ttl, Duration::from_secs(300));
