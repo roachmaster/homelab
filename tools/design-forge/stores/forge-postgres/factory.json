@@ -11,6 +11,7 @@
   "registrar"
  ],
  "id": "factory",
+ "idioms": "// forge_core::provider::Factory (exact):\n//   pub trait Factory<T> { type Error; fn create(&self) -> Result<T, Self::Error>; }",
  "invariants": [
   "The factory never connects at construction or staging time - only create() connects."
  ],

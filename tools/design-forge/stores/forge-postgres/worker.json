@@ -14,6 +14,7 @@
   "stop proof"
  ],
  "id": "worker",
+ "idioms": "// serde_json::Value (exact): v.get(\"key\") -> Option<&Value>; v.as_str() -> Option<&str>;\n//   v.as_object() -> Option<&Map<String, Value>>. There is NO as_uuid on Value:\n//   parse ids with Uuid::parse_str(v.as_str()...). Value, Option<Value>, Option<&str>,\n//   Uuid all implement tokio_postgres::types::ToSql - pass them by reference in params.",
  "invariants": [
   "A Claim is a value, not a guard: dropping it does nothing on the server.",
   "claim returns Ok(None) when the server returns SQL NULL (nothing claimable) - never an error.",

@@ -62,6 +62,8 @@ def build_packet(target_id, cards, glossary, rules):
     lines.append(f"Public signature to implement exactly:\n{card['signature']}")
     if card.get("pattern"):
         lines.append(f"Decided pattern for this file (implement with this structure):\n{card['pattern']}")
+    if card.get("idioms"):
+        lines.append(f"External-crate idioms (exact signatures - use these, do not guess crate APIs):\n{card['idioms']}")
     collabs = [c for c in card.get("collaborators", []) if c in cards]
     if collabs:
         lines.append("")

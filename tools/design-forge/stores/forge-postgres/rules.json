@@ -6,6 +6,7 @@
   "Leases are explicit values: nothing is cleaned up by Drop, and every fallible operation returns Result<_, AdapterError>.",
   "Every public item carries a /// doc comment.",
   "Unit tests go in a #[cfg(test)] mod tests at the bottom of the same file and test pure logic only - never a live database.",
-  "No binary, no main function, no environment access anywhere in this crate."
+  "No binary, no main function, no environment access anywhere in this crate.",
+  "One file is one generation unit: at most ~90 lines. If a design needs more, it belongs in two cards (split into submodules at the design level) - never write a file longer than ~110 lines."
  ]
 }

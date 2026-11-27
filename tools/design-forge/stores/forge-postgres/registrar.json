@@ -12,6 +12,7 @@
   "session"
  ],
  "id": "registrar",
+ "idioms": "// forge_core::bootstrap (exact):\n//   PreparedGroup::new(id: impl Into<String>, provides: &[&str], requires: &[&str], factories: F)\n//       -> Result<PreparedGroup<F>, RegistrationError>\n//   Identifiers allow [A-Za-z0-9._-]. With fixed literal id/provides the call cannot\n//   fail: use .expect(\"fixed ... group\") (the forge-jobs registrar convention).",
  "invariants": [
   "Neither function connects, reads the environment, or performs any I/O.",
   "Each group provides exactly one binding and holds exactly one factory - nothing optional survives the freeze."

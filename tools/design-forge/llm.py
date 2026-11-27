@@ -31,6 +31,7 @@ Every request appends one JSON line to out/llm-log.jsonl:
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -98,19 +99,36 @@ def clear_memory(label):
 
     The harness side of clearing is the caller's: restart the target
     from the bare packet, with none of the accumulated conversation.
-    A failed erase is logged, never fatal - a fresh packet with no
+    A failed erase is logged WITH its HTTP status and response body,
+    never silently - a broken erase (e.g. the server started without
+    --slots/--slot-save-path, which answers 501) must fail loudly,
+    because the retry otherwise proceeds on a warm KV cache believing
+    memory was cleared. Still never fatal: a fresh packet with no
     shared prefix already busts the prompt cache in practice.
     """
-    ok = False
+    status, body = None, ""
     try:
         req = urllib.request.Request(f"{SLOTS_API}/0?action=erase",
                                      data=b"", method="POST")
         with urllib.request.urlopen(req, timeout=5) as r:
-            ok = r.status == 200
-    except Exception:
-        ok = False
+            status = r.status
+            body = r.read().decode("utf-8", "replace")[:200]
+    except urllib.error.HTTPError as e:
+        status = e.code
+        try:
+            body = e.read().decode("utf-8", "replace")[:200]
+        except Exception:
+            body = ""
+    except Exception as e:
+        body = f"{type(e).__name__}: {e}"[:200]
+    ok = status == 200
     _log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "label": label,
-          "outcome": "memory_cleared", "slot_erase_ok": ok})
+          "outcome": "memory_cleared", "slot_erase_ok": ok,
+          "http_status": status, "body": body})
+    if not ok:
+        print(f"WARNING: slot erase FAILED (http {status}): {body} - "
+              f"the retry proceeds on a possibly warm KV cache",
+              file=sys.stderr)
     return ok
 
 

@@ -148,6 +148,14 @@ def main():
         with open(os.path.join(OUT, "src", card["file"]), "w") as f:
             f.write(code + "\n")
         print(f"{target}: wrote {card['file']} ({len(code.splitlines())} lines, packet ~{approx_tokens(packet)} tokens) {note}")
+        if len(code.splitlines()) > 110:
+            # Generation-unit cap (Leonardo, from the forge-postgres log):
+            # files over ~90 lines fall off the output-cap cliff - worker.rs
+            # at 156 lines ate 60% of the whole build's model time. The file
+            # is kept, but the card should be split before the next build.
+            print(f"WARNING: {card['file']} is {len(code.splitlines())} lines - over the "
+                  f"~90-line generation-unit cap. Split this card into submodules "
+                  f"before building on it.", file=sys.stderr)
 
 
 if __name__ == "__main__":

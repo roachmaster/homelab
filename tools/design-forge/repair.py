@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from assemble import load_store, build_packet
+from assemble import load_store, build_packet, approx_tokens
 import generate
 import llm
 from generate import strip_fences, SYSTEM
@@ -32,6 +32,11 @@ def main():
     path = os.path.join(out_dir, "src", card["file"])
     with open(path) as f:
         current = f.read()
+    # A repair re-emits the whole file, so the output cap needs headroom:
+    # at least 2x the current file's token count, never below 2800. (The
+    # 156-line worker.rs truncated all 6 repair rounds at the flat 1400
+    # cap during the forge-postgres build.)
+    llm.MAX_TOKENS = max(llm.MAX_TOKENS, 2800, 2 * approx_tokens(current))
     with open(errors_path) as f:
         errors = f.read()
     user = (packet

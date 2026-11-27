@@ -9,6 +9,7 @@
   "lease"
  ],
  "id": "reconciler",
+ "idioms": "// serde_json::Value (exact): v.get(\"key\") -> Option<&Value>; v.as_str() -> Option<&str>.\n//   Value and Option<Value> implement tokio_postgres::types::ToSql - pass by reference in params.",
  "invariants": [
   "A ReconcilerApi is never built on a worker-role session; the role separation is the host's wiring job, and this type assumes it."
  ],
