@@ -1,3 +1,27 @@
+## Latest live telemetry correction — 2026-11-27
+
+The API-only Jenkins stage ingress is now selected by the narrow root-owned
+/etc/homelab-forge/coding-api/jenkins-events.json allowlist. The API remained on
+source5bdedc1a; workers, identities, reservations and DB privileges did not change.
+Build124 proves stage events now arrive before completion. That revealed a second
+bug: v3's45/46command indices were mapped to legacy three-stage labels. The new
+verifier mapping derives contiguous logical-gate intervals from the trusted phase
+plan, starts once at the first command, completes success only after the last,
+and seals any failure against later success. v1/v2 behavior and delivery IDs remain.
+All18 stage emitter tests pass, including full main/branch v3 sequences and failure
+fences. Existing unwired lifecycle producer remains untouched. The corrected
+verifier is not installed at this source checkpoint; wait for current Jenkins124
+to finish before any protected executor replacement. No native task has run CI
+under the newly enabled ingress yet; the observed124 run is operator verification.
+
+Migration52 source is locally checkpointed through ad0e81ed, still not pushed or
+applied live. Jenkins123 exposed the explicit verifier-closure expectation; the
+new verifier was added to that exact closure, and254preflight tests then passed.
+Upgrade assertions now expect52; no check was removed. The actual schema51 upgrade
+and immutable task-history proof passed. Final broad runner tests/branch Jenkins124
+are running. Preserve native feature/codex ownership and the pending migration
+publication/release hold plan below.
+
 # Current: continuation-owned Plan repair — 2026-11-27
 
 PR35 is merged as ea3e42cb; source5bdedc1a has the identical tree and is live.

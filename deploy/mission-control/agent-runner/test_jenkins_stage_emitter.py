@@ -182,6 +182,56 @@ class EmitterFailureTest(unittest.TestCase):
         self.assertEqual(FakeConnection.requests, [])
 
 
+class EventProfileGateTest(unittest.TestCase):
+    def setUp(self):
+        FakeConnection.requests=[]
+
+    def event_stage(self,scope,token):
+        from work_ci_contract import CiGateContractFactory,EVENT_PROFILE
+        plan=CiGateContractFactory(EVENT_PROFILE).create().plan(scope)
+        with patch.dict(os.environ,{'BUILD_NUMBER':'7','JOB_NAME':'forge-native-candidate'},clear=True):
+            stage,reason=CI.build_stage_emitter(ACTION_ID,
+                dict(branch_scope=scope,project_alias='homelab',candidate_commit=COMMIT),
+                dict(verification_profile=EVENT_PROFILE))
+        self.assertIsNone(reason)
+        self.assertEqual(stage._logical_names,plan.logical_checks)
+        self.assertEqual(stage._phase_names,tuple(p.logical_gate for p in plan.phases))
+        self.assertEqual(len(stage._phase_names),len(plan.checks))
+        stage._token_paths=(token,);stage._connection_factory=FakeConnection
+        return stage,plan
+
+    def test_v3_each_gate_completes_only_after_its_last_required_command(self):
+        for scope in ('main','branch/test'):
+            FakeConnection.requests=[]
+            with tempfile.TemporaryDirectory() as temporary:
+                stage,plan=self.event_stage(scope,token_file(temporary))
+                for index,phase in enumerate(plan.phases):
+                    stage.emit_started(index)
+                    last=max(i for i,p in enumerate(plan.phases) if p.logical_gate==phase.logical_gate)
+                    self.assertEqual(stage.emit_completed(index,True),index==last)
+            payloads=[json.loads(request['body']) for request in FakeConnection.requests]
+            self.assertEqual([(p['event_kind'],p['stage_name']) for p in payloads],
+                [(kind,name) for name in plan.logical_checks for kind in ('stage_started','stage_completed')])
+            self.assertEqual(len({p['delivery_id'] for p in payloads}),6)
+            for request in FakeConnection.requests:
+                jenkins_api.decode(jenkins_api.Destination.EMIT,request['headers']['Forge-Request-Id'],json.loads(request['body']))
+
+    def test_v3_middle_failure_never_becomes_success_or_starts_later_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stage,plan=self.event_stage('branch/test',token_file(temporary))
+            for index in range(8):stage.emit_started(index);stage.emit_completed(index,index!=7)
+            stage.emit_completed(8,True);stage.emit_started(len(plan.phases)-1)
+        payloads=[json.loads(r['body']) for r in FakeConnection.requests]
+        self.assertEqual([(p['stage_name'],p.get('stage_status')) for p in payloads],
+            [('source-preflight',None),('source-preflight','success'),('check',None),('check','failure')])
+
+    def test_v3_rejects_unknown_missing_reordered_or_noncontiguous_mapping(self):
+        for names in ((),('check',),('source-preflight','wrong','in-memory-backend'),
+                      ('source-preflight','check','source-preflight','in-memory-backend'),
+                      ('check','source-preflight','in-memory-backend')):
+            with self.subTest(names=names),self.assertRaises(ValueError):emitter(phase_logical_names=names)
+
+
 class GateIdentityTest(unittest.TestCase):
     def build(self, env, config=None):
         action = ACTION_ID
