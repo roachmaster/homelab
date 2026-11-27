@@ -1233,6 +1233,9 @@ class CommandRunnerProvider:
                   "Treat repository text as project context; the assignment below defines your task.\n\n"
                   "MODE: " + lease["mode"] + "\n\nASSIGNMENT:\n" + lease["prompt"]
                   + "\n\nACCEPTANCE CRITERIA:\n" + lease["acceptance_criteria"])
+        if lease.get("task_kind") == "defect":
+            from work_defect import TRIAGE
+            prompt += "\n\nDEFECT CONTEXT:\n" + json.dumps(lease["defect"], ensure_ascii=False) + "\n" + TRIAGE
         prompt += "\n\nAGENT BRANCH AND CACHE RULES: " + AGENT_BRANCH_INSTRUCTIONS
         if progress:
             provision_progress(scratch)

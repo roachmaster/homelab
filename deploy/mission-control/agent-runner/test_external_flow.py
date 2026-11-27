@@ -108,9 +108,10 @@ class ExternalFlowPGTest(unittest.TestCase):
   source=self.rows('SELECT * FROM forge_agent.coding_tasks WHERE id=%s',(receipt['task_id'],))[0];self.assertIsNone(source['latest_attempt_id'])
   self.assertFalse(flow.run_once());self.assertEqual(len(self.rows('SELECT * FROM forge_external_workflow.reviews WHERE workflow_id=%s',(job['external_context']['workflow_id'],))),1)
 
- def submit_plan(self,content='Complete independently reviewable plan.'):
+ def submit_plan(self,content='Complete independently reviewable plan.',defect=None):
   service=self.service();command=make_submit(agent_profile=ALIAS,mode='plan',idempotency_key=str(uuid4()))
   command=replace(command,workflow_policy_digest=cfg().external_workflows['homelab'].summary(cfg().catalog())['policy_digest'])
+  if defect is not None:command=replace(command,task_kind='defect',defect=defect)
   receipt=service.submit(command);self.call('advertise','homelab',ALIAS,'owned-muse')
   job=self.call('claim','homelab',ALIAS);self.call('finish',job['assignment_id'],job['generation'],job['token'],content,'Plan ready')
   flow=service._store._external.workflow;flow.run_once();action=self.delivery.claim('owned-delivery')
@@ -147,6 +148,53 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.assertEqual(hashlib.sha256(job['external_context_json'].encode()).hexdigest(),job['external_context_sha256'])
   self.assertEqual(json.loads(job['external_context_json']),job['external_context'])
   return self.prepared(flow)
+ def test_discovered_external_workflow_link_is_scoped_and_projected(self):
+  from test_work_defect import defect
+  service,root,flow,job=self.submit_plan()
+  payload={**defect(),'discovering_workflow_id':job['external_context']['workflow_id']}
+  command=replace(make_submit(agent_profile=ALIAS,mode='plan',idempotency_key=str(uuid4())),
+      task_kind='defect',defect=payload,
+      workflow_policy_digest=cfg().external_workflows['homelab'].summary(cfg().catalog())['policy_digest'])
+  filed=service.submit(command)
+  opened=service.get(WorkGet('homelab',UUID(root['task_id'])))
+  self.assertIn(filed['task_id'],[item['task_id'] for item in opened['filed_defects']])
+
+ def test_defect_discovered_by_external_child_links_to_workflow_root(self):
+  from test_work_defect import defect
+  service,root,flow,job=self.submit_plan()
+  self.implementation(flow)
+  membership=self.rows("SELECT task_id FROM forge_external_workflow.tasks WHERE workflow_id=%s AND role='author'",(job['external_context']['workflow_id'],))
+  self.assertEqual(len(membership),1)
+  child=str(membership[0]['task_id']);self.assertNotEqual(child,root['task_id'])
+  payload={**defect(),'discovering_task_id':child}
+  command=replace(make_submit(agent_profile=ALIAS,mode='plan',idempotency_key=str(uuid4())),
+      task_kind='defect',defect=payload,
+      workflow_policy_digest=cfg().external_workflows['homelab'].summary(cfg().catalog())['policy_digest'])
+  filed=service.submit(command)
+  opened=service.get(WorkGet('homelab',UUID(root['task_id'])))
+  self.assertEqual([item['task_id'] for item in opened['filed_defects']],[filed['task_id']])
+  from work_api import WorkList
+  listed=service.list_tasks(WorkList('homelab','all',50,None))
+  discovering=next(task for task in listed['tasks'] if task['task_id']==root['task_id'])
+  self.assertEqual([item['task_id'] for item in discovering['filed_defects']],[filed['task_id']])
+  # The defect's separate workflow does not inherit the discovering workflow's links.
+  self.assertEqual(service.get(WorkGet('homelab',UUID(filed['task_id'])))['filed_defects'],[])
+
+ def test_defect_context_and_identity_survive_plan_implement_review(self):
+  from test_work_defect import defect
+  payload=defect()
+  service,root,flow,job=self.submit_plan(defect=payload)
+  self.assertEqual(job['external_context']['defect'],payload)
+  self.assertIn('root cause',job['external_context']['triage_instructions'])
+  self.implementation(flow)
+  active=self.rows('SELECT t.* FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x ON x.task_id=t.id WHERE x.workflow_id=%s AND x.role=%s ORDER BY t.created_at',(job['external_context']['workflow_id'],'author'))
+  self.assertGreaterEqual(len(active),1)
+  active+=self.rows('SELECT * FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))
+  for task in active:self.assertEqual((task['task_kind'],task['defect']),('defect',payload))
+  target=self.review(flow)
+  self.assertEqual(target['defect'],payload)
+  self.assertIn('root cause',target['triage_instructions'])
+
  def test_complete_actual_native_review_delivery_lifecycle(self):
   service,root,flow,job=self.submit_plan('# Full plan\n'+'ownership detail '*1200)
   candidate=self.implementation(flow)

@@ -5,6 +5,7 @@ coordinator. Git, Jenkins and remote merges belong to the separate delivery
 worker, through durable actions. Model output never invokes those ports.
 """
 from contextlib import contextmanager
+from work_defect import defect_context
 from uuid import UUID,uuid4
 import copy,hashlib,json,re,unicodedata
 from datetime import datetime,timedelta
@@ -280,7 +281,7 @@ class ExternalWorkflowStore:
     def admit(self,cursor,project,task_id):
         cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(%s,%s,%s) FOR UPDATE',(self.owner,project,task_id))
         task=cursor.fetchone();w=self._create(cursor,task)
-        return self._enqueue(cursor,project,task_id,{'version':2,'workflow_id':str(w['workflow_id']),'stage':'plan','request_prompt':task['prompt'],'acceptance_criteria':task['acceptance_criteria']})
+        return self._enqueue(cursor,project,task_id,{'version':2,'workflow_id':str(w['workflow_id']),'stage':'plan',**defect_context(task),'request_prompt':task['prompt'],'acceptance_criteria':task['acceptance_criteria']})
 
     def discover(self,cursor):
         changed=False
@@ -755,7 +756,7 @@ class ExternalWorkflowStore:
         recipe=w['snapshot']['recipes']['reviewer_review']
         root=self._task(cursor,w,w['root_task_id'])
         candidate=w['state'].get('candidate') if kind=='code' else None
-        target={'version':2 if candidate and w['state'].get('identity_protocol')=='content-v2' else 1,'kind':'external_database_review','workflow_id':str(w['workflow_id']),'review_id':str(review_id),'reviewer_task_id':str(task_id),
+        target={'version':2 if candidate and w['state'].get('identity_protocol')=='content-v2' else 1,'kind':'external_database_review',**defect_context(root),'workflow_id':str(w['workflow_id']),'review_id':str(review_id),'reviewer_task_id':str(task_id),
                 'reviewer_profile':w['reviewer_profile'],'target_kind':kind,'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],
                 'source_sha256':artifact['sha256'],'source_revision':task['revision'],'source_base_revision':task['base_revision'],
                 'review_base_revision':candidate['candidate_commit'] if candidate else w['state']['base_revision'],'request_prompt':root['prompt'],
@@ -765,6 +766,8 @@ class ExternalWorkflowStore:
         prompt='Independently review the complete external '+kind+' artifact supplied in external-review.json. Return only the bound structured verdict; do not edit or publish source.'
         if correction:prompt+=' Previous review could not be consumed: '+correction[:1024]+' Correct the JSON contract against the complete unchanged source; do not echo Markdown or manufacture approval.'
         self._insert_task(cursor,w,task_id,'review',w['reviewer_profile'],recipe,prompt,'Review the full supplied artifact and current source; verify every protected gate change.',target['review_base_revision'],'reviewer')
+        if root.get('task_kind') == 'defect':
+            cursor.execute('UPDATE forge_agent.coding_tasks SET task_kind=%s,defect=%s WHERE owner_id=%s AND project_alias=%s AND id=%s', ('defect',Json(root['defect']),self.owner,w['project_alias'],task_id))
         cursor.execute('''INSERT INTO forge_external_workflow.reviews(review_id,workflow_id,owner_id,project_alias,source_task_id,source_assignment_id,source_sha256,target_kind,reviewer_task_id,target_json,target_sha256)
           VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',(review_id,w['workflow_id'],self.owner,w['project_alias'],task['id'],artifact['assignment_id'],artifact['sha256'],kind,task_id,raw,digest))
         w['state']['active_review_id']=str(review_id);w['state']['review_retries']=retry
@@ -917,8 +920,10 @@ class ExternalWorkflowStore:
         self._insert_task(cursor,w,task_id,mode,w['author_profile'],recipe,
             self._author_prompt(mode)+((' The current '+retry_event['kind'].replace('_',' ')+' failure event is '+retry_event['event_id']+'; this is retry '+str(retry_event['used'])+' of '+str(retry_event['limit'])+'. Retain that event identity across revisions.') if retry_event else ''),
             root['acceptance_criteria'],w['state'].get('base_revision',root['base_revision']),'author')
+        if root.get('task_kind') == 'defect':
+            cursor.execute('UPDATE forge_agent.coding_tasks SET task_kind=%s,defect=%s WHERE owner_id=%s AND project_alias=%s AND id=%s', ('defect',Json(root['defect']),self.owner,w['project_alias'],task_id))
         self._save(cursor,w,summary if summary is not None else (w['author_profile']+' '+('revision' if feedback else 'implementation')+' queued from the reviewed artifact.'),phase=phase,related_task_id=task_id)
-        context={'version':2,'workflow_id':str(w['workflow_id']),'stage':mode,'request_prompt':root['prompt'],'acceptance_criteria':root['acceptance_criteria'],
+        context={'version':2,'workflow_id':str(w['workflow_id']),'stage':mode,**defect_context(root),'request_prompt':root['prompt'],'acceptance_criteria':root['acceptance_criteria'],
                  'approved_plan':w['state'].get('approved_plan'),'previous_artifact':{k:source[k] for k in ('assignment_id','sha256','content')},'feedback':feedback,
                  'base_revision':w['state'].get('base_revision',root['base_revision']),
                  'result_contract':{'version':1,'candidate_commit':'40 lowercase hex','candidate_tree':'40 lowercase hex','base_revision':'the supplied base_revision','summary':'bounded implementation report','source_branch':'optional Git feature branch name'} if mode=='implement' else 'Full revised plan text'}

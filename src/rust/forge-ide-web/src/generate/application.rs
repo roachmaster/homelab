@@ -46,6 +46,7 @@ pub fn ide_document() -> Document {
                             component!(select "agents-project", "Project", "select_agent_project"),
                             component!(region "agents-task-scope-field"; [
                                 component!(select "agents-task-scope", "Tasks", "select_agent_task_scope"),
+                                component!(select "agents-task-kind", "Kind", "select_agent_task_kind"),
                             ]),
                             component!(button "agents-attention", "Needs attention", "select_agent_task_scope"),
                         ]),
@@ -96,6 +97,15 @@ pub fn ide_document() -> Document {
                     component!(button "agents-retry", "Retry saved request", "retry_agent_request"),
                     component!(region "agents-reader"; [
                         component!(heading "agents-task-title", "Task"),
+                        component!(region "agents-defect-panel"; [
+                            component!(badge "agents-defect-badge", "Defect"),
+                            component!(text "agents-defect-context", ""),
+                            component!(button "agents-defect-discovery", "Open discovering task", "open_agent_task"),
+                        ]),
+                        component!(region "agents-filed-defects-panel"; [
+                            component!(heading "agents-filed-defects-heading", "Filed defects"),
+                            component!(stacked_tree "agents-filed-defects", "Defects discovered in this workflow"),
+                        ]),
                         component!(region "agents-triage"; [
                             component!(caption "agents-triage-kind", ""),
                             component!(region "agents-triage-now-group"; [

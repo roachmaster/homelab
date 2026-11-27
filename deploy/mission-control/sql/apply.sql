@@ -416,4 +416,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=52)
 \ir migrations/0052_continuation_plan_lineage.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(52,'continuation_plan_lineage');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=53) AS apply_0053
+\gset
+\if :apply_0053
+\ir migrations/0053_defect_tasks.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(53,'defect_tasks');
+\endif
 COMMIT;

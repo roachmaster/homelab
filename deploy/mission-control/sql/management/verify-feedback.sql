@@ -1,3 +1,4 @@
+\ir verify-defect-tasks.sql
 \ir verify-continuation-plan-lineage.sql
 \ir verify-agent-feature-branches.sql
 -- Full M26 pins precede the exact reviewed historical-body projections below.
@@ -188,6 +189,13 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
   actual:=jsonb_set(actual,'{columns}',(SELECT jsonb_agg(CASE WHEN (expected.name,item->>0) IN(VALUES('coding_review_policy','max_rounds'),('coding_review_policy','max_stagnant_rounds'),('coding_review_policy','max_infrastructure_retries'),('coding_review_budget','policy'))
    THEN jsonb_set(item,'{3}',(SELECT old->3 FROM jsonb_array_elements(expected.data->'columns') old WHERE old->>0=item->>0))
    ELSE item END ORDER BY ord) FROM jsonb_array_elements(actual->'columns') WITH ORDINALITY rows(item,ord)));
+ END IF;
+ -- M53's complete contract is verified before projecting its exact additions.
+ IF expected.name='coding_tasks' AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53) THEN
+   actual:=jsonb_set(actual,'{columns}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'columns') WITH ORDINALITY part(entry,ord) WHERE entry->>0 NOT IN('task_kind','defect')),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{constraints}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'constraints') WITH ORDINALITY part(entry,ord) WHERE entry->>0<>'coding_tasks_defect_check'),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{indexes}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'indexes') WITH ORDINALITY part(entry,ord) WHERE entry->>0<>'coding_tasks_defect_filter'),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{triggers}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'triggers') WITH ORDINALITY part(entry,ord) WHERE entry->>0<>'coding_tasks_inherit_defect'),'[]'::jsonb));
  END IF;
  IF actual IS DISTINCT FROM expected.data THEN RAISE EXCEPTION 'Feedback schema drift: %',expected.name;END IF;
  END LOOP;

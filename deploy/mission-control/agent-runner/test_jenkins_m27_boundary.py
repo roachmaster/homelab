@@ -1690,7 +1690,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             visited.add(source)
             for name in re.findall(r"^\\ir\s+(\S+)\s*$", source.read_text(), re.MULTILINE):
                 pending.append(source.parent / name)
-        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES | {"verify-author-handoff.sql", "verify-continuation-plan-lineage.sql"})
+        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES | {"verify-author-handoff.sql", "verify-continuation-plan-lineage.sql", "verify-defect-tasks.sql"})
 
     def test_normal_installer_preserves_owner_control_and_installs_event_service(self):
         published = {
@@ -1700,7 +1700,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         required = (
             "work_owner_control.py", "work_owner_reverification.py", "work_publication_clients.py", "work_review.py",
-            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py", "work_superseding_review.py",
+            "work_store.py", "work_defect.py", "work_worker_store.py", "work_reviewer_correction.py", "work_superseding_review.py",
             "work_peer_feedback_recovery.py", "work_cli_transport.py",
             "work_post_merge.py", "work_post_merge_provider.py", "jenkins_events.py", "jenkins_config.py",
             "jenkins_codec.py", "jenkins_store.py", "jenkins_consumer.py",

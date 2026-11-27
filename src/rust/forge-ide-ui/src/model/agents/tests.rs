@@ -53,6 +53,9 @@ fn step(agents: &mut Agents, event: UiEvent, id: &str) -> Vec<UiEffect> {
 }
 fn detail(status: WorkStatus) -> WorkTaskDetail {
     WorkTaskDetail {
+        task_kind: WorkTaskKind::Feature,
+        defect: None,
+        filed_defects: vec![],
         retry_event: None,
         delivery: None,
         task_id: TASK.into(),

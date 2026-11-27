@@ -36,9 +36,10 @@ class AutonomousWorkflowTest(unittest.TestCase):
   self.incarnation=str(uuid4())
   for profile in ('agy-v2','codex-v2'):self.cluster.grant_worker('mission-control','homelab',profile)
   self.db.advertise('workflow-worker',self.incarnation,[{'alias':'homelab','base_revision':'a'*40}],[{'alias':p.alias,'backend':p.backend,'model':p.model,'modes':['plan','review','implement']} for p in self.config.profiles.values() if p.alias in {'agy-v2','codex-v2'}],work_policy.POLICY_DIGEST)
- def submit(self,key=None):
+ def submit(self,key=None,defect=None):
   policy=self.config.project_workflows['homelab'].summary(self.config.catalog(),self.config.repair_policy)
   command=replace(make_submit(agent_profile='agy-v2',idempotency_key=key or str(uuid4())),workflow_policy_digest=policy['policy_digest'])
+  if defect is not None:command=replace(command,task_kind='defect',defect=defect)
   return command,self.service.submit(command)
  def claim(self,profile):return self.db.claim('workflow-worker',self.incarnation,[profile])
  def publish(self,lease,text):
@@ -138,8 +139,8 @@ class AutonomousWorkflowTest(unittest.TestCase):
   outcome={'disposition':'repair','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[{'finding_id':'fix-1','category':'source','summary':'Fix parser.'}],'verified_finding_ids':[],'fingerprint':'f'*64,'summary':'Repair source.','cleanup_confirmed':True,'verification':{'checks_passed':False,'candidate_workspace_digest':'c'*64,'repair_requires_new_workspace':True,'cleanup_confirmed':True}}
   result=self.db.review_finish(job,outcome);child=self.claim('agy-v2')
   self.assertEqual(child.parent_task_id,author.task_id);self.assertEqual(_lease(child)['parent_task_id'],author.task_id)
- def checked_implementation(self,*,linked=False):
-  _,admitted=self.submit();self.finish_plan_round();author=self.claim('agy-v2');rec=self.publish(author,'Implemented the reviewed Plan with typed factories.')
+ def checked_implementation(self,*,linked=False,defect=None):
+  _,admitted=self.submit(defect=defect);self.finish_plan_round();author=self.claim('agy-v2');rec=self.publish(author,'Implemented the reviewed Plan with typed factories.')
   self.db.queue_review(author,rec);self.coordinator.run_once();self.assertEqual(self.get(author.task_id)['workflow']['phase'],'checks');job=self.db.review_claim('checks')
   result={'disposition':'awaiting_review','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[],'verified_finding_ids':[],'fingerprint':None,'summary':'All local checks passed.','cleanup_confirmed':True,
       'verification':{'checks_passed':True,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':linked,'cleanup_confirmed':True,'integration_base':'a'*40,'toolchain':'fixture','checks':[{'check_id':'make-ci','status':'passed','head_sha':'d'*40}]}}
@@ -193,6 +194,46 @@ class AutonomousWorkflowTest(unittest.TestCase):
   self.assertEqual(self.service.submit(next_command)['status'],'queued')
   self.cluster.admin_exec("DELETE FROM forge_agent.coding_worker_grants WHERE project_alias='homelab'",owner=False)
   self.assertEqual(self.db.project_revisions(),{})
+ def test_defect_native_plan_implementation_review_and_linked_repair(self):
+  from test_work_defect import defect
+  payload=defect()
+  admitted,author,critic,checks=self.checked_implementation(linked=True,defect=payload)
+  self.assertEqual((author.task_kind,author.defect),('defect',payload))
+  envelope=self.db.read_review_target(critic)
+  target=parse_review_target(envelope['target_json'],envelope['target_sha256'])
+  self.assertEqual(target['defect'],payload)
+  self.assertIn('reproduce',target['triage_instructions'])
+  self.publish(critic,self.verdict(critic,'revise'));self.coordinator.run_once()
+  repair=self.claim('agy-v2')
+  self.assertEqual((repair.task_kind,repair.defect),('defect',payload))
+  self.assertEqual(repair.parent_task_id,author.task_id)
+  opened=self.get(repair.task_id)
+  self.assertEqual((opened['task_kind'],opened['defect']),('defect',payload))
+
+ def test_defect_discovered_by_native_children_links_to_workflow_root(self):
+  from test_work_defect import defect
+  admitted,author,critic,checks=self.checked_implementation(linked=True)
+  self.publish(critic,self.verdict(critic,'revise'));self.coordinator.run_once()
+  repair=self.claim('agy-v2');self.assertEqual(repair.parent_task_id,author.task_id)
+  filed=[]
+  for child in (author,repair):
+   payload={**defect(),'discovering_task_id':child.task_id}
+   _,receipt=self.submit(defect=payload);filed.append(receipt['task_id'])
+   self.assertNotIn('discovering_workflow_id',payload)
+  self.assertEqual({item['task_id'] for item in self.get(admitted['task_id'])['filed_defects']},set(filed))
+  listed=self.service.list_tasks(WorkList('homelab','all',50,None))
+  root=next(task for task in listed['tasks'] if task['task_id']==admitted['task_id'])
+  self.assertEqual({item['task_id'] for item in root['filed_defects']},set(filed))
+  _,unrelated=self.submit()
+  self.assertEqual(self.get(unrelated['task_id'])['filed_defects'],[])
+  # References to a child still require the filing owner's authorized project.
+  for owner,project in (('other-owner','homelab'),('mission-control','other-project')):
+   foreign=WorkServiceFactory(make_v2_config(owner=owner,projects=(project,)),lambda:self.cluster.connect('forge_agent')).create()
+   command=replace(make_submit(agent_profile='agy-v2',project_alias=project,idempotency_key=str(uuid4())),
+       task_kind='defect',defect={**defect(),'discovering_task_id':repair.task_id})
+   with self.assertRaises(Rejected) as caught:foreign.submit(command)
+   self.assertEqual(caught.exception.reason,'defect.discovering_task_id')
+
  def test_peer_code_repair_feedback_delivered_for_same_task_and_linked_child(self):
   for linked in (False,True):
    with self.subTest(linked=linked):

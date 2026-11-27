@@ -206,6 +206,8 @@ fn final_acceptance_projection_requires_matching_hosted_evidence() {
 #[test]
 fn automatic_repair_is_an_explicit_implementation_only_choice() {
     let mut request = WorkRequest::WorkSubmit {
+        task_kind: WorkTaskKind::Feature,
+        defect: None,
         request_id: "submit".into(),
         project_alias: "homelab".into(),
         base_revision: "b".repeat(40),
@@ -358,6 +360,8 @@ fn autonomous_policy_and_phase_contracts_are_strict_and_request_digest_is_plan_o
     assert!(serde_json::from_value::<WorkWorkflowPolicy>(unknown).is_err());
     assert!(serde_json::from_str::<WorkWorkflowPhase>("\"manual_approve\"").is_err());
     let mut request = WorkRequest::WorkSubmit {
+        task_kind: WorkTaskKind::Feature,
+        defect: None,
         request_id: "submit".into(),
         project_alias: "homelab".into(),
         base_revision: "a".repeat(40),
