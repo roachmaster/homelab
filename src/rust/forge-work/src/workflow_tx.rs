@@ -402,6 +402,40 @@ pub trait WorkflowTx: RetryEvents {
     /// call inserted the row).
     fn insert_action_returning(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError>;
 
+    // -- F5a agent handoff ----------------------------------------
+    /// effective()'s recorded delegations: completed decide
+    /// actions under the handoff prefix, oldest first, LIMIT 2
+    /// (a second row is itself the defect).
+    fn handoff_actions(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// _quota_source: the latest stopped quota_blocked
+    /// antigravity attempt for (project, profile, model) with a
+    /// systemd stop receipt and no later successful turn.
+    fn quota_source_attempt(
+        &mut self,
+        project: &str,
+        profile: &str,
+        model: &str,
+    ) -> Result<Option<Value>, WorkError>;
+    /// handoff()'s busy composite: sibling queued work, live
+    /// attempts, pending actions/reviews, open publications.
+    fn handoff_busy(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+    ) -> Result<bool, WorkError>;
+    /// The attempt's latest reconciliation receipt (created_at
+    /// DESC, receipt_id DESC).
+    fn latest_receipt(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
+
     // -- F4f continuation probes -------------------------------
 
     /// _lock's root probe: the workflow's root task id under
@@ -526,4 +560,15 @@ pub trait WorkflowTxFactory {
     /// workflows in an authoring phase, each with its latest
     /// reconciliation receipt.
     fn quota_candidates(&self) -> Result<Vec<Value>, WorkError>;
+    /// AgentHandoffProvider.run_once candidates: quota_blocked
+    /// or queued author tasks of handoff-configured profiles,
+    /// keyset-paged by (updated_at, id), LIMIT 64.
+    fn handoff_candidates(
+        &self,
+        profiles: &[String],
+        position: Option<(&str, Uuid)>,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// The coding_workflow_author_handoff(uuid) delegation
+    /// function's availability probe (older schemas lack it).
+    fn handoff_available(&self) -> Result<bool, WorkError>;
 }

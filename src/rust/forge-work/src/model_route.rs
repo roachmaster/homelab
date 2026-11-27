@@ -307,7 +307,7 @@ impl QuotaProofPort for PublishedQuotaProof {
 // exactly as Python's Rejected does (it is not in the caught
 // exception set).
 
-fn model_snapshot_from(
+pub(crate) fn model_snapshot_from(
     rows: &[Value],
     workflow: &Value,
     catalog: &dyn WorkflowCatalog,
@@ -1353,6 +1353,17 @@ mod tests {
 
         fn quota_candidates(&self) -> Result<Vec<Value>, WorkError> {
             unimplemented!()
+        }
+        fn handoff_candidates(
+            &self,
+            _profiles: &[String],
+            _position: Option<(&str, Uuid)>,
+        ) -> Result<Vec<Value>, WorkError> {
+            Ok(Vec::new())
+        }
+
+        fn handoff_available(&self) -> Result<bool, WorkError> {
+            Ok(false)
         }
     }
 

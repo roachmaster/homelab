@@ -72,6 +72,24 @@ impl WorkflowDecisionPort for PgWorkflowDecisions {
         }))
     }
 
+    fn handoff_author(
+        &self,
+        command: &forge_work::operator_dtos::AuthorHandoff,
+        target_profile: &str,
+        recipe: &forge_work::pinned_recipe::PinnedRecipe,
+        workspace_digest: Option<&str>,
+        authority: &forge_work::agent_handoff::BoundAuthorHandoffAuthority,
+    ) -> Result<Value, WorkError> {
+        crate::work_decision_more::handoff_author_full(
+            &self.store,
+            command,
+            target_profile,
+            recipe,
+            workspace_digest,
+            authority,
+        )
+    }
+
     fn resume(&self, request: &ResumeRequest) -> Result<Value, WorkError> {
         let outcome = WorkAdmissionPort::resume(&self.store, request)?;
         Ok(json!({

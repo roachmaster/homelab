@@ -48,6 +48,24 @@ pub trait WorkflowCatalog {
         model: &str,
         native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
     ) -> Option<PinnedRecipe>;
+    /// work_config.resolve_handoff: the source profile's
+    /// configured quota-handoff target, resolved for an author
+    /// mode. None covers both Python failures (KeyError for a
+    /// missing profile/handoff, ValueError for a non-author
+    /// mode); the handoff caller maps both to denied.
+    fn resolve_handoff(
+        &self,
+        alias: &str,
+        mode: &str,
+        native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    ) -> Option<(String, PinnedRecipe)> {
+        if mode != "plan" && mode != "implement" {
+            return None;
+        }
+        let target = self.profile(alias)?.quota_handoff_profile?;
+        let recipe = self.resolve(&target, mode, native_policy_matches)?;
+        Some((target, recipe))
+    }
 }
 
 fn intact(snapshot: &Value) -> bool {

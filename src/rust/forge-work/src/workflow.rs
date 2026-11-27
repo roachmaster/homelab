@@ -201,6 +201,18 @@ pub trait WorkflowDecisionPort {
     fn plan_decide(&self, request: &PlanDecideRequest) -> Result<Value, WorkError>;
     fn review_decide(&self, request: &ReviewDecideRequest) -> Result<Value, WorkError>;
     fn resume(&self, request: &ResumeRequest) -> Result<Value, WorkError>;
+    /// WorkStore.handoff_author under a BoundAuthorHandoffAuthority
+    /// minted by the handoff service (F5a): re-queues the stopped
+    /// task under the delegated profile/recipe and returns the
+    /// Python receipt document.
+    fn handoff_author(
+        &self,
+        command: &crate::operator_dtos::AuthorHandoff,
+        target_profile: &str,
+        recipe: &PinnedRecipe,
+        workspace_digest: Option<&str>,
+        authority: &crate::agent_handoff::BoundAuthorHandoffAuthority,
+    ) -> Result<Value, WorkError>;
 }
 
 /// The execution-policy overlay (work_provider_model_route's
@@ -2619,6 +2631,10 @@ mod tests {
         unused!(readiness_for_worker, &str, Uuid, &str, &str => Result<Vec<Value>, WorkError>);
         unused!(binary_pin_busy, &str, Uuid, Uuid, &str => Result<bool, WorkError>);
         unused!(insert_action_returning, &Value => Result<Option<Uuid>, WorkError>);
+        unused!(handoff_actions, &str, Uuid => Result<Vec<Value>, WorkError>);
+        unused!(quota_source_attempt, &str, &str, &str => Result<Option<Value>, WorkError>);
+        unused!(handoff_busy, Uuid, Uuid => Result<bool, WorkError>);
+        unused!(latest_receipt, &str, Uuid, Uuid => Result<Option<Value>, WorkError>);
         unused!(workflow_root, &str, Uuid => Result<Option<Uuid>, WorkError>);
         unused!(task_workflow, &str, Uuid => Result<Option<Uuid>, WorkError>);
         unused!(continuation_source, &str, Uuid, Uuid => Result<Value, WorkError>);

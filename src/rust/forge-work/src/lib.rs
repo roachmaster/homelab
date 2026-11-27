@@ -1,4 +1,5 @@
 /// forge-work is the typed work-admission capability (frozen catalog, canonical event vocabulary, bridge-fronted service, three driven store ports); adapters live in forge-postgres; this crate has no SQL and no I/O.
+pub mod agent_handoff;
 pub mod artifact_identity;
 pub mod branch_scope;
 pub mod canonical;

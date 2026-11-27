@@ -212,6 +212,49 @@ impl WorkflowTxFactory for PgWorkflowTxFactory {
         ];
         self.scan_rows(sql, &params)
     }
+
+    fn handoff_candidates(
+        &self,
+        profiles: &[String],
+        position: Option<(&str, Uuid)>,
+    ) -> Result<Vec<Value>, WorkError> {
+        let sql = "SELECT to_jsonb(s) FROM (SELECT t.id, t.project_alias, t.revision, t.latest_attempt_id, t.agent_profile, t.updated_at, \
+              t.pinned_recipe->>'model' AS model \
+              FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w \
+              ON (w.owner_id, w.project_alias, w.workflow_id) = (t.owner_id, t.project_alias, t.workflow_id) \
+              WHERE t.owner_id=$1 AND t.project_alias=ANY($2) AND t.agent_profile=ANY($3) \
+              AND t.status IN ('quota_blocked','queued') AND t.cancelled_at IS NULL \
+              AND t.mode IN ('plan','implement') AND t.workflow_review_id IS NULL \
+              AND w.enabled AND w.phase IN ('plan','plan_revision','implement','repair') \
+              AND NOT EXISTS (SELECT FROM forge_agent.coding_workflow_actions a \
+                WHERE a.workflow_id = w.workflow_id AND a.source_key LIKE 'provider-author-handoff:%') \
+              AND ($4::timestamptz IS NULL OR (t.updated_at, t.id) > ($4::timestamptz, $5::uuid)) \
+              ORDER BY t.updated_at, t.id LIMIT 64) s";
+        let (updated_at, position_id) = match position {
+            Some((stamp, id)) => (Some(stamp.to_string()), Some(id)),
+            None => (None, None),
+        };
+        let params: Params = vec![
+            Box::new(self.owner.clone()),
+            Box::new(self.allowed_projects.clone()),
+            Box::new(profiles.to_vec()),
+            Box::new(updated_at),
+            Box::new(position_id),
+        ];
+        self.scan_rows(sql, &params)
+    }
+
+    fn handoff_available(&self) -> Result<bool, WorkError> {
+        let mut session = self.factory.create().map_err(work_err)?;
+        session
+            .in_tx(|tx| {
+                tx.call_bool(
+                    "SELECT to_regprocedure('forge_agent.coding_workflow_author_handoff(uuid)') IS NOT NULL AS available",
+                    &[],
+                )
+            })
+            .map_err(work_err)
+    }
 }
 
 impl PgWorkflowTxFactory {
@@ -234,17 +277,6 @@ impl PgWorkflowTxFactory {
             .collect())
     }
 
-    fn handoff_available(&self) -> Result<bool, WorkError> {
-        let mut session = self.factory.create().map_err(work_err)?;
-        session
-            .in_tx(|tx| {
-                tx.call_bool(
-                    "SELECT to_regprocedure('forge_agent.coding_workflow_author_handoff(uuid)') IS NOT NULL AS available",
-                    &[],
-                )
-            })
-            .map_err(work_err)
-    }
 }
 
 struct WorkflowTxImpl<'x, 't, 'c, 'o> {
@@ -1972,6 +2004,111 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         Ok(rows
             .first()
             .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
+    }
+
+    fn handoff_actions(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(workflow_id),
+        ];
+        self.many(
+            "SELECT to_jsonb(t) FROM (SELECT source_key,intent,finish_receipt FROM forge_agent.coding_workflow_actions WHERE owner_id=$1 AND project_alias=$2 AND workflow_id=$3 AND kind='decide' AND status='completed' AND source_key LIKE 'provider-author-handoff:%' ORDER BY created_at,action_id LIMIT 2) t",
+            &params,
+        )
+    }
+
+    fn quota_source_attempt(
+        &mut self,
+        project: &str,
+        profile: &str,
+        model: &str,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(profile.to_string()),
+            Box::new(model.to_string()),
+        ];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT a.* FROM forge_agent.coding_attempts a \
+              WHERE a.owner_id=$1 AND a.project_alias=$2 AND a.agent_profile=$3 \
+              AND a.pinned_recipe->>'backend'='antigravity' AND a.pinned_recipe->>'model'=$4 \
+              AND a.outcome='quota_blocked' AND a.phase='stopped' \
+              AND a.published_at IS NOT NULL AND a.finished_at IS NOT NULL \
+              AND NOT a.reservation_active AND a.lease_expires_at IS NULL \
+              AND EXISTS (SELECT FROM forge_agent.coding_reconciliation_receipts stopped \
+                WHERE (stopped.owner_id, stopped.project_alias, stopped.task_id, stopped.attempt_id) = \
+                      (a.owner_id, a.project_alias, a.task_id, a.attempt_id) \
+                  AND stopped.stop_proof->>'scope_stopped'='true' \
+                  AND stopped.stop_proof->>'source'='systemd' \
+                  AND stopped.stop_proof->>'unit_name'=a.unit_name) \
+              AND NOT EXISTS (SELECT FROM forge_agent.coding_attempts succeeded \
+                WHERE succeeded.owner_id=a.owner_id AND succeeded.project_alias=a.project_alias \
+                  AND succeeded.agent_profile=a.agent_profile \
+                  AND succeeded.pinned_recipe->>'model'=a.pinned_recipe->>'model' \
+                  AND succeeded.outcome='awaiting_review' AND succeeded.published_at IS NOT NULL \
+                  AND succeeded.finished_at>a.finished_at) \
+              ORDER BY a.finished_at DESC, a.attempt_id DESC LIMIT 1) t",
+            &params,
+        )
+    }
+
+    fn handoff_busy(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+    ) -> Result<bool, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(task_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+        ];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT FROM forge_agent.coding_tasks WHERE workflow_id=$1 AND \
+                  (cancelled_at IS NOT NULL OR status IN ('running','cancelled','cancel_requested') \
+                   OR id<>$2 AND status='queued')) \
+                OR EXISTS(SELECT FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t \
+                  ON (t.owner_id, t.project_alias, t.id) = (a.owner_id, a.project_alias, a.task_id) \
+                  WHERE t.workflow_id=$3 AND (a.reservation_active OR a.lease_expires_at IS NOT NULL)) \
+                OR EXISTS(SELECT FROM forge_agent.coding_workflow_actions WHERE workflow_id=$4 AND status IN ('pending','leased')) \
+                OR EXISTS(SELECT FROM forge_agent.coding_workflow_reviews WHERE workflow_id=$5 AND status IN ('pending','reviewing')) \
+                OR EXISTS(SELECT FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t \
+                  ON (t.owner_id, t.project_alias, t.id) = (q.owner_id, q.project_alias, q.task_id) \
+                  WHERE t.workflow_id=$6 AND q.status IN ('pending','checking')) \
+                OR EXISTS(SELECT FROM forge_agent.coding_publications q JOIN forge_agent.coding_tasks t \
+                  ON (t.owner_id, t.project_alias, t.id) = (q.owner_id, q.project_alias, q.task_id) \
+                  WHERE t.workflow_id=$7 AND q.status IN ('pending','checking','publishing')) AS x",
+                &refs(&params),
+            )
+            .map_err(work_err)
+    }
+
+    fn latest_receipt(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(task_id),
+            Box::new(attempt_id),
+        ];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_reconciliation_receipts WHERE (owner_id, project_alias, task_id, attempt_id) = ($1, $2, $3, $4) ORDER BY created_at DESC, receipt_id DESC LIMIT 1) t",
+            &params,
+        )
     }
 }
 

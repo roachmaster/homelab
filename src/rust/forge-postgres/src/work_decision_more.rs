@@ -592,6 +592,122 @@ pub(crate) fn publication_retry(
     })
 }
 
+/// WorkStore.handoff_author, full port for the coordinator's
+/// handoff service (F5a): the bound authority is validated
+/// against the locked task (Python's
+/// _require_transition_authority), and the Python receipt
+/// document is returned directly. The S0 port path below
+/// keeps its documented v1 authority form for its existing
+/// caller; this path is the one the workflow service uses.
+pub(crate) fn handoff_author_full(
+    store: &PgWorkStore,
+    command: &forge_work::operator_dtos::AuthorHandoff,
+    target_profile: &str,
+    recipe: &forge_work::pinned_recipe::PinnedRecipe,
+    workspace_digest: Option<&str>,
+    authority: &forge_work::agent_handoff::BoundAuthorHandoffAuthority,
+) -> Result<Value, forge_work::WorkError> {
+    if target_profile != authority.target_profile
+        || recipe.digest != authority.recipe_digest
+        || workspace_digest != authority.workspace_digest.as_deref()
+    {
+        return Err(forge_work::WorkError::rejected(403, "denied"));
+    }
+    run_tx(store, |tx| {
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &store.owner,
+            &command.project_alias,
+            &command.task_id,
+        ];
+        let task = tx
+            .call_json(
+                "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_tasks WHERE (owner_id, project_alias, id) = ($1, $2, $3) FOR UPDATE) t",
+                params,
+            )
+            .map_err(work_err)?
+            .ok_or_else(|| forge_work::WorkError::not_found("task"))?;
+        authority.validate(&task, "author_handoff")?;
+        let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
+        // PinnedRecipe's parse already refuses a non-null
+        // generation_token_limit, as Python's check requires.
+        if !task["cancelled_at"].is_null()
+            || !task["workflow_review_id"].is_null()
+            || recipe.mode != task["mode"].as_str().unwrap_or("")
+            || recipe.backend != "codex"
+            || command.expected_revision >= MAX_REVISION
+        {
+            return Err(not_reviewable());
+        }
+        if task["status"].as_str() == Some("quota_blocked") {
+            let count_params: &[&(dyn ToSql + Sync)] = &[&store.owner, &command.project_alias];
+            let counts = tx
+                .query_rows(
+                    "SELECT count(*) AS pending FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND status IN ('queued','running','cancel_requested')",
+                    count_params,
+                )
+                .map_err(work_err)?;
+            let pending: i64 = counts
+                .first()
+                .ok_or_else(|| forge_work::WorkError::store("pending count missing"))?
+                .try_get("pending")
+                .map_err(|e| forge_work::WorkError::store(e.to_string()))?;
+            if pending >= store.max_pending {
+                return Err(forge_work::WorkError::rejected(503, "queue_full"));
+            }
+        } else if task["resume_workspace_digest"].as_str() != workspace_digest {
+            return Err(forge_work::WorkError::rejected(409, "reconcile_required"));
+        }
+        let recipe_document = recipe.to_dict();
+        let update_params: &[&(dyn ToSql + Sync)] = &[
+            &target_profile,
+            &recipe_document,
+            &recipe.digest,
+            &workspace_digest,
+            &store.owner,
+            &command.project_alias,
+            &command.task_id,
+            &command.expected_revision,
+        ];
+        let updated = tx
+            .query_rows(
+                "UPDATE forge_agent.coding_tasks SET status='queued', revision=revision+1, agent_profile=$1, pinned_recipe=$2, recipe_digest=$3, resume_workspace_digest=$4, updated_at=clock_timestamp() WHERE (owner_id, project_alias, id, revision) = ($5, $6, $7, $8) RETURNING revision",
+                update_params,
+            )
+            .map_err(work_err)?;
+        let new_revision: i64 = updated
+            .first()
+            .ok_or_else(|| forge_work::WorkError::rejected(409, "revision_conflict"))?
+            .try_get("revision")
+            .map_err(|e| forge_work::WorkError::store(e.to_string()))?;
+        insert_event(
+            tx,
+            &store.owner,
+            &command.project_alias,
+            command.task_id,
+            "resumed",
+            serde_json::json!({
+                "base_revision": command.expected_revision,
+                "revision": new_revision,
+                "agent_profile": target_profile,
+                "recipe_digest": recipe.digest,
+                "workspace_digest": workspace_digest,
+                "reason": "provider_author_handoff",
+            }),
+            &coordinator_actor(),
+            None,
+            false,
+        )?;
+        Ok(serde_json::json!({
+            "project_alias": command.project_alias,
+            "task_id": command.task_id.to_string(),
+            "base_revision": command.expected_revision,
+            "revision": new_revision,
+            "status": "queued",
+            "recipe_digest": recipe.digest,
+        }))
+    })
+}
+
 /// WorkDecisionPort::handoff_author, ported from
 /// WorkStore.handoff_author: re-queues a stopped task under the
 /// handoff authority's profile/recipe/workspace. The authority
