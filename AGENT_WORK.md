@@ -1765,3 +1765,16 @@ External evidence is under /mnt/data/homelab-build/cleanup-conflicts-20261121/re
   SSH identify `roachmaster`; GitHub reports homelab read/write permissions; both
   HTTPS and SSH read main `a3968c1`. Job completed at00:11:24UTC. No push, build
   or workflow was started. Jenkins jobs, agents and pipeline wiring remain future.
+
+## forge-postgres adapter build (Muse, feature/muse) — 2026-11-26
+
+Design-driven generation: the design store lives at
+tools/design-forge/stores/forge-postgres (cards derived from
+~/workspace/deploy-design/forge-postgres-design.yaml, three review rounds);
+the local Qwen2.5-Coder-7B agent on forge-gpu generates each file from its
+packet via tools/design-forge (generate.py/repair.py, timed llm.py policy),
+Muse reviews against the card, compiler/test failures loop back through
+repair.py. Increment 1 landed: error.rs + config.rs, 3 unit tests green,
+fmt clean. Remaining in build order: client, worker, reconciler, factory,
+registrar, generated lib.rs. Workspace membership + check-deps guard entries
+added for forge-postgres (and the pre-existing forge-mcp/forge-mcp-host gap).
