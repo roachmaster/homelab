@@ -1,3 +1,9 @@
+# Current Forge implementation
+
+Reviewed **26 November 2026** against consolidated application source
+`0163a615` in [draft PR29](https://github.com/roachmaster/homelab/pull/29).
+Documentation changes do not attest a new build, deployment or successful task.
+
 ## Stop-event attribution candidate — 27 November 2026
 
 The portal source now projects recorded cancellation, interruption and blocked
@@ -9,12 +15,6 @@ assets and WASM select that extension together. This does not recover native
 permission categories discarded before publication, nor change retry authority.
 Local browser verification passed all28 groups at the recorded source fingerprint;
 publication and live activation require their own verification receipts.
-
-# Current Forge implementation
-
-Reviewed **26 November 2026** against consolidated application source
-`0163a615` in [draft PR29](https://github.com/roachmaster/homelab/pull/29).
-Documentation changes do not attest a new build, deployment or successful task.
 
 ## The system we are building
 

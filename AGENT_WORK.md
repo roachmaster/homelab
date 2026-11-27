@@ -7,9 +7,11 @@ missing historical evidence stays not recorded. No migration or history rewrite.
 ABI18 host opts into version1 attribution; legacy clients retain their old shape.
 Atomic host/assets/WASM required. Local browser QA passed all28 groups with
 unchanged source fingerprint199e3f00 (dirty tree at2db5a0ab); screenshots inspected
-at390/1440px. API/projection/attribution checks31 passed; native host70 passed.
-Subsequent edits are test assertions and documentation only; application bytes
-remain those exercised by the browser. Exact committed CI and rollout pending.
+at390/1440px. API/projection/attribution checks31 passed; native host71,
+API/release tests54 and generation tests35 passed. Jenkins108 found that the new
+embedded documentation note displaced its required page title; the note now
+follows that title and baseline context. Event UI/WASM sources are unchanged.
+Fresh committed browser/CI verification and rollout remain pending.
 
 PR30 merged Codex38e89e9b into main as2db5a0ab after Jenkins106 SUCCESS on
 exact tree048232ff. Feature/grok was not merged or modified.
