@@ -20,6 +20,7 @@ from usage_store import (
     validate_utc_rfc3339,
 )
 from work_events import CAUSES
+from work_lease_contract import validate_lease
 from work_config import (
     DIGEST_HEX_RE,
     VALID_BACKENDS,
@@ -395,39 +396,41 @@ class WorkerDB:
                 (worker_id, incarnation_uuid, profiles_list),
             )
             payload = cursor.fetchone()[0]
-        if payload is None:
-            return None
-        return Lease(
-            task_id=str(payload["task_id"]),
-            project_alias=payload["project_alias"],
-            base_revision=payload["base_revision"],
-            mode=payload["mode"],
-            agent_profile=payload["agent_profile"],
-            prompt=payload["prompt"],
-            acceptance_criteria=payload["acceptance_criteria"],
-            recipe=MappingProxyType(dict(payload["recipe"])),
-            attempt_id=str(payload["attempt_id"]),
-            attempt_token=str(payload["attempt_token"]),
-            worker_id=payload["worker_id"],
-            incarnation=str(payload["incarnation"]),
-            lease_expires_at=payload["lease_expires_at"],
-            deadline_at=payload["deadline_at"],
-            unit_name=payload["unit_name"],
-            resume_workspace_digest=payload.get("resume_workspace_digest"),
-            resume_attempt_id=str(payload["resume_attempt_id"]) if payload.get("resume_attempt_id") else None,
-            plan_decision_id=str(payload["plan_decision_id"]) if payload.get("plan_decision_id") else None,
-            feedback_id=str(payload["feedback_id"]) if payload.get("feedback_id") else None,
-            feedback_sha256=payload.get("feedback_sha256"),
-            repair_source_review_id=str(payload["repair_source_review_id"]) if payload.get("repair_source_review_id") else None,
-            repair_candidate_commit=payload.get("repair_candidate_commit"),
-            scope_plan_decision_id=str(payload["scope_plan_decision_id"]) if payload.get("scope_plan_decision_id") else None,
-            parent_task_id=str(payload["parent_task_id"]) if payload.get("parent_task_id") else None,
-            workflow_id=str(payload["workflow_id"]) if payload.get("workflow_id") else None,
-            workflow_review_id=str(payload["workflow_review_id"]) if payload.get("workflow_review_id") else None,
-            review_target_sha256=payload.get("review_target_sha256"),
-            workflow_feedback_review_id=str(payload["workflow_feedback_review_id"]) if payload.get("workflow_feedback_review_id") else None,
-            workflow_feedback_sha256=payload.get("workflow_feedback_sha256"),
-        )
+            if payload is None:
+                return None
+            lease = Lease(
+                task_id=str(payload["task_id"]),
+                project_alias=payload["project_alias"],
+                base_revision=payload["base_revision"],
+                mode=payload["mode"],
+                agent_profile=payload["agent_profile"],
+                prompt=payload["prompt"],
+                acceptance_criteria=payload["acceptance_criteria"],
+                recipe=MappingProxyType(dict(payload["recipe"])),
+                attempt_id=str(payload["attempt_id"]),
+                attempt_token=str(payload["attempt_token"]),
+                worker_id=payload["worker_id"],
+                incarnation=str(payload["incarnation"]),
+                lease_expires_at=payload["lease_expires_at"],
+                deadline_at=payload["deadline_at"],
+                unit_name=payload["unit_name"],
+                resume_workspace_digest=payload.get("resume_workspace_digest"),
+                resume_attempt_id=str(payload["resume_attempt_id"]) if payload.get("resume_attempt_id") else None,
+                plan_decision_id=str(payload["plan_decision_id"]) if payload.get("plan_decision_id") else None,
+                feedback_id=str(payload["feedback_id"]) if payload.get("feedback_id") else None,
+                feedback_sha256=payload.get("feedback_sha256"),
+                repair_source_review_id=str(payload["repair_source_review_id"]) if payload.get("repair_source_review_id") else None,
+                repair_candidate_commit=payload.get("repair_candidate_commit"),
+                scope_plan_decision_id=str(payload["scope_plan_decision_id"]) if payload.get("scope_plan_decision_id") else None,
+                parent_task_id=str(payload["parent_task_id"]) if payload.get("parent_task_id") else None,
+                workflow_id=str(payload["workflow_id"]) if payload.get("workflow_id") else None,
+                workflow_review_id=str(payload["workflow_review_id"]) if payload.get("workflow_review_id") else None,
+                review_target_sha256=payload.get("review_target_sha256"),
+                workflow_feedback_review_id=str(payload["workflow_feedback_review_id"]) if payload.get("workflow_feedback_review_id") else None,
+                workflow_feedback_sha256=payload.get("workflow_feedback_sha256"),
+            )
+            validate_lease(lease.to_dict())
+            return lease
 
     def renew(self, lease):
         attempt_id, attempt_token = _extract_attempt_creds(lease)

@@ -29,6 +29,7 @@ from work_source_revision import SelectedSourceRevisionProvider
 from work_external_review_context import ExternalReviewContextProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 from work_cli_transport import CliDiagnosticReporter
+from work_lease_contract import validate_lease
 
 LOG = logging.getLogger("forge-coding-worker")
 FEEDBACK_INTEGRITY_SUMMARY = "Review feedback integrity could not be verified; explicit review is required."
@@ -59,50 +60,7 @@ VERDICT_SELF_CHECK_RETRIES = 2
 
 
 def _lease(value):
-    result = _mapping(value)
-    required = {"task_id", "project_alias", "base_revision", "mode", "agent_profile", "prompt",
-                "acceptance_criteria", "recipe", "attempt_id", "attempt_token", "worker_id",
-                "incarnation", "lease_expires_at", "deadline_at", "unit_name"}
-    if not required <= result.keys():
-        raise ValueError("Incomplete coding lease")
-    for field in ("task_id", "attempt_id", "attempt_token"):
-        if str(UUID(str(result[field]))) != str(result[field]):
-            raise ValueError("Invalid coding lease identity")
-    for field in ("plan_decision_id", "scope_plan_decision_id", "resume_attempt_id", "feedback_id", "repair_source_review_id", "parent_task_id",
-                  "workflow_id", "workflow_review_id", "workflow_feedback_review_id"):
-        if result.get(field) is not None and str(UUID(str(result[field]))) != str(result[field]):
-            raise ValueError("Invalid coding continuation identity")
-    if result.get("feedback_id") is not None and (not isinstance(result.get("feedback_sha256"), str)
-            or len(result["feedback_sha256"]) != 64
-            or any(char not in "0123456789abcdef" for char in result["feedback_sha256"])):
-        raise ValueError("Invalid coding feedback digest")
-    if result.get("feedback_id") is None and result.get("feedback_sha256") is not None:
-        raise ValueError("Unbound coding feedback digest")
-    if result.get("workflow_review_id") is not None:
-        digest = result.get("review_target_sha256")
-        if (result.get("workflow_id") is None or result["mode"] != "review"
-                or not isinstance(digest, str) or len(digest) != 64
-                or any(char not in "0123456789abcdef" for char in digest)):
-            raise ValueError("Incomplete peer review authority")
-    elif result.get("review_target_sha256") is not None:
-        raise ValueError("Unbound peer review context")
-    if result.get("workflow_feedback_review_id") is not None:
-        digest = result.get("workflow_feedback_sha256")
-        if (result.get("workflow_id") is None or result.get("workflow_review_id") is not None
-                or result["mode"] not in {"plan", "implement"} or not isinstance(digest, str)
-                or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)):
-            raise ValueError("Incomplete workflow feedback authority")
-    elif result.get("workflow_feedback_sha256") is not None:
-        raise ValueError("Unbound workflow feedback context")
-    linked = any(result.get(name) is not None for name in
-                 ("parent_task_id", "repair_source_review_id", "repair_candidate_commit"))
-    if linked and (not result.get("parent_task_id") or not result.get("repair_source_review_id")
-                   or not result.get("feedback_id") or result.get("repair_candidate_commit") != result["base_revision"]):
-        raise ValueError("Incomplete linked repair authority")
-    if result["unit_name"] != unit_name(result["attempt_id"]):
-        raise ValueError("Invalid coding lease scope")
-    return result
-
+    return validate_lease(_mapping(value))
 
 def _mapping(value):
     if callable(getattr(value, "to_dict", None)):
@@ -542,8 +500,8 @@ class CodingWorker:
                             self.store.wait(committed_listener, SCAN_SECONDS)
                         else:
                             self.stop.wait(SCAN_SECONDS)
-            except Exception:
-                LOG.warning("Coding worker reconnecting; no assignment is automatically replayed")
+            except Exception as error:
+                LOG.warning("Coding worker reconnecting after %s; no assignment is automatically replayed",type(error).__name__)
                 self.stop.wait(SCAN_SECONDS)
 
 

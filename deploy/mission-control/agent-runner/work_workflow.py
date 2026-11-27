@@ -110,6 +110,23 @@ class BoundNativeRetryAuthority:
 
 
 @dataclass(frozen=True)
+class BoundUnstartedPlanAuthority:
+    """One stopped, reconciled Plan claim; no implementation approval."""
+    store:object
+    cursor:object
+    workflow_id:object
+    task_id:object
+    attempt_id:object
+    revision:int
+
+    def validate(self,cursor,task,kind):
+        if (cursor is not self.cursor or kind!='native_startup' or task['id']!=self.task_id
+                or task.get('workflow_id')!=self.workflow_id or task['latest_attempt_id']!=self.attempt_id
+                or task['revision']!=self.revision or task['mode']!='plan' or task['status']!='needs_reconcile'):
+            raise Rejected(403,'denied')
+
+
+@dataclass(frozen=True)
 class BoundPreparationRetryAuthority:
     """One existing-budget check retry; never code-review approval authority."""
     store:object

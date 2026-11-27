@@ -1802,7 +1802,9 @@ class WorkStore:
                 return dict(existing["receipt_json"])
 
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
-            transition_kind=('stopped_binary_pin' if isinstance(_authority,BoundBinaryPinAuthority)
+            from work_workflow import BoundUnstartedPlanAuthority
+            transition_kind=('native_startup' if isinstance(_authority,BoundUnstartedPlanAuthority)
+                             else 'stopped_binary_pin' if isinstance(_authority,BoundBinaryPinAuthority)
                              else 'provider_model_route' if isinstance(_authority,BoundProviderModelAuthority)
                              else 'reviewer_correction' if task['mode']=='review' else 'native_timeout')
             self._require_transition_authority(cursor,task,_authority,transition_kind)
@@ -1971,11 +1973,11 @@ class WorkStore:
         if authority is None:
             with self._transaction() as cursor:yield cursor
         else:
-            from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority
+            from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority
             from work_reviewer_correction import BoundReviewerCorrectionAuthority
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
             from work_agent_handoff import BoundAuthorHandoffAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority)) or authority.store is not self:
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 
