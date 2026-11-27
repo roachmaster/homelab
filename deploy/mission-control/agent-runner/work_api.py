@@ -967,7 +967,10 @@ def dispatch(route, correlation, command, service, *, delivery_version=1):
         return HTTPStatus.OK, common.envelope("work_catalog", correlation, **catalog_data)
     if route is Destination.SUBMIT and isinstance(command, WorkSubmit):
         receipt = service.submit(command)
-        return HTTPStatus.ACCEPTED, common.envelope("work_submitted", correlation, **receipt)
+        public_receipt = {key: receipt[key] for key in (
+            "task_id", "project_alias", "revision", "status", "recipe_digest",
+        )}
+        return HTTPStatus.ACCEPTED, common.envelope("work_submitted", correlation, **public_receipt)
     if route is Destination.GET and isinstance(command, WorkGet):
         opened = service.get(command)
         return HTTPStatus.OK, common.envelope("work_opened", correlation, task=opened)

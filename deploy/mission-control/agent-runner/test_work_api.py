@@ -481,6 +481,22 @@ class WorkDecodeTest(unittest.TestCase):
 
 
 class WorkHttpApiTest(unittest.TestCase):
+    def test_submit_projects_audited_admission_and_idempotent_replay_without_mutating_receipt(self):
+        service, store = self._service_with_mock_store()
+        public = {"task_id": str(TASK_ID), "project_alias": "homelab",
+                  "revision": 1, "status": "queued", "recipe_digest": RECIPE_DIGEST}
+        actor = {"kind": "operator", "id": "mission-control"}
+        receipt = {**public, "actor": actor}
+        store.submit.return_value = receipt
+        with runner_server(work_service=service) as port:
+            for _ in range(2):
+                self.assertEqual(work_post(port, work_api.Destination.SUBMIT, submit_body()),
+                                 (202, reply("work_submitted", **public), "no-store"))
+                self.assertEqual(receipt, {**public, "actor": actor})
+        self.assertEqual(store.submit.call_count, 2)
+        self.assertEqual(store.submit.call_args_list[0].kwargs["idempotency_key"],
+                         store.submit.call_args_list[1].kwargs["idempotency_key"])
+
     def test_cancel_projects_audited_receipts_without_mutating_native_or_external_replays(self):
         config = work_config.parse_work_config(sample_raw_config())
         for external in (False, True):
