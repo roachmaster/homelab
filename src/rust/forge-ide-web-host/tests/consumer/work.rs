@@ -229,9 +229,11 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
             if headers["forge-destination"].starts_with("ide.work.") {
                 assert_eq!(headers["forge-delivery-version"], "1");
                 assert_eq!(headers["forge-retry-events-version"], "1");
+                assert_eq!(headers["forge-event-attribution-version"], "1");
             } else {
                 assert!(!headers.contains_key("forge-delivery-version"));
                 assert!(!headers.contains_key("forge-retry-events-version"));
+                assert!(!headers.contains_key("forge-event-attribution-version"));
             }
             for key in ["cookie", "origin", "forge-csrf", "forge-target-node"] {
                 assert!(!headers.contains_key(key));
@@ -1775,5 +1777,44 @@ fn mcp_presence_selected_reader_gets_only_dedicated_bearer_and_projects_typed_da
         expected,
     );
     reader.join().unwrap();
+    worker.join().unwrap();
+}
+
+#[test]
+fn recorded_cancellation_attribution_is_typed_and_rejects_invented_causes() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let events = reply(
+        "work_events",
+        json!({
+            "project_alias":PROJECT,"task_id":TASK,"revision":2,"status":"cancelled",
+            "events":[{"event_id":TASK,"correlation_id":OTHER,"sequence":1,
+                "kind":"cancelled","created_at":STAMP,
+                "attribution":{"actor":{"kind":"worker","id":"grok-primary"},
+                    "cause":"workflow_cancelled","detail":"Recorded stop <safe text>."}}],
+            "next_sequence":1
+        }),
+    );
+    let mut invalid = events.clone();
+    invalid["event"]["events"][0]["attribution"]["cause"] = json!("invented");
+    let worker = backend(upstream, vec![(200, events.clone()), (200, invalid)]);
+    assert_reply(
+        &host,
+        "ide.work.events",
+        task_request("work_events"),
+        &auth,
+        200,
+        events,
+    );
+    assert_reply(
+        &host,
+        "ide.work.events",
+        task_request("work_events"),
+        &auth,
+        503,
+        failure("unavailable"),
+    );
     worker.join().unwrap();
 }

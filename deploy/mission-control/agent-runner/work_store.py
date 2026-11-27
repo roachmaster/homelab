@@ -14,6 +14,7 @@ from psycopg2.extras import Json, RealDictCursor, register_uuid
 from work_retry_policy import AGENT_RETRY_LIMIT
 from queue_store import Rejected
 from work_failure_cause import CAUSE_SUMMARY_BYTES, FAILURE_CAUSES
+from work_event_attribution import public_attribution
 from work_events import COORDINATOR_ACTOR, ESCALATION_CAUSES, insert_event, require_actor, require_cancel_cause
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
@@ -1462,6 +1463,9 @@ class WorkStore:
                     raise Rejected(409,"result_mismatch")
                 item = {"event_id":str(row["event_id"]),"correlation_id":str(row["correlation_id"]),
                         "sequence":row["sequence"],"kind":row["event_kind"],"created_at":_timestamp(row["created_at"])}
+                attribution = public_attribution(row["event_kind"], row["payload"])
+                if attribution is not None:
+                    item["attribution"] = attribution
                 if row["event_kind"] == "checkpoint":
                     native = _public_progress(row["payload"])
                     external = _public_external_progress(row["payload"],binding)

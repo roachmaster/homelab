@@ -76,6 +76,9 @@ function task(status, number, input = {}) {
 }
 function event(t, kind, report) {
   const item = { event_id:randomUUID(), correlation_id:t.correlation_id, sequence: ++t.sequence, kind, created_at: time };
+  if (['cancel_requested','cancelled'].includes(kind)) item.attribution={
+    actor:{kind:'operator',id:'fixture-operator'},cause:'operator_request',
+    detail:'Stopped by the owner <safe text>.'};
   if (report?.attempt_id===t.attempt_id) item.progress_verified=true;
   if (report) item.progress = report;
   t.events.push(item);

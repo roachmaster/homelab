@@ -237,7 +237,7 @@ class ActorConfig:
                 or not values['override'].name.endswith('.conf')
                 or not isinstance(values['owner'], str) or not 1 <= len(values['owner']) <= 128
                 or type(values['candidate_port']) is not int or not 1024 < values['candidate_port'] < 65536
-                or type(values['expected_abi']) is not int or values['expected_abi'] not in {14, 15, 16, 17}):
+                or type(values['expected_abi']) is not int or values['expected_abi'] not in {14, 15, 16, 17, 18}):
             raise ValueError('Release configuration exceeds the fixed portal boundary')
         return cls(**values)
 

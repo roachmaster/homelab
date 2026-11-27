@@ -74,12 +74,12 @@ class PortalReleaseActorTest(unittest.TestCase):
             web_user='homelab-web', web_group='homelab-web', source_account='lrocha',
             source_github_config_dir='/home/lrocha/.config/gh', candidate_port=18788,
             expected_abi=16)
-    def test_configuration_supports_abi17_and_retains_closed_legacy_abi_selection(self):
+    def test_configuration_supports_abi18_and_retains_closed_legacy_abi_selection(self):
         raw = self.production_config()
-        for abi in (14, 15, 16, 17):
+        for abi in (14, 15, 16, 17, 18):
             with self.subTest(supported=abi):
                 self.assertEqual(ACTOR.ActorConfig.parse(dict(raw, expected_abi=abi)).expected_abi, abi)
-        for abi in (13, 18, True, '17', 17.0):
+        for abi in (13, 19, True, '18', 18.0):
             with self.subTest(unsupported=abi), self.assertRaises(ValueError):
                 ACTOR.ActorConfig.parse(dict(raw, expected_abi=abi))
 

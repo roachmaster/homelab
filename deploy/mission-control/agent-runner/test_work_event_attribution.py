@@ -471,6 +471,11 @@ class NativeAttributionPostgresTest(unittest.TestCase):
         # against the stored row above.
         public = self.service.events(WorkEvents("homelab", UUID(lease.task_id), 0, 50))
         self.assertIn("needs_reconcile", [item["kind"] for item in public["events"]])
+        stop = next(item for item in public['events'] if item['kind'] == 'needs_reconcile')
+        self.assertEqual(stop['attribution']['actor'], WORKER)
+        self.assertEqual(stop['attribution']['cause'], 'lease_lost')
+        self.assertNotIn('payload', stop)
+
 
 
 # Checked-in inventory of every INSERT into forge_agent.coding_events in the
