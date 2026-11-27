@@ -6,6 +6,7 @@
 //! the executor, workspace, and supervisor modules land as separate
 //! increments on these ports.
 
+pub mod agent_branch;
 pub mod branch;
 pub mod build_info;
 pub mod cli_argv;
@@ -22,6 +23,7 @@ pub mod gpu;
 pub mod grok_policy;
 pub mod lease;
 pub mod native_auth;
+pub mod native_identity;
 pub mod policy;
 pub mod ports_runtime;
 pub mod ports_store;

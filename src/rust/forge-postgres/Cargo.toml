@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 forge-core.workspace = true
 forge-work.workspace = true
+forge-work-publication.workspace = true
 forge-work-worker.workspace = true
 chrono = "0.4"
 sha2 = "0.10"

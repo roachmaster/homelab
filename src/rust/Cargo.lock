@@ -662,6 +662,7 @@ dependencies = [
  "chrono",
  "forge-core",
  "forge-work",
+ "forge-work-publication",
  "forge-work-worker",
  "nix",
  "serde_json",
@@ -739,6 +740,7 @@ dependencies = [
 name = "forge-work-publication"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "forge-core",
  "forge-jenkins",
  "forge-work",

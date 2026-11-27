@@ -27,9 +27,9 @@ pub const FAILURE_KINDS: [&str; 12] = [
     "reviewer_correction",
 ];
 
-const ALL_FEATURES: [&str; 4] = ["PACKAGE=", "FEATURES=", "ALL_FEATURES=1", "NO_DEFAULT_FEATURES=0"];
+pub const ALL_FEATURES: [&str; 4] = ["PACKAGE=", "FEATURES=", "ALL_FEATURES=1", "NO_DEFAULT_FEATURES=0"];
 
-const FEATURE_VARIANTS: [(&str, &str, &str, bool); 10] = [
+pub const FEATURE_VARIANTS: [(&str, &str, &str, bool); 10] = [
     ("remote-https", "forge-remote-https", "", true),
     ("ide-remote", "forge-ide", "remote", true),
     ("ide-minimal", "forge-ide", "", true),

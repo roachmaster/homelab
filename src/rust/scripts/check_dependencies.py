@@ -51,7 +51,7 @@ EXTERNAL = {
     "forge-postgres": {"chrono", "nix", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
     "forge-work": {"serde_json", "sha2", "uuid"},
     "forge-work-worker": {"serde_json", "sha2", "uuid", "nix"},
-    "forge-work-publication": {"serde", "serde_json", "sha2", "uuid"},
+    "forge-work-publication": {"serde", "serde_json", "sha2", "uuid", "base64"},
 }
 
 WASM_PLAYTEST_PROFILE = {

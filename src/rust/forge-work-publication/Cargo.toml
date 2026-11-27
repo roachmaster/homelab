@@ -14,6 +14,7 @@ forge-core.workspace = true
 forge-jenkins.workspace = true
 forge-work.workspace = true
 forge-work-worker.workspace = true
+base64 = "0.22"
 serde = "1"
 serde_json = "1"
 sha2 = "0.10"

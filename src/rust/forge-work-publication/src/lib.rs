@@ -10,9 +10,17 @@
 //! content identity contract and the read-only Jenkins observer.
 
 pub mod artifact_identity;
+pub mod artifact_source;
+pub mod ci_contract;
+pub mod cicd_artifacts;
 pub mod ci_phases;
+pub mod external_delivery;
+pub mod external_verification;
 pub mod identity_contract;
 pub mod jenkins_observer;
+pub mod pipeline_projection;
+pub mod publication_config;
 pub mod strict_json;
 pub mod verification;
 pub mod verification_init;
+pub mod verifier_parity;
