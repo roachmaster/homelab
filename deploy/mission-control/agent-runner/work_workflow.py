@@ -1046,7 +1046,7 @@ class WorkflowStore:
             floor=revival_floor(cursor,w['workflow_id'])
             retained=retained_sources(cursor,w['workflow_id'])
             if any(not any(is_retained_source(t,[binding]) for t in tasks) for binding in retained):
-                self._escalate(cursor,w,'Incident continuation source changed; reconciliation is required.')
+                self._escalate(cursor,w,'Incident continuation source could not be verified; reconciliation is required.')
                 continue
             # A guarded revival keeps earlier cancelled tasks terminal; they are
             # history, not a reason to cancel or escalate the revived workflow.

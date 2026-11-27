@@ -101,6 +101,18 @@ class WorkflowContinuationTest(unittest.TestCase):
         self.assertEqual(stale.exception.code, 'source_changed')
         self.assertEqual(self.rows('SELECT enabled FROM forge_agent.coding_workflows WHERE workflow_id=%s', (workflow_id,))[0][0], False)
 
+    def test_changed_retained_source_stops_replay_with_a_classified_reason(self):
+        root, _, workflow_id = self.approved_and_cancelled()
+        port, command = self.command(workflow_id)
+        receipt = self.execute(port, command)
+        critic = next(t['id'] for t in receipt['retained_sources'] if t['id'] != root)
+        self.cluster.admin_exec("UPDATE forge_agent.coding_tasks SET revision=revision+1 WHERE id='"+critic+"'", owner=False)
+        self.coordinator.run_once()
+        self.assertEqual(self.rows('SELECT phase,enabled FROM forge_agent.coding_workflows WHERE workflow_id=%s', (workflow_id,))[0], ('escalated', False))
+        events = self.service.events(WorkEvents('homelab', UUID(root), 0, 100))['events']
+        self.assertEqual(events[-1]['workflow_progress']['escalation_cause'], 'verification_failed')
+        self.assertIsNone(self.claim('agy-v2'))
+
     def test_revoked_grant_rolls_back_lifecycle_transition(self):
         root, _, workflow_id = self.approved_and_cancelled()
         port, command = self.command(workflow_id)

@@ -30,7 +30,7 @@ assignment and quiescent checks are required. Any existing publication requires
 separate reconciliation. Root/task locks match cancellation. Full historical
 retry evidence is read through an operator-only administrative read port, not
 new application grants. Resolved-but-exhausted retry histories are refused.
-Nine real PostgreSQL continuation tests cover fresh independent
+Ten real PostgreSQL continuation tests cover fresh independent
 Plan approval, retained original rows, partial spent event history and a
 resolved used20 event refusal, native event links/foreign-link rejection and
 retained planning allowance across new event generations. Legacy revival six
@@ -64,6 +64,20 @@ local ci-preflight now passes, zero skips (runner fast inventory254). A fresh
 successor candidate/CI operation is required; Jenkins111 failure is preserved.
 No activation/recovery has occurred. The first immutable source staging under
 /opt/homelab-forge/releases/event-autonomy-1bbf68af6265 is not a live deployment.
+
+Jenkins112 passed checks0–43, then its complete memory inventory executed1215
+tests and found one missing classification for the new retained-source refusal
+literal. The reason now maps to verification_failed using the existing closed
+vocabulary. Added a real PostgreSQL regression proving changed retained evidence
+stops replay and exposes that classified reason. All16 classification/projection/
+continuation tests pass, zero skips. Jenkins112's failure remains evidence; a
+fresh successor candidate must pass all checks before merge/activation.
+The acceptance audit for typed renew and failed-event causes also passed all11
+focused tests. These two old requests already have implementations in main
+(fa11c0637 /846556ff1 families); review their disposition after deployment rather
+than restarting obsolete implementations. Other six incidents need fresh scope
+audits. Two standalone failed connectivity diagnostics have no supported archive
+operation; do not rewrite their statuses or fake completion to clear a badge.
 
 
 Confirmed defect: _current_policy compares current default roles before checking
