@@ -1,0 +1,20 @@
+[package]
+name = "forge-work-publication"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+description = "Publication and delivery for Forge work: CI gate contracts, verification, candidate publication clients, merge and post-merge, hosted checks, external delivery, Jenkins lifecycle and native CI. Ports it implements live in forge-work (external verification) and forge-work-worker (review worker ports); DB adapters live in forge-postgres."
+
+[lints]
+workspace = true
+
+[dependencies]
+forge-core.workspace = true
+forge-jenkins.workspace = true
+forge-work.workspace = true
+forge-work-worker.workspace = true
+serde = "1"
+serde_json = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "v5"] }

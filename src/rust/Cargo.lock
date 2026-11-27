@@ -736,6 +736,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-work-publication"
+version = "0.1.0"
+dependencies = [
+ "forge-core",
+ "forge-jenkins",
+ "forge-work",
+ "forge-work-worker",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
+]
+
+[[package]]
 name = "forge-work-worker"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,18 @@
+//! Publication and delivery for Forge work (the S4 slice:
+//! work_ci_contract, work_verification, work_publication_*,
+//! work_merge, work_post_merge, work_hosted_checks,
+//! work_external_delivery, work_jenkins_lifecycle,
+//! work_native_jenkins, work_delivery_*).
+//!
+//! Increment P1 (foundations): artifact/verification identities,
+//! the closed v3 CI phase plan, the verification report
+//! projection, the PID-1 verification launcher recipe, the
+//! content identity contract and the read-only Jenkins observer.
+
+pub mod artifact_identity;
+pub mod ci_phases;
+pub mod identity_contract;
+pub mod jenkins_observer;
+pub mod strict_json;
+pub mod verification;
+pub mod verification_init;
