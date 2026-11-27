@@ -49,7 +49,7 @@ EXTERNAL = {
     "forge-mcp-host": {"tokio", "rmcp", "serde", "serde_json", "reqwest", "tokio-postgres", "uuid", "axum"},
     "forge-postgres": {"chrono", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
     "forge-work": {"serde_json", "uuid"},
-    "forge-work-worker": {"serde_json", "sha2", "uuid"},
+    "forge-work-worker": {"serde_json", "sha2", "uuid", "nix"},
 }
 
 WASM_PLAYTEST_PROFILE = {

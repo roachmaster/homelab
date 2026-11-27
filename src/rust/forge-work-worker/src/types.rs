@@ -125,10 +125,10 @@ pub struct SessionSelection {
     pub conversation_id: Option<String>,
 }
 
-/// One provider CLI invocation (work_executor.Invocation). The
-/// native_auth lease field is deferred to the executor increment -
-/// native auth flows are S3-adjacent (work_native_auth).
-#[derive(Debug, Clone)]
+/// One provider CLI invocation (work_executor.Invocation), with the
+/// native-auth lease attached: the lease owns live descriptors, so
+/// Invocation is not Clone.
+#[derive(Debug)]
 pub struct Invocation {
     pub argv: Vec<String>,
     pub stdin: Vec<u8>,
@@ -141,6 +141,7 @@ pub struct Invocation {
     pub plan_file: Option<std::path::PathBuf>,
     pub readonly_files: Vec<std::path::PathBuf>,
     pub external_sandbox: bool,
+    pub native_auth: Option<crate::native_auth::AuthLease>,
 }
 
 /// The parsed outcome of a provider CLI run (work_executor.CliOutcome).

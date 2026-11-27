@@ -7,13 +7,16 @@
 //! increments on these ports.
 
 pub mod branch;
+pub mod cli_argv;
 pub mod config;
 pub mod config_profile;
 pub mod error;
 pub mod lease;
+pub mod native_auth;
 pub mod policy;
 pub mod ports_runtime;
 pub mod ports_store;
+pub mod quota;
 pub mod types;
 pub mod workspace;
 pub mod workspace_digest;
