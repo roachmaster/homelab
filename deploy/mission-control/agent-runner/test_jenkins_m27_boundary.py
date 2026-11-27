@@ -1201,7 +1201,7 @@ PG_PROXY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
     'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
     'deploy/mission-control/agent-runner/work_worker.py': '71f0f83f3f099f636980f3955b374ccc89b730bb0f3ec02caf73b234b123ff53',
-    'deploy/mission-control/agent-runner/work_worker_config.py': 'aa1d696beb5ce141fbead525bf197f933a76cad3198ea3f3f591e10980cc14e2',
+    'deploy/mission-control/agent-runner/work_worker_config.py': 'e0cd1406cd929cefe67a7931f8510f0e83aac58be7d3819831d78d3e7646d0cd',
     'deploy/mission-control/sql/management/grant-external-workflows.sql': '4dec068db6250819e1388ec4d2c6c60a2557d98ee36778156959e67eaf489a67',
     'deploy/mission-control/sql/management/grant-runner.sql': 'b3c42606e1d2717cfb0f8e08cf336483331087838ce92cc1268c7d0304f4163f',
     'deploy/mission-control/sql/management/verify-external-agent.sql': '18149b72731e222fb78953f8657f302d7669095785e5ad1eb6887b378dee66db',

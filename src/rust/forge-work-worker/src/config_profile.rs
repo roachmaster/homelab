@@ -246,6 +246,13 @@ impl WorkerProfile {
             branch,
         })
     }
+
+    /// The shared agent branch instructions for every profile,
+    /// including configured aliases (Python's `instructions`
+    /// property).
+    pub fn instructions(&self) -> &'static str {
+        crate::agent_branch::AGENT_BRANCH_INSTRUCTIONS
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

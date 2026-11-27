@@ -18,6 +18,12 @@ use crate::contexts::sha256_hex;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 
+/// AGENT_BRANCH_INSTRUCTIONS: instruction text only - it never
+/// changes permissions, frozen branch bindings or recipes.
+/// Mirrored in forge-work for the external workflow (the crates
+/// cannot import each other).
+pub const AGENT_BRANCH_INSTRUCTIONS: &str = r#"Keep one persistent named feature/<agent> branch per agent, never renamed or replaced. Assignments: agy-primary=feature/agy; codex-author and codex-primary=feature/codex; grok-primary=feature/grok; muse-primary and muse-db-primary=feature/muse; dot-primary=feature/dot. Configured aliases must use their explicitly assigned agent branch; do not infer a new owner from an alias. Never create agent-owned per-task branches. Before any authorized push, rebase onto current main, rerun required tests, and push incrementally after green tests rather than one final dump. Manage your own local build cache outside source using the provisioned cache paths; preserve other agents' caches. These rules grant no commit or push permission. Native task workers must not commit or push; their authorized publisher owns publication. Plan and review remain read-only pinned snapshots. If a receipt-bound author workspace has a different branch, stop and request receipt-preserving reconciliation; never rewrite frozen identities or switch another owner's checkout. Legacy machinery-owned publication exception: work_publication_clients.py:branch_name() retains forge/task-<publication-id> fallback refs for explicit ephemeral-task-v1, legacy identities and jobs without persistent profile resolution. Historical forge/agent/<profile-slug> defaults remain compatibility bindings, not author branch instructions. Preserve their receipts; only a separately authorized transition may reconcile them."#;
+
 pub const PERSISTENT_BRANCH_POLICY: &str = "persistent-agent-v1";
 pub const EPHEMERAL_BRANCH_POLICY: &str = "ephemeral-task-v1";
 pub const VALID_BRANCH_POLICIES: [&str; 2] = [PERSISTENT_BRANCH_POLICY, EPHEMERAL_BRANCH_POLICY];

@@ -1417,9 +1417,9 @@ impl ExternalWorkflowStore {
     fn author_prompt(mode: &str) -> String {
         let common = "Read the COMPLETE claim.external_context. First verify SHA-256 of the exact UTF-8 claim.external_context_json equals claim.external_context_sha256, then parse that canonical JSON as external_context. It contains the original request_prompt and acceptance_criteria, approved_plan, previous_artifact, feedback, base_revision and result_contract. Follow the approved Plan and independent feedback at the supplied exact base_revision. Preserve existing work and your feature branch across revisions; rebase it when the trusted base changes. Do not merge main or manufacture native process proofs, review approval, Jenkins results or merge receipts. ";
         if mode == "plan" {
-            format!("{common}Revise the complete Plan using the supplied feedback; finish with the full revised Plan text.")
+            format!("{common}{} Revise the complete Plan using the supplied feedback; finish with the full revised Plan text.", crate::external_workflow::AGENT_BRANCH_INSTRUCTIONS)
         } else {
-            format!("{common}Implement and verify the approved Plan, publish the preserved feature candidate, and finish with ONLY the exact JSON object specified by external_context.result_contract (version,candidate_commit,candidate_tree,base_revision,summary, and optional source_branch). No Markdown fences or extra prose; report the actual commit/tree and supplied base_revision.")
+            format!("{common}{} Implement and verify the approved Plan, publish the preserved feature candidate, and finish with ONLY the exact JSON object specified by external_context.result_contract (version,candidate_commit,candidate_tree,base_revision,summary, and optional source_branch). No Markdown fences or extra prose; report the actual commit/tree and supplied base_revision.", crate::external_workflow::AGENT_BRANCH_INSTRUCTIONS)
         }
     }
 

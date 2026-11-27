@@ -414,6 +414,8 @@ impl CommandRunnerProvider {
              MODE: {}\n\nASSIGNMENT:\n{}\n\nACCEPTANCE CRITERIA:\n{}",
             lease.mode, lease.prompt, lease.acceptance_criteria
         );
+        prompt.push_str("\n\nAGENT BRANCH AND CACHE RULES: ");
+        prompt.push_str(crate::agent_branch::AGENT_BRANCH_INSTRUCTIONS);
         if progress {
             crate::progress::provision(&scratch)
                 .map_err(|_| failed("Agent public progress channel is unavailable."))?;
