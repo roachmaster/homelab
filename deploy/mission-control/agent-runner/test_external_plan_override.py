@@ -626,7 +626,9 @@ class ExternalPlanOverridePGTest(unittest.TestCase):
             proof = make_stop_proof(lease.unit_name)
             self.db.publish(lease, 'failed', None, None, 'The coding agent returned malformed machine output.', proof)
             self.db.reconcile(lease, 'b' * 64, proof)
-            flow.run_once()
+            self.assertTrue(flow.run_once())
+            self.pg.admin_exec("UPDATE forge_external_workflow.workflows SET state=jsonb_set(state,'{review_retry_wait,not_before}',to_jsonb((clock_timestamp()-interval '1 second')::text))")
+            self.assertTrue(flow.run_once())
         w = self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
         self.assertEqual(w['phase'], 'escalated')
         cmd = self.make_override_command(w, root)

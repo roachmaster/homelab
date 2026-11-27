@@ -445,7 +445,16 @@ class ExternalFlowPGTest(unittest.TestCase):
   lease=self.db.claim('review-worker',self.inc,['codex-v2']);self.assertIsNotNone(lease)
   proof=make_stop_proof(lease.unit_name)
   self.db.publish(lease,'failed',None,None,'The immutable execution context is unavailable.',proof)
-  self.db.reconcile(lease,'b'*64,proof);self.assertTrue(flow.run_once());return lease
+  self.db.reconcile(lease,'b'*64,proof);self.assertTrue(flow.run_once())
+  self.pg.admin_exec("UPDATE forge_external_workflow.workflows SET state=jsonb_set(state,'{review_retry_wait,not_before}',to_jsonb((clock_timestamp()-interval '1 second')::text))")
+  self.assertTrue(flow.run_once())
+  # This recovery fixture models the retained predecessor incident, which
+  # cancelled its source. New infrastructure failures no longer do so.
+  w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
+  if w['phase']=='escalated':
+   with flow._transaction() as cursor:
+    flow._cancel_children(cursor,w,actor={'kind':'coordinator','id':'forge-coordinator'},cause='workflow_cancelled')
+  return lease
  def escalated_setup(self):
   _,root,flow,job=self.submit_plan('# Same immutable legacy plan\n'+'detail '*2400)
   # Preserve the exact historical one-retry failure consumed by the separate

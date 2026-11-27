@@ -7,6 +7,7 @@ worker, through durable actions. Model output never invokes those ports.
 from contextlib import contextmanager
 from uuid import UUID,uuid4
 import copy,hashlib,json,re,unicodedata
+from datetime import datetime,timedelta
 from psycopg2.extras import Json
 from queue_store import Rejected
 from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS
@@ -810,7 +811,8 @@ class ExternalWorkflowStore:
         except (ValueError,TypeError,KeyError):return self._retry_review(cursor,w,review,task,source,'Native reviewer result was oversized or did not match its immutable publication receipt.')
         if result is None:
             if critic['status'] in {'failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled'}:
-                return self._retry_review(cursor,w,review,task,source,'Native reviewer could not finish: '+critic['status'])
+                return self._retry_review(cursor,w,review,task,source,'Native reviewer could not finish: '+critic['status'],
+                    infrastructure=critic['status']!='cancelled')
             return False
         target=validate_target(review['target_json'],review['target_sha256'])
         try:verdict=parse_verdict(result['content'],target,review['target_sha256'])
@@ -831,16 +833,31 @@ class ExternalWorkflowStore:
             self._save(cursor,w,'Independent code review approved; trusted Jenkins verification is next.',phase='checks')
         return True
 
-    def _retry_review(self,cursor,w,review,task,source,summary):
+    def _retry_review(self,cursor,w,review,task,source,summary,*,infrastructure=False):
         cursor.execute("SELECT EXISTS(SELECT FROM forge_agent.coding_attempts WHERE(owner_id,project_alias,task_id)=(%s,%s,%s) AND(phase<>'stopped' OR reservation_active OR lease_expires_at IS NOT NULL)) AS active",(self.owner,w['project_alias'],review['reviewer_task_id']))
         if cursor.fetchone()['active']:return False
         critic=self._task(cursor,w,review['reviewer_task_id'])
-        if critic['status'] in {'quota_blocked','blocked_auth','blocked_permission','cancelled'}:
+        if critic['status']=='cancelled':
             self._escalate(cursor,w,summary);return True
         retry=w['state'].get('review_retries',0)+1
-        # needs_reconcile = the reviewer could not run (context/lease/deadline),
-        # not a judgement on the candidate.
-        infrastructure=critic['status']=='needs_reconcile'
+        # Only the trusted terminal-state path supplies infrastructure=True.
+        # Malformed or receipt-mismatched output keeps reviewer correction
+        # semantics regardless of its text; model prose cannot select this path.
+        if infrastructure:
+            # Persist the wait before reserving an admission. Coordinator restarts
+            # and repeated ticks cannot spend retries or launch reviewers early.
+            cursor.execute('SELECT clock_timestamp() AS now')
+            now=cursor.fetchone()['now']
+            pending=w['state'].get('review_retry_wait')
+            if pending is None:
+                delay=min(300,5 * 2 ** min(w['state'].get('review_retries',0),6))
+                w['state']['review_retry_wait']={'review_id':str(review['review_id']),
+                    'not_before':(now+timedelta(seconds=delay)).isoformat()}
+                self._save(cursor,w,'Review infrastructure unavailable; waiting before retry.')
+                return True
+            if pending['review_id']!=str(review['review_id']):raise ValueError('Review retry wait binding changed')
+            if now<datetime.fromisoformat(pending['not_before']):return False
+            del w['state']['review_retry_wait']
         if self._retry_events is None:
             if retry>AGENT_RETRY_LIMIT:self._escalate(cursor,w,summary,cancel_children=not infrastructure);return True
         else:
