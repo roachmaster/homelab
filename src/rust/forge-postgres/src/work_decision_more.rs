@@ -8,18 +8,15 @@ use crate::work_control_policy::ensure_review_policy;
 use crate::work_rows::{insert_event, outcome_for, pinned_recipe_for};
 use crate::work_store::PgWorkStore;
 
-/// WorkStore._append_review_retry: appends a successor review for
-/// an infrastructure retry, capped by the project's
-/// max_infrastructure_retries (the budget's policy value over the
-/// project policy). The bound owner-verification authority that
-/// can exceed the cap is a host object, outside the port.
-pub(crate) fn append_review_retry(
+/// The max_infrastructure_retries read (the named query):
+/// the budget's policy value over the project policy. A
+/// missing policy row is not_reviewable; a null max is
+/// unbounded.
+fn retry_policy_max(
     tx: &mut crate::tx::Tx<'_, '_>,
     store: &PgWorkStore,
     task: &ControlTask,
-    review: &tokio_postgres::Row,
-    note: &str,
-) -> Result<Uuid, forge_work::WorkError> {
+) -> Result<Option<i64>, forge_work::WorkError> {
     let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
     let params: &[&(dyn ToSql + Sync)] = &[&store.owner, &task.project_alias, &task.root_task_id];
     let policies = tx
@@ -29,17 +26,19 @@ pub(crate) fn append_review_retry(
         )
         .map_err(work_err)?;
     let policy = policies.first().ok_or_else(not_reviewable)?;
-    let max: Option<i64> = policy
+    policy
         .try_get("max_infrastructure_retries")
-        .map_err(|e| forge_work::WorkError::store(e.to_string()))?;
-    let retries: i64 = review
-        .try_get("infrastructure_retries")
-        .map_err(|e| forge_work::WorkError::store(e.to_string()))?;
-    if let Some(max) = max {
-        if retries >= max {
-            return Err(not_reviewable());
-        }
-    }
+        .map_err(|e| forge_work::WorkError::store(e.to_string()))
+}
+
+/// The successor-review insert shared by every retry append.
+fn insert_review_retry(
+    tx: &mut crate::tx::Tx<'_, '_>,
+    store: &PgWorkStore,
+    task: &ControlTask,
+    review: &tokio_postgres::Row,
+    note: &str,
+) -> Result<Uuid, forge_work::WorkError> {
     let review_id: Uuid = review
         .try_get("review_id")
         .map_err(|e| forge_work::WorkError::store(e.to_string()))?;
@@ -62,6 +61,248 @@ pub(crate) fn append_review_retry(
         .ok_or_else(|| forge_work::WorkError::store("review retry insert returned no row"))?
         .try_get("review_id")
         .map_err(|e| forge_work::WorkError::store(e.to_string()))
+}
+
+/// WorkStore._append_review_retry: appends a successor review
+/// for an infrastructure retry, capped by the project's
+/// max_infrastructure_retries.
+pub(crate) fn append_review_retry(
+    tx: &mut crate::tx::Tx<'_, '_>,
+    store: &PgWorkStore,
+    task: &ControlTask,
+    review: &tokio_postgres::Row,
+    note: &str,
+) -> Result<Uuid, forge_work::WorkError> {
+    let max = retry_policy_max(tx, store, task)?;
+    let retries: i64 = review
+        .try_get("infrastructure_retries")
+        .map_err(|e| forge_work::WorkError::store(e.to_string()))?;
+    if let Some(max) = max {
+        if retries >= max {
+            return Err(forge_work::WorkError::rejected(409, "not_reviewable"));
+        }
+    }
+    insert_review_retry(tx, store, task, review, note)
+}
+
+enum BoundAuthority<'a> {
+    Preparation(&'a forge_work::workflow_ingress::BoundPreparationRetryAuthority),
+    Owner(&'a forge_work::owner_reverification::BoundOwnerVerificationAuthority),
+}
+
+/// WorkStore.review_decide with a bound authority (the owner
+/// verification v1/v2 paths): retry_infrastructure only. The
+/// authority is re-validated against the locked task inside
+/// the decision transaction; for the owner authority,
+/// validate_append runs against the locked review before
+/// the append and the automatic cap is skipped (the policy
+/// row must still exist), in Python's _append_review_retry
+/// order.
+fn review_decide_bound(
+    store: &PgWorkStore,
+    request: &forge_work::decision_requests::ReviewDecideRequest,
+    authority: BoundAuthority<'_>,
+) -> Result<Value, forge_work::WorkError> {
+    use forge_work::decision_requests::ReviewDecision;
+    use std::collections::HashSet;
+    if request.note.len() > 2048
+        || request.verified_finding_ids.len()
+            != request
+                .verified_finding_ids
+                .iter()
+                .collect::<HashSet<_>>()
+                .len()
+        || request.verified_finding_ids.iter().any(|id| {
+            id.is_empty()
+                || id.len() > 64
+                || !id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+        })
+    {
+        return Err(forge_work::WorkError::rejected(400, "invalid_request"));
+    }
+    if let BoundAuthority::Owner(owner) = &authority {
+        if store.owner != owner.owner_id() {
+            return Err(forge_work::WorkError::rejected(403, "denied"));
+        }
+    }
+    let intent = intent_digest(&serde_json::json!({
+        "action": "review_decide",
+        "project_alias": request.project_alias,
+        "task_id": request.task_id.to_string(),
+        "expected_revision": request.expected_revision,
+        "review_id": request.review_id.to_string(),
+        "decision": request.decision.as_str(),
+        "agent_profile": request.agent_profile,
+        "note": request.note,
+        "findings": request.findings,
+        "verified_finding_ids": request.verified_finding_ids,
+    }));
+    run_tx(store, |tx| {
+        let task = control_task(
+            tx,
+            store,
+            &request.project_alias,
+            request.task_id,
+            request.expected_revision,
+            &request.idempotency_key,
+            "review_decide",
+            &intent,
+        )?;
+        if let Some(replay) = &task.replay {
+            return Ok(replay.clone());
+        }
+        let task_value = serde_json::json!({
+            "id": task.task_id.to_string(),
+            "owner_id": store.owner,
+            "project_alias": task.project_alias,
+            "workflow_id": task.workflow_id.map(|id| id.to_string()),
+            "latest_attempt_id": task.latest_attempt_id.map(|id| id.to_string()),
+            "revision": task.revision,
+            "mode": task.mode,
+            "status": task.status,
+        });
+        match &authority {
+            BoundAuthority::Preparation(bound) => {
+                bound.validate_review_decision(request.decision, request.review_id)?;
+                bound.validate(&task_value, "code")?;
+            }
+            BoundAuthority::Owner(bound) => {
+                bound.validate_review_decision(request.decision, request.review_id)?;
+                bound.validate(&task_value, "code")?;
+            }
+        }
+        let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
+        if task.status != "awaiting_review" {
+            return Err(not_reviewable());
+        }
+        let review_params: &[&(dyn ToSql + Sync)] = &[
+            &store.owner,
+            &request.project_alias,
+            &request.task_id,
+            &request.review_id,
+        ];
+        let reviews = tx
+            .query_rows(
+                "SELECT * FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND review_id=$4 FOR UPDATE",
+                review_params,
+            )
+            .map_err(work_err)?;
+        let review = reviews.first().ok_or_else(not_reviewable)?;
+        let review_attempt: Option<Uuid> = col(review, "attempt_id")?;
+        let review_status: String = col(review, "status")?;
+        if review_attempt != task.latest_attempt_id
+            || ["pending", "checking", "approved", "cancelled"]
+                .contains(&review_status.as_str())
+        {
+            return Err(not_reviewable());
+        }
+        if request.decision != ReviewDecision::RetryInfrastructure {
+            return Err(forge_work::WorkError::rejected(403, "denied"));
+        }
+        let mut result = serde_json::json!({
+            "project_alias": request.project_alias,
+            "task_id": request.task_id.to_string(),
+            "base_revision": request.expected_revision,
+            "revision": request.expected_revision + 1,
+            "status": task.status,
+            "review_id": request.review_id.to_string(),
+        });
+        let new_review_id = match &authority {
+            BoundAuthority::Preparation(_) => {
+                append_review_retry(tx, store, &task, review, &request.note)?
+            }
+            BoundAuthority::Owner(bound) => {
+                // The policy row must exist even for the
+                // manual authority; only the cap is skipped.
+                let _max = retry_policy_max(tx, store, &task)?;
+                let doc_params: &[&(dyn ToSql + Sync)] = &[&request.review_id];
+                let docs = tx
+                    .query_rows(
+                        "SELECT to_jsonb(t) AS doc FROM (SELECT * FROM forge_agent.coding_reviews WHERE review_id=$1) t",
+                        doc_params,
+                    )
+                    .map_err(work_err)?;
+                let review_value: Value = docs
+                    .first()
+                    .and_then(|row| row.get::<usize, Option<Value>>(0))
+                    .ok_or_else(not_reviewable)?;
+                let max_params: &[&(dyn ToSql + Sync)] = &[
+                    &store.owner,
+                    &request.project_alias,
+                    &request.task_id,
+                ];
+                let max_rows = tx
+                    .query_rows(
+                        "SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3",
+                        max_params,
+                    )
+                    .map_err(work_err)?;
+                let max_review_no: Option<i64> = max_rows
+                    .first()
+                    .and_then(|row| row.try_get("latest").ok())
+                    .flatten();
+                let attempt_value: Option<Value> = match task.latest_attempt_id {
+                    Some(attempt_id) => {
+                        let params: &[&(dyn ToSql + Sync)] = &[
+                            &store.owner,
+                            &request.project_alias,
+                            &request.task_id,
+                            &attempt_id,
+                        ];
+                        let rows = tx
+                            .query_rows(
+                                "SELECT to_jsonb(t) AS doc FROM (SELECT phase, reservation_active, lease_expires_at, result_sha256 FROM forge_agent.coding_attempts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND attempt_id=$4) t",
+                                params,
+                            )
+                            .map_err(work_err)?;
+                        rows.first()
+                            .and_then(|row| row.get::<usize, Option<Value>>(0))
+                    }
+                    None => None,
+                };
+                bound.validate_append_rows(
+                    &task_value,
+                    &review_value,
+                    max_review_no,
+                    attempt_value.as_ref(),
+                )?;
+                insert_review_retry(tx, store, &task, review, &request.note)?
+            }
+        };
+        result["review_id"] = Value::String(new_review_id.to_string());
+        control_record(
+            tx,
+            store,
+            &task,
+            request.expected_revision,
+            &request.idempotency_key,
+            "review_decide",
+            &intent,
+            &result,
+            &request.actor,
+        )?;
+        Ok(result)
+    })
+}
+
+/// WorkflowDecisionPort::review_decide_preparation (F5d).
+pub(crate) fn review_decide_preparation(
+    store: &PgWorkStore,
+    request: &forge_work::decision_requests::ReviewDecideRequest,
+    authority: &forge_work::workflow_ingress::BoundPreparationRetryAuthority,
+) -> Result<Value, forge_work::WorkError> {
+    review_decide_bound(store, request, BoundAuthority::Preparation(authority))
+}
+
+/// WorkflowDecisionPort::review_decide_owner (F5d).
+pub(crate) fn review_decide_owner(
+    store: &PgWorkStore,
+    request: &forge_work::decision_requests::ReviewDecideRequest,
+    authority: &forge_work::owner_reverification::BoundOwnerVerificationAuthority,
+) -> Result<Value, forge_work::WorkError> {
+    review_decide_bound(store, request, BoundAuthority::Owner(authority))
 }
 
 fn findings_empty(value: &Value) -> bool {

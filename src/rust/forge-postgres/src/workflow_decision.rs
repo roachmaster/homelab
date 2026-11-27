@@ -72,6 +72,22 @@ impl WorkflowDecisionPort for PgWorkflowDecisions {
         }))
     }
 
+    fn review_decide_preparation(
+        &self,
+        request: &ReviewDecideRequest,
+        authority: &forge_work::workflow_ingress::BoundPreparationRetryAuthority,
+    ) -> Result<Value, WorkError> {
+        crate::work_decision_more::review_decide_preparation(&self.store, request, authority)
+    }
+
+    fn review_decide_owner(
+        &self,
+        request: &ReviewDecideRequest,
+        authority: &forge_work::owner_reverification::BoundOwnerVerificationAuthority,
+    ) -> Result<Value, WorkError> {
+        crate::work_decision_more::review_decide_owner(&self.store, request, authority)
+    }
+
     fn resume_corrected(
         &self,
         request: &ResumeRequest,

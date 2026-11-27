@@ -224,6 +224,27 @@ pub trait WorkflowDecisionPort {
         request: &ResumeRequest,
         authority: &crate::workflow_ingress::BoundNativeRetryAuthority,
     ) -> Result<Value, WorkError>;
+    /// WorkStore.review_decide under a BoundPreparationRetryAuthority
+    /// (F5d owner verification v1): the adapter re-validates the
+    /// authority against the locked task and review rows inside
+    /// the decision transaction; the automatic infrastructure
+    /// cap applies. Returns the Python result document.
+    fn review_decide_preparation(
+        &self,
+        request: &ReviewDecideRequest,
+        authority: &crate::workflow_ingress::BoundPreparationRetryAuthority,
+    ) -> Result<Value, WorkError>;
+    /// WorkStore.review_decide under a
+    /// BoundOwnerVerificationAuthority (F5d): the adapter
+    /// re-validates the authority and runs its validate_append
+    /// inside the decision transaction; the automatic cap is
+    /// skipped for this manual authority (the policy row must
+    /// still exist). Returns the Python result document.
+    fn review_decide_owner(
+        &self,
+        request: &ReviewDecideRequest,
+        authority: &crate::owner_reverification::BoundOwnerVerificationAuthority,
+    ) -> Result<Value, WorkError>;
     fn handoff_author(
         &self,
         command: &crate::operator_dtos::AuthorHandoff,
@@ -1617,7 +1638,7 @@ impl WorkflowStore {
     }
 
     /// _exhausted_code_budget.
-    fn exhausted_code_budget(
+    pub(crate) fn exhausted_code_budget(
         &self,
         tx: &mut dyn WorkflowTx,
         workflow: &Value,
@@ -2671,6 +2692,23 @@ mod tests {
         unused!(needs_reconcile_witness, &str, Uuid, &str, &str => Result<Option<Uuid>, WorkError>);
         unused!(previous_attempt_id, &str, Uuid, i64 => Result<Option<Uuid>, WorkError>);
         unused!(author_feedback_proof, Uuid, &str => Result<Option<Value>, WorkError>);
+        unused!(owner_source_history, Uuid, &str, &str, &[String], i64 => Result<Vec<Value>, WorkError>);
+        unused!(owner_followup_actions, &str, Uuid, &str, &str, &str, &str => Result<Vec<Value>, WorkError>);
+        unused!(owner_followup_orphaned, Uuid, &str, &str => Result<bool, WorkError>);
+        unused!(owner_workflow_busy, Uuid => Result<bool, WorkError>);
+        unused!(deadline_retry_count, Uuid => Result<i64, WorkError>);
+        unused!(verification_retries_sum, Uuid, Uuid => Result<i64, WorkError>);
+        unused!(receipt_review_actions, &str, Uuid, &str, &[String] => Result<Vec<Value>, WorkError>);
+        unused!(latest_review, &str, Uuid => Result<Option<Value>, WorkError>);
+        unused!(peer_for_source_review, Uuid, Uuid, Uuid => Result<Option<Value>, WorkError>);
+        unused!(decided_action_for_review, Uuid, Uuid => Result<Option<Value>, WorkError>);
+        unused!(critic_attempt_binding, &str, Uuid, Uuid => Result<Option<Value>, WorkError>);
+        unused!(owner_capability, => Result<Option<Value>, WorkError>);
+        unused!(insert_control_receipt, &str, Uuid, &str, &str, &str, i64, i64, &Value => Result<(), WorkError>);
+        unused!(owner_queue_task, &str, Uuid, &str, Uuid, &str, &str => Result<Option<i64>, WorkError>);
+        unused!(make_feedback, Uuid, Uuid, &str, &Value => Result<Option<Uuid>, WorkError>);
+        unused!(feedback_by_id, Uuid => Result<Option<Value>, WorkError>);
+        unused!(clear_pending_review, Uuid, Uuid => Result<u64, WorkError>);
         unused!(workflow_root, &str, Uuid => Result<Option<Uuid>, WorkError>);
         unused!(task_workflow, &str, Uuid => Result<Option<Uuid>, WorkError>);
         unused!(continuation_source, &str, Uuid, Uuid => Result<Value, WorkError>);

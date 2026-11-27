@@ -30,6 +30,8 @@ pub mod workflow_continuation;
 pub mod workflow_tx;
 pub mod workflow_policy;
 pub mod operator_dtos;
+pub mod owner_control;
+pub mod owner_reverification;
 pub mod peer_review;
 pub mod port_admission;
 pub mod port_decision;

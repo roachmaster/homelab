@@ -553,6 +553,142 @@ pub trait WorkflowTx: RetryEvents {
         kind: &str,
     ) -> Result<Option<Value>, WorkError>;
 
+    // -- F5d owner-control probes ------------------------------
+
+    /// workflow_actions_by_source_or_policy: decide actions
+    /// matching the source key, the source pattern, or any of
+    /// the policies, oldest first.
+    fn owner_source_history(
+        &mut self,
+        workflow_id: Uuid,
+        source_key: &str,
+        source_pattern: &str,
+        policies: &[String],
+        limit: i64,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// workflow_actions_by_source_or_policy_request: followup
+    /// actions whose recorded request names the task and
+    /// idempotency key (LIMIT 2).
+    fn owner_followup_actions(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        source_pattern: &str,
+        policy: &str,
+        task_id: &str,
+        idempotency_key: &str,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// workflow_actions_by_source_or_policy_exists: an
+    /// orphaned followup exists without its v1 source.
+    fn owner_followup_orphaned(
+        &mut self,
+        workflow_id: Uuid,
+        source_pattern: &str,
+        policy: &str,
+    ) -> Result<bool, WorkError>;
+    /// workflow_busy with the owner parameters: live tasks,
+    /// live attempts, pending/leased actions, open
+    /// publications, pending/checking reviews.
+    fn owner_workflow_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+    /// deadline_retry_count: completed native deadline
+    /// retries in the workflow.
+    fn deadline_retry_count(&mut self, workflow_id: Uuid) -> Result<i64, WorkError>;
+    /// verification_retries_sum: infrastructure retries
+    /// honestly added by verification appends before the
+    /// named review.
+    fn verification_retries_sum(
+        &mut self,
+        workflow_id: Uuid,
+        review_id: Uuid,
+    ) -> Result<i64, WorkError>;
+    /// workflow_action_by_receipt_review: decide actions
+    /// whose receipt names the review, under the policies.
+    fn receipt_review_actions(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        review_id: &str,
+        policies: &[String],
+    ) -> Result<Vec<Value>, WorkError>;
+    /// The task's latest local review by review_no.
+    fn latest_review(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
+    /// The latest decided code peer review for one source
+    /// review.
+    fn peer_for_source_review(
+        &mut self,
+        workflow_id: Uuid,
+        source_task_id: Uuid,
+        source_review_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
+    /// The completed decide action that finished a workflow
+    /// review.
+    fn decided_action_for_review(
+        &mut self,
+        workflow_id: Uuid,
+        workflow_review_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
+    /// The critic attempt's binding columns (pinned recipe,
+    /// digest, workflow, review, target digest).
+    fn critic_attempt_binding(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
+    /// owner_continuation_capability(): the capability
+    /// document, or None when the function is missing or not
+    /// executable by the current role.
+    fn owner_capability(&mut self) -> Result<Option<Value>, WorkError>;
+    /// Insert one coding_control_receipts row (the owner
+    /// paths write these directly, as Python does).
+    fn insert_control_receipt(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        action: &str,
+        idempotency_key: &str,
+        intent_digest: &str,
+        base_revision: i64,
+        result_revision: i64,
+        receipt: &Value,
+    ) -> Result<(), WorkError>;
+    /// The owner resume task update: queue the task at
+    /// revision+1 bound to the verified workspace and fresh
+    /// feedback; returns the new revision.
+    fn owner_queue_task(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        workspace_digest: &str,
+        feedback_id: Uuid,
+        feedback_sha256: &str,
+        note: &str,
+    ) -> Result<Option<i64>, WorkError>;
+    /// coding_make_feedback(review, task, 'repair', summary,
+    /// findings): the new feedback id.
+    fn make_feedback(
+        &mut self,
+        review_id: Uuid,
+        task_id: Uuid,
+        summary: &str,
+        findings: &Value,
+    ) -> Result<Option<Uuid>, WorkError>;
+    /// One feedback row by id ({feedback_sha256,
+    /// feedback_json}).
+    fn feedback_by_id(&mut self, feedback_id: Uuid) -> Result<Option<Value>, WorkError>;
+    /// The post-decision clearing of the appended review:
+    /// candidate fields reset while it is still pending from
+    /// the named previous review. Returns rows changed.
+    fn clear_pending_review(
+        &mut self,
+        review_id: Uuid,
+        previous_review_id: Uuid,
+    ) -> Result<u64, WorkError>;
+
     // -- F4f continuation probes -------------------------------
 
     /// _lock's root probe: the workflow's root task id under
