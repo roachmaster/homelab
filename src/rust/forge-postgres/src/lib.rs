@@ -14,7 +14,11 @@
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod reconciler;
+pub mod worker;
 
 pub use client::PgSession;
 pub use config::PgConfig;
 pub use error::AdapterError;
+pub use reconciler::ReconcilerApi;
+pub use worker::{Claim, RenewStatus, WorkerApi};
