@@ -1,4 +1,107 @@
-# Current: Cancellation response fixed; remaining attention review — 2026-11-27
+# Current: Root-cause analysis and contract-name handoff correction — 2026-11-27
+
+Code/history/production-evidence review confirms two separate completion blockers.
+No CPU or hashing-performance claim is made: the evidence establishes control-flow
+rejection, repeated work and disabled workflow admission.
+
+## Root cause 1: Contract-name migration missed the preparation consumer
+
+The v2/v3 Jenkins producer emits `<profile>:<branch_scope>` from
+work_external_delivery.jenkins_gate_manifest. Jenkins and the release actor accept
+that named contract. Protected successful main receipt b5727985-b846-4ed4-a65a-e969b6ee1623
+verified a3ec03b8 with forge-sdlc-jenkins-v3:main and cleanup confirmed.
+
+But ExternalWorkflowStore._step still grouped gate_manifest_sha256 with actual
+diff/source hashes and required all three to be64hex. An effect-free reproduction
+through the actual installed predecessor queued review with the legacy gate and
+raised 'Candidate lacks exact gate/diff digests' for the corresponding named gate.
+run_once catches that ValueError, rolls back the step, then escalates the workflow
+with the generic 'Workflow input could not be verified: ValueError' reason.
+This is an incomplete protocol migration, enabled by duplicate gate validators
+and a legacy field name that no longer describes the gate's value type.
+
+Correction b541ad5f, published on feature/codex: producer/consumer share a pure
+closed gate-reference validator in work_ci_contract. The consumer accepts named
+contracts or historical64hex receipts, binds names to the exact prepared profile
+and branch scope, and retains strict diff/source hashes, commit/tree/base checks,
+independent review and content-v2 generation checks. No privileged verifier or
+actor pins, SQL grants, schema, task identities or audit records were weakened.
+
+Validation:20 contract/handoff tests and36 external-flow/content-identity/main-refresh
+integration tests passed with no skips; an additional real disposable-PostgreSQL
+named-gate content-v2 handoff test passed. Independent read-only review found no
+blocking findings. The root-sealed source's eight handoff tests also passed as
+forge_agent before API activation. Runtime evidence and deployment state:
+`/opt/homelab-forge/operations/workflow-gate-20261127/state.json`.
+API source: `/opt/homelab-forge/releases/workflow-gate-b541ad5fa163/source`.
+Other workers retain their compatible named-gate producer release. Main has not
+been pushed or merged; future main integration retains its required CI.
+
+Important limit: live Muse workflow b3a05d8a is repair, active task b178c144 is
+queued, external assignment generation0, with no returned artifact/prepared
+candidate. The mismatch was a confirmed next-preparation blocker; it is not an
+observed explanation for this currently unclaimed assignment. MCP SQL/heartbeat
+access alone supplies no task-claim or push-notification tool. Check whether the
+designated external author polls its approved assignment API before retrying it.
+
+## Root cause 2: Default-agent changes invalidate preserved workflow authority
+
+Actual database records show15 workflows with frozen AGY author policy25ce3a1e,
+Codex reviewer, and completed AGY-to-codex-author handoffs at
+2026-11-26T02:50:13.170523Z through02:50:14.561583Z. At03:15:34.768146Z through
+03:15:34.880456Z, the coordinator emitted14 cancellations (12roots and2children)
+plus one cancellation request for running root21f9d7d6. Its worker recorded final
+cancellation at03:15:50.590580Z. All15 workflow reasons are exactly 'Workflow
+delegation or role grant is no longer current.' A later03:33:21.563043Z workflow
+bbd6bab5 freezes the Grok default policy75856ff2, retaining the same Codex reviewer.
+
+The historical selected0070e78f coordinator compares the newly configured project
+snapshot digest with each workflow's frozen snapshot, then permits only budget
+changes through budget_compatible_snapshot. Actual-snapshot comparison returns
+False: author profile and author Plan/Implement recipe identities differ. The
+coordinator rejects before execution_policy.effective can consider valid handoff
+authority. Its catch routes every such Rejected to _escalate, which disables the
+workflow, cancels queued children, requests running cancellation, hands off pending
+actions and resolves retry scopes. No model invocation or exhausted retry budget
+is necessary to explain this synchronized batch.
+
+Current work_store.policy_drifted can compare catalog documents without their
+policy_digest field. Those15 legacy workflows have no workflow-policy identity
+attachments, so they still use the legacy comparison. The historical0070 source
+had no identity-catalog fence at all. Removing hashes cannot fix the semantic
+coupling: comparing these documents directly still observes changed defaults.
+Increasing retry limits and invoking audited revival alone also cannot fix it:
+revival calls _grant, which calls the same _current_policy and refuses grant_not_covered.
+
+Required correction remains explicit versioned compatibility for frozen workflow
+authority, checked with current grants and effective handoff authority; typed
+deferral for compatible/transient configuration changes; distinct revocation and
+operator-cancellation semantics; and an exact incident-bound recovery manifest.
+Seven of the original15 workflows were subsequently retired by the operator and
+must stay cancelled. Only the remaining eight are incident-recovery candidates,
+subject to their preserved source/attempt/plan/receipt and readiness checks.
+No workflow recovery, counter reset, snapshot rewrite or new model run was done.
+
+## Present queue and related symptoms
+
+The13 attention items comprise eight policy-escalated workflows, two workflows
+stopped by real agent failures, and three obsolete standalone diagnostics. The
+two stop summaries are 'The coding agent returned malformed Grok machine output'
+(bbd6bab5) and 'Agent invocation did not complete successfully' (42fcaf63).
+Neither can honestly be attributed to a gate mismatch from this evidence.
+Workflow phase takes precedence in the attention classifier, so seven root tasks
+can already be cancelled while their workflow remains escalated/attention.
+
+The earlier30-minute timeout was a separate Antigravity CLI wall bound and is
+fixed at the4-hour ceiling; progress-aware lifecycle remains the wall authority.
+Seven focused retry-policy/CLI-bound tests passed during this review. Review
+infrastructure retry handling also has a separate partial fix and acceptance
+work, as recorded below. Immutable Git/artifact/context/receipt digests and
+privileged executable pins remain necessary; the destructive old-column drop
+continues to be deferred. Runtime source selections were checked against reviewed
+modules. No unrelated service/configuration or historical evidence was modified.
+
+# Previous checkpoint: Cancellation response fixed; remaining attention review — 2026-11-27
 
 The cancellation response fix is published on feature/codex as80e688e0 and live
 in the API runner. The version1 response now projects only its five declared
