@@ -19,6 +19,23 @@ def git(path, *args):
 
 
 class OwnedFeatureBranchTest(unittest.TestCase):
+    def test_all_profile_aliases_receive_identical_instruction_policy(self):
+        from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS, OWNED_FEATURE_BRANCHES
+        from work_external_workflow import ExternalWorkflowStore
+        for alias in (*OWNED_FEATURE_BRANCHES, 'configured-review-alias'):
+            profile = WorkProfile(alias, 'codex', 'fixture-model', POLICY_ID)
+            self.assertEqual(profile.instructions, AGENT_BRANCH_INSTRUCTIONS)
+            from work_worker_config import WorkerProfile
+            worker = WorkerProfile(alias, 'codex', 'fixture-model', ('review',))
+            self.assertEqual(worker.instructions, AGENT_BRANCH_INSTRUCTIONS)
+        for mode in ('plan', 'implement'):
+            self.assertIn(AGENT_BRANCH_INSTRUCTIONS, ExternalWorkflowStore._author_prompt(mode))
+        for rule in ('never renamed or replaced', 'Never create agent-owned per-task',
+                     'rebase onto current main', 'incrementally after green tests',
+                     'own local build cache', 'must not commit or push',
+                     'Plan and review remain read-only', 'Legacy machinery-owned publication exception'):
+            self.assertIn(rule, AGENT_BRANCH_INSTRUCTIONS)
+
     def test_codex_author_feature_branch_and_enforced_readonly_reviewer(self):
         with TemporaryDirectory() as root:
             raw = raw_config(root)

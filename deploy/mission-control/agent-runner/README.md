@@ -1,5 +1,16 @@
 # Forge agent runner
 
+Follow the [persistent agent branch and cache rules](../../../AGENTS.md) for every profile
+and configured alias: one permanent `feature/<agent>`, no agent-created per-task
+branches, rebase onto current main before authorized pushes, incremental pushes
+after green tests, and agent-managed local caches. Native workers cannot commit
+or push; Plan/review remain read-only. Older `forge/agent/*` defaults below are
+compatibility bindings requiring receipt-preserving reconciliation before author
+work. The named **legacy machinery-owned publication exception** retains
+`forge/task-<publication-id>` in `work_publication_clients.py:branch_name()` for
+explicit ephemeral policy, legacy identities or missing persistent resolution.
+Preserve frozen receipts; this documentation grants no new permissions.
+
 **Operating note — 26 November 2026:** the event/API runner is deliberately
 stopped and disabled at boot. Coding, publication and external-delivery workers
 are separate services and remain active; this is not a full queue/workflow pause.
@@ -563,7 +574,8 @@ independent Codex reviewer. Approval advances automatically; revision findings
 return to Gemini within the frozen budget. The owner is involved only for a
 genuine escalation. No manual approval bypass applies to autonomous tasks.
 
-Trusted providers publish a nonforce `forge/task-<publication-id>` feature branch
+Under the legacy machinery-owned exception, trusted providers publish a nonforce
+`forge/task-<publication-id>` branch
 and **draft PR to main** from the verified candidate. A separately configured
 trusted merger updates main only after independent approval and exact-source
 verification; native agents cannot merge. Existing remote-head receipts constrain
@@ -1000,7 +1012,7 @@ accounting convention, lifecycle and activation boundary.
 In source, `branch_policy` defaults to `"persistent-agent-v1"` across `WorkConfig`,
 `WorkerConfig`, `PublicationConfig`, and external delivery (with explicit
 `"ephemeral-task-v1"` opt-in preserved for legacy regression tests and historical
-`forge/task-<uuid>` receipts). Every admitted profile (`agy-primary`,
+`forge/task-<uuid>` receipts). Under retained compatibility defaults, every admitted profile (`agy-primary`,
 `codex-primary`, `grok-primary`, `muse-primary`, `muse-db-primary`, or any
 configured alias) resolves deterministically to `forge/agent/<profile-slug>`
 unless an explicit validated per-profile or per-project override is frozen at

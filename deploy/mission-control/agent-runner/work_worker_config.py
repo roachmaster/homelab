@@ -7,7 +7,7 @@ import re
 from types import MappingProxyType
 
 from work_policy import POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIES, native_policy_digest
-from work_agent_branch import default_agent_branch, validate_persistent_branch, validate_profile_branch
+from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS, default_agent_branch, validate_persistent_branch, validate_profile_branch
 
 CONFIG_ENV = "FORGE_CODING_WORKER_CONFIG"
 MAX_CONFIG_BYTES = 64 * 1024
@@ -138,6 +138,11 @@ class WorkerProfile:
             else validate_profile_branch(self.alias, self.branch)
         )
         object.__setattr__(self, "branch", resolved_branch)
+
+    @property
+    def instructions(self):
+        """Shared instructions apply to custom aliases without changing their grants."""
+        return AGENT_BRANCH_INSTRUCTIONS
 
 
 @dataclass(frozen=True)
