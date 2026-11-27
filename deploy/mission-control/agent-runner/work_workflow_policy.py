@@ -84,7 +84,8 @@ class WorkflowPolicyProvider:
 
 class WorkflowPolicyFactory:
     def __init__(self, config, catalog):
-        self.policy, self.catalog = config.workflow_policy_compatibility, catalog
+        self.policy = 'strict-defaults-v1' if config is None else config.workflow_policy_compatibility
+        self.catalog = catalog
 
     def create(self):
         return WorkflowPolicyProvider(self.policy, self.catalog)

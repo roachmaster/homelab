@@ -56,6 +56,15 @@ Codex-author is the qualified feature/codex publishing identity. API, author,
 review-only worker, AGY, Grok and publisher configs are staged but NOT activated
 under /etc/homelab-forge/coding-worker/event-autonomy-20261127-*.json.
 
+PR33 opened for b602bc851+1bbf68af6. Jenkins111 stopped at preflight: two
+existing effect-free composition tests supplied None/a test-double without the
+new selector. Corrected absent config to legacy strict and supplied explicit
+strict selection in the independent factory-substitution fixture. The exact
+local ci-preflight now passes, zero skips (runner fast inventory254). A fresh
+successor candidate/CI operation is required; Jenkins111 failure is preserved.
+No activation/recovery has occurred. The first immutable source staging under
+/opt/homelab-forge/releases/event-autonomy-1bbf68af6265 is not a live deployment.
+
 
 Confirmed defect: _current_policy compares current default roles before checking
 valid execution/handoff authority. Recovery then excludes escalated workflows.
