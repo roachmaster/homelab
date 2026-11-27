@@ -1369,6 +1369,13 @@ mod tests {
         fn superseding_candidates(&self) -> Result<Vec<Value>, WorkError> {
             Ok(Vec::new())
         }
+
+        fn feedback_recovery_candidates(
+            &self,
+            _summaries: &[String],
+        ) -> Result<Vec<Value>, WorkError> {
+            Ok(Vec::new())
+        }
     }
 
     fn agy_recipe(mode: &str, model: &str) -> Value {

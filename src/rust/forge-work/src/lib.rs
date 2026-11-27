@@ -19,6 +19,8 @@ pub mod pinned_recipe;
 pub mod retry_events;
 pub mod reviewer_correction;
 pub mod superseding_review;
+pub mod workflow_feedback;
+pub mod context_recovery;
 pub mod revival;
 pub mod workflow;
 pub mod model_route;

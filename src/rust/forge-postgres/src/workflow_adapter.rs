@@ -272,6 +272,28 @@ impl WorkflowTxFactory for PgWorkflowTxFactory {
         ];
         self.scan_rows(sql, &params)
     }
+
+    fn feedback_recovery_candidates(
+        &self,
+        summaries: &[String],
+    ) -> Result<Vec<Value>, WorkError> {
+        let sql = "SELECT to_jsonb(s) FROM (SELECT t.project_alias, t.id, t.revision, r.receipt_id, a.attempt_id \
+              FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w \
+              ON (w.owner_id, w.project_alias, w.workflow_id) = (t.owner_id, t.project_alias, t.workflow_id) \
+              JOIN forge_agent.coding_attempts a ON (a.owner_id, a.project_alias, a.task_id, a.attempt_id) = (t.owner_id, t.project_alias, t.id, t.latest_attempt_id) \
+              JOIN forge_agent.coding_reconciliation_receipts r ON (r.owner_id, r.project_alias, r.task_id, r.attempt_id, r.task_revision) = (t.owner_id, t.project_alias, t.id, t.latest_attempt_id, t.revision) \
+              WHERE t.owner_id=$1 AND t.project_alias=ANY($2) AND t.workflow_required AND t.mode='implement' \
+              AND t.status='needs_reconcile' AND t.feedback_id IS NOT NULL AND a.outcome='needs_reconcile' \
+              AND a.summary=ANY($3) AND a.phase='stopped' AND NOT a.reservation_active \
+              AND a.lease_expires_at IS NULL AND a.result_sha256 IS NULL \
+              AND w.phase IN ('implement','repair','escalated') ORDER BY r.created_at DESC LIMIT 64) s";
+        let params: Params = vec![
+            Box::new(self.owner.clone()),
+            Box::new(self.allowed_projects.clone()),
+            Box::new(summaries.to_vec()),
+        ];
+        self.scan_rows(sql, &params)
+    }
 }
 
 impl PgWorkflowTxFactory {
@@ -2252,6 +2274,166 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         self.tx
             .call_bool(
                 "SELECT EXISTS(SELECT FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND action_id<>$2 AND status IN ('pending','leased')) AS x",
+                &refs(&params),
+            )
+            .map_err(work_err)
+    }
+
+    fn feedback_packet(
+        &mut self,
+        feedback_id: Uuid,
+        project: &str,
+        task_id: Uuid,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(feedback_id),
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(task_id),
+        ];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_feedback WHERE feedback_id=$1 AND owner_id=$2 AND project_alias=$3 AND task_id=$4) t",
+            &params,
+        )
+    }
+
+    fn feedback_review(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        review_id: Uuid,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(task_id),
+            Box::new(review_id),
+        ];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND review_id=$4) t",
+            &params,
+        )
+    }
+
+    fn recovery_busy(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+    ) -> Result<bool, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+            Box::new(task_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+            Box::new(workflow_id),
+        ];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (a.owner_id, a.project_alias, a.task_id) WHERE t.workflow_id=$1 AND (a.reservation_active OR a.lease_expires_at IS NOT NULL)) \
+                OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$2 AND (status IN ('queued','running','cancel_requested') OR (id<>$3 AND status IN ('failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')))) \
+                OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$4 AND status IN ('pending','leased')) \
+                OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (p.owner_id, p.project_alias, p.task_id) WHERE t.workflow_id=$5 AND p.status IN ('pending','checking','publishing')) \
+                OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON (t.owner_id, t.project_alias, t.id) = (q.owner_id, q.project_alias, q.task_id) WHERE t.workflow_id=$6 AND q.status IN ('pending','checking')) AS x",
+                &refs(&params),
+            )
+            .map_err(work_err)
+    }
+
+    fn recovery_budget(&mut self, workflow_id: Uuid) -> Result<Value, WorkError> {
+        let params: Params = vec![Box::new(workflow_id)];
+        self.one(
+            "SELECT to_jsonb(t) FROM (SELECT count(*) AS used, coalesce(max(created_at) <= clock_timestamp() - interval '60 seconds', true) AS ready FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND kind='decide' AND (source_key LIKE 'feedback-delivery-retry:%' OR source_key LIKE 'peer-feedback-delivery-retry:%')) t",
+            &params,
+        )
+        .map(|row| row.unwrap_or(Value::Null))
+    }
+
+    fn recovery_attempt_ready(&mut self, finished_at: &str) -> Result<bool, WorkError> {
+        let params: Params = vec![Box::new(finished_at.to_string())];
+        self.tx
+            .call_bool(
+                "SELECT ($1::timestamptz <= clock_timestamp() - interval '60 seconds') AS x",
+                &refs(&params),
+            )
+            .map_err(work_err)
+    }
+
+    fn feedback_resume_used(
+        &mut self,
+        workflow_id: Uuid,
+        feedback_id: &str,
+    ) -> Result<i64, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(feedback_id.to_string()),
+        ];
+        let row = self.one(
+            "SELECT to_jsonb(t) FROM (SELECT count(*) AS used FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND kind='decide' AND status='completed' AND (source_key LIKE 'feedback-delivery-retry:%' OR source_key LIKE 'peer-feedback-delivery-retry:%') AND intent->>'feedback_id'=$2) t",
+            &params,
+        )?;
+        Ok(row.map(|doc| doc["used"].as_i64().unwrap_or(0)).unwrap_or(0))
+    }
+
+    fn needs_reconcile_witness(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_id: &str,
+        finished_at: &str,
+    ) -> Result<Option<Uuid>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(task_id),
+            Box::new(attempt_id.to_string()),
+            Box::new(finished_at.to_string()),
+        ];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT event_id FROM forge_agent.coding_events WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND event_kind='needs_reconcile' AND payload->>'attempt_id'=$4 AND created_at >= $5::timestamptz ORDER BY sequence DESC LIMIT 1",
+                &refs(&params),
+            )
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
+    }
+
+    fn previous_attempt_id(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_no: i64,
+    ) -> Result<Option<Uuid>, WorkError> {
+        let params: Params = vec![
+            Box::new(self.owner.to_string()),
+            Box::new(project.to_string()),
+            Box::new(task_id),
+            Box::new(attempt_no),
+        ];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT attempt_id FROM forge_agent.coding_attempts WHERE (owner_id, project_alias, task_id, attempt_no) = ($1, $2, $3, $4)",
+                &refs(&params),
+            )
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
+    }
+
+    fn author_feedback_proof(
+        &mut self,
+        attempt_id: Uuid,
+        kind: &str,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![Box::new(attempt_id), Box::new(kind.to_string())];
+        self.tx
+            .call_json(
+                "SELECT forge_agent.coding_workflow_author_feedback($1, $2) AS proof",
                 &refs(&params),
             )
             .map_err(work_err)

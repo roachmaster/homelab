@@ -215,6 +215,15 @@ pub trait WorkflowDecisionPort {
         request: &ResumeRequest,
         authority: &crate::reviewer_correction::BoundReviewerCorrectionAuthority,
     ) -> Result<Value, WorkError>;
+    /// WorkStore.resume under a BoundNativeRetryAuthority
+    /// (F5c feedback recovery): the adapter validates the
+    /// authority against the locked task, then delegates to
+    /// the S0 resume and returns the Python receipt document.
+    fn resume_native_retry(
+        &self,
+        request: &ResumeRequest,
+        authority: &crate::workflow_ingress::BoundNativeRetryAuthority,
+    ) -> Result<Value, WorkError>;
     fn handoff_author(
         &self,
         command: &crate::operator_dtos::AuthorHandoff,
@@ -2653,6 +2662,15 @@ mod tests {
         unused!(superseding_busy, Uuid => Result<bool, WorkError>);
         unused!(deciding_action, Uuid, Uuid, &str => Result<Option<Value>, WorkError>);
         unused!(other_actions_busy, Uuid, Uuid => Result<bool, WorkError>);
+        unused!(feedback_packet, Uuid, &str, Uuid => Result<Option<Value>, WorkError>);
+        unused!(feedback_review, &str, Uuid, Uuid => Result<Option<Value>, WorkError>);
+        unused!(recovery_busy, Uuid, Uuid => Result<bool, WorkError>);
+        unused!(recovery_budget, Uuid => Result<Value, WorkError>);
+        unused!(recovery_attempt_ready, &str => Result<bool, WorkError>);
+        unused!(feedback_resume_used, Uuid, &str => Result<i64, WorkError>);
+        unused!(needs_reconcile_witness, &str, Uuid, &str, &str => Result<Option<Uuid>, WorkError>);
+        unused!(previous_attempt_id, &str, Uuid, i64 => Result<Option<Uuid>, WorkError>);
+        unused!(author_feedback_proof, Uuid, &str => Result<Option<Value>, WorkError>);
         unused!(workflow_root, &str, Uuid => Result<Option<Uuid>, WorkError>);
         unused!(task_workflow, &str, Uuid => Result<Option<Uuid>, WorkError>);
         unused!(continuation_source, &str, Uuid, Uuid => Result<Value, WorkError>);

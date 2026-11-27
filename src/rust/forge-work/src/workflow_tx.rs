@@ -490,6 +490,69 @@ pub trait WorkflowTx: RetryEvents {
         action_id: Uuid,
     ) -> Result<bool, WorkError>;
 
+    // -- F5c feedback-recovery probes --------------------------
+
+    /// The feedback packet row by (feedback, owner, project,
+    /// task).
+    fn feedback_packet(
+        &mut self,
+        feedback_id: Uuid,
+        project: &str,
+        task_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
+    /// The local review row named by the feedback packet.
+    fn feedback_review(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        review_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
+    /// The feedback-recovery busy composite: live attempts,
+    /// live or stopped-state sibling tasks, pending/leased
+    /// actions, open publications, open local reviews.
+    fn recovery_busy(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+    ) -> Result<bool, WorkError>;
+    /// The shared recovery budget over both accounting
+    /// prefixes: {used, ready} where ready means the newest
+    /// recovery action is at least 60 seconds old.
+    fn recovery_budget(&mut self, workflow_id: Uuid) -> Result<Value, WorkError>;
+    /// The source attempt finished at least 60 seconds ago.
+    fn recovery_attempt_ready(&mut self, finished_at: &str) -> Result<bool, WorkError>;
+    /// Completed recovery actions (either prefix) whose
+    /// intent names this feedback id.
+    fn feedback_resume_used(
+        &mut self,
+        workflow_id: Uuid,
+        feedback_id: &str,
+    ) -> Result<i64, WorkError>;
+    /// The latest needs_reconcile event witnessing the
+    /// attempt's stop at or after its finish.
+    fn needs_reconcile_witness(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_id: &str,
+        finished_at: &str,
+    ) -> Result<Option<Uuid>, WorkError>;
+    /// The previous attempt's id by attempt number (the
+    /// author-handoff lease reconstruction).
+    fn previous_attempt_id(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        attempt_no: i64,
+    ) -> Result<Option<Uuid>, WorkError>;
+    /// coding_workflow_author_feedback(attempt, kind): the
+    /// database-verified handoff provenance, never synthesized.
+    fn author_feedback_proof(
+        &mut self,
+        attempt_id: Uuid,
+        kind: &str,
+    ) -> Result<Option<Value>, WorkError>;
+
     // -- F4f continuation probes -------------------------------
 
     /// _lock's root probe: the workflow's root task id under
@@ -630,4 +693,13 @@ pub trait WorkflowTxFactory {
     /// the legacy peer-error reason, not yet superseded,
     /// LIMIT 16.
     fn superseding_candidates(&self) -> Result<Vec<Value>, WorkError>;
+    /// FeedbackRecovery.run_once candidates: needs_reconcile
+    /// implement tasks whose latest stopped attempt carries
+    /// one of the failure summaries and a revision-bound
+    /// reconciliation receipt, LIMIT 64. The peer consumer
+    /// passes its own summary list.
+    fn feedback_recovery_candidates(
+        &self,
+        summaries: &[String],
+    ) -> Result<Vec<Value>, WorkError>;
 }
