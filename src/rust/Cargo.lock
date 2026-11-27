@@ -712,6 +712,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-services"
+version = "0.1.0"
+dependencies = [
+ "nix 0.30.1",
+ "serde",
+ "serde_yaml_ng",
+]
+
+[[package]]
 name = "forge-system"
 version = "0.1.0"
 dependencies = [
