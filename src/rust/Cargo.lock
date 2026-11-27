@@ -659,8 +659,11 @@ dependencies = [
 name = "forge-postgres"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "forge-core",
+ "forge-work",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "tokio-postgres",
  "uuid",
@@ -1498,6 +1501,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "851ca9db4932932d69f3ea811b1abe63087a0f740a47692619dd40d4899b68be"
 dependencies = [
  "bytes",
+ "chrono",
  "fallible-iterator",
  "postgres-protocol",
  "serde_core",

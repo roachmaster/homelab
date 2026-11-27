@@ -69,6 +69,35 @@ impl<'t, 'c> Tx<'t, 'c> {
         self.call_scalar(select, params).map(|v| v.unwrap_or(false))
     }
 
+    /// Runs a general row query on the open transaction and returns all
+    /// rows. The work-store adapters use this for the raw-SQL surface
+    /// (forge_agent.coding_* tables) that the call_* helpers, shaped for
+    /// single-value SQL functions, cannot express.
+    pub fn query_rows(
+        &mut self,
+        select: &str,
+        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
+    ) -> Result<Vec<tokio_postgres::Row>, crate::error::AdapterError> {
+        let handle = self.handle.clone();
+        let pg = &mut *self.pg;
+        let rows = handle.block_on(async move { pg.query(select, params).await })?;
+        Ok(rows)
+    }
+
+    /// Executes a statement on the open transaction and returns the
+    /// number of rows it affected (the rowcount conditional updates
+    /// check).
+    pub fn execute_count(
+        &mut self,
+        select: &str,
+        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
+    ) -> Result<u64, crate::error::AdapterError> {
+        let handle = self.handle.clone();
+        let pg = &mut *self.pg;
+        let count = handle.block_on(async move { pg.execute(select, params).await })?;
+        Ok(count)
+    }
+
     /// Executes a query on the open transaction and returns the result as
     /// a text value.
     pub fn call_text(

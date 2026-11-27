@@ -102,6 +102,55 @@ impl PgSession {
         Ok(out?)
     }
 
+    /// Runs a general row query inside the standard envelope (its own
+    /// transaction with the owner set_config) and returns all rows. The
+    /// work-store adapters use this for the raw-SQL surface
+    /// (forge_agent.coding_* tables) that the call_* helpers, shaped for
+    /// single-value SQL functions, cannot express.
+    pub fn query_rows(
+        &mut self,
+        select: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> Result<Vec<Row>, AdapterError> {
+        let owner = self.config.owner.clone();
+        let client = &mut self.client;
+        let out = self.rt.block_on(async {
+            let mut tx = client.transaction().await?;
+            tx.execute(
+                "SELECT set_config('forge.coding_owner', $1, true)",
+                &[&owner],
+            )
+            .await?;
+            let rows = tx.query(select, params).await?;
+            tx.commit().await?;
+            Ok::<_, tokio_postgres::Error>(rows)
+        });
+        Ok(out?)
+    }
+
+    /// Executes a statement inside the standard envelope and returns the
+    /// number of rows it affected.
+    pub fn execute_count(
+        &mut self,
+        select: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> Result<u64, AdapterError> {
+        let owner = self.config.owner.clone();
+        let client = &mut self.client;
+        let out = self.rt.block_on(async {
+            let mut tx = client.transaction().await?;
+            tx.execute(
+                "SELECT set_config('forge.coding_owner', $1, true)",
+                &[&owner],
+            )
+            .await?;
+            let count = tx.execute(select, params).await?;
+            tx.commit().await?;
+            Ok::<_, tokio_postgres::Error>(count)
+        });
+        Ok(out?)
+    }
+
     /// Executes a query and returns the result as a scalar value.
     pub fn call_scalar<T>(
         &mut self,

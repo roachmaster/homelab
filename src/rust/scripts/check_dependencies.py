@@ -26,7 +26,7 @@ ALLOWED = {
                        ("forge-local", "forge-core", "forge-jobs")},
     "forge-mcp": set(),
     "forge-mcp-host": {("forge-mcp", "normal")},
-    "forge-postgres": {("forge-core", "normal")},
+    "forge-postgres": {("forge-core", "normal"), ("forge-work", "normal")},
     "forge-work": {("forge-core", "normal")},
 }
 EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
@@ -46,7 +46,7 @@ EXTERNAL = {
                   "nix", "serde_json"},
     "forge-mcp": {"serde", "serde_json"},
     "forge-mcp-host": {"tokio", "rmcp", "serde", "serde_json", "reqwest", "tokio-postgres", "uuid", "axum"},
-    "forge-postgres": {"serde_json", "tokio", "tokio-postgres", "uuid"},
+    "forge-postgres": {"chrono", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
     "forge-work": {"serde_json", "uuid"},
 }
 

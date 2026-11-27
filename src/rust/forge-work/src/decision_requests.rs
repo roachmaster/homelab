@@ -64,7 +64,7 @@ pub struct ReviewDecideRequest {
     pub note: String,
     pub idempotency_key: String,
     pub findings: Value,
-    pub verified_finding_ids: Vec<Uuid>,
+    pub verified_finding_ids: Vec<String>,
     pub recipe_digest: Option<String>,
     pub actor: crate::work_actors::Actor,
 }

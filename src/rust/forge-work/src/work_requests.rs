@@ -14,6 +14,7 @@ pub struct SubmitRequest {
     pub idempotency_key: String,
     pub auto_repair: bool,
     pub workflow_policy_digest: Option<String>,
+    pub workflow_snapshot: Option<serde_json::Value>,
     pub actor: crate::work_actors::Actor,
 }
 
