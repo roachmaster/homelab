@@ -1,3 +1,37 @@
+# Current: Event-stream autonomy defects — 2026-11-27
+
+User requests root-cause fixes for repeated Needs attention and tasks failing to
+reach main. Codex owns feature/codex; one writer. Portal attribution from PR31
+is already deployed (main4db1bdb3, ABI18, Jenkins110 all46 checks), superseding
+its pending rollout checkpoint below.
+
+Live attention12: eight disabled policy-escalated workflows from the Nov26
+AGY/default-to-Grok change, two genuine agent failures, two obsolete standalone
+connectivity diagnostics. Active0/history50/all62. No retries or state rewrites
+have been performed in this investigation.
+
+Core corrections implemented on feature/codex: explicit opt-in
+forge-frozen-workflow-roles-v1 compatibility, validating current enabled effective
+recipes and preserving non-role controls; default selector remains legacy strict.
+Grok's documented auto_compact_* advisory namespace no longer becomes malformed
+output, while final session/accounting authority remains end/error only and a
+max-turns advisory cannot complete work. Antigravity's observed Third-party quota
+reached diagnostic now takes the existing quota path; generic429 still does not.
+106 focused tests passed, including disposable PostgreSQL handoff/default-rollover
+through independent review/publication/hosted checks/merge and real grant revocation.
+No live deployment or incident recovery is claimed yet.
+
+
+Confirmed defect: _current_policy compares current default roles before checking
+valid execution/handoff authority. Recovery then excludes escalated workflows.
+Implement versioned frozen-role compatibility while preserving original snapshots,
+current grants, independent review, required checks, merge controls and counters.
+Investigate native Grok protocol/permission failures from private evidence before
+retrying. Branch-mismatched receipt-bound attempts remain stopped and preserved.
+Of eight policy incidents, three have approved Plans and five do not; no blanket
+implementation revival or fabricated approval. Assess already-shipped requests
+before creating any successor. Historical operator cancellations remain terminal.
+
 # Current: Portal stop-event reasons — 2026-11-27
 
 User requests cancellation reasons in the portal sub-event reader. Codex owns

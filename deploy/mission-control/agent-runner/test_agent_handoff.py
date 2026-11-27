@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 from queue_store import Rejected
 from work_agent_handoff import AuthorHandoff, AgentHandoffFactory, changed_snapshot
 from work_api import WorkCancel, WorkServiceFactory
+from work_config import WorkProfile
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE
 from test_work_execution_and_usage import make_stop_proof
 import test_provider_model_route as route_fixtures
@@ -760,11 +761,39 @@ class AgentHandoffPostgresTest(unittest.TestCase):
         self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_retry_event_admissions"), [(0,)])
         self.assertEqual(self.delegation_count(), 1)
 
+    def configure_new_project_defaults(self):
+        profiles=dict(self.config.profiles)
+        profiles['grok-primary']=WorkProfile('grok-primary','grok','fixture-grok',
+            work_policy.POLICY_ID,execution_enabled=True,branch='feature/grok')
+        policy=replace(self.config.project_workflows['homelab'],author_profile='grok-primary')
+        self.install_config(replace(self.config,profiles=profiles,project_workflows={'homelab':policy},
+            workflow_policy_compatibility='forge-frozen-workflow-roles-v1'))
+        self.advertise()
+
+    def test_default_rollover_preserves_queued_plan_and_real_grant_revocation_still_stops(self):
+        _,admitted=self.submit('before-default-rollover')
+        self.configure_new_project_defaults()
+        self.coordinator.run_once()
+        author=self.claim('agy-v2');self.assertIsNotNone(author)
+        self.publish(author,'The original delegated author completed its Plan.')
+        self.cluster.admin_exec("DELETE FROM forge_agent.coding_worker_grants WHERE agent_profile='codex-v2'",owner=False)
+        self.coordinator.run_once()
+        self.assertEqual(self.get(admitted['task_id'])['workflow']['phase'],'escalated')
+        self.assertIsNone(self.claim('codex-v2'))
+
+    def test_default_rollover_after_handoff_reaches_independently_reviewed_merge(self):
+        self._delegated_candidate_to_merge(change_defaults=True)
+
     def test_delegated_candidate_requires_exact_checks_independent_review_and_merge_gates(self):
+        self._delegated_candidate_to_merge()
+
+    def _delegated_candidate_to_merge(self, *, change_defaults=False):
         _, _, original = self.implementation()
         frozen = self.frozen(original)
         self.stop_quota_attempt(original)
         self.handoff_port.handoff(self.command(original))
+        if change_defaults:
+            self.configure_new_project_defaults()
         resumed = self.claim("codex-author")
         rec = self.publish(resumed, "Implemented the original approved Plan under the Codex handoff.")
         self.db.queue_review(resumed, rec)

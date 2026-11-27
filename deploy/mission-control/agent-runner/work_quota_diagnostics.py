@@ -10,7 +10,7 @@ import re
 MAX_ERROR_BYTES = 4096
 MAX_RESET_SECONDS = 86400
 _QUOTA_CODES = ('usage_limit_reached', 'insufficient_quota', 'quota_exhausted', 'quota_exceeded')
-_ACCOUNT_QUOTA = re.compile(r'\bindividual\s+quota\s+(?:reached|exhausted)\b', re.IGNORECASE)
+_ACCOUNT_QUOTA = re.compile(r'\b(?:individual|third-party)\s+quota\s+(?:reached|exhausted)\b', re.IGNORECASE)
 _RESET = re.compile(r'\bresets?\s+in\s+((?:[0-9]{1,5}\s*[hms]\s*){1,3})(?=[.\s\]]|$)', re.IGNORECASE)
 _SUMMARY=re.compile(r'Provider quota exhausted; waiting for allowance\. \[forge-provider-quota-v1 reset=(none|[1-9][0-9]{0,4}) error=([0-9a-f]{64})\]')
 

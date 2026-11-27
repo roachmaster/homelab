@@ -21,6 +21,7 @@ from work_config import PinnedRecipe,sha256_canonical,prepare_title
 from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_matches
 from work_store import ADVISORY_LOCK_SALT
 from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
+from work_workflow_policy import WorkflowPolicyFactory
 from work_events import COORDINATOR_ACTOR, insert_event, operator_actor, escalation_cause
 import unicodedata
 
@@ -138,6 +139,7 @@ class WorkflowStore:
         self.peer_feedback_recovery = None
         self.superseding_review = None
         self.execution_policy = None
+        self.policy_compatibility = None
         self._retry_allowance_position = None
         self._manual_allowance_position = None
 
@@ -179,13 +181,25 @@ class WorkflowStore:
         fence=getattr(type(self.store),'policy_drifted',None)
         drifted=fence(self.store,workflow['workflow_id'],current) if fence is not None and 'workflow_id' in workflow else None
         if drifted is None:drifted=current['policy_digest']!=workflow['policy_digest']
-        if drifted and not budget_compatible_snapshot(workflow['snapshot'],current):
-            raise Rejected(403,'denied')
         if not {'plan','review','implement'}<=self.config.allowed_modes:
             raise Rejected(403,'denied')
-        if self.execution_policy is not None:
-            self.execution_policy.effective(workflow)
+        # Validate the durable overlay before comparing future admission defaults.
+        effective = self._snapshot(workflow)
+        if (drifted and not budget_compatible_snapshot(workflow['snapshot'],current)
+                and (self.policy_compatibility is None
+                    or self.policy_compatibility.select(workflow['snapshot'],current,effective) is None)):
+            raise Rejected(403,'denied')
         return policy
+
+    def _allowance_snapshot(self,workflow,policy):
+        current=policy.snapshot(self.catalog,self.config.repair_policy)
+        if budget_compatible_snapshot(workflow['snapshot'],current):
+            return current
+        selected=(self.policy_compatibility.select(workflow['snapshot'],current,self._snapshot(workflow))
+                  if self.policy_compatibility is not None else None)
+        if selected is None:
+            raise Rejected(403,'denied')
+        return selected
 
     def _snapshot(self,workflow):
         """Select future execution only; historical authority remains in snapshot."""
@@ -194,7 +208,7 @@ class WorkflowStore:
 
     def _retry_limit(self,workflow,key):
         policy=self._current_policy(workflow)
-        return effective_limit(workflow['snapshot'],key,policy.snapshot(self.catalog,self.config.repair_policy))
+        return effective_limit(workflow['snapshot'],key,self._allowance_snapshot(workflow,policy))
 
     def _repair_limit(self,workflow,key):
         self._current_policy(workflow)
@@ -1384,7 +1398,7 @@ class WorkflowCoordinatorFactory:
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,execution_policy_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,execution_policy_factory=None,policy_compatibility_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
         self.config,self.catalog,self.store=config,catalog,store
         self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
         self.reviewer_correction_factory=reviewer_correction_factory
@@ -1392,6 +1406,7 @@ class WorkflowStoreFactory:
         self.peer_feedback_recovery_factory=peer_feedback_recovery_factory
         self.superseding_review_factory=superseding_review_factory
         self.execution_policy_factory=execution_policy_factory
+        self.policy_compatibility_factory=policy_compatibility_factory
     def create(self):
         from work_reviewer_correction import ReviewerCorrectionFactory
         from work_context_recovery import FeedbackRecoveryFactory
@@ -1399,6 +1414,9 @@ class WorkflowStoreFactory:
         from work_superseding_review import SupersedingReviewFactory
         from work_provider_model_route import ExecutionPolicyFactory
         flow=WorkflowStore(self.config,self.catalog,self.store,retry_events=self.retry_events)
+        flow.policy_compatibility=(self.policy_compatibility_factory or WorkflowPolicyFactory)(self.config,self.catalog).create()
+        if not callable(getattr(flow.policy_compatibility,'select',None)):
+            raise TypeError('Workflow policy compatibility requires a ready selector')
         flow.execution_policy=(self.execution_policy_factory or ExecutionPolicyFactory)(flow).create()
         if not all(callable(getattr(flow.execution_policy,name,None))for name in('effective','run_once','handles_quota')):
             raise TypeError('Execution policy requires a ready generation selection port')
