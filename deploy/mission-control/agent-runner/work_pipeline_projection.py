@@ -615,11 +615,19 @@ def project_correlation_cicd(
         if not isinstance(checks, list):
             continue
         commit = obs.get("candidate_commit")
-        if commit:
+        if not commit or not checks or any(
+                not isinstance(chk, dict) or chk.get("head_sha") != commit
+                for chk in checks):
+            continue
+        action_ids = {str(chk["action_id"]) if chk.get("action_id") else None
+                      for chk in checks}
+        # A terminal observation belongs to one exact action and source.
+        # Commit-only fallback can otherwise turn a retry green using the
+        # preceding run's receipt. Retain it only for unbound legacy runs.
+        if action_ids == {None}:
             obs_by_commit[commit] = checks
-        for chk in checks:
-            if isinstance(chk, dict) and chk.get("action_id"):
-                obs_by_action[str(chk["action_id"])] = checks
+        elif len(action_ids) == 1 and None not in action_ids:
+            obs_by_action[(next(iter(action_ids)), commit)] = checks
 
     runs = []
     seen_actions = set()
@@ -638,7 +646,7 @@ def project_correlation_cicd(
             continue
         seen_actions.add(aid)
         commit = next((e.get("commit_sha") for e in evs if e.get("commit_sha")), None)
-        obs = obs_by_action.get(aid) or (obs_by_commit.get(commit) if commit else None)
+        obs = obs_by_action.get((aid, commit))
         runs.append(_build_run_from_events_only(aid, evs, obs, now=now))
 
     for key, evs in events_by_build.items():

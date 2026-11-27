@@ -7,7 +7,7 @@ import unittest
 from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE
 from work_pipeline_projection import (
     PIPELINE_STALENESS_TIMEOUT_SECONDS, identify_plan, project_pipeline_stages,
-    select_latest_build_events)
+    select_latest_build_events, project_correlation_cicd)
 
 HERE = Path(__file__).resolve().parent
 SETUP_SPEC = importlib.util.spec_from_file_location('forge_ci_provision', HERE.parent / 'jenkins/setup-ci.py')
@@ -298,6 +298,58 @@ class TerminalObservationTest(unittest.TestCase):
         self.assertEqual(result['pipeline_stages'], [])
         self.assertEqual(result['pipeline_availability'], 'stage_data_unavailable')
         self.assertEqual(result['pipeline_phase'], 'unknown')
+
+
+class CorrelationObservationIdentityTest(unittest.TestCase):
+    def run_projection(self, checks, *, candidate=COMMIT, action='retry'):
+        result = project_correlation_cicd(
+            correlation_id='fixture-correlation', now=NOW,
+            jenkins_events=[
+                event('build_started', 1, action_id=action),
+                event('stage_started', 2, action_id=action, stage_name='source-preflight'),
+            ],
+            hosted_observations=[{'candidate_commit': candidate, 'checks': checks}],
+        )
+        return result['runs'][0]
+
+    def checks(self, action):
+        return [dict(check, action_id=action) for check in
+                observation('success', 'success', 'success')]
+
+    def test_retry_does_not_inherit_previous_actions_success_for_same_commit(self):
+        run = self.run_projection(self.checks('previous'))
+        self.assertEqual(run['phase'], 'running')
+        self.assertEqual(run['stages'][0]['status'], 'running')
+
+    def test_bound_observation_must_match_candidate_commit(self):
+        run = self.run_projection(self.checks('retry'), candidate='b' * 40)
+        self.assertEqual(run['phase'], 'running')
+
+    def test_matching_action_and_commit_can_complete_run(self):
+        run = self.run_projection(self.checks('retry'))
+        self.assertEqual(run['phase'], 'complete')
+        self.assertTrue(all(stage['status'] == 'passed' for stage in run['stages']))
+
+    def test_unbound_legacy_observation_cannot_complete_action_bound_retry(self):
+        run = self.run_projection(observation('success', 'success', 'success'))
+        self.assertEqual(run['phase'], 'running')
+
+    def test_unbound_legacy_run_retains_commit_observation(self):
+        run = self.run_projection(observation('success', 'success', 'success'), action=None)
+        self.assertEqual(run['phase'], 'complete')
+
+    def test_mixed_actions_cannot_complete_either_run(self):
+        checks = self.checks('retry')
+        checks[-1]['action_id'] = 'previous'
+        self.assertEqual(self.run_projection(checks)['phase'], 'running')
+
+    def test_check_head_must_match_observation_candidate(self):
+        checks = self.checks('retry')
+        checks[-1]['head_sha'] = 'b' * 40
+        self.assertEqual(self.run_projection(checks)['phase'], 'running')
+
+    def test_bound_observation_cannot_complete_unbound_legacy_run(self):
+        self.assertEqual(self.run_projection(self.checks('previous'), action=None)['phase'], 'running')
 
 
 if __name__ == '__main__':
