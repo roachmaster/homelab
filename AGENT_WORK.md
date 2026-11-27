@@ -1,3 +1,32 @@
+## Latest database qualification — 2026-11-27
+
+Final35 focused continuation/upgrade tests passed. The M26 upgrade snapshot now
+excludes only read_plan's deliberately changed source, alongside its existing
+reviewed replacement exceptions; M52 independently pins the entire new body and
+security metadata. Original owners, credentials, default ACLs and HBA still compare.
+The runner installer now publishes the new transitive recovery module; its
+import-closure regression and all18 stage-emitter tests passed.254 preflight tests
+passed with zero skips. Broad PG testing exposed these expected qualification
+updates; no gate or historical receipt was removed.
+
+A private6MiB live backup was restored as actual data into canonical immutable
+schema51 in an owned disposable cluster. All101 foreign keys were revalidated;
+M36's documented historical NOT VALID progress rule was recreated from its
+original source after loading grandfathered rows. Applying/verifying52 twice
+preserved all60 data tables byte-for-byte, original51 migration timestamps,
+sequence state and role/ACL metadata. This is source-reconstructed schema plus
+live-data upgrade proof, not a passed raw full-schema pg_dump roundtrip: that
+separate failed strict-catalog restoration (default ACL/deparse representation)
+is retained as evidence. No production migration has run at this checkpoint.
+
+Jenkins125 is checking d1c0bf95; the test-only intentional read_plan snapshot
+correction needs final successor qualification. Jenkins124 was explicitly stopped
+as superseded through the normal provider; trusted cleanup confirmed all build
+processes reaped. Native candidate3622 and its branch reservation are untouched.
+The corrected verifier must be rendered through native_installation_plan so its
+native CONFIG path and matching verifier_sha256 stay consistent. Wait for125
+cleanup before replacing that protected executor; then qualify this successor.
+
 ## Latest live telemetry correction — 2026-11-27
 
 The API-only Jenkins stage ingress is now selected by the narrow root-owned

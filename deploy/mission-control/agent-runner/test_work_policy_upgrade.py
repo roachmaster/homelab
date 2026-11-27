@@ -1090,6 +1090,11 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                                      # fifth parameter); their sources are
                                      # pinned separately by the current
                                      # verifier snapshots.
+                                     # M52 deliberately widens approved Plan ownership
+                                     # through bound repair lineage. Its full body and
+                                     # security metadata are separately pinned by
+                                     # verify-continuation-plan-lineage.sql.
+                                     'forge_coding_worker_api.read_plan(uuid,uuid)',
                                      'forge_agent.coding_schedule_repair(uuid,uuid)',
                                      'forge_coding_reconciler_api.expire_leases()',
                                      'forge_coding_reconciler_api.native_branch_first_replay(uuid,bigint)',
