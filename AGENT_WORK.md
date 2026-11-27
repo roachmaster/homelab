@@ -33,6 +33,25 @@ remain root-owned. Initial existing MCP qualification passed56 tests; the final
 combined suite including spoofing, restart/freshness, OAuth-client identity,
 reader isolation and the bounded store is pending at this checkpoint.
 
+## Integrated validation and rollout checkpoint — 2026-11-27
+
+The MCP backend passed70 tests (56 retained +14 presence), with no skips or
+failures. Portal native presence/clock tests,35 generation tests and make ui-check
+passed. A real isolated sandboxed browser fixture at1440 and390 pixels verified
+four MCP clients, all three states, exact timestamps, unchanged worker readiness,
+no phone overflow/runtime errors and successful cleanup. Root inspected both
+screenshots. Root actor/recovery/startup tests passed39, including ABI17 and a
+presence overlay that preserves the predecessor configuration for rollback.
+
+The host owns the optional reader and clears any runner-provided presence. Its
+read is bounded to8KiB/300ms; failure renders Unavailable without changing coding
+readiness. An active-only60-second typed catalog refresh updates presence without
+changing project/task selection or usage, and late replies after close are ignored.
+Normal PostgreSQL/runtime worker APIs and all SQL files remain unchanged. The
+full integrated main Jenkins gate and real deployment/production presence proof
+remain required. A temporary clearly named verification identity may exercise the
+live tool, then is revoked/removed; never generate fake production-client beats.
+
 # Current: Match portal host admission to generated UI ABI16 — 2026-11-26
 
 The user authorizes fixing verified deployment blockers. Jenkins100 and a clean
