@@ -1680,6 +1680,288 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
             .map_err(work_err)
     }
 
+    // -- F4f continuation probes -------------------------------
+
+    fn workflow_root(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<Option<Uuid>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id, &self.owner, &project];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT root_task_id FROM forge_agent.coding_workflows WHERE workflow_id=$1 AND owner_id=$2 AND project_alias=$3",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
+    }
+
+    fn task_workflow(&mut self, project: &str, task_id: Uuid) -> Result<Option<Uuid>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&self.owner, &project, &task_id];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT workflow_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
+    }
+
+    fn continuation_source(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        root_task_id: Uuid,
+    ) -> Result<Value, WorkError> {
+        let agg = |inner: &str| {
+            format!("SELECT coalesce(jsonb_agg(to_jsonb(s)),'[]'::jsonb) AS value FROM ({inner}) s")
+        };
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
+        let read = |tx: &mut Tx, sql: &str, params: &[&(dyn ToSql + Sync)]| {
+            tx.call_json(sql, params)
+                .map_err(work_err)
+                .map(|value| value.unwrap_or_else(|| serde_json::json!([])))
+        };
+        let tasks = read(
+            self.tx,
+            &agg("SELECT t.* FROM forge_agent.coding_tasks t WHERE workflow_id=$1 ORDER BY id"),
+            params,
+        )?;
+        let attempts = read(
+            self.tx,
+            &agg("SELECT a.* FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=$1 ORDER BY a.attempt_id"),
+            params,
+        )?;
+        let stops = read(
+            self.tx,
+            &agg("SELECT r.* FROM forge_agent.coding_reconciliation_receipts r JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(r.owner_id,r.project_alias,r.task_id) WHERE t.workflow_id=$1 ORDER BY r.receipt_id"),
+            params,
+        )?;
+        let events = read(
+            self.tx,
+            &agg("SELECT e.* FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id) WHERE t.workflow_id=$1 ORDER BY e.task_id,e.sequence"),
+            params,
+        )?;
+        let controls = read(
+            self.tx,
+            &agg("SELECT c.* FROM forge_agent.coding_control_receipts c JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(c.owner_id,c.project_alias,c.task_id) WHERE t.workflow_id=$1 ORDER BY c.task_id,c.idempotency_key"),
+            params,
+        )?;
+        let budget_params: &[&(dyn ToSql + Sync)] = &[&self.owner, &project, &root_task_id];
+        let budget = self
+            .tx
+            .call_json(
+                "SELECT to_jsonb(b) AS value FROM forge_agent.coding_review_budget b WHERE owner_id=$1 AND project_alias=$2 AND root_task_id=$3",
+                budget_params,
+            )
+            .map_err(work_err)?;
+        Ok(serde_json::json!({
+            "tasks": tasks,
+            "attempts": attempts,
+            "stops": stops,
+            "events": events,
+            "controls": controls,
+            "repair_budget": budget.unwrap_or(Value::Null),
+        }))
+    }
+
+    fn delivery_head(&mut self, project: &str) -> Result<Option<String>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&project];
+        let head = self
+            .tx
+            .call_json("SELECT forge_agent.delivery_project_head($1) AS head", params)
+            .map_err(work_err)?;
+        Ok(head.and_then(|value| {
+            value
+                .get("commit_sha")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        }))
+    }
+
+    fn continuation_receipt_action(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        kind: Option<&str>,
+    ) -> Result<Option<Uuid>, WorkError> {
+        let task = task_id.to_string();
+        let (sql, params): (&str, Params) = match kind {
+            Some(kind) => (
+                "SELECT action_id FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND kind=$2 AND status='completed' AND source_key LIKE 'policy-continuation:%' AND finish_receipt->'receipt'->>'task_id'=$3",
+                vec![
+                    Box::new(workflow_id) as Box<dyn ToSql + Sync + Send>,
+                    Box::new(kind.to_string()) as Box<dyn ToSql + Sync + Send>,
+                    Box::new(task) as Box<dyn ToSql + Sync + Send>,
+                ],
+            ),
+            None => (
+                "SELECT action_id FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND status='completed' AND source_key LIKE 'policy-continuation:%' AND finish_receipt->'receipt'->>'task_id'=$2",
+                vec![
+                    Box::new(workflow_id) as Box<dyn ToSql + Sync + Send>,
+                    Box::new(task) as Box<dyn ToSql + Sync + Send>,
+                ],
+            ),
+        };
+        let rows = self
+            .tx
+            .query_rows(sql, &refs(&params))
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
+    }
+
+    fn startup_action_intent(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(task_id.to_string()),
+        ];
+        let row = self.one(
+            "SELECT to_jsonb(t) FROM (SELECT intent FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND kind='decide' AND status='completed' AND source_key LIKE 'unstarted-plan-resume:%' AND finish_receipt->'receipt'->>'task_id'=$2) t",
+            &params,
+        )?;
+        Ok(row.map(|row| row["intent"].clone()))
+    }
+
+    fn reviews_of_attempt(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError> {
+        let params: Params = vec![Box::new(task_id), Box::new(attempt_id)];
+        self.many(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_reviews WHERE task_id=$1 AND attempt_id=$2 FOR UPDATE) t",
+            &params,
+        )
+    }
+
+    fn result_chunk_count(&mut self, attempt_id: Uuid) -> Result<i64, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&attempt_id];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT count(*) FROM forge_agent.coding_result_chunks WHERE attempt_id=$1",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<i64>>(0))
+            .unwrap_or(0))
+    }
+
+    fn workflow_review_decided_plan(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError> {
+        let params: Params = vec![
+            Box::new(workflow_id),
+            Box::new(task_id),
+            Box::new(attempt_id),
+        ];
+        self.many(
+            "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_workflow_reviews WHERE workflow_id=$1 AND target_kind='plan' AND source_task_id=$2 AND source_attempt_id=$3 AND status='decided') t",
+            &params,
+        )
+    }
+
+    fn plan_receipt_digest(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+        task_revision: i64,
+    ) -> Result<Option<String>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&task_id, &attempt_id, &task_revision];
+        self.tx
+            .call_text(
+                "SELECT workspace_digest FROM forge_agent.coding_reconciliation_receipts WHERE task_id=$1 AND attempt_id=$2 AND task_revision=$3",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn materialization_markers(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError> {
+        let attempt = attempt_id.to_string();
+        let params: Params = vec![Box::new(task_id), Box::new(attempt)];
+        let rows = self.many(
+            "SELECT to_jsonb(t) FROM (SELECT payload FROM forge_agent.coding_events WHERE task_id=$1 AND event_kind='checkpoint' AND payload->>'stage'='unstarted_plan_workspace_materialized' AND payload->>'attempt_id'=$2) t",
+            &params,
+        )?;
+        Ok(rows
+            .iter()
+            .map(|row| row["payload"].clone())
+            .collect())
+    }
+
+    fn plan_direction_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &workflow_id, &workflow_id, &workflow_id, &workflow_id, &workflow_id, &workflow_id,
+        ];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$1 AND status IN('queued','running','cancel_requested')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$2 AND status IN('pending','leased')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t USING(owner_id,project_alias) WHERE t.id=p.task_id AND t.workflow_id=$3) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON t.id=q.task_id WHERE t.workflow_id=$4 AND q.status IN('pending','checking')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_control_receipts c JOIN forge_agent.coding_tasks t ON t.id=c.task_id WHERE t.workflow_id=$5 AND c.action='cancel') \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON t.id=e.task_id WHERE t.workflow_id=$6 AND e.event_kind IN('cancelled','cancel_requested') AND(e.payload->>'cause'='operator_request' OR e.payload->'actor'->>'kind'='operator')) AS busy",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn unstarted_busy(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &attempt_id, &task_id, &workflow_id, &workflow_id, &workflow_id, &workflow_id,
+        ];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_result_chunks WHERE attempt_id=$1) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_events WHERE task_id=$2 AND event_kind='checkpoint' AND payload->>'stage' IS DISTINCT FROM 'unstarted_plan_workspace_materialized') \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$3 AND status IN('queued','running','cancel_requested')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$4 AND status IN('pending','leased')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_control_receipts c JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(c.owner_id,c.project_alias,c.task_id) WHERE t.workflow_id=$5 AND c.action='cancel') \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id) WHERE t.workflow_id=$6 AND e.event_kind IN('cancelled','cancel_requested') AND(e.payload->>'cause'='operator_request' OR e.payload->'actor'->>'kind'='operator')) AS busy",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn continuation_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id, &workflow_id, &workflow_id];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND status IN('pending','leased')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=$2 AND q.status IN('pending','checking','retry_infrastructure')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=$3) AS busy",
+                params,
+            )
+            .map_err(work_err)
+    }
+
     fn insert_action_returning(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError> {
         let (sql, params) = self.insert_sql("coding_workflow_actions", row);
         let sql = format!("{sql} ON CONFLICT DO NOTHING RETURNING action_id");

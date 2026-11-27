@@ -2619,6 +2619,20 @@ mod tests {
         unused!(readiness_for_worker, &str, Uuid, &str, &str => Result<Vec<Value>, WorkError>);
         unused!(binary_pin_busy, &str, Uuid, Uuid, &str => Result<bool, WorkError>);
         unused!(insert_action_returning, &Value => Result<Option<Uuid>, WorkError>);
+        unused!(workflow_root, &str, Uuid => Result<Option<Uuid>, WorkError>);
+        unused!(task_workflow, &str, Uuid => Result<Option<Uuid>, WorkError>);
+        unused!(continuation_source, &str, Uuid, Uuid => Result<Value, WorkError>);
+        unused!(delivery_head, &str => Result<Option<String>, WorkError>);
+        unused!(continuation_receipt_action, Uuid, Uuid, Option<&str> => Result<Option<Uuid>, WorkError>);
+        unused!(startup_action_intent, Uuid, Uuid => Result<Option<Value>, WorkError>);
+        unused!(reviews_of_attempt, Uuid, Uuid => Result<Vec<Value>, WorkError>);
+        unused!(result_chunk_count, Uuid => Result<i64, WorkError>);
+        unused!(workflow_review_decided_plan, Uuid, Uuid, Uuid => Result<Vec<Value>, WorkError>);
+        unused!(plan_receipt_digest, Uuid, Uuid, i64 => Result<Option<String>, WorkError>);
+        unused!(materialization_markers, Uuid, Uuid => Result<Vec<Value>, WorkError>);
+        unused!(plan_direction_busy, Uuid => Result<bool, WorkError>);
+        unused!(unstarted_busy, Uuid, Uuid, Uuid => Result<bool, WorkError>);
+        unused!(continuation_busy, Uuid => Result<bool, WorkError>);
     }
 
     fn rows() -> (Value, Value, Value, Value, Value) {

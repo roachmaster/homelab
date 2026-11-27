@@ -401,6 +401,93 @@ pub trait WorkflowTx: RetryEvents {
     /// (the provider-quota-wait marker: Some only when this
     /// call inserted the row).
     fn insert_action_returning(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError>;
+
+    // -- F4f continuation probes -------------------------------
+
+    /// _lock's root probe: the workflow's root task id under
+    /// (owner, project); None when the workflow is not the
+    /// caller's.
+    fn workflow_root(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<Option<Uuid>, WorkError>;
+    /// A task's workflow id under (owner, project); None when
+    /// the task is missing or carries no workflow.
+    fn task_workflow(&mut self, project: &str, task_id: Uuid) -> Result<Option<Uuid>, WorkError>;
+    /// _source's five aggregates plus the repair budget row:
+    /// {tasks, attempts, stops, events, controls,
+    /// repair_budget}, each rendered by jsonb_agg(to_jsonb)
+    /// exactly as the Python fingerprint reads them.
+    fn continuation_source(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        root_task_id: Uuid,
+    ) -> Result<Value, WorkError>;
+    /// store._delivery_head: the delivery projection's head
+    /// commit for the project, when delivery is enabled and a
+    /// head exists.
+    fn delivery_head(&mut self, project: &str) -> Result<Option<String>, WorkError>;
+    /// A completed policy-continuation action whose receipt
+    /// names the task (the retained-source action); the
+    /// plan-direction form additionally requires kind decide.
+    fn continuation_receipt_action(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        kind: Option<&str>,
+    ) -> Result<Option<Uuid>, WorkError>;
+    /// The completed unstarted-plan-resume action's intent
+    /// for the task (the startup recovery binding).
+    fn startup_action_intent(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
+    /// coding_reviews rows for one attempt, locked.
+    fn reviews_of_attempt(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// Stored result chunks for an attempt.
+    fn result_chunk_count(&mut self, attempt_id: Uuid) -> Result<i64, WorkError>;
+    /// Decided plan workflow reviews for (task, attempt).
+    fn workflow_review_decided_plan(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// One reconciliation receipt's workspace digest by
+    /// (task, attempt, task revision).
+    fn plan_receipt_digest(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+        task_revision: i64,
+    ) -> Result<Option<String>, WorkError>;
+    /// The unstarted-plan materialization marker payloads.
+    fn materialization_markers(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<Vec<Value>, WorkError>;
+    /// resume_approved_plan_direction's six-part quiescence
+    /// composite (publications in any state included).
+    fn plan_direction_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+    /// resume_unstarted_plan's six-part quiescence composite.
+    fn unstarted_busy(
+        &mut self,
+        task_id: Uuid,
+        attempt_id: Uuid,
+        workflow_id: Uuid,
+    ) -> Result<bool, WorkError>;
+    /// execute's quiescence composite: live actions, reviews
+    /// pending/checking/retry_infrastructure, publications
+    /// in any state.
+    fn continuation_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
 }
 
 /// Vends workflow transactions (WorkflowStore._transaction with
