@@ -1976,7 +1976,7 @@ impl GitHubPullRequestClient {
         GitHubPullRequestClient { config, execute }
     }
 
-    fn api(
+    pub(crate) fn api(
         &mut self,
         method: &str,
         path: &str,
@@ -2020,7 +2020,7 @@ impl GitHubPullRequestClient {
             .map_err(|_| PublicationError::new("invalid_pull_request_response"))
     }
 
-    fn validated(&self, job: &Value, head: &str, value: &Value) -> PublicationResult<String> {
+    pub(crate) fn validated(&self, job: &Value, head: &str, value: &Value) -> PublicationResult<String> {
         let repository = self
             .config
             .repositories
