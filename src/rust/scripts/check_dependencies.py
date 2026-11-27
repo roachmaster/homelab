@@ -12,6 +12,7 @@ ALLOWED = {
     "forge-agent-driver": set(),
     "forge-services": set(),
     "forge-portal-release-actor": set(),
+    "forge-studio": set(),
     "forge-ide-ui": set(),
     "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-core","forge-template","forge-game-runtime")},
     "forge-ide-web-host": {(name,"normal") for name in ("forge-core","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")} | {("forge-ide-ui", "build")},
@@ -43,6 +44,7 @@ EXTERNAL = {
     "forge-agent-driver": {"serde", "serde_json", "serde_yaml_ng", "nix"},
     "forge-services": {"serde", "serde_yaml_ng", "nix"},
     "forge-portal-release-actor": {"serde_json", "sha2", "nix"},
+    "forge-studio": {"serde", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
     "forge-ide-ui": {"serde"},
     "forge-terminal": {"ctrlc", "nix", "serde", "serde_json"},
     "forge-jobs": {"cap-std", "serde", "serde_json"},
@@ -274,7 +276,7 @@ def main():
         raise SystemExit("Only the playtest runtime and digest verifier may expand the default WASM profile")
     if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable | web_native) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable | wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
-    local_expected = (set(ALLOWED) - {"forge-jenkins", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-mcp", "forge-mcp-host", "forge-postgres", "forge-work", "forge-work-worker", "forge-work-publication", "forge-usage", "forge-agent-driver", "forge-services", "forge-portal-release-actor"})
+    local_expected = (set(ALLOWED) - {"forge-jenkins", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-mcp", "forge-mcp-host", "forge-postgres", "forge-work", "forge-work-worker", "forge-work-publication", "forge-usage", "forge-agent-driver", "forge-services", "forge-portal-release-actor", "forge-studio"})
     for args in [(), ("--features", "disk"), ("--features", "jobs")]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")

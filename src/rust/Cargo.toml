@@ -1,5 +1,5 @@
 [workspace]
-members = ["forge-jenkins", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-agent", "forge-remote", "forge-remote-https", "forge-ide", "forge-template", "forge-core", "forge-system", "forge-local", "forge-terminal", "forge-jobs", "forge-mcp", "forge-mcp-host", "forge-postgres", "forge-work", "forge-work-worker", "forge-work-publication", "forge-usage", "forge-agent-driver", "forge-services", "forge-portal-release-actor"]
+members = ["forge-jenkins", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-agent", "forge-remote", "forge-remote-https", "forge-ide", "forge-template", "forge-core", "forge-system", "forge-local", "forge-terminal", "forge-jobs", "forge-mcp", "forge-mcp-host", "forge-postgres", "forge-work", "forge-work-worker", "forge-work-publication", "forge-usage", "forge-agent-driver", "forge-services", "forge-portal-release-actor", "forge-studio"]
 resolver = "2"
 
 [workspace.package]
@@ -22,6 +22,7 @@ forge-usage = { path = "forge-usage" }
 forge-agent-driver = { path = "forge-agent-driver" }
 forge-services = { path = "forge-services" }
 forge-portal-release-actor = { path = "forge-portal-release-actor" }
+forge-studio = { path = "forge-studio" }
 
 forge-system = { path = "forge-system" }
 
