@@ -1435,7 +1435,7 @@ class WorkStore:
         mode = {"repeatable_read": True} if self._external is not None else {"read_only": True}
         with self._transaction(**mode) as cursor:
             cursor.execute("""
-                SELECT id, correlation_id, project_alias, revision, status
+                SELECT id, correlation_id, project_alias, revision, status, workflow_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
             """, (self._owner, project_alias, task_id))
@@ -1451,7 +1451,12 @@ class WorkStore:
             owned_attempts = {str(row["attempt_id"]) for row in cursor.fetchall()}
             binding = None
             workflow = None
-            if self._external is not None:
+            if task['workflow_id'] is not None:
+                cursor.execute('SELECT workflow_id FROM forge_agent.coding_workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s',
+                    (self._owner,project_alias,task['workflow_id']))
+                native_workflow=cursor.fetchone()
+                if native_workflow is not None:workflow={'workflow_id':str(native_workflow['workflow_id'])}
+            if self._external is not None and task['workflow_id'] is None:
                 cursor.execute("SELECT forge_external_agent_api.event_binding(%s,%s,%s) AS binding",(self._owner,project_alias,task_id))
                 binding = cursor.fetchone()["binding"]
                 external_workflow = self._external_workflow_for(project_alias)
@@ -1478,7 +1483,12 @@ class WorkStore:
                         except (ValueError,TypeError):
                             valid_related = False
                         if valid_related:
-                            related_allowed = external_workflow.related_task(cursor,project_alias,workflow["workflow_id"],related)
+                            if task['workflow_id'] is not None:
+                                cursor.execute('SELECT 1 FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s AND id=%s',
+                                    (self._owner,project_alias,task['workflow_id'],related))
+                                related_allowed=cursor.fetchone() is not None
+                            else:
+                                related_allowed = external_workflow.related_task(cursor,project_alias,workflow["workflow_id"],related)
                     flow = _public_workflow_progress(payload,workflow,related_allowed)
                     if native is not None and native["attempt_id"] in owned_attempts:
                         item["progress"] = native

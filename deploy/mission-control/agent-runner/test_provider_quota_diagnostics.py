@@ -31,6 +31,15 @@ class QuotaDiagnosticTest(unittest.TestCase):
         self.assertNotIn('upgrade', outcome.summary.lower())
         self.assertNotIn(ACTUAL_ERROR, str(outcome.quota_diagnostic))
 
+    def test_actual_third_party_quota_uses_existing_wait_or_handoff_path(self):
+        message=('RESOURCE_EXHAUSTED (code 429): Third-party quota reached. '
+                 'Please switch to Gemini models or upgrade your subscription. Resets in 4h52m54s.')
+        outcome=self.result(message)
+        self.assertEqual(outcome.status,'quota_blocked')
+        self.assertEqual(outcome.quota_diagnostic['retry_after_seconds'],17574)
+        self.assertNotIn('upgrade',outcome.summary.lower())
+        self.assertEqual(self.result(message,success=True).status,'awaiting_review')
+
     def test_transient_429_resource_or_success_prose_never_becomes_quota(self):
         for message in ('HTTP 429 Too many requests; retry in 2s.',
                         'RESOURCE_EXHAUSTED (code 429): temporary concurrency limit.',

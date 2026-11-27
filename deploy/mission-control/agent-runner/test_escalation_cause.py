@@ -30,6 +30,7 @@ class EscalationCauseVocabularyTest(unittest.TestCase):
             "Workflow task was cancelled.": "agent_stopped",
             "Trusted publication stopped; retained source and remote metadata require reconciliation.": "publication_failed",
             "Trusted merge could not be verified: x": "verification_failed",
+            "Incident continuation source could not be verified; reconciliation is required.": "verification_failed",
             "All protected phases passed but Jenkins did not report SUCCESS. The terminal delivery mismatch requires reconciliation; no source repair was admitted.": "verification_failed",
             "Peer review could not safely continue: denied": "review_unavailable",
             "The author returned the identical candidate manifest at base abc": "candidate_repeated",

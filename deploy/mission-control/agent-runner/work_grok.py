@@ -194,6 +194,14 @@ class GrokEvents:
             if type(incomplete)is not bool:raise ValueError('Invalid Grok accounting coverage')
             self.usage=None if incomplete else self._usage(event.get('usage'))
             self.complete=True
+        elif re.fullmatch(r'auto_compact_[a-z0-9_]{1,48}',kind):
+            # Grok1.0.92 documents this advisory namespace. It grants no final
+            # response, session or spend authority; end/error remain required.
+            pass
+        elif kind=='max_turns_reached':
+            # Advisory, not a successful terminal result. A later end may carry
+            # bound usage, but cannot turn an exhausted run into completed work.
+            self.failure='max_turns_reached'
         elif kind not in {'thought','usage','plan','available_commands'}:
             raise ValueError('Unsupported Grok event type')
     @staticmethod

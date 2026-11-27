@@ -21,6 +21,8 @@ from work_config import PinnedRecipe,sha256_canonical,prepare_title
 from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_matches
 from work_store import ADVISORY_LOCK_SALT
 from work_retry_policy import AGENT_RETRY_LIMIT, budget_compatible_snapshot, effective_limit
+from work_workflow_policy import WorkflowPolicyFactory
+from work_workflow_continuation import retained_sources, is_retained_source
 from work_events import COORDINATOR_ACTOR, insert_event, operator_actor, escalation_cause
 import unicodedata
 
@@ -55,48 +57,6 @@ def _ready_for_recipe(rows,project_alias,profile_alias,mode,recipe):
         and any(x.get('alias')==profile_alias and x.get('backend')==recipe.backend
             and x.get('model')==recipe.model and mode in x.get('modes',[]) for x in row['profiles'])
         for row in rows)
-
-
-def _read_query(cursor, name, params):
-    """Run a named fixed read query on either transport (see proxy_client.run_read_query)."""
-    from proxy_client import run_read_query
-    return run_read_query(cursor, name, params)
-
-
-def _composite(cursor, owner, name, *args):
-    """Call one forge_pg_proxy_api composite; return its jsonb result.
-
-    Works on both transports: the direct connection executes the
-    SECURITY DEFINER function, and the proxy translates the call to
-    the op.<name> operation. Returns the decoded result (a dict, or
-    None when the function returned SQL NULL). The owner scope is set
-    here (a no-op through the proxy; a real SET LOCAL on direct).
-    """
-    cursor.execute("SELECT pg_catalog.set_config('forge.coding_owner', %s, true)", (owner,))
-    placeholders = ", ".join(["%s"] * len(args))
-    cursor.execute("SELECT forge_pg_proxy_api." + name + "(" + placeholders + ")", args)
-    row = cursor.fetchone()
-    if row is None:
-        return None
-    return row[name] if isinstance(row, dict) else row[0]
-
-
-def _restore_action_job(action):
-    """Restore the native types of a leased action returned by a composite.
-
-    to_jsonb renders UUIDs and timestamps as strings, but the process()
-    job contract carries native types (notably lease_token, which
-    process() compares against the re-read action row). Returns the
-    same dict with the UUID and timestamp columns converted back.
-    """
-    for _key in ("action_id", "workflow_id", "workflow_review_id",
-                 "lease_token"):
-        if action.get(_key) is not None:
-            action[_key] = UUID(action[_key])
-    for _key in ("created_at", "updated_at", "lease_expires_at"):
-        if action.get(_key) is not None:
-            action[_key] = datetime.fromisoformat(action[_key])
-    return action
 
 
 @dataclass(frozen=True)
@@ -180,6 +140,7 @@ class WorkflowStore:
         self.peer_feedback_recovery = None
         self.superseding_review = None
         self.execution_policy = None
+        self.policy_compatibility = None
         self._retry_allowance_position = None
         self._manual_allowance_position = None
 
@@ -221,13 +182,25 @@ class WorkflowStore:
         fence=getattr(type(self.store),'policy_drifted',None)
         drifted=fence(self.store,workflow['workflow_id'],current) if fence is not None and 'workflow_id' in workflow else None
         if drifted is None:drifted=current['policy_digest']!=workflow['policy_digest']
-        if drifted and not budget_compatible_snapshot(workflow['snapshot'],current):
-            raise Rejected(403,'denied')
         if not {'plan','review','implement'}<=self.config.allowed_modes:
             raise Rejected(403,'denied')
-        if self.execution_policy is not None:
-            self.execution_policy.effective(workflow)
+        # Validate the durable overlay before comparing future admission defaults.
+        effective = self._snapshot(workflow)
+        if (drifted and not budget_compatible_snapshot(workflow['snapshot'],current)
+                and (self.policy_compatibility is None
+                    or self.policy_compatibility.select(workflow['snapshot'],current,effective) is None)):
+            raise Rejected(403,'denied')
         return policy
+
+    def _allowance_snapshot(self,workflow,policy):
+        current=policy.snapshot(self.catalog,self.config.repair_policy)
+        if budget_compatible_snapshot(workflow['snapshot'],current):
+            return current
+        selected=(self.policy_compatibility.select(workflow['snapshot'],current,self._snapshot(workflow))
+                  if self.policy_compatibility is not None else None)
+        if selected is None:
+            raise Rejected(403,'denied')
+        return selected
 
     def _snapshot(self,workflow):
         """Select future execution only; historical authority remains in snapshot."""
@@ -236,7 +209,7 @@ class WorkflowStore:
 
     def _retry_limit(self,workflow,key):
         policy=self._current_policy(workflow)
-        return effective_limit(workflow['snapshot'],key,policy.snapshot(self.catalog,self.config.repair_policy))
+        return effective_limit(workflow['snapshot'],key,self._allowance_snapshot(workflow,policy))
 
     def _repair_limit(self,workflow,key):
         self._current_policy(workflow)
@@ -254,12 +227,18 @@ class WorkflowStore:
             cursor.execute("SELECT to_regprocedure('forge_agent.amend_agent_retry_policy(text,uuid,jsonb)') IS NOT NULL AS available")
             if not cursor.fetchone()['available']:
                 return
-            position = self._retry_allowance_position
-            rows = _read_query(cursor, "sweep_retry_policy_workflows",
-                               {"owner_id": self.store.owner,
-                                "project_aliases": list(self.store.allowed_projects),
-                                "cursor_created_at": position[0] if position else None,
-                                "cursor_id": position[1] if position else None})
+            cursor.execute("""SELECT w.* FROM forge_agent.coding_workflows w
+              JOIN forge_agent.coding_review_budget b ON(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)
+              WHERE w.owner_id=%s AND w.project_alias=ANY(%s) AND w.phase NOT IN('completed','cancelled')
+              AND ((w.snapshot->>'max_plan_revisions')::integer<20 OR (w.snapshot->>'max_code_revisions')::integer<20
+                OR b.policy->'max_rounds'<>'20'::jsonb OR b.policy->'max_stagnant_rounds'<>'20'::jsonb OR b.policy->'max_infrastructure_retries'<>'20'::jsonb)
+              AND NOT EXISTS(SELECT FROM forge_agent.coding_events e WHERE(e.owner_id,e.project_alias,e.task_id)=(w.owner_id,w.project_alias,w.root_task_id)
+                AND e.event_kind='checkpoint' AND e.payload->>'stage'='retry_policy_updated'
+                AND e.payload->>'policy'='forge-agent-retry-v1' AND e.payload->>'scope_id'=w.workflow_id::text)
+              AND (%s::timestamptz IS NULL OR (w.created_at,w.workflow_id)>(%s::timestamptz,%s::uuid))
+              ORDER BY w.created_at,w.workflow_id LIMIT 64""",(self.store.owner,list(self.store.allowed_projects)) +
+                ((self._retry_allowance_position[0],*self._retry_allowance_position) if self._retry_allowance_position else (None,None,None)))
+            rows=cursor.fetchall()
             self._retry_allowance_position=(rows[-1]['created_at'],rows[-1]['workflow_id']) if len(rows)==64 else None
             for w in rows:
                 try:
@@ -272,13 +251,20 @@ class WorkflowStore:
                     continue
                 self._project_lock(cursor,w['project_alias'])
                 self._amend_retry_allowance(cursor,w['project_alias'],w['root_task_id'])
-            position = self._manual_allowance_position
-            manual_rows = _read_query(cursor, "sweep_orphan_tasks",
-                                      {"owner_id": self.store.owner,
-                                       "project_aliases": list(self.store.allowed_projects),
-                                       "policy": Json(dict(self.config.repair_policy)),
-                                       "cursor_created_at": position[0] if position else None,
-                                       "cursor_id": position[1] if position else None})
+            cursor.execute("""SELECT t.project_alias,t.id,t.created_at,t.agent_profile,t.mode,b.policy FROM forge_agent.coding_tasks t
+              JOIN forge_agent.coding_review_budget b ON(b.owner_id,b.project_alias,b.root_task_id)=(t.owner_id,t.project_alias,t.id)
+              WHERE t.owner_id=%s AND t.project_alias=ANY(%s) AND t.workflow_id IS NULL
+              AND (t.status NOT IN('completed','cancelled') OR EXISTS(SELECT FROM forge_agent.coding_tasks child
+                WHERE(child.owner_id,child.project_alias,child.repair_root_task_id)=(t.owner_id,t.project_alias,t.id)
+                AND child.status NOT IN('completed','cancelled')))
+              AND b.policy IS DISTINCT FROM %s
+              AND (b.policy-ARRAY['max_rounds','max_stagnant_rounds','max_infrastructure_retries'])=
+                (%s::jsonb-ARRAY['max_rounds','max_stagnant_rounds','max_infrastructure_retries'])
+              AND (%s::timestamptz IS NULL OR (t.created_at,t.id)>(%s::timestamptz,%s::uuid))
+              ORDER BY t.created_at,t.id LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),
+                Json(dict(self.config.repair_policy)),Json(dict(self.config.repair_policy))) +
+                ((self._manual_allowance_position[0],*self._manual_allowance_position) if self._manual_allowance_position else (None,None,None)))
+            manual_rows=cursor.fetchall()
             self._manual_allowance_position=(manual_rows[-1]['created_at'],manual_rows[-1]['id']) if len(manual_rows)==64 else None
             for row in manual_rows:
                 profile=self.config.profiles.get(row['agent_profile'])
@@ -289,14 +275,17 @@ class WorkflowStore:
 
     def _amend_retry_allowance(self,cursor,project,root):
         # A concurrent grant revocation or historical orphan must not roll back
-        # unrelated amendments. The composite runs amend_agent_retry_policy
-        # in a server-side subtransaction and swallows P0009/P0006 (policy
-        # not found / already applied) exactly as the savepoint flow did;
-        # any other error propagates (as ProxyError through the proxy).
-        # The inline SAVEPOINT form cannot run through the proxy at all,
-        # and claim() calls this sweep first, so the wiring is load-bearing.
-        _composite(cursor, self.store.owner, "workflow_retry_allowance_amend",
-                   project, root, Json(dict(self.config.repair_policy)))
+        # unrelated amendments. Keep grants private to the narrow SQL port.
+        cursor.execute('SAVEPOINT retry_allowance_scope')
+        try:
+            cursor.execute('SELECT forge_agent.amend_agent_retry_policy(%s,%s,%s)',
+                (project,root,Json(dict(self.config.repair_policy))))
+        except psycopg2.Error as error:
+            cursor.execute('ROLLBACK TO SAVEPOINT retry_allowance_scope')
+            if error.pgcode not in {'P0009','P0006'}:
+                raise
+        finally:
+            cursor.execute('RELEASE SAVEPOINT retry_allowance_scope')
 
     def _grant(self,cursor,workflow,profile,mode):
         self._current_policy(workflow)
@@ -306,7 +295,11 @@ class WorkflowStore:
         if not cursor.fetchone()['allowed']:raise Rejected(403,'denied')
 
     def _phase(self,cursor,w,phase):
-        cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND enabled AND phase NOT IN('completed','cancelled','escalated') AND phase IS DISTINCT FROM %s",(phase,w['workflow_id'],phase))
+        cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND enabled AND phase NOT IN('completed','cancelled','escalated') AND phase IS DISTINCT FROM %s RETURNING root_task_id",(phase,w['workflow_id'],phase))
+        changed=cursor.fetchone()
+        if changed:
+            insert_event(cursor,self.store.owner,w['project_alias'],changed['root_task_id'],'checkpoint',
+                {'workflow_id':str(w['workflow_id']),'phase':phase,'summary':'Workflow entered '+phase.replace('_',' ')+'.'},actor=COORDINATOR_ACTOR)
 
     def _retry_scope(self,w):
         from work_retry_events import RetryScope
@@ -325,13 +318,15 @@ class WorkflowStore:
                          {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
                           'workflow_id':str(w['workflow_id'])},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
+        insert_event(cursor,self.store.owner,w['project_alias'],w['root_task_id'],'checkpoint',
+            {'workflow_id':str(w['workflow_id']),'phase':'cancelled','summary':reason},actor=COORDINATOR_ACTOR)
         if self.retry_events is not None:
             self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
 
     def _escalate(self,cursor,w,reason,*,cause=None):
         code=escalation_cause(reason,cause)
         reason=reason[:2048]
-        cursor.execute("SELECT status FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],w['root_task_id']))
+        cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],w['root_task_id']))
         root=cursor.fetchone()
         cursor.execute("SELECT phase FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(w['workflow_id'],))
         current=cursor.fetchone()
@@ -341,7 +336,8 @@ class WorkflowStore:
                 self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
             return
         if (current_phase not in {'completed','cancelled','escalated'} and root is not None and root['status'] in {'cancelled','cancel_requested'}
-                and revival_floor(cursor,self.store.owner,w['workflow_id']) is None):
+                and revival_floor(cursor,w['workflow_id']) is None
+                and not is_retained_source(root,retained_sources(cursor,w['workflow_id']))):
             self._cancel_workflow(cursor,w,reason)
             return
         cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=false,phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
@@ -357,6 +353,8 @@ class WorkflowStore:
                          {'base_revision':affected_task['revision'],'revision':affected_task['revision']+1,
                           'workflow_id':str(w['workflow_id']),'escalation_cause':code},actor=COORDINATOR_ACTOR,cause='workflow_cancelled',
                          cause_detail=reason)
+        insert_event(cursor,self.store.owner,w['project_alias'],w['root_task_id'],'checkpoint',
+            {'workflow_id':str(w['workflow_id']),'phase':'escalated','summary':reason,'escalation_cause':code},actor=COORDINATOR_ACTOR)
         if self.retry_events is not None:
             self.retry_events.resolve_open_scope(cursor,self._retry_scope(w))
 
@@ -379,11 +377,17 @@ class WorkflowStore:
             recipe_digest=task['recipe_digest'])
         event=self.retry_events.observe_failure(cursor,scope,'infrastructure',str(attempt['attempt_id']),
             sha256_canonical(proof),phase_id=phase)
-        legacy = _read_query(cursor, "deadline_retry_actions",
-                             {"workflow_id": w["workflow_id"], "owner_id": self.store.owner,
-                              "project_alias": task["project_alias"],
-                              "policy": NATIVE_DEADLINE_POLICY,
-                              "task_id": str(task["id"]), "before": attempt["started_at"]})
+        cursor.execute("""SELECT x.* FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=%s
+          AND x.owner_id=%s AND x.project_alias=%s AND x.kind='decide' AND x.status='completed'
+          AND x.source_key LIKE 'native-deadline-retry:%%' AND x.intent->>'policy'=%s
+          AND x.intent->>'task_id'=%s AND NOT EXISTS(
+            SELECT FROM forge_agent.coding_attempts p WHERE(p.owner_id,p.project_alias,p.task_id)=(x.owner_id,x.project_alias,%s)
+            AND p.phase='stopped' AND p.result_sha256 IS NOT NULL AND NOT p.reservation_active AND p.lease_expires_at IS NULL
+            AND p.published_at>x.created_at AND p.published_at<%s
+            AND EXISTS(SELECT FROM forge_agent.coding_reconciliation_receipts r WHERE(r.owner_id,r.project_alias,r.task_id,r.attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id)))
+          ORDER BY x.created_at,x.action_id""",
+            (w['workflow_id'],self.store.owner,task['project_alias'],NATIVE_DEADLINE_POLICY,str(task['id']),task['id'],attempt['started_at']))
+        legacy=cursor.fetchall()
         if len(legacy)>NATIVE_DEADLINE_RETRIES:raise Rejected(409,'reconcile_required')
         for action in legacy:
             intent=action['intent'];finish=action['finish_receipt'] or {}
@@ -397,13 +401,14 @@ class WorkflowStore:
                 or action['source_key']!='native-deadline-retry:'+str(intent.get('source_attempt_id'))
                 or finish.get('status')!='native_deadline_retried' or not isinstance(finish.get('receipt'),dict)):
                 raise Rejected(409,'reconcile_required')
-            rows = _read_query(cursor, "resume_receipt",
-                               {"owner_id": self.store.owner,
-                                "project_alias": task["project_alias"],
-                                "task_id": task["id"],
-                                "receipt_id": intent.get("reconciliation_receipt_id"),
-                                "idempotency_key": intent.get("idempotency_key")})
-            retained = rows[0] if rows else None
+            cursor.execute("""SELECT r.attempt_id,r.task_revision,r.workspace_digest,c.receipt_json
+              FROM forge_agent.coding_reconciliation_receipts r
+              JOIN forge_agent.coding_control_receipts c ON(c.owner_id,c.project_alias,c.task_id)=(r.owner_id,r.project_alias,r.task_id)
+              WHERE(r.owner_id,r.project_alias,r.task_id,r.receipt_id)=(%s,%s,%s,%s)
+              AND c.action='resume' AND c.idempotency_key=%s AND c.base_revision=r.task_revision
+              AND c.result_revision=r.task_revision+1""",
+                (self.store.owner,task['project_alias'],task['id'],intent.get('reconciliation_receipt_id'),intent.get('idempotency_key')))
+            retained=cursor.fetchone()
             if (not retained or str(retained['attempt_id'])!=intent.get('source_attempt_id')
                 or retained['task_revision']!=intent.get('source_revision')
                 or retained['workspace_digest']!=intent.get('workspace_digest')
@@ -486,32 +491,22 @@ class WorkflowStore:
                 or attempt['pinned_recipe']!=recipe.to_dict() or attempt['recipe_digest']!=recipe.digest
                 or proof.get('scope_stopped') is not True or proof.get('source')!='systemd'
                 or proof.get('unit_name')!=attempt['unit_name']):raise Rejected(409,'reconcile_required')
-            rows = _read_query(cursor, "needs_reconcile_witnessed",
-                               {"owner_id": self.store.owner, "project_alias": project_alias,
-                                "task_id": task_id,
-                                "attempt_id": str(attempt["attempt_id"]),
-                                "since": attempt["deadline_at"]})
-            if not rows[0]["witnessed"]:raise Rejected(409,'not_reviewable')
-            rows = _read_query(cursor, "blocked_witnessed",
-                               {"owner_id": self.store.owner, "project_alias": project_alias,
-                                "task_id": task_id, "since": attempt["started_at"]})
-            if rows[0]["blocked"]:raise Rejected(409,'not_reviewable')
-            rows = _read_query(cursor, "writer_active", {"workflow_id": w["workflow_id"], "owner_id": self.store.owner})
-            if rows[0]["writer"]:raise Rejected(409,'reconcile_required')
-            rows = _read_query(cursor, "workflow_busy",
-                               {"workflow_id": w["workflow_id"],
-                                "owner_id": self.store.owner,
-                                "task_statuses": ["queued", "running", "cancel_requested"],
-                                "include_attempts": False,
-                                "publication_statuses": ["pending", "checking", "publishing"]})
-            if rows[0]["busy"]:raise Rejected(409,'reconcile_required')
-            rows = _read_query(cursor, "sibling_failure",
-                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner, "task_id": task_id})
-            if rows[0]["sibling_failure"]:raise Rejected(409,'not_reviewable')
-            rows = _read_query(cursor, "action_source_count",
-                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner, "kind": "decide",
-                                "prefix": "native-deadline-retry:"})
-            prior_deadlines = rows[0]["used"]
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND event_kind='needs_reconcile' AND payload->>'attempt_id'=%s AND payload->>'reason' IN('deadline_exceeded','stopped_without_publication') AND created_at>=%s) AS witnessed",
+                (self.store.owner,project_alias,task_id,str(attempt['attempt_id']),attempt['deadline_at']))
+            if not cursor.fetchone()['witnessed']:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND created_at>=%s AND (event_kind IN('quota_blocked','blocked_auth','blocked_permission','cancel_requested','cancelled') OR payload->>'status' IN('quota_blocked','blocked_auth','blocked_permission','cancel_requested','cancelled'))) AS blocked",
+                (self.store.owner,project_alias,task_id,attempt['started_at']))
+            if cursor.fetchone()['blocked']:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) AS writer",(w['workflow_id'],))
+            if cursor.fetchone()['writer']:raise Rejected(409,'reconcile_required')
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested')) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s AND p.status IN('pending','checking','publishing')) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",
+                           (w['workflow_id'],)*4)
+            if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND id<>%s AND status IN('failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) AS sibling_failure",
+                           (w['workflow_id'],task_id))
+            if cursor.fetchone()['sibling_failure']:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT count(*) AS used FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE 'native-deadline-retry:%%'",(w['workflow_id'],))
+            prior_deadlines=cursor.fetchone()['used']
             if self.retry_events is None and prior_deadlines>=NATIVE_DEADLINE_RETRIES:
                 raise Rejected(409,'not_reviewable')
             event=None
@@ -524,9 +519,9 @@ class WorkflowStore:
                         workflow_id=str(w['workflow_id']),retry_event=event)
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='implement',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-            ready = _read_query(cursor, "worker_readiness_fresh",
-                                {"owner_id": self.store.owner,
-                                 "policy_digests": [x[0] for x in NATIVE_POLICIES.values()]})
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",
+                           (self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]))
+            ready=cursor.fetchall()
             for role,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
                 required=recipe_from_snapshot(p,entry)
                 if not _ready_for_recipe(ready,project_alias,role,mode,required):
@@ -551,20 +546,36 @@ class WorkflowStore:
     def _recover_native_timeouts(self):
         """Existing durable-event scan retries only reconciled deadline stops."""
         with self.store._transaction(read_only=True) as cursor:
+            cursor.execute("SELECT to_regprocedure('forge_agent.coding_workflow_author_handoff(uuid)') IS NOT NULL AS available")
             # An allowed historical escalation is still recoverable. The active
             # role helper returns NULL for that phase; the verified handoff
             # receipt retains the selected author without rewriting authority.
-            # Probe for the handoff function before running the scan so older
-            # schemas never parse a statement referencing a function they do
-            # not contain: the probe selects the named read variant.
-            probe = _read_query(cursor, "author_handoff_available", {})
-            sweep = ("sweep_needs_reconcile_handoff" if probe[0]["available"]
-                     else "sweep_needs_reconcile")
-            candidates = _read_query(cursor, sweep,
-                                     {"owner_id": self.store.owner,
-                                      "project_aliases": list(self.store.allowed_projects),
-                                      "policy_digests": [x[0] for x in NATIVE_POLICIES.values()],
-                                      "allow_any_retry": self.retry_events is None})
+            # Select a constant expression before parsing the scan so older
+            # schemas never reference a function that they do not contain.
+            author = ("coalesce(forge_agent.coding_workflow_author_handoff(w.workflow_id)->'intent'->>'target_profile',w.snapshot->>'author_profile')"
+                      if cursor.fetchone()['available'] else "w.snapshot->>'author_profile'")
+            cursor.execute(f"""SELECT t.project_alias,t.id,t.revision,r.receipt_id,a.attempt_id
+              FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w
+              ON(w.owner_id,w.project_alias,w.workflow_id)=(t.owner_id,t.project_alias,t.workflow_id)
+              JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)
+              JOIN forge_agent.coding_reconciliation_receipts r ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.revision)
+              WHERE t.owner_id=%s AND t.project_alias=ANY(%s) AND t.workflow_required AND t.mode='implement'
+              AND t.status IN('needs_reconcile','failed') AND w.phase IN('implement','repair','escalated')
+              AND(w.enabled OR w.phase='escalated')
+              AND(w.phase<>'escalated' OR w.escalation_reason IN('Agent stopped: needs_reconcile','Agent stopped: failed'))
+              AND t.cancelled_at IS NULL AND t.workflow_review_id IS NULL AND a.result_sha256 IS NULL
+              AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL
+              AND a.finished_at>=a.deadline_at AND r.created_at>=a.deadline_at
+              AND a.pinned_recipe->>'policy_digest'=ANY(%s)
+              AND t.agent_profile={author}
+              AND EXISTS(SELECT 1 FROM forge_agent.coding_events e WHERE(e.owner_id,e.project_alias,e.task_id)=(t.owner_id,t.project_alias,t.id)
+                AND e.event_kind='needs_reconcile' AND e.payload->>'attempt_id'=a.attempt_id::text
+                AND e.payload->>'reason' IN('deadline_exceeded','stopped_without_publication') AND e.created_at>=a.deadline_at)
+              AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=w.workflow_id
+                 AND x.kind='decide' AND (x.source_key='native-deadline-retry:'||a.attempt_id::text
+                   OR(%s AND x.source_key LIKE 'native-deadline-retry:%%')))
+              ORDER BY r.created_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),[x[0] for x in NATIVE_POLICIES.values()],self.retry_events is None))
+            candidates=cursor.fetchall()
         for task in candidates:
             try:
                 self.retry_native_timeout(project_alias=task['project_alias'],task_id=task['id'],expected_revision=task['revision'],
@@ -595,13 +606,8 @@ class WorkflowStore:
             or {'checks_passed':True,'toolchain':q['verification'].get('toolchain','Not reported'),
                 'checks':[{k:x[k] for k in ('check_id','status','head_sha')} for x in q['verification'].get('checks',[])]}!=target['verification']):
             raise Rejected(409,'not_reviewable')
-        rows = _read_query(cursor, "workflow_busy",
-                           {"workflow_id": w["workflow_id"],
-                            "owner_id": self.store.owner,
-                            "task_statuses": ["queued", "running", "cancel_requested", "failed", "needs_reconcile", "quota_blocked", "blocked_auth", "blocked_permission", "cancelled"],
-                            "include_attempts": True,
-                            "publication_statuses": None})
-        if rows[0]["busy"]:raise Rejected(409,'reconcile_required')
+        cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",(w['workflow_id'],)*5)
+        if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
         return q
 
     def _correct_peer_verdict(self,cursor,w,review,task,critic,target,defect,*,reviewer_attempt_id,reviewer_result_sha256,correction_key,correction_intent,validate_target):
@@ -662,9 +668,7 @@ class WorkflowStore:
                      {'note':note,'superseding_workflow_review_id':str(new_id)},actor=COORDINATOR_ACTOR)
         p=self._snapshot(w)
         self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-        ready = _read_query(cursor, "worker_readiness_fresh",
-                            {"owner_id": self.store.owner,
-                             "policy_digests": [x[0] for x in NATIVE_POLICIES.values()]})
+        cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
         for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
             recipe=recipe_from_snapshot(p,entry)
             if not _ready_for_recipe(ready,review['project_alias'],profile,mode,recipe):
@@ -770,19 +774,15 @@ class WorkflowStore:
                            (w['workflow_id'],workflow_review_id,str(reviewer_attempt_id)+':'+reviewer_result_sha256));action=cursor.fetchone()
             if not action or action['status']!='handoff' or action['finish_receipt'] is not None or action['intent'] is not None:
                 raise Rejected(409,'not_reviewable')
-            rows = _read_query(cursor, "action_source_count",
-                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner, "kind": "decide",
-                                "prefix": "peer-verdict-replay:"})
-            if rows[0]["used"]:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT count(*) AS used FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE 'peer-verdict-replay:%%'",(w['workflow_id'],))
+            if cursor.fetchone()['used']:raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT repair_rounds,stagnant_rounds,policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
                            (self.store.owner,project_alias,task['repair_root_task_id'] or task['id']));budget=cursor.fetchone()
             if self.retry_events is None and (q['round']>=self._retry_limit(w,'max_code_revisions') or budget and (budget['repair_rounds']>=self._retry_limit(w,'max_code_revisions')
                 or budget['stagnant_rounds']>=budget['policy']['max_stagnant_rounds'])):raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='code_review',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-            ready = _read_query(cursor, "worker_readiness_fresh",
-                            {"owner_id": self.store.owner,
-                             "policy_digests": [x[0] for x in NATIVE_POLICIES.values()]})
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
             for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
                 recipe=recipe_from_snapshot(p,entry)
                 if not _ready_for_recipe(ready,project_alias,profile,mode,recipe):
@@ -799,10 +799,15 @@ class WorkflowStore:
 
     def _recover_peer_verdicts(self):
         with self.store._transaction(read_only=True) as cursor:
-            rows = _read_query(cursor, "sweep_escalated_reviews",
-                               {"owner_id": self.store.owner,
-                                "project_aliases": list(self.store.allowed_projects),
-                                "escalation_reason": PEER_WIRE_ERROR})
+            cursor.execute("""SELECT r.workflow_review_id,r.target_sha256,r.source_revision,t.project_alias,a.attempt_id,a.result_sha256
+              FROM forge_agent.coding_workflow_reviews r JOIN forge_agent.coding_workflows w USING(workflow_id)
+              JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(r.owner_id,r.project_alias,r.reviewer_task_id)
+              JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)
+              WHERE r.owner_id=%s AND r.project_alias=ANY(%s) AND r.target_kind='code' AND r.status='escalated'
+              AND w.phase='escalated' AND NOT w.enabled AND w.escalation_reason=%s AND t.status='awaiting_review'
+              AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL AND a.result_sha256 IS NOT NULL
+              AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=w.workflow_id AND x.source_key LIKE 'peer-verdict-replay:%%')
+              ORDER BY r.updated_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),PEER_WIRE_ERROR));rows=cursor.fetchall()
         for row in rows:
             try:self.retry_peer_verdict(project_alias=row['project_alias'],workflow_review_id=row['workflow_review_id'],
                 expected_revision=row['source_revision'],reviewer_attempt_id=row['attempt_id'],reviewer_result_sha256=row['result_sha256'],
@@ -874,22 +879,14 @@ class WorkflowStore:
                 or rec['stop_proof'].get('source')!='systemd' or rec['stop_proof'].get('unit_name')!=attempt['unit_name']):
                 raise Rejected(409,'reconcile_required')
             self._artifact(cursor,task_id,task['latest_attempt_id'])
-            rows = _read_query(cursor, "workflow_busy",
-                               {"workflow_id": w["workflow_id"],
-                                "owner_id": self.store.owner,
-                                "task_statuses": ["queued", "running", "cancel_requested", "failed", "needs_reconcile", "quota_blocked", "blocked_auth", "blocked_permission", "cancelled"],
-                                "include_attempts": True,
-                                "publication_statuses": ["pending", "checking", "publishing"]})
-            if rows[0]["busy"]:raise Rejected(409,'reconcile_required')
-            rows = _read_query(cursor, "max_review_no",
-                               {"owner_id": self.store.owner,
-                                "project_alias": project_alias, "task_id": task_id})
-            if rows[0]['latest']!=q['review_no']:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s AND p.status IN('pending','checking','publishing')) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",(w['workflow_id'],)*5)
+            if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
+            cursor.execute('SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s',
+                           (self.store.owner,project_alias,task_id))
+            if cursor.fetchone()['latest']!=q['review_no']:raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='checks',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-            ready = _read_query(cursor, "worker_readiness_fresh",
-                            {"owner_id": self.store.owner,
-                             "policy_digests": [x[0] for x in NATIVE_POLICIES.values()]})
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
             for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
                 required=recipe_from_snapshot(p,entry)
                 if not _ready_for_recipe(ready,project_alias,profile,mode,required):raise Rejected(503,'unavailable')
@@ -899,9 +896,19 @@ class WorkflowStore:
 
     def _recover_preparations(self):
         with self.store._transaction(read_only=True) as cursor:
-            rows = _read_query(cursor, "sweep_publication_failures",
-                               {"owner_id": self.store.owner,
-                                "project_aliases": list(self.store.allowed_projects)})
+            cursor.execute("""SELECT t.project_alias,t.id,t.revision,q.review_id,q.reconciliation_receipt_id FROM forge_agent.coding_tasks t
+              JOIN forge_agent.coding_workflows w USING(workflow_id) JOIN forge_agent.coding_reviews q
+              ON(q.owner_id,q.project_alias,q.task_id,q.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)
+              WHERE t.owner_id=%s AND t.project_alias=ANY(%s) AND t.workflow_required AND t.parent_task_id IS NOT NULL
+              AND t.mode='implement' AND t.status='awaiting_review' AND t.cancelled_at IS NULL
+              AND w.phase='escalated' AND NOT w.enabled AND w.escalation_reason='publication_command_failed'
+              AND q.status='handoff' AND q.phase='local' AND q.reason='publication_command_failed' AND q.candidate_commit IS NULL
+              AND q.verification->'checks_passed'='false'::jsonb AND q.verification->'checks'='[]'::jsonb
+              AND q.verification->'cleanup_confirmed'='true'::jsonb AND q.source_revision=t.revision
+              AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff'
+              AND q.finish_receipt->'outcome'->>'reason'='publication_command_failed'
+              AND q.infrastructure_retries<coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)),(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer)
+              ORDER BY q.updated_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects)));rows=cursor.fetchall()
         for row in rows:
             try:self.retry_preparation(project_alias=row['project_alias'],task_id=row['id'],expected_revision=row['revision'],
                 review_id=row['review_id'],reconciliation_receipt_id=row['reconciliation_receipt_id'],idempotency_key='prepare-retry-'+str(row['review_id']))
@@ -976,26 +983,16 @@ class WorkflowStore:
                 or rec['stop_proof'].get('source')!='systemd' or rec['stop_proof'].get('unit_name')!=attempt['unit_name']):
                 raise Rejected(409,'reconcile_required')
             self._artifact(cursor,task_id,task['latest_attempt_id'])
-            rows = _read_query(cursor, "workflow_busy",
-                               {"workflow_id": w["workflow_id"],
-                                "owner_id": self.store.owner,
-                                "task_statuses": ["queued", "running", "cancel_requested", "failed", "needs_reconcile", "quota_blocked", "blocked_auth", "blocked_permission", "cancelled"],
-                                "include_attempts": True,
-                                "publication_statuses": ["pending", "checking", "publishing"]})
-            if rows[0]["busy"]:raise Rejected(409,'reconcile_required')
-            rows = _read_query(cursor, "max_review_no",
-                               {"owner_id": self.store.owner,
-                                "project_alias": project_alias, "task_id": task_id})
-            if rows[0]['latest']!=q['review_no']:raise Rejected(409,'not_reviewable')
-            rows = _read_query(cursor, "action_source_count",
-                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner, "kind": None,
-                                "prefix": "source-readiness-delivery:"})
-            if rows[0]["used"]:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s AND p.status IN('pending','checking','publishing')) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",(w['workflow_id'],)*5)
+            if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
+            cursor.execute('SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s',
+                           (self.store.owner,project_alias,task_id))
+            if cursor.fetchone()['latest']!=q['review_no']:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT count(*) AS used FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND source_key LIKE 'source-readiness-delivery:%%'",(w['workflow_id'],))
+            if cursor.fetchone()['used']:raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='checks',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-            ready = _read_query(cursor, "worker_readiness_fresh",
-                            {"owner_id": self.store.owner,
-                             "policy_digests": [x[0] for x in NATIVE_POLICIES.values()]})
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
             for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
                 required=recipe_from_snapshot(p,entry)
                 if not _ready_for_recipe(ready,project_alias,profile,mode,required):raise Rejected(503,'unavailable')
@@ -1019,9 +1016,21 @@ class WorkflowStore:
 
     def _recover_source_readiness(self):
         with self.store._transaction(read_only=True) as cursor:
-            rows = _read_query(cursor, "sweep_handoff_reviews",
-                               {"owner_id": self.store.owner,
-                                "project_aliases": list(self.store.allowed_projects)})
+            cursor.execute("""SELECT t.project_alias,t.id,t.revision,q.review_id,r.receipt_id FROM forge_agent.coding_tasks t
+              JOIN forge_agent.coding_workflows w USING(workflow_id) JOIN forge_agent.coding_reviews q
+              ON(q.owner_id,q.project_alias,q.task_id,q.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)
+              JOIN forge_agent.coding_reconciliation_receipts r ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.revision)
+              WHERE t.owner_id=%s AND t.project_alias=ANY(%s) AND t.workflow_required AND t.parent_task_id IS NOT NULL
+              AND t.status='awaiting_review' AND t.cancelled_at IS NULL AND w.phase='escalated' AND NOT w.enabled
+              AND q.phase='local' AND q.status='handoff' AND q.candidate_commit IS NULL AND q.source_revision=t.revision
+              AND q.reason IN('review_unavailable','workspace_busy') AND w.escalation_reason=q.reason
+              AND q.infrastructure_retries IN((w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer,
+                coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id)),(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer))
+              AND q.infrastructure_retries>0 AND r.created_at>q.updated_at AND r.workspace_digest=q.workspace_digest
+              AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff'
+              AND q.finish_receipt->'outcome'->'verification'->'checks'='[]'::jsonb
+              AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions a WHERE a.workflow_id=w.workflow_id AND a.source_key LIKE 'source-readiness-delivery:%%')
+              ORDER BY r.created_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects)));rows=cursor.fetchall()
         for row in rows:
             try:self.defer_source_readiness(project_alias=row['project_alias'],task_id=row['id'],expected_revision=row['revision'],review_id=row['review_id'],
                 reconciliation_receipt_id=row['receipt_id'],idempotency_key='source-ready-'+str(row['review_id']))
@@ -1029,18 +1038,21 @@ class WorkflowStore:
 
     def recover(self,cursor):
         """Authoritative replay fills missed callbacks using immutable source keys."""
-        for w in _read_query(cursor, "workflows_open", {"owner_id": self.store.owner}):
-            tasks = _read_query(cursor, "tasks_with_attempts",
-                                {"owner_id": self.store.owner,
-                                 "project_alias": w["project_alias"],
-                                 "workflow_id": w["workflow_id"]})
-            root = next((t for t in tasks if t["id"] == w["root_task_id"]), None)
-            floor = revival_floor(cursor, self.store.owner, w["workflow_id"])
+        cursor.execute("SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND phase NOT IN('completed','cancelled','escalated') ORDER BY created_at",(self.store.owner,))
+        for w in cursor.fetchall():
+            cursor.execute("SELECT t.*,a.phase AS attempt_phase,a.result_sha256,a.reservation_active,a.lease_expires_at,a.published_at,a.summary AS attempt_summary,a.outcome AS attempt_outcome FROM forge_agent.coding_tasks t LEFT JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id) WHERE t.owner_id=%s AND t.project_alias=%s AND t.workflow_id=%s ORDER BY t.created_at",(self.store.owner,w['project_alias'],w['workflow_id']))
+            tasks=cursor.fetchall()
+            root=next((t for t in tasks if t['id']==w['root_task_id']),None)
+            floor=revival_floor(cursor,w['workflow_id'])
+            retained=retained_sources(cursor,w['workflow_id'])
+            if any(not any(is_retained_source(t,[binding]) for t in tasks) for binding in retained):
+                self._escalate(cursor,w,'Incident continuation source could not be verified; reconciliation is required.')
+                continue
             # A guarded revival keeps earlier cancelled tasks terminal; they are
             # history, not a reason to cancel or escalate the revived workflow.
-            tasks = [t for t in tasks if not superseded_by_revival(t, floor)]
-            if root is not None and root["status"] in {"cancelled", "cancel_requested"} and floor is None:
-                self._cancel_workflow(cursor, w, "Workflow root task was cancelled.")
+            tasks=[t for t in tasks if not superseded_by_revival(t,floor) and not is_retained_source(t,retained)]
+            if root is not None and root['status'] in {'cancelled','cancel_requested'} and floor is None and not is_retained_source(root,retained):
+                self._cancel_workflow(cursor,w,'Workflow root task was cancelled.')
                 continue
             try:self._current_policy(w)
             except Rejected:self._escalate(cursor,w,'Workflow delegation or role grant is no longer current.');continue
@@ -1094,9 +1106,11 @@ class WorkflowStore:
                         else:self._phase(cursor,w,'publishing')
             cursor.execute("SELECT enabled,phase FROM forge_agent.coding_workflows WHERE workflow_id=%s",(w['workflow_id'],));active=cursor.fetchone()
             if not active or not active['enabled'] or active['phase'] in {'completed','cancelled','escalated'}:continue
-            rows = _read_query(cursor, "published_with_green",
-                               {"workflow_id": w["workflow_id"], "owner_id": self.store.owner})
-            for p in rows:
+            cursor.execute("""SELECT p.*,q.candidate_commit,q.gate_manifest_sha256 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id)
+              JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.repair_task_id IS NULL AND q.owner_decision->>'closed_by'='peer_reviewer'
+              AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha ORDER BY h.observed_at DESC,h.observation_id DESC LIMIT 1) IS TRUE ORDER BY p.created_at DESC""",(w['workflow_id'],))
+            for p in cursor.fetchall():
+                if any(binding['id']==str(p['task_id']) for binding in retained):continue
                 if not w['snapshot']['auto_merge']:continue
                 cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,source_publication_id) VALUES(%s,%s,%s,'merge',%s,%s) ON CONFLICT DO NOTHING",(w['workflow_id'],self.store.owner,w['project_alias'],str(p['publication_id'])+':'+p['commit_sha'],p['publication_id']))
                 cursor.execute("UPDATE forge_agent.coding_workflows SET phase='merging',updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('cancelled','escalated','completed')",(w['workflow_id'],))
@@ -1127,21 +1141,15 @@ class WorkflowStore:
         with self._transaction() as cursor:
             for project in sorted(self.store.allowed_projects):self._project_lock(cursor,project)
             self.recover(cursor)
-            # The lease composite claims the oldest pending (or expired)
-            # review/decide action atomically; to_jsonb renders UUIDs and
-            # timestamps as strings, so restore the native types the
-            # process() job contract carries (notably lease_token, which
-            # process() compares against the re-read action row).
-            action = _composite(cursor, self.store.owner,
-                                "workflow_action_lease", worker_id)
+            cursor.execute("""SELECT a.* FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w ON w.workflow_id=a.workflow_id WHERE a.owner_id=%s AND a.kind IN('review','decide') AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated') AND(a.status='pending' OR(a.status='leased' AND a.lease_expires_at<=clock_timestamp())) ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(self.store.owner,))
+            action=cursor.fetchone()
             if not action:return None
-            return dict(_restore_action_job(action))
+            cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='leased',worker_id=%s,lease_token=gen_random_uuid(),lease_expires_at=clock_timestamp()+interval '60 seconds',updated_at=clock_timestamp() WHERE action_id=%s RETURNING *",(worker_id,action['action_id']))
+            return dict(cursor.fetchone())
 
     def _artifact(self,cursor,task_id,attempt_id):
-        rows = _read_query(cursor, "attempt_result_content",
-                           {"owner_id": self.store.owner, "task_id": task_id,
-                            "attempt_id": attempt_id})
-        a = rows[0] if rows else None
+        cursor.execute("SELECT a.result_sha256,a.result_byte_count,a.phase,a.reservation_active,a.lease_expires_at,string_agg(c.content,'' ORDER BY c.chunk_index) AS content FROM forge_agent.coding_attempts a JOIN forge_agent.coding_result_chunks c ON(c.owner_id,c.project_alias,c.task_id,c.attempt_id)=(a.owner_id,a.project_alias,a.task_id,a.attempt_id) WHERE a.owner_id=%s AND a.task_id=%s AND a.attempt_id=%s GROUP BY a.owner_id,a.project_alias,a.task_id,a.attempt_id",(self.store.owner,task_id,attempt_id))
+        a=cursor.fetchone()
         if not a or a['phase']!='stopped' or a['reservation_active'] or a['lease_expires_at'] is not None or a['content'] is None or len(a['content'].encode())!=a['result_byte_count'] or hashlib.sha256(a['content'].encode()).hexdigest()!=a['result_sha256']:raise Rejected(409,'result_mismatch')
         return a
 
@@ -1150,9 +1158,7 @@ class WorkflowStore:
         with self._transaction() as cursor:
             self._project_lock(cursor,job["project_alias"])
             # Task -> peer review -> action is shared with owner/cancel paths.
-            rows = _read_query(cursor, "review_root_tasks",
-                               {"workflow_review_id": job["workflow_review_id"], "owner_id": self.store.owner})
-            identity = rows[0] if rows else None
+            cursor.execute("SELECT r.source_task_id,w.root_task_id FROM forge_agent.coding_workflow_reviews r JOIN forge_agent.coding_workflows w USING(workflow_id) WHERE r.workflow_review_id=%s",(job['workflow_review_id'],));identity=cursor.fetchone()
             if not identity:return
             if identity['root_task_id']!=identity['source_task_id']:
                 cursor.execute("SELECT id FROM forge_agent.coding_tasks WHERE owner_id=%s AND id=%s FOR UPDATE",(self.store.owner,identity['root_task_id']))
@@ -1305,7 +1311,15 @@ class WorkflowStore:
                 if review['target_kind']=='code' and not event_exhausted:
                     self.retry_events.bind_review(cursor,review['source_review_id'],retry_event['event_id'],'peer-revision.'+source)
 
-        if decision=='escalate' or event_exhausted or(review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
+        incident_budget_spent=False
+        if decision=='revise' and retained_sources(cursor,w['workflow_id']):
+            spent=w['plan_revisions']
+            if review['target_kind']=='code':
+                cursor.execute('SELECT repair_rounds FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
+                    (self.store.owner,w['project_alias'],w['root_task_id']))
+                budget=cursor.fetchone();spent=budget['repair_rounds'] if budget else 0
+            incident_budget_spent=spent>=self._retry_limit(w,'max_plan_revisions' if review['target_kind']=='plan' else 'max_code_revisions')
+        if decision=='escalate' or event_exhausted or incident_budget_spent or(review['target_kind']=='plan' and decision=='revise' and self.retry_events is None and w['plan_revisions']>=self._retry_limit(w,'max_plan_revisions')):
             self._escalate(cursor,w,verdict['summary'],cause='review_verdict' if decision=='escalate' else 'retry_exhausted' if event_exhausted else 'budget_exhausted')
             receipt={'status':'escalated','workflow_id':str(w['workflow_id'])}
         elif review['target_kind']=='plan':
@@ -1407,7 +1421,7 @@ class WorkflowCoordinatorFactory:
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,execution_policy_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,peer_feedback_recovery_factory=None,superseding_review_factory=None,execution_policy_factory=None,policy_compatibility_factory=None,retry_events=_INHERIT_RETRY_EVENTS):
         self.config,self.catalog,self.store=config,catalog,store
         self.retry_events=getattr(store,'retry_events',None) if retry_events is _INHERIT_RETRY_EVENTS else retry_events
         self.reviewer_correction_factory=reviewer_correction_factory
@@ -1415,6 +1429,7 @@ class WorkflowStoreFactory:
         self.peer_feedback_recovery_factory=peer_feedback_recovery_factory
         self.superseding_review_factory=superseding_review_factory
         self.execution_policy_factory=execution_policy_factory
+        self.policy_compatibility_factory=policy_compatibility_factory
     def create(self):
         from work_reviewer_correction import ReviewerCorrectionFactory
         from work_context_recovery import FeedbackRecoveryFactory
@@ -1422,6 +1437,9 @@ class WorkflowStoreFactory:
         from work_superseding_review import SupersedingReviewFactory
         from work_provider_model_route import ExecutionPolicyFactory
         flow=WorkflowStore(self.config,self.catalog,self.store,retry_events=self.retry_events)
+        flow.policy_compatibility=(self.policy_compatibility_factory or WorkflowPolicyFactory)(self.config,self.catalog).create()
+        if not callable(getattr(flow.policy_compatibility,'select',None)):
+            raise TypeError('Workflow policy compatibility requires a ready selector')
         flow.execution_policy=(self.execution_policy_factory or ExecutionPolicyFactory)(flow).create()
         if not all(callable(getattr(flow.execution_policy,name,None))for name in('effective','run_once','handles_quota')):
             raise TypeError('Execution policy requires a ready generation selection port')
@@ -1461,15 +1479,13 @@ REFUSAL_REASONS = frozenset({
 })
 
 
-def revival_floor(cursor, owner_id, workflow_id):
+def revival_floor(cursor, workflow_id):
     """Return the timestamp of the latest completed revival, or None."""
-    from proxy_client import run_read_query
-    rows = run_read_query(cursor, "revival_floor", {
-        "workflow_id": str(workflow_id),
-        "owner_id": owner_id,
-        "source_key_pattern": REVIVAL_SOURCE_PREFIX + '%',
-    })
-    return rows[0]['floor'] if rows else None
+    cursor.execute("""SELECT max(created_at) AS floor FROM forge_agent.coding_workflow_actions
+      WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s""",
+        (workflow_id, REVIVAL_SOURCE_PREFIX + '%'))
+    row = cursor.fetchone()
+    return row['floor'] if row else None
 
 
 def superseded_by_revival(task, floor):
@@ -1569,13 +1585,9 @@ def _revive(flow, cursor, w, prior, key, intent, note, actor):
         plan = cursor.fetchone()
     if not plan or plan['decision'] != 'resume' or plan['task_id'] != root['id']:
         raise Refused('plan_not_approved', 'The workflow Plan was never approved; revival needs an approved Plan.')
-    from proxy_client import run_read_query
-    revival_rows = run_read_query(cursor, "revival_decide_count", {
-        "workflow_id": str(w['workflow_id']),
-        "owner_id": store.owner,
-        "source_key_pattern": REVIVAL_SOURCE_PREFIX + '%',
-    })
-    if revival_rows[0]['n'] >= REVIVAL_LIMIT:
+    cursor.execute("SELECT count(*) AS n FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE %s",
+                   (w['workflow_id'], REVIVAL_SOURCE_PREFIX + '%'))
+    if cursor.fetchone()['n'] >= REVIVAL_LIMIT:
         raise Refused('revival_limit', 'This workflow already used its bounded revivals.')
     cursor.execute('SAVEPOINT workflow_revival_grant')
     cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='implement',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",

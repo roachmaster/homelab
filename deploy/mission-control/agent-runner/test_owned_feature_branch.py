@@ -10,7 +10,7 @@ from work_agent_branch import AgentBranchPolicy, validate_profile_branch
 from work_config import WorkProfile
 from work_executor import ExecutionError, WorkspaceProvider
 from work_policy import POLICY_ID
-from work_worker_config import parse_config
+from work_worker_config import parse_config, verify_recipe
 from test_work_executor import raw_config, lease
 
 
@@ -19,6 +19,31 @@ def git(path, *args):
 
 
 class OwnedFeatureBranchTest(unittest.TestCase):
+    def test_codex_author_feature_branch_and_enforced_readonly_reviewer(self):
+        with TemporaryDirectory() as root:
+            raw = raw_config(root)
+            raw['profiles'] = {'codex-author': {'backend':'codex','model':'fixture-model',
+                'modes':['plan','implement'],'branch':'feature/codex'}}
+            raw['binaries'] = {'codex':'/usr/bin/true'}
+            raw['allow_implement'] = True
+            author_config = parse_config(raw)
+            repository, base = self.seed(author_config)
+            provider = WorkspaceProvider(author_config); provider.prepare()
+            assignment = {**lease(author_config,backend='codex',mode='implement'),
+                          'agent_profile':'codex-author','base_revision':base}
+            with provider.acquire(assignment) as workspace:
+                self.assertEqual(git(workspace.path,'branch','--show-current'),'feature/codex')
+            raw['profiles'] = {'codex-primary': {'backend':'codex','model':'fixture-model','modes':['review']}}
+            reviewer_config = parse_config(raw)
+            review = {**lease(reviewer_config,backend='codex',mode='review'),'agent_profile':'codex-primary','base_revision':base}
+            self.assertTrue(verify_recipe(reviewer_config,review))
+            self.assertFalse(verify_recipe(reviewer_config,{**review,'mode':'implement',
+                'recipe':{**review['recipe'],'mode':'implement'}}))
+            reviewer = WorkspaceProvider(reviewer_config); reviewer.prepare()
+            with reviewer.acquire(review) as workspace:
+                self.assertEqual(git(workspace.path,'rev-parse','--abbrev-ref','HEAD'),'HEAD')
+            self.assertEqual(git(repository,'branch','--show-current'),'main')
+
     def config(self, root):
         raw = raw_config(root)
         raw['profiles'] = {'grok-primary': {'backend': 'grok', 'model': 'fixture-model',
