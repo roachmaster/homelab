@@ -1195,7 +1195,7 @@ CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '0618692a67377f33869343d
 # so this context heads the qualification chain for exactly those files.
 PG_PROXY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': '97348b5db6d9c5eac164bb54e5c6c134ba6a61116e108595fcc56f95a1a16535',
-    'deploy/mission-control/agent-runner/test_work_event_attribution.py': '17d91b292c5bfe30d75d866f59a795058efd45717236ff91b95dc01bcece8a01',
+    'deploy/mission-control/agent-runner/test_work_event_attribution.py': '6e069145d92e120ee0249a15408e78525c0b5d91d610490a5e5a8110ce83adf7',
     'deploy/mission-control/agent-runner/work_owner_control.py': '38a3edda0caec8f079deb6533592f48786254038f3016423754b15ff652185a0',
     'deploy/mission-control/agent-runner/work_owner_reverification.py': '28c6f3314a4f93ab007299cca3234452bc84f0de72022c9726506930b3bd11b6',
     'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
