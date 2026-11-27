@@ -32,6 +32,8 @@ pub mod work_read_scope;
 pub mod work_rows;
 pub mod work_store;
 pub mod worker;
+pub mod worker_adapter;
+pub mod worker_adapter_reconciler;
 pub mod worker_context;
 
 pub use branch::{AgentBranch, AgentBranchUpsert};

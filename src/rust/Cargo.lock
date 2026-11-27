@@ -662,6 +662,7 @@ dependencies = [
  "chrono",
  "forge-core",
  "forge-work",
+ "forge-work-worker",
  "serde_json",
  "sha2 0.10.9",
  "tokio",
