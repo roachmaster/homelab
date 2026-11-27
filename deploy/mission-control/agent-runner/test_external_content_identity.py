@@ -205,6 +205,7 @@ class ExternalIdentityAdmissionTest(unittest.TestCase):
 
     def test_frozen_protocol_reaches_prepare_and_native_reviewer_through_real_database_ports(self):
         from work_artifact_identity import ArtifactEntry,ArtifactManifest
+        from work_ci_contract import EVENT_PROFILE
         from work_external_workflow import derive_branch_scope
         _,_,flow,_=self.submit_plan()
         self.review(flow)
@@ -221,8 +222,9 @@ class ExternalIdentityAdmissionTest(unittest.TestCase):
         candidate={'candidate_commit':'c'*40,'candidate_tree':'d'*40,'integration_base':'a'*40,
             'author_candidate_commit':'b'*40,'source_branch':'feat/content',
             'branch_scope':derive_branch_scope(candidate_commit='c'*40,expected_main='a'*40,source_branch='feat/content'),
-            'diff_sha256':'e'*64,'verification_profile':'owned-tests','gate_source_sha256':'f'*64,
-            'gate_manifest_sha256':'1'*64,'protected_gate_changes':[],'prepare_action_id':action.action_id,
+            'diff_sha256':'e'*64,'verification_profile':EVENT_PROFILE,'gate_source_sha256':'f'*64,
+            'gate_manifest_sha256':EVENT_PROFILE+':'+derive_branch_scope(candidate_commit='c'*40,expected_main='a'*40,source_branch='feat/content'),
+            'protected_gate_changes':[],'prepare_action_id':action.action_id,
             'content_identity':reference,'identity_protocol':'content-v2'}
         self.delivery.checkpoint(action,{'status':'passed','receipt':candidate,'summary':'Prepared source'})
         self.assertTrue(flow.run_once())

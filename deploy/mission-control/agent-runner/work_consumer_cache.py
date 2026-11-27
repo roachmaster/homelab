@@ -122,7 +122,7 @@ class ScopedConsumerCacheProvider:
         self.provider = provider if provider is not None else ConsumerCacheProvider()
 
     def prepare(self, workspace, scratch):
-        if workspace.repository not in self.repositories:
+        if (getattr(workspace, 'source_repository', None) or workspace.repository) not in self.repositories:
             return ()
         return self.provider.prepare(workspace, scratch)
 

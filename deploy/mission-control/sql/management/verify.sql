@@ -3,6 +3,7 @@
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
+\ir verify-agent-feature-branches.sql
 \ir verify-author-handoff.sql
 
 -- Validate M33 review lineage before exact predecessor normalization.
@@ -550,6 +551,10 @@ BEGIN
         -- expression (the exemption above already gates its validity).
         IF expected.relname='coding_events' AND expected.conname='coding_events_progress_check' THEN
             actual_expression:=regexp_replace(actual_expression, ' NOT VALID$', '');
+        END IF;
+        IF expected.relname='coding_publications' AND expected.conname='coding_publications_branch_check'
+           AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=51) THEN
+            actual_expression:=expected.definition;
         END IF;
         IF expected.definition IS NOT NULL THEN
             actual_tokens := ARRAY(

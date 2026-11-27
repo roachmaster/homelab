@@ -137,6 +137,8 @@ class WorkspaceLease:
     git_directory: Path
     task_id: str
     base_revision: str
+    source_repository: Path | None = None
+    execution_branch: str | None = None
 
     def digest(self):
         """Hash actual bounded workspace bytes, including ignored/untracked files.
@@ -158,6 +160,21 @@ class WorkspaceLease:
         return self._digest(source_only=True)
 
     def _digest(self, *, source_only=False):
+        if self.source_repository is not None:
+            try:
+                common = Path(_git(self.path, 'rev-parse', '--path-format=absolute', '--git-common-dir').decode().strip())
+                if self.repository.is_symlink() or common.resolve() != self.repository.resolve():
+                    raise ExecutionError('needs_reconcile', 'The task Git repository changed.')
+            except ExecutionError:
+                raise ExecutionError('needs_reconcile', 'The task Git repository could not be verified.') from None
+        if self.execution_branch is not None:
+            try:
+                branch = _git(self.path, 'symbolic-ref', '--quiet', 'HEAD').decode().strip()
+                head = _git(self.path, 'rev-parse', 'HEAD').decode().strip()
+            except ExecutionError:
+                raise ExecutionError('needs_reconcile', 'The assigned feature branch is unavailable.') from None
+            if branch != 'refs/heads/' + self.execution_branch or head != self.base_revision:
+                raise ExecutionError('needs_reconcile', 'The assigned feature branch or pinned base changed.')
         digest = hashlib.sha256(b"forge-workspace-v1\0")
         digest.update(self.base_revision.encode("ascii"))
         total = count = 0
@@ -248,6 +265,21 @@ class WorkspaceProvider:
             try:
                 expected = {"task_id": task, "project_alias": lease["project_alias"],
                             "repository": str(repository), "base_revision": lease["base_revision"]}
+                profile = getattr(self.config, 'profiles', {}).get(lease.get('agent_profile'))
+                branch = getattr(profile, 'branch', None)
+                feature_branch = branch if isinstance(branch, str) and branch.startswith('feature/') else None
+                owned_branch = feature_branch if lease.get('mode') == 'implement' else None
+                execution_repository = repository
+                if feature_branch is not None:
+                    # Each preserved task owns its branch ref and Git metadata.
+                    # A later repair never detaches or resets an older workspace.
+                    canonical_git = Path(_git(repository, 'rev-parse', '--absolute-git-dir').decode().strip())
+                    execution_repository = canonical_git / 'forge-execution-repositories' / (task + '.git')
+                    if (execution_repository.is_symlink() or execution_repository.parent.is_symlink()
+                            or execution_repository.parent.resolve() != canonical_git.resolve() / 'forge-execution-repositories'):
+                        raise ExecutionError('needs_reconcile', 'The owned repository path changed.')
+                    expected.update(execution_branch=feature_branch,
+                                    execution_repository=str(execution_repository))
                 if path.is_symlink() or metadata_path.is_symlink():
                     raise ExecutionError("needs_reconcile", "Task workspace identity could not be verified.")
                 materialized = not path.exists()
@@ -265,7 +297,17 @@ class WorkspaceProvider:
                                     lease["base_revision"] + "^{commit}").decode().strip()
                     if revision != lease["base_revision"]:
                         raise ExecutionError("failed", "The pinned base revision is unavailable.")
-                    _git(repository, "worktree", "add", "--detach", "--lock", str(path), revision)
+                    if feature_branch is not None:
+                        execution_repository.parent.mkdir(mode=0o700, exist_ok=True)
+                        if execution_repository.exists() or execution_repository.is_symlink():
+                            raise ExecutionError('needs_reconcile', 'The owned branch repository already exists without its workspace.')
+                        _git(repository, 'clone', '--bare', '--no-local', '--single-branch',
+                             '--branch', 'main', str(repository), str(execution_repository))
+                        _git(execution_repository, 'fetch', '--no-tags', '--no-write-fetch-head',
+                             str(repository), revision)
+                        _git(execution_repository, 'worktree', 'add', '--detach', '--lock', str(path), revision)
+                    else:
+                        _git(repository, "worktree", "add", "--detach", "--lock", str(path), revision)
                     with metadata_path.open("x", encoding="utf-8") as stream:
                         json.dump(expected, stream, sort_keys=True)
                 else:
@@ -281,12 +323,26 @@ class WorkspaceProvider:
                 if head != lease["base_revision"]:
                     raise ExecutionError("needs_reconcile", "The task workspace revision has changed.")
                 git_directory = Path(_git(path, "rev-parse", "--absolute-git-dir").decode().strip())
-                approved_git = Path(_git(repository, "rev-parse", "--absolute-git-dir").decode().strip())
+                approved_git = Path(_git(execution_repository, "rev-parse", "--absolute-git-dir").decode().strip())
+                if feature_branch is not None:
+                    common = Path(_git(path, 'rev-parse', '--path-format=absolute', '--git-common-dir').decode().strip())
+                    if common.resolve() != execution_repository.resolve():
+                        raise ExecutionError('needs_reconcile', 'The owned common Git repository changed.')
                 if ((path / ".git").is_symlink()
                         or not git_directory.is_relative_to(approved_git / "worktrees")
                         or (git_directory / "gitdir").read_text().strip() != str(path / ".git")):
                     raise ExecutionError("needs_reconcile", "The task Git directory is not the approved isolated worktree.")
-                workspace = WorkspaceLease(path, repository, git_directory, task, lease["base_revision"])
+                if owned_branch is not None:
+                    actual_branch = _git(path, 'rev-parse', '--abbrev-ref', 'HEAD').decode().strip()
+                    if (actual_branch == 'HEAD' and create
+                            and not _git(execution_repository, 'branch', '--list', owned_branch).strip()):
+                        _git(path, 'checkout', '-b', owned_branch)
+                        actual_branch = owned_branch
+                    if actual_branch != owned_branch:
+                        raise ExecutionError('needs_reconcile', 'The task is no longer on its assigned feature branch.')
+                workspace = WorkspaceLease(path, execution_repository, git_directory, task, lease["base_revision"],
+                                           source_repository=repository if feature_branch else None,
+                                           execution_branch=owned_branch)
                 resumed = lease.get("resume_workspace_digest")
                 actual_digest = (workspace.source_digest if materialized and linked_candidate_input(lease)
                                  else workspace.digest)
@@ -877,6 +933,8 @@ class SystemdSupervisor:
                         (".gemini" if invocation.backend == "antigravity" else ".codex"))
         binary = Path(invocation.argv[0])
         readonly = [invocation.workspace.repository, binary]
+        if invocation.workspace.source_repository is not None:
+            readonly.append(invocation.workspace.source_repository)
         for ancestor in (account.home / "repos/AGENTS.md", account.home / "repos/mission-control/AGENTS.md"):
             if ancestor.is_file():
                 readonly.append(ancestor)
@@ -942,11 +1000,12 @@ class SystemdSupervisor:
             readonly_bindings.append(str(registry) + ":" + str(CHILD_STATE / "cargo-home/registry"))
         if verification:
             browser = Path("src/rust/forge-ide-web/tests/browser")
-            dependencies = invocation.workspace.repository / browser / "node_modules"
+            source_repository = invocation.workspace.source_repository or invocation.workspace.repository
+            dependencies = source_repository / browser / "node_modules"
             if dependencies.is_dir():
                 target = invocation.cwd / browser / "node_modules"
                 lock = invocation.cwd / browser / "package-lock.json"
-                source_lock = invocation.workspace.repository / browser / "package-lock.json"
+                source_lock = source_repository / browser / "package-lock.json"
                 if (target.is_symlink() or not target.is_dir()
                         or not target.resolve().is_relative_to(invocation.cwd.resolve())
                         or not lock.is_file() or lock.read_bytes() != source_lock.read_bytes()):

@@ -1,3 +1,297 @@
+# Current: Qualify Grok feature-branch runtime and publication — 2026-11-27
+
+Completed runtime correction47789e90, published on feature/codex and deployed.
+API, Grok worker and publisher explicitly resolve grok-primary to feature/grok;
+their original workflow policy snapshot is byte-equivalent. Legacy defaults and
+historical frozen task/branch/CI receipts are preserved. Other agent profiles were
+not silently reassigned. Main remains untouched; future integration retains CI.
+
+Native feature validation is scoped to each known agent profile; wrong-agent
+feature refs, main, malformed refs and ephemeral task refs remain rejected.
+New feature-assigned tasks get independent private bare repositories under the
+canonical Git directory, with no shared objects/alternates. Read-only Plan/Review
+keeps its pinned detached snapshot; implementation attaches the exact owned
+feature branch. Plan-to-implementation retains metadata/.git bytes/resume digest;
+stopped dirty workspaces survive and never block or reset another task's branch.
+Canonical cache/browser provenance and exact common-Git-directory, branch/head
+and symlink checks remain enforced. No existing workspace is silently migrated.
+
+Additive migration0051_agent_feature_branches changes only the coding_publications
+branch constraint and two publication branch checks. It preserves all other scope,
+profile, epoch, candidate, token, audit and idempotency checks. Strict source/owner/
+language/return/ACL verification precedes exact predecessor normalization. Existing
+migrations and the deferred destructive digest-column drop remain untouched.
+
+Validation passed:50 branch/executor/cache/SQL tests;52 upgrade/owner/reader tests;
+34 Jenkins source-boundary tests after adding the new verifier to its closed
+inventory; native delivery/content identity tests; and real Git-only systemd
+sandbox proofs, including the actual /home/lrocha/repos/homelab source path.
+Those probes saw feature/grok, read Git status and wrote the owned workspace,
+without invoking a model or changing the canonical checkout. Independent Python
+and SQL reviews found no outstanding blockers.
+
+A root-private physical schema50 copy passed strict before/after verification,
+50-to51 upgrade and idempotent reapply. All task/event/workflow/control-receipt
+row counts and full-row fingerprints matched before/after. Logical pg_dump
+rehearsals exposed representation differences in explicit-owner ACLs and CHECK
+parse trees; no production verifier was relaxed to accommodate those artifacts.
+The live upgrade also preserved every task/event/workflow/control receipt, and
+setup-postgres.sh --check passed. No grants, credentials or model settings changed.
+Root-private backup/rehearsal/configuration/activation receipts:
+`/opt/homelab-forge/operations/grok-feature-runtime-20261127/`.
+Runtime source: `/opt/homelab-forge/releases/grok-feature-47789e90d93c/source`.
+
+Execution hold released after matched qualification. Grok claimed97711535 as
+attempt2b8b1532-a09c-45d4-9db4-43c9a0f7229f at2026-11-27T03:49:57.722964Z;
+the task is running its read-only Plan step, with Codex independent review next.
+Implementation/publication will use feature/grok. All nine services are active.
+Shared repo/landing AGENTS notes explain that the older prompt's pending-hold
+statement is superseded and deployed schema51 must be accounted for explicitly
+before any new migration. This does not revive earlier operator-cancelled work.
+
+# Previous checkpoint: Muse proxy task reassigned to Grok — 2026-11-27
+
+User explicitly requested replacing Muse with Grok or AGY. Selected Grok, the
+existing native default, without another project-policy change. New task
+97711535-4007-4bec-b995-67d90c560ead / workflow e1683a99-9d9e-4155-88bc-8129840301a2
+is queued for grok-primary with codex-primary independent review. Its prompt
+links the original request/acceptance, prior plan artifact and read-only Muse
+source, requires a fresh reviewed plan and feature/grok-only edits/publication.
+Only after verifying this successor, cancelled original Muse workflow b3a05d8a
+through the normal operator API, retaining every task/artifact/review/event.
+Original task6fdff749 remains historical, not falsely completed.
+
+Execution is held: native Grok config resolves forge/agent/grok-primary; Python
+native profile/branch validation and SQL native publication receipt validation
+still require forge/*, so merely changing a prompt/config cannot qualify
+feature/grok. Grok worker was idle and stopped before admission. No attempt or
+branch reservation exists for the new task. Do not start it before an explicitly
+qualified branch-policy transition; preserve all other workflow identities.
+An explicit root-owned systemd condition preserves this hold across reboot:
+`/etc/systemd/system/forge-grok-worker.service.d/~owned-branch-hold.conf`, gated by
+`/opt/homelab-forge/operations/muse-to-grok-20261127/execution.hold`.
+Remove the hold only after feature/grok admission, execution and publication are
+qualified. The API and all other worker/portal/MCP services remain running.
+Evidence: `/opt/homelab-forge/operations/muse-to-grok-20261127/`.
+
+Admission exposed the same strict response/audit mismatch as cancellation:
+WorkStore.submit durably records actor, but Rust WorkSubmitted has no actor field.
+The first request committed one task then portal returned503. Never submit a new
+key on that response; verify/replay the original key. Root is applying the same
+public response projection while retaining the full audited admission receipt.
+Correction a1b0d44d is now published and live in the API-only release
+`/opt/homelab-forge/releases/admission-response-a1b0d44d370b/source`. All27 API
+tests passed; independent review found no blockers. Two authenticated same-key
+live submission replays returned202 and the same task UUID, without creating
+another task or starting an attempt. Queue counts are active1, attention13,
+history48, all62. No global project defaults or frozen identities were changed.
+
+# Previous checkpoint: Root-cause analysis and contract-name handoff correction — 2026-11-27
+
+Code/history/production-evidence review confirms two separate completion blockers.
+No CPU or hashing-performance claim is made: the evidence establishes control-flow
+rejection, repeated work and disabled workflow admission.
+
+## Root cause 1: Contract-name migration missed the preparation consumer
+
+The v2/v3 Jenkins producer emits `<profile>:<branch_scope>` from
+work_external_delivery.jenkins_gate_manifest. Jenkins and the release actor accept
+that named contract. Protected successful main receipt b5727985-b846-4ed4-a65a-e969b6ee1623
+verified a3ec03b8 with forge-sdlc-jenkins-v3:main and cleanup confirmed.
+
+But ExternalWorkflowStore._step still grouped gate_manifest_sha256 with actual
+diff/source hashes and required all three to be64hex. An effect-free reproduction
+through the actual installed predecessor queued review with the legacy gate and
+raised 'Candidate lacks exact gate/diff digests' for the corresponding named gate.
+run_once catches that ValueError, rolls back the step, then escalates the workflow
+with the generic 'Workflow input could not be verified: ValueError' reason.
+This is an incomplete protocol migration, enabled by duplicate gate validators
+and a legacy field name that no longer describes the gate's value type.
+
+Correction b541ad5f, published on feature/codex: producer/consumer share a pure
+closed gate-reference validator in work_ci_contract. The consumer accepts named
+contracts or historical64hex receipts, binds names to the exact prepared profile
+and branch scope, and retains strict diff/source hashes, commit/tree/base checks,
+independent review and content-v2 generation checks. No privileged verifier or
+actor pins, SQL grants, schema, task identities or audit records were weakened.
+
+Validation:20 contract/handoff tests and36 external-flow/content-identity/main-refresh
+integration tests passed with no skips; an additional real disposable-PostgreSQL
+named-gate content-v2 handoff test passed. Independent read-only review found no
+blocking findings. The root-sealed source's eight handoff tests also passed as
+forge_agent before API activation. Runtime evidence and deployment state:
+`/opt/homelab-forge/operations/workflow-gate-20261127/state.json`.
+API source: `/opt/homelab-forge/releases/workflow-gate-b541ad5fa163/source`.
+Other workers retain their compatible named-gate producer release. Main has not
+been pushed or merged; future main integration retains its required CI.
+
+Important limit: live Muse workflow b3a05d8a is repair, active task b178c144 is
+queued, external assignment generation0, with no returned artifact/prepared
+candidate. The mismatch was a confirmed next-preparation blocker; it is not an
+observed explanation for this currently unclaimed assignment. MCP SQL/heartbeat
+access alone supplies no task-claim or push-notification tool. Check whether the
+designated external author polls its approved assignment API before retrying it.
+
+## Root cause 2: Default-agent changes invalidate preserved workflow authority
+
+Actual database records show15 workflows with frozen AGY author policy25ce3a1e,
+Codex reviewer, and completed AGY-to-codex-author handoffs at
+2026-11-26T02:50:13.170523Z through02:50:14.561583Z. At03:15:34.768146Z through
+03:15:34.880456Z, the coordinator emitted14 cancellations (12roots and2children)
+plus one cancellation request for running root21f9d7d6. Its worker recorded final
+cancellation at03:15:50.590580Z. All15 workflow reasons are exactly 'Workflow
+delegation or role grant is no longer current.' A later03:33:21.563043Z workflow
+bbd6bab5 freezes the Grok default policy75856ff2, retaining the same Codex reviewer.
+
+The historical selected0070e78f coordinator compares the newly configured project
+snapshot digest with each workflow's frozen snapshot, then permits only budget
+changes through budget_compatible_snapshot. Actual-snapshot comparison returns
+False: author profile and author Plan/Implement recipe identities differ. The
+coordinator rejects before execution_policy.effective can consider valid handoff
+authority. Its catch routes every such Rejected to _escalate, which disables the
+workflow, cancels queued children, requests running cancellation, hands off pending
+actions and resolves retry scopes. No model invocation or exhausted retry budget
+is necessary to explain this synchronized batch.
+
+Current work_store.policy_drifted can compare catalog documents without their
+policy_digest field. Those15 legacy workflows have no workflow-policy identity
+attachments, so they still use the legacy comparison. The historical0070 source
+had no identity-catalog fence at all. Removing hashes cannot fix the semantic
+coupling: comparing these documents directly still observes changed defaults.
+Increasing retry limits and invoking audited revival alone also cannot fix it:
+revival calls _grant, which calls the same _current_policy and refuses grant_not_covered.
+
+Required correction remains explicit versioned compatibility for frozen workflow
+authority, checked with current grants and effective handoff authority; typed
+deferral for compatible/transient configuration changes; distinct revocation and
+operator-cancellation semantics; and an exact incident-bound recovery manifest.
+Seven of the original15 workflows were subsequently retired by the operator and
+must stay cancelled. Only the remaining eight are incident-recovery candidates,
+subject to their preserved source/attempt/plan/receipt and readiness checks.
+No workflow recovery, counter reset, snapshot rewrite or new model run was done.
+
+## Present queue and related symptoms
+
+The13 attention items comprise eight policy-escalated workflows, two workflows
+stopped by real agent failures, and three obsolete standalone diagnostics. The
+two stop summaries are 'The coding agent returned malformed Grok machine output'
+(bbd6bab5) and 'Agent invocation did not complete successfully' (42fcaf63).
+Neither can honestly be attributed to a gate mismatch from this evidence.
+Workflow phase takes precedence in the attention classifier, so seven root tasks
+can already be cancelled while their workflow remains escalated/attention.
+
+The earlier30-minute timeout was a separate Antigravity CLI wall bound and is
+fixed at the4-hour ceiling; progress-aware lifecycle remains the wall authority.
+Seven focused retry-policy/CLI-bound tests passed during this review. Review
+infrastructure retry handling also has a separate partial fix and acceptance
+work, as recorded below. Immutable Git/artifact/context/receipt digests and
+privileged executable pins remain necessary; the destructive old-column drop
+continues to be deferred. Runtime source selections were checked against reviewed
+modules. No unrelated service/configuration or historical evidence was modified.
+
+# Previous checkpoint: Cancellation response fixed; remaining attention review — 2026-11-27
+
+The cancellation response fix is published on feature/codex as80e688e0 and live
+in the API runner. The version1 response now projects only its five declared
+receipt fields, matching Rust WorkCancelRecorded's strict schema. Operator actor
+metadata remains in durable control receipts and events. Native/external provider
+selection, cancellation semantics and idempotency keys are unchanged.
+
+Independent read-only review found no blocking issues. All37 focused API,
+retry-transport and progress tests passed with no skips; the new regression
+reproduced both native/external failures against the deployed predecessor.
+Two authenticated live portal replays of an existing cancellation returned200
+with the exact response schema; task state remained identical and all eight
+original operator audit receipts retained their actor. No new work was cancelled.
+
+Only production module work_api.py differs from the previous API release. The
+runner was restarted after confirming zero active attempt/review/action leases;
+other workers, portal assets/actor, database, MCP and configurations were not
+changed. All nine services are active. The first startup check raced API readiness
+and rolled back; the successful retry waited for work_get before replaying.
+Root-private deployment and acceptance evidence:
+`/opt/homelab-forge/operations/cancel-response-20261127/`.
+Runtime source: `/opt/homelab-forge/releases/cancel-response-80e688e0c9cb/source`.
+This is a reviewed, focused feature/codex API hotfix; main remains a3ec03b8 and
+has not been pushed or merged. Future main integration keeps its required CI.
+
+## Disposition of all13 remaining attention items
+
+Read-only source/history review below does not assert successful completion of
+old tasks or authorize replay of frozen work. Counts remain active1, attention13,
+history47, all61. Existing cancellation/escalation history is preserved.
+
+| Task prefix | Finding | Next action / order |
+|---|---|---|
+| bbd6bab5 | Policy rollover/recovery remains incomplete. work_workflow._current_policy still rejects default-author changes; compatibility covers retry-budget drift only. Audited revival exists but does not satisfy the exact incident recovery request. | First: versioned policy compatibility, safe deferral and source-bound recovery manifest. Never revive operator-cancelled workflows or reset retry budgets. |
+| 1d4fe821 | Branch notes are updated, but runtime defaults remain forge/agent/<profile>; project/profile overrides already exist. The old request is partly superseded by the user's newer five feature-branch mapping. | First: align admission/publication and selected profile config with that mapping; qualify new work and preserve historical frozen identities. Stop mismatched jobs before editing/pushing. |
+| 92591001 | Review-infrastructure protection substantially landed in888ff6a9; candidate/sibling preservation and audited recovery exist. Full outage classification/backoff acceptance remains unproven. | Next: qualify context-load, auth/quota/permission and retry-exhaustion behavior; implement only remaining gaps. Do not restart the old conflicting candidate automatically. |
+| 42fcaf63 | The requested agent-facing base-refresh API is absent. Trusted integration already preserves completed author work when main advances and repeats independent review/exact CI. | Next: reproduce residual redundant rebase rounds against current integration before adding another privileged API. Actual conflicts must retain the existing rebase path. |
+| bc54723f | forge-m27-update.py was not found in current tracked source or matching available history; saved notes place the tool in the Muse proxy candidate. | Locate the actual tool/candidate, then reproduce and test first pin, replacement, chained maps, formatting and idempotency. Preserve historical qualification maps. |
+| 21f9d7d6 | M46 implements bounded failure causes/summaries and event/portal-history projection. Complete producer coverage and literal list/get acceptance are not established. | Audit remaining producers and list/get visibility; close only after that narrow acceptance check. Do not rewrite historical events. |
+| 29cbba02 | CI correlation, stage/log storage, API projection and typed portal rendering are integrated. | Acceptance/retirement candidate: verify one source-correlated run in the current portal, including stages/logs and missing-evidence behavior. Avoid a duplicate implementation. |
+| 0e8dcdc6 | M45 typed renew outcomes and worker handling distinguish cancellation, expiry, deadline and missing tasks; test_typed_renew.py covers the distinction. | Acceptance/retirement candidate: verify the current cancellation versus lease-expiry outcome; no new implementation indicated. |
+| 9a6ca050 | Jenkins-to-Drive snapshot refresh remains a saved request, not an implemented stage. | Feature backlog: exact verified-main archive, main-only post-success stage, qualified rclone upload/verification, then safe old-snapshot retirement. Keep credentials out of source. |
+| dcb9d2e1 | Structured defect submission/schema/filter/badge and triage workflow remain unimplemented. | Feature backlog: backward-compatible defect contract, normal plan/review lifecycle, schema verification and portal acceptance. |
+| 666c25a9 | Obsolete successful-output Grok connectivity report, awaiting_review. | Add a supported audited report-only closure/archive operation; preserve its real outcome. No new agent run or fabricated code approval. |
+| 0d116b62 | Obsolete failed Grok connectivity diagnostic. | Same audited archive disposition; preserve failure evidence. |
+| c8ec1815 | Obsolete failed Grok connectivity qualification. | Same audited archive disposition; preserve failure evidence. |
+
+Relevant source entry points: work_workflow.py:174/_current_policy and audited
+revival, work_retry_policy.py/budget_compatible_snapshot, work_agent_branch.py
+branch resolution, work_external_workflow.py infrastructure recovery/integration,
+work_failure_cause.py and work_events.py, work_store.py correlation projection,
+work_worker.py typed renewal, and the saved resubmission-queue feature/defect notes.
+The active Muse proxy workflow is separate from these13 and remains untouched.
+
+# Historical checkpoint: Event stream and obsolete task retirement — 2026-11-27
+
+Reviewed the 21 attention items and the active Muse proxy workflow through the
+authenticated portal Work API, including task details and event histories.
+Retired eight obsolete native workflows using revision-bound, idempotent operator
+cancellation: five historical main-verification repairs superseded by deployed
+main a3ec03b8 / protected Jenkins104, the integrated progress-aware timeout fix,
+the superseded cancel intent_digest investigation, and the historical35-branch
+cleanup (the remote now contains main and the five assigned feature branches).
+These are cancellations, not newly asserted successful task completions.
+
+Verified scope counts: active1, attention13, history47, all61 (previously1/21/39/61).
+Preserved every event ID in the22 reviewed task snapshots; no history, task,
+workspace or branch was deleted. All eight durable cancellation receipts and
+workflow phases were checked. Private before/after snapshots and rationales:
+`/var/backups/homelab-forge/task-retirement-20261127-i6wtt_4h/`.
+
+Follow-up defect: Python cancellation receipts include actor metadata while the
+strict Rust WorkCancelRecorded response lacks that field. The portal returns503
+after the cancellation commits. Never infer failure from that response alone or
+retry with a fresh key; reread workflow state and preserve the idempotency key.
+No response-contract fix or deployment was performed during this cleanup.
+
+Retained unresolved feature/defect/policy work and the active Muse proxy workflow.
+Three obsolete standalone Grok connectivity checks remain visible: their failed
+or awaiting_review states cannot use current manual cancellation (queued/running
+only). They need a supported archive/report-only closure, not direct SQL edits
+or fabricated acceptance. Runtime agent branch-default migration also remains
+pending; preserve the owned feature-branch policy below for all new development.
+
+# Current: Record required agent feature branches in shared notes — 2026-11-27
+
+The user explicitly requires all agents to use only their own named feature
+branch. Codex is the primary orchestrator on feature/codex; Dot is a separate
+ChatGPT agent on feature/dot. Gemini/Antigravity uses feature/agy, Grok uses
+feature/grok, and Muse uses feature/muse. These exact remote branches were
+confirmed with git branch -a and a fresh remote fetch. See AGENTS.md for the
+mandatory before-edit check, publication boundaries and receipt preservation.
+
+This notes-only change is developed and published from feature/codex, synchronized
+with origin/main a3ec03b8. Preserve all other branch refs and worktrees. Do not
+push this update directly to main or other agents' branches. Shared Mission Control
+notes and the existing Gemini Drive connection guide carry the same ownership
+rules so local sessions and external MCP agents can pick them up before work.
+Runtime branch defaults are not changed by this documentation update. Automated
+jobs pinned to older forge/agent/* branches must be reported for a separately
+reviewed, identity-preserving transition before those agents edit or publish.
+
 # Current: Authenticated MCP heartbeat and portal connection presence — 2026-11-27
 
 User authorizes adding an authenticated heartbeat MCP tool and connecting it to
