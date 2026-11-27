@@ -77,6 +77,12 @@ impl NativeVerificationIdentityProvider {
         Ok(self.directory(review)?.join("verification-identity.json"))
     }
 
+    /// Whether a frozen snapshot already exists for the review
+    /// (the Python provider's _path(review).exists() probes).
+    pub fn snapshot_exists(&self, review_id: &str) -> bool {
+        self.path(review_id).map(|path| path.exists()).unwrap_or(false)
+    }
+
     pub fn selected(&self, job: &Value) -> Result<bool, PublicationError> {
         let review = job["review_id"].as_str().unwrap_or_default();
         if self.path(review)?.exists() {
