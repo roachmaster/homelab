@@ -1,4 +1,55 @@
-# Current: Muse proxy task reassigned to Grok — 2026-11-27
+# Current: Qualify Grok feature-branch runtime and publication — 2026-11-27
+
+Completed runtime correction47789e90, published on feature/codex and deployed.
+API, Grok worker and publisher explicitly resolve grok-primary to feature/grok;
+their original workflow policy snapshot is byte-equivalent. Legacy defaults and
+historical frozen task/branch/CI receipts are preserved. Other agent profiles were
+not silently reassigned. Main remains untouched; future integration retains CI.
+
+Native feature validation is scoped to each known agent profile; wrong-agent
+feature refs, main, malformed refs and ephemeral task refs remain rejected.
+New feature-assigned tasks get independent private bare repositories under the
+canonical Git directory, with no shared objects/alternates. Read-only Plan/Review
+keeps its pinned detached snapshot; implementation attaches the exact owned
+feature branch. Plan-to-implementation retains metadata/.git bytes/resume digest;
+stopped dirty workspaces survive and never block or reset another task's branch.
+Canonical cache/browser provenance and exact common-Git-directory, branch/head
+and symlink checks remain enforced. No existing workspace is silently migrated.
+
+Additive migration0051_agent_feature_branches changes only the coding_publications
+branch constraint and two publication branch checks. It preserves all other scope,
+profile, epoch, candidate, token, audit and idempotency checks. Strict source/owner/
+language/return/ACL verification precedes exact predecessor normalization. Existing
+migrations and the deferred destructive digest-column drop remain untouched.
+
+Validation passed:50 branch/executor/cache/SQL tests;52 upgrade/owner/reader tests;
+34 Jenkins source-boundary tests after adding the new verifier to its closed
+inventory; native delivery/content identity tests; and real Git-only systemd
+sandbox proofs, including the actual /home/lrocha/repos/homelab source path.
+Those probes saw feature/grok, read Git status and wrote the owned workspace,
+without invoking a model or changing the canonical checkout. Independent Python
+and SQL reviews found no outstanding blockers.
+
+A root-private physical schema50 copy passed strict before/after verification,
+50-to51 upgrade and idempotent reapply. All task/event/workflow/control-receipt
+row counts and full-row fingerprints matched before/after. Logical pg_dump
+rehearsals exposed representation differences in explicit-owner ACLs and CHECK
+parse trees; no production verifier was relaxed to accommodate those artifacts.
+The live upgrade also preserved every task/event/workflow/control receipt, and
+setup-postgres.sh --check passed. No grants, credentials or model settings changed.
+Root-private backup/rehearsal/configuration/activation receipts:
+`/opt/homelab-forge/operations/grok-feature-runtime-20261127/`.
+Runtime source: `/opt/homelab-forge/releases/grok-feature-47789e90d93c/source`.
+
+Execution hold released after matched qualification. Grok claimed97711535 as
+attempt2b8b1532-a09c-45d4-9db4-43c9a0f7229f at2026-11-27T03:49:57.722964Z;
+the task is running its read-only Plan step, with Codex independent review next.
+Implementation/publication will use feature/grok. All nine services are active.
+Shared repo/landing AGENTS notes explain that the older prompt's pending-hold
+statement is superseded and deployed schema51 must be accounted for explicitly
+before any new migration. This does not revive earlier operator-cancelled work.
+
+# Previous checkpoint: Muse proxy task reassigned to Grok — 2026-11-27
 
 User explicitly requested replacing Muse with Grok or AGY. Selected Grok, the
 existing native default, without another project-policy change. New task
