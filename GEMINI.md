@@ -1,3 +1,29 @@
+## Persistent agent branch and cache rules
+
+Keep one persistent named `feature/<agent>` branch per agent, never renamed or
+replaced: AGY uses `feature/agy`, Codex (including codex-author) `feature/codex`,
+Grok `feature/grok`, Muse (native and muse-db) `feature/muse`, Dot `feature/dot`.
+Configured aliases inherit their explicitly assigned agent ownership; do not
+invent another branch from an alias. Never create agent-owned per-task branches.
+Before each authorized push, rebase onto current main, rerun required tests, and
+push incrementally after green tests rather than one final dump. Manage your own
+local build cache outside source using provisioned paths; preserve other caches.
+
+This grants no publication permission: native task workers cannot commit or push;
+the authorized publisher owns publication. Plan/review retain read-only pinned
+snapshots. Stop on receipt-bound branch mismatches for receipt-preserving
+reconciliation; never rewrite frozen bindings or another owner's checkout.
+
+**Legacy machinery-owned publication exception:**
+`deploy/mission-control/agent-runner/work_publication_clients.py:branch_name()`
+retains `forge/task-<publication-id>` fallback refs for explicit
+`ephemeral-task-v1`, legacy identities, and jobs without persistent profile
+resolution. Historical `forge/agent/<profile-slug>` defaults are compatibility
+bindings, not author branch instructions. Preserve original workspaces and
+receipts; reconciling them requires a separately authorized transition. The
+publisher's compare-and-swap rebase handling does not authorize agent force-pushes.
+
+
 # Forge IDE coding context
 
 Your purpose in this workspace is to improve Forge IDE and its homelab framework:

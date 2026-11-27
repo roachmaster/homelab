@@ -1,5 +1,16 @@
 # Jenkins client and Forge CLI
 
+Follow the [persistent agent branch and cache rules](../../AGENTS.md) for every profile
+and configured alias: one permanent `feature/<agent>`, no agent-created per-task
+branches, rebase onto current main before authorized pushes, incremental pushes
+after green tests, and agent-managed local caches. Native workers cannot commit
+or push; Plan/review remain read-only. Older `forge/agent/*` defaults below are
+compatibility bindings requiring receipt-preserving reconciliation before author
+work. The named **legacy machinery-owned publication exception** retains
+`forge/task-<publication-id>` in `work_publication_clients.py:branch_name()` for
+explicit ephemeral policy, legacy identities or missing persistent resolution.
+Preserve frozen receipts; this documentation grants no new permissions.
+
 Implemented source: the optional [`forge-jenkins`](../../src/rust/forge-jenkins/README.md)
 Rust capability implements `forge_core::io_client::IoClient`. Its public `Config`,
 `Credentials`, `ClientFactory`, `register` and opt-in `register_http` compose with
@@ -221,7 +232,7 @@ recorded in `AGENT_WORK.md`.
 ## Persistent agent branches & portal stage inspection (source M41)
 
 Under default `branch_policy = "persistent-agent-v1"`, native verification and
-publication reuse one persistent branch per profile (`forge/agent/<profile-slug>`
+publication reuse one persistent branch per profile (legacy `forge/agent/<profile-slug>`
 or explicit startup-validated override) guarded by exclusive active-workflow
 ownership in `forge_agent.agent_branch_state` (`reservation_epoch`, compare-and-swap
 `--force-with-lease` pushes, and open-PR safety blocking). Native and post-merge
