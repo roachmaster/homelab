@@ -9,12 +9,18 @@
 pub mod branch;
 pub mod error;
 pub mod lease;
+pub mod ports_runtime;
+pub mod ports_store;
 pub mod types;
+pub mod workspace;
+pub mod workspace_digest;
 
 pub use branch::{AgentBranch, AgentBranchUpsert};
 pub use error::WorkerError;
 pub use lease::Lease;
 pub use types::{
-    AdvertisedProfile, AdvertisedProject, NativeDeliveryContext, PublishReceipt, PublishResult,
-    RecoveryLease, RenewDeadline, RenewStatus, ResultManifest, StopProof,
+    AdvertisedProfile, AdvertisedProject, CliOutcome, Invocation, NativeDeliveryContext,
+    PublishReceipt, PublishResult, RecoveryLease, RenewDeadline, RenewStatus, ResultManifest,
+    SessionSelection, StopProof,
 };
+pub use workspace::WorkspaceLease;

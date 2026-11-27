@@ -738,6 +738,7 @@ version = "0.1.0"
 dependencies = [
  "forge-core",
  "serde_json",
+ "sha2 0.10.9",
  "uuid",
 ]
 

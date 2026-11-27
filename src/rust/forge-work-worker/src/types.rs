@@ -114,3 +114,46 @@ pub struct RecoveryLease {
     pub incarnation: String,
     pub unit_name: String,
 }
+
+/// An explicit same-task conversation selection for a provider CLI
+/// (work_sessions.SessionSelection).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSelection {
+    pub task_id: String,
+    pub identity: String,
+    pub attempt_id: String,
+    pub conversation_id: Option<String>,
+}
+
+/// One provider CLI invocation (work_executor.Invocation). The
+/// native_auth lease field is deferred to the executor increment -
+/// native auth flows are S3-adjacent (work_native_auth).
+#[derive(Debug, Clone)]
+pub struct Invocation {
+    pub argv: Vec<String>,
+    pub stdin: Vec<u8>,
+    pub backend: String,
+    pub cwd: std::path::PathBuf,
+    pub scratch: std::path::PathBuf,
+    pub workspace: crate::workspace::WorkspaceLease,
+    pub implement: bool,
+    pub session: Option<SessionSelection>,
+    pub plan_file: Option<std::path::PathBuf>,
+    pub readonly_files: Vec<std::path::PathBuf>,
+    pub external_sandbox: bool,
+}
+
+/// The parsed outcome of a provider CLI run (work_executor.CliOutcome).
+/// usage and quota_diagnostic stay JSON documents (the usage DTO is
+/// the S6 slice's; the quota diagnostic is provider-shaped).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CliOutcome {
+    pub status: String,
+    pub text: String,
+    pub conversation_id: Option<String>,
+    pub usage: Option<Value>,
+    pub summary: String,
+    pub stop_proof: StopProof,
+    pub fresh_session: bool,
+    pub quota_diagnostic: Option<Value>,
+}

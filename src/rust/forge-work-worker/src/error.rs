@@ -11,7 +11,10 @@ pub enum WorkerError {
         code: String,
         message: String,
     },
-    Execution(String),
+    Execution {
+        outcome: String,
+        summary: String,
+    },
     WorkspaceBusy(String),
     Session(String),
     AuthCleanup(String),
@@ -52,8 +55,14 @@ impl WorkerError {
         )
     }
 
-    pub fn execution(message: impl Into<String>) -> WorkerError {
-        WorkerError::Execution(message.into())
+    /// An execution failure with one of the five coding outcomes
+    /// (failed, needs_reconcile, blocked_auth, blocked_permission,
+    /// quota_blocked), mirroring work_executor.ExecutionError.
+    pub fn execution(outcome: &str, summary: impl Into<String>) -> WorkerError {
+        WorkerError::Execution {
+            outcome: outcome.to_string(),
+            summary: summary.into(),
+        }
     }
 
     pub fn protocol(message: impl Into<String>) -> WorkerError {
@@ -69,7 +78,9 @@ impl std::fmt::Display for WorkerError {
                 code,
                 message,
             } => write!(f, "store error {status} {code}: {message}"),
-            WorkerError::Execution(m) => write!(f, "execution error: {m}"),
+            WorkerError::Execution { outcome, summary } => {
+                write!(f, "execution error {outcome}: {summary}")
+            }
             WorkerError::WorkspaceBusy(m) => write!(f, "workspace busy: {m}"),
             WorkerError::Session(m) => write!(f, "session error: {m}"),
             WorkerError::AuthCleanup(m) => write!(f, "auth cleanup failed: {m}"),
