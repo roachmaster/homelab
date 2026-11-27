@@ -43,7 +43,6 @@ pub mod port_admission;
 pub mod port_decision;
 pub mod port_read;
 pub mod recovery_contract;
-pub mod repair_policy;
 pub mod retry_policy;
 pub mod routes_admission;
 pub mod routes_decision;

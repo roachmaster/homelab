@@ -18,6 +18,7 @@ pub mod model_route_proofs;
 pub mod peer_validator;
 pub mod reconciler;
 pub mod retry_evidence;
+pub mod review_store;
 pub mod registrar;
 pub mod tx;
 pub mod work_admission;

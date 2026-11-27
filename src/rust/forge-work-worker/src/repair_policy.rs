@@ -6,8 +6,13 @@
 
 use serde_json::json;
 
-use crate::canonical::{canonical_json, sha256_hex};
-use crate::retry_policy::AGENT_RETRY_LIMIT;
+use crate::contexts::sha256_hex;
+use crate::policy::canonical_json;
+
+/// The forge-agent-retry-v1 admission limit (mirrors
+/// forge-work's retry_policy constant; sibling crates do
+/// not import each other).
+pub const AGENT_RETRY_LIMIT: i64 = 20;
 
 pub const REPAIR_CATEGORIES: [&str; 7] = [
     "source",

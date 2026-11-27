@@ -118,6 +118,16 @@ impl ReconcilerApi {
         self.session.call_json(select, params)
     }
 
+    /// Shared parameterized boolean call for the review
+    /// surface (review_store.rs).
+    pub(crate) fn call_bool_params(
+        &mut self,
+        select: &str,
+        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
+    ) -> Result<bool, AdapterError> {
+        self.session.call_bool(select, params)
+    }
+
     /// Check if post-merge is available for the given owner.
     pub fn post_merge_available(&mut self, owner: &str) -> Result<bool, AdapterError> {
         self.session.call_bool(

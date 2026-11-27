@@ -2,7 +2,10 @@
 //! command output never grants authority. Secrets are replaced,
 //! control characters stripped, and the result truncated on a
 //! UTF-8 boundary. Ported in F3 for the build-context provider;
-//! S4's verification providers reuse it.
+//! S4's verification providers reuse it. A mirror copy
+//! lives in the sibling worker crate (forge-work-worker),
+//! whose layering forbids importing forge-work; keep the
+//! two in step.
 
 pub const MAX_DIAGNOSTIC_BYTES: usize = 2048;
 
