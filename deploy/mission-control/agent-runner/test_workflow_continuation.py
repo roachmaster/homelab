@@ -1,5 +1,10 @@
 """Incident recovery uses the real coordinator, worker and independent reviewer."""
 from dataclasses import replace
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+import hashlib
 from unittest.mock import patch
 import unittest
 from uuid import UUID, uuid4
@@ -43,6 +48,93 @@ class WorkflowContinuationTest(unittest.TestCase):
         with patch.dict('work_agent_branch.OWNED_FEATURE_BRANCHES',
                         {p: self.config.profiles[p].branch for p in ('agy-v2', 'codex-v2')}):
             return port.execute(command)
+
+    def process_native(self, lease, text):
+        """Real worker lifecycle/DB/context ports; only CLI, Git and CI are fixtures."""
+        from work_worker import CodingWorker
+        from work_worker_config import parse_config
+        from test_work_executor import raw_config
+        from test_work_execution_and_usage import make_stop_proof
+        from work_executor import CliOutcome
+        from work_review_context import ReviewContextProvider
+        from work_peer_context import PeerReviewContextProvider
+        captured = {}
+        with TemporaryDirectory() as root:
+            raw = raw_config(root)
+            raw['worker_id'] = 'workflow-worker';raw['allow_implement'] = True
+            raw['profiles'] = {alias:{'backend':p.backend,'model':p.model,
+                'modes':['plan','review','implement']} for alias,p in self.config.profiles.items()}
+            raw['binaries'] = {p.backend:'/usr/bin/true' for p in self.config.profiles.values()}
+            config = parse_config(raw)
+            @contextmanager
+            def acquire(value):
+                digest = 'b'*64
+                source = digest
+                if value.get('workflow_review_id') is not None:
+                    import json
+                    source = json.loads(self.db.read_review_target(value)['target_json'])['workspace_digest'] or digest
+                yield SimpleNamespace(path=Path(root),task_id=value['task_id'],base_revision=value['base_revision'],
+                    digest=lambda:digest,source_digest=lambda:source)
+            def run(value, workspace, stop, **context):
+                captured.update(context)
+                return CliOutcome('awaiting_review',text,None,None,'Fixture native result',make_stop_proof(value['unit_name']))
+            worker = CodingWorker(config,self.db,SimpleNamespace(run=run),SimpleNamespace(acquire=acquire,
+                projects=lambda:[{'alias':'homelab','base_revision':lease.base_revision}]),
+                SimpleNamespace(stop=lambda unit:make_stop_proof(unit)),
+                review_context_provider=ReviewContextProvider(self.db),
+                peer_context_provider=PeerReviewContextProvider(self.db,SimpleNamespace(ensure=lambda *args:None)))
+            worker.incarnation = self.incarnation
+            worker.process(lease)
+        self.assertEqual(self.get(lease.task_id)['status'],'awaiting_review')
+        return captured
+
+    def test_claim_validation_failure_rolls_back_admission(self):
+        _, admitted = self.submit()
+        with patch('work_worker_store.validate_lease',side_effect=ValueError('Invalid fixture claim contract')):
+            with self.assertRaises(ValueError):self.claim('agy-v2')
+        self.assertEqual(self.get(admitted['task_id'])['status'],'queued')
+        self.assertEqual(self.rows('SELECT count(*) FROM forge_agent.coding_attempts')[0][0],0)
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_events WHERE event_kind='started'")[0][0],0)
+
+    def test_native_process_continuation_reaches_independent_review_and_exact_merge(self):
+        _, admitted = self.submit()
+        workflow_id = self.escalate(admitted['task_id'])
+        port, command = self.command(workflow_id);receipt = self.execute(port,command)
+        self.coordinator.run_once();plan = self.claim('agy-v2')
+        self.process_native(plan,'Fresh independently reviewable Plan.')
+        self.assertTrue(self.coordinator.run_once());critic = self.claim('codex-v2')
+        self.process_native(critic,self.verdict(critic))
+        self.assertTrue(self.coordinator.run_once());author = self.claim('agy-v2')
+        context = self.process_native(author,'Implemented the fresh approved Plan.')
+        self.assertEqual(context['plan_context']['plan_attempt_id'],plan.attempt_id)
+        self.assertEqual(context['peer_feedback_context'].target_kind,'plan')
+        self.coordinator.run_once();check = self.db.review_claim('fixed-checks')
+        self.assertIsNotNone(check)
+        self.db.review_finish(check,{'disposition':'awaiting_review','candidate_commit':'d'*40,
+            'gate_manifest_sha256':'e'*64,'findings':[],'verified_finding_ids':[],'fingerprint':None,
+            'summary':'Fixed checks passed.','cleanup_confirmed':True,
+            'verification':{'checks_passed':True,'candidate_workspace_digest':'f'*64,
+                'repair_requires_new_workspace':False,'cleanup_confirmed':True,'integration_base':author.base_revision,
+                'toolchain':'fixture','checks':[{'check_id':'make-ci','status':'passed','head_sha':'d'*40}]}})
+        self.coordinator.run_once();critic = self.claim('codex-v2')
+        self.process_native(critic,self.verdict(critic));self.coordinator.run_once()
+        pub = self.db.publication_claim('publisher');self.assertIsNotNone(pub)
+        self.db.publication_finish(pub,'publishing','Checked',branch='forge/test',commit_sha='d'*40)
+        self.db.publication_finish(pub,'published','Reviewed PR',branch='forge/test',commit_sha='d'*40,pr_url='https://github.com/fixture/project/pull/1')
+        self.db.record_hosted_checks(pub['publication_id'],'d'*40,[{'name':name,'status':'success','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')])
+        self.coordinator.run_once();merge = self.db.merge_claim('merger');self.assertIsNotNone(merge)
+        intent={'version':1,'merge_id':merge['merge_id'],'workflow_id':merge['workflow_id'],
+            'task_id':merge['task_id'],'repository':'fixture/project','pr_url':merge['pr_url'],
+            'candidate_commit':'d'*40,'candidate_tree':'1'*40,'expected_main':'a'*40,'merge_commit':'2'*40,
+            'review_id':merge['review_id'],'gate_manifest_sha256':'e'*64,
+            'commit_payload':{'message':'Merge independently reviewed continuation','tree':'1'*40,
+                'parents':['a'*40,'d'*40],'author':{'name':'Forge','email':'forge@example.test','date':'2026-11-20T00:00:00Z'},
+                'committer':{'name':'Forge','email':'forge@example.test','date':'2026-11-20T00:00:00Z'}}}
+        self.db.merge_intent(merge,intent)
+        self.db.merge_finish(merge,'merged',{'candidate_commit':'d'*40,'merge_commit':'2'*40,
+            'pr_url':merge['pr_url'],'summary':'Exact reviewed continuation merged.'})
+        self.assertEqual(self.get(receipt['task_id'])['workflow']['phase'],'completed')
+        self.assertEqual(self.db.project_revisions(),{'homelab':'2'*40})
 
     def test_unapproved_source_gets_fresh_independently_reviewed_plan(self):
         _, admitted = self.submit()

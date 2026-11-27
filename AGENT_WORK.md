@@ -1,5 +1,35 @@
 # Current: Event-stream autonomy defects — 2026-11-27
 
+Live checkpoint16:05UTC supersedes pending-rollout text below: PR33 merged as
+a51e83dae (tree5d601ff4); Jenkins113 branch45 and Jenkins114 main46 passed,
+including real browser and1805 runner tests with zero skips. Portal release
+dad4a957 is deployed; API/workers/publisher sourceaa141028 and matched staged
+configs activated. Nine services passed health probes; three deferred release
+operations retained exact row fingerprints. Two delivered workflows (typed
+renew0e8dcdc6 and failure causes21f9d7d6) retired through normal operator Cancel,
+with11 acceptance tests plus full-main proof; original task histories retained.
+
+Six policy continuations were admitted, but LIVE execution exposed a worker
+boundary defect missed by DB-only continuation tests: _lease treated ANY parent
+as code-repair linkage. Fresh child Plans failed before heartbeat/workspace/
+sandbox/model startup, then their claims expired. Six exact attempts are now
+needs_reconcile/unknown with reservations; all units are absent. Dedicated
+forge-codex-author-worker is intentionally STOPPED to prevent further claims.
+Do not replay, cancel, rewrite or invent stop/workspace evidence. Preserve the
+six source-bound receipts under operations/event-autonomy-20261127.
+
+Correction in progress: shared pure lease contract distinguishes workflow Plan
+and approved implementation lineage from reviewed code-repair authority; SQL
+claim decoding/validation now stays INSIDE the claim transaction so validation
+errors roll back reservation/events. Existing malformed repair guards remain.
+36 focused tests pass, including ACTUAL CodingWorker.process on real PG through
+fresh Plan, independent review, implementation context, checks/publication and
+exact merge; claim decode failure leaves zero attempts/started events.
+Next: audited Git-only materialization of truly absent pristine Plan workspaces,
+genuine systemd/cgroup stop proof + normal reconcile, then bounded server-only
+same-Plan resume authority. Verify/deploy successor through reviewed CI before
+restarting the author. No new DB migration or paid model diagnostics.
+
 User requests root-cause fixes for repeated Needs attention and tasks failing to
 reach main. Codex owns feature/codex; one writer. Portal attribution from PR31
 is already deployed (main4db1bdb3, ABI18, Jenkins110 all46 checks), superseding
