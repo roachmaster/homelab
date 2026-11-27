@@ -1,4 +1,59 @@
-# Current: Event stream and obsolete task retirement — 2026-11-27
+# Current: Cancellation response fixed; remaining attention review — 2026-11-27
+
+The cancellation response fix is published on feature/codex as80e688e0 and live
+in the API runner. The version1 response now projects only its five declared
+receipt fields, matching Rust WorkCancelRecorded's strict schema. Operator actor
+metadata remains in durable control receipts and events. Native/external provider
+selection, cancellation semantics and idempotency keys are unchanged.
+
+Independent read-only review found no blocking issues. All37 focused API,
+retry-transport and progress tests passed with no skips; the new regression
+reproduced both native/external failures against the deployed predecessor.
+Two authenticated live portal replays of an existing cancellation returned200
+with the exact response schema; task state remained identical and all eight
+original operator audit receipts retained their actor. No new work was cancelled.
+
+Only production module work_api.py differs from the previous API release. The
+runner was restarted after confirming zero active attempt/review/action leases;
+other workers, portal assets/actor, database, MCP and configurations were not
+changed. All nine services are active. The first startup check raced API readiness
+and rolled back; the successful retry waited for work_get before replaying.
+Root-private deployment and acceptance evidence:
+`/opt/homelab-forge/operations/cancel-response-20261127/`.
+Runtime source: `/opt/homelab-forge/releases/cancel-response-80e688e0c9cb/source`.
+This is a reviewed, focused feature/codex API hotfix; main remains a3ec03b8 and
+has not been pushed or merged. Future main integration keeps its required CI.
+
+## Disposition of all13 remaining attention items
+
+Read-only source/history review below does not assert successful completion of
+old tasks or authorize replay of frozen work. Counts remain active1, attention13,
+history47, all61. Existing cancellation/escalation history is preserved.
+
+| Task prefix | Finding | Next action / order |
+|---|---|---|
+| bbd6bab5 | Policy rollover/recovery remains incomplete. work_workflow._current_policy still rejects default-author changes; compatibility covers retry-budget drift only. Audited revival exists but does not satisfy the exact incident recovery request. | First: versioned policy compatibility, safe deferral and source-bound recovery manifest. Never revive operator-cancelled workflows or reset retry budgets. |
+| 1d4fe821 | Branch notes are updated, but runtime defaults remain forge/agent/<profile>; project/profile overrides already exist. The old request is partly superseded by the user's newer five feature-branch mapping. | First: align admission/publication and selected profile config with that mapping; qualify new work and preserve historical frozen identities. Stop mismatched jobs before editing/pushing. |
+| 92591001 | Review-infrastructure protection substantially landed in888ff6a9; candidate/sibling preservation and audited recovery exist. Full outage classification/backoff acceptance remains unproven. | Next: qualify context-load, auth/quota/permission and retry-exhaustion behavior; implement only remaining gaps. Do not restart the old conflicting candidate automatically. |
+| 42fcaf63 | The requested agent-facing base-refresh API is absent. Trusted integration already preserves completed author work when main advances and repeats independent review/exact CI. | Next: reproduce residual redundant rebase rounds against current integration before adding another privileged API. Actual conflicts must retain the existing rebase path. |
+| bc54723f | forge-m27-update.py was not found in current tracked source or matching available history; saved notes place the tool in the Muse proxy candidate. | Locate the actual tool/candidate, then reproduce and test first pin, replacement, chained maps, formatting and idempotency. Preserve historical qualification maps. |
+| 21f9d7d6 | M46 implements bounded failure causes/summaries and event/portal-history projection. Complete producer coverage and literal list/get acceptance are not established. | Audit remaining producers and list/get visibility; close only after that narrow acceptance check. Do not rewrite historical events. |
+| 29cbba02 | CI correlation, stage/log storage, API projection and typed portal rendering are integrated. | Acceptance/retirement candidate: verify one source-correlated run in the current portal, including stages/logs and missing-evidence behavior. Avoid a duplicate implementation. |
+| 0e8dcdc6 | M45 typed renew outcomes and worker handling distinguish cancellation, expiry, deadline and missing tasks; test_typed_renew.py covers the distinction. | Acceptance/retirement candidate: verify the current cancellation versus lease-expiry outcome; no new implementation indicated. |
+| 9a6ca050 | Jenkins-to-Drive snapshot refresh remains a saved request, not an implemented stage. | Feature backlog: exact verified-main archive, main-only post-success stage, qualified rclone upload/verification, then safe old-snapshot retirement. Keep credentials out of source. |
+| dcb9d2e1 | Structured defect submission/schema/filter/badge and triage workflow remain unimplemented. | Feature backlog: backward-compatible defect contract, normal plan/review lifecycle, schema verification and portal acceptance. |
+| 666c25a9 | Obsolete successful-output Grok connectivity report, awaiting_review. | Add a supported audited report-only closure/archive operation; preserve its real outcome. No new agent run or fabricated code approval. |
+| 0d116b62 | Obsolete failed Grok connectivity diagnostic. | Same audited archive disposition; preserve failure evidence. |
+| c8ec1815 | Obsolete failed Grok connectivity qualification. | Same audited archive disposition; preserve failure evidence. |
+
+Relevant source entry points: work_workflow.py:174/_current_policy and audited
+revival, work_retry_policy.py/budget_compatible_snapshot, work_agent_branch.py
+branch resolution, work_external_workflow.py infrastructure recovery/integration,
+work_failure_cause.py and work_events.py, work_store.py correlation projection,
+work_worker.py typed renewal, and the saved resubmission-queue feature/defect notes.
+The active Muse proxy workflow is separate from these13 and remains untouched.
+
+# Historical checkpoint: Event stream and obsolete task retirement — 2026-11-27
 
 Reviewed the 21 attention items and the active Muse proxy workflow through the
 authenticated portal Work API, including task details and event histories.
