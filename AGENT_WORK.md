@@ -1,3 +1,33 @@
+# Current: Event stream and obsolete task retirement — 2026-11-27
+
+Reviewed the 21 attention items and the active Muse proxy workflow through the
+authenticated portal Work API, including task details and event histories.
+Retired eight obsolete native workflows using revision-bound, idempotent operator
+cancellation: five historical main-verification repairs superseded by deployed
+main a3ec03b8 / protected Jenkins104, the integrated progress-aware timeout fix,
+the superseded cancel intent_digest investigation, and the historical35-branch
+cleanup (the remote now contains main and the five assigned feature branches).
+These are cancellations, not newly asserted successful task completions.
+
+Verified scope counts: active1, attention13, history47, all61 (previously1/21/39/61).
+Preserved every event ID in the22 reviewed task snapshots; no history, task,
+workspace or branch was deleted. All eight durable cancellation receipts and
+workflow phases were checked. Private before/after snapshots and rationales:
+`/var/backups/homelab-forge/task-retirement-20261127-i6wtt_4h/`.
+
+Follow-up defect: Python cancellation receipts include actor metadata while the
+strict Rust WorkCancelRecorded response lacks that field. The portal returns503
+after the cancellation commits. Never infer failure from that response alone or
+retry with a fresh key; reread workflow state and preserve the idempotency key.
+No response-contract fix or deployment was performed during this cleanup.
+
+Retained unresolved feature/defect/policy work and the active Muse proxy workflow.
+Three obsolete standalone Grok connectivity checks remain visible: their failed
+or awaiting_review states cannot use current manual cancellation (queued/running
+only). They need a supported archive/report-only closure, not direct SQL edits
+or fabricated acceptance. Runtime agent branch-default migration also remains
+pending; preserve the owned feature-branch policy below for all new development.
+
 # Current: Record required agent feature branches in shared notes — 2026-11-27
 
 The user explicitly requires all agents to use only their own named feature
