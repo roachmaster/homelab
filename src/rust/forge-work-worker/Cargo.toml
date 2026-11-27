@@ -16,4 +16,4 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", features = ["fs", "process", "signal", "user"] }
+nix = { version = "0.31", features = ["dir", "fs", "process", "signal", "user"] }

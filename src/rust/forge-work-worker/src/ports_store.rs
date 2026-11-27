@@ -9,8 +9,10 @@ use serde_json::Value;
 
 /// The worker-role store port: WorkerDB's SQL-API methods for a
 /// claimed attempt (forge_coding_worker_api). forge-postgres
-/// implements this over WorkerApi; the loop depends only on the trait.
-pub trait WorkerStorePort {
+/// implements this over WorkerApi; the loop depends only on the
+/// trait. Send: the renew thread and the progress callback hold
+/// their own handles concurrently with the worker's.
+pub trait WorkerStorePort: Send {
     fn advertise(
         &mut self,
         worker_id: &str,
@@ -81,6 +83,25 @@ pub trait WorkerStorePort {
     ) -> Result<(), WorkerError>;
 
     fn cancellation_requested(&mut self, lease: &Lease) -> Result<bool, WorkerError>;
+
+    /// Queue the independent review of a reconciled implement
+    /// result (WorkerDB.queue_review): returns the review task id
+    /// when one was created. (Post-publish reconciliation itself
+    /// goes through the reconciler port, building a RecoveryLease
+    /// from the attempt lease - the SQL function takes only the
+    /// task/attempt identity, as in the Python facade.)
+    fn queue_review(
+        &mut self,
+        lease: &Lease,
+        reconciliation_receipt_id: &str,
+    ) -> Result<Option<String>, WorkerError>;
+
+    /// Wait for queue notifications up to `seconds` (WorkerDB's
+    /// LISTEN/WAIT); false means the port has no listener and the
+    /// caller should sleep on its own stop flag instead.
+    fn listen_wait(&mut self, _seconds: f64) -> bool {
+        false
+    }
 }
 
 /// The execution-context reads: what an attempt may look at through

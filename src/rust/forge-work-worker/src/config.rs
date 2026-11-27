@@ -648,3 +648,91 @@ mod tests {
         assert!(parse_config(&repo_overlap).is_err());
     }
 }
+
+/// Validate direct typed construction too, before selected
+/// factories act (work_worker_config.validated_copy): serialize
+/// the typed config back to the raw document shape and re-parse
+/// it, so a programmatically built config passes the same gates
+/// as a loaded one. The source path is preserved across the
+/// round trip, as in the Python.
+pub fn validated_copy(config: &WorkerConfig) -> Result<WorkerConfig, ConfigError> {
+    let path = |p: &PathBuf| serde_json::json!(p.to_string_lossy());
+    let opt_path = |p: &Option<PathBuf>| match p {
+        Some(p) => serde_json::json!(p.to_string_lossy()),
+        None => serde_json::Value::Null,
+    };
+    let mut projects = serde_json::Map::new();
+    for (alias, root) in &config.projects {
+        projects.insert(alias.clone(), path(root));
+    }
+    let mut profiles = serde_json::Map::new();
+    for profile in &config.profiles {
+        profiles.insert(
+            profile.alias.clone(),
+            serde_json::json!({
+                "backend": profile.backend,
+                "model": profile.model,
+                "modes": profile.modes,
+                "execution_enabled": profile.execution_enabled,
+                "backup_models": profile.backup_models,
+                "branch": profile.branch,
+            }),
+        );
+    }
+    let mut binaries = serde_json::Map::new();
+    for (backend, binary) in &config.binaries {
+        binaries.insert(backend.clone(), path(binary));
+    }
+    let mut usage_only = serde_json::Map::new();
+    for profile in &config.usage_only_profiles {
+        usage_only.insert(
+            profile.alias.clone(),
+            serde_json::json!({
+                "backend": profile.backend,
+                "model": profile.model,
+                "binary": profile.binary.to_string_lossy(),
+            }),
+        );
+    }
+    let mut autonomous = config.autonomous_projects.clone();
+    autonomous.sort();
+    let mut raw = serde_json::json!({
+        "worker_id": config.worker_id,
+        "owner": config.owner,
+        "database": {
+            "host": config.database.host.to_string_lossy(),
+            "port": config.database.port,
+            "name": config.database.name,
+            "user": config.database.user,
+            "reconciler_user": config.database.reconciler_user,
+            "passfile": opt_path(&config.database.passfile),
+        },
+        "account": {
+            "user": config.account.user,
+            "uid": config.account.uid,
+            "gid": config.account.gid,
+            "home": config.account.home.to_string_lossy(),
+        },
+        "workspace_root": config.workspace_root.to_string_lossy(),
+        "state_root": config.state_root.to_string_lossy(),
+        "projects": projects,
+        "profiles": profiles,
+        "binaries": binaries,
+        "allow_implement": config.allow_implement,
+        "autonomous_projects": autonomous,
+        "external_reviews": config.external_reviews,
+        "resource_profile": config.resource_profile,
+        "build_results_root": opt_path(&config.build_results_root),
+        "codex_session_ttl_seconds": config.codex_session_ttl_seconds,
+        "usage_only_profiles": usage_only,
+    });
+    if let Some(usage) = &config.usage {
+        raw["usage"] = serde_json::json!({
+            "hmac_key_file": usage.hmac_key_file.to_string_lossy(),
+            "interval_seconds": usage.interval_seconds,
+        });
+    }
+    let mut parsed = parse_config(&raw)?;
+    parsed.source_path = config.source_path.clone();
+    Ok(parsed)
+}

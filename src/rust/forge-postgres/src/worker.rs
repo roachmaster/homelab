@@ -425,6 +425,31 @@ impl WorkerApi {
         payload.map(PublishReceipt::from_json).transpose()
     }
 
+    /// Queues the independent review of a reconciled implement
+    /// result: the review-admission advisory lock and the
+    /// queue_review call run in one owner-scoped transaction
+    /// (WorkerDB.queue_review). The lock key is the transaction's
+    /// own forge.coding_owner setting, which is exactly the owner
+    /// the Python facade passes explicitly.
+    pub fn queue_review(
+        &mut self,
+        claim: &Claim,
+        receipt_id: Uuid,
+    ) -> Result<Option<String>, AdapterError> {
+        const REVIEW_ADMISSION_LOCK_SALT: i64 = 731492647451;
+        let value = self.session.in_tx(|tx| {
+            tx.call_void(
+                "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(current_setting('forge.coding_owner'), $1))",
+                &[&REVIEW_ADMISSION_LOCK_SALT],
+            )?;
+            tx.call_json(
+                "SELECT forge_coding_worker_api.queue_review($1, $2, $3)",
+                &[&claim.attempt_id, &claim.attempt_token, &receipt_id],
+            )
+        })?;
+        Ok(value.and_then(|v| v.as_str().map(str::to_string)))
+    }
+
     /// Records the stop of the given claim.
     pub fn record_stop(
         &mut self,

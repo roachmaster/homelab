@@ -42,22 +42,58 @@ pub const MUSE_BINARY_SHA256: &str =
 /// The worker's stop signal, shared with the runner.
 #[derive(Debug, Clone)]
 pub struct StopFlag {
-    inner: Arc<AtomicBool>,
+    inner: Arc<StopInner>,
+}
+
+#[derive(Debug)]
+struct StopInner {
+    flag: AtomicBool,
+    lock: std::sync::Mutex<()>,
+    cond: std::sync::Condvar,
 }
 
 impl StopFlag {
     pub fn new() -> StopFlag {
         StopFlag {
-            inner: Arc::new(AtomicBool::new(false)),
+            inner: Arc::new(StopInner {
+                flag: AtomicBool::new(false),
+                lock: std::sync::Mutex::new(()),
+                cond: std::sync::Condvar::new(),
+            }),
         }
     }
 
     pub fn is_set(&self) -> bool {
-        self.inner.load(Ordering::SeqCst)
+        self.inner.flag.load(Ordering::SeqCst)
     }
 
     pub fn set(&self) {
-        self.inner.store(true, Ordering::SeqCst);
+        self.inner.flag.store(true, Ordering::SeqCst);
+        let _guard = self.inner.lock.lock().unwrap_or_else(|p| p.into_inner());
+        self.inner.cond.notify_all();
+    }
+
+    /// Wait up to `seconds` for the flag; returns is_set()
+    /// (threading.Event.wait parity).
+    pub fn wait_timeout(&self, seconds: f64) -> bool {
+        if self.is_set() {
+            return true;
+        }
+        let deadline = Instant::now() + Duration::from_secs_f64(seconds.max(0.0));
+        let mut guard = self.inner.lock.lock().unwrap_or_else(|p| p.into_inner());
+        while !self.is_set() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let (next, _) = self
+                .inner
+                .cond
+                .wait_timeout(guard, remaining)
+                .unwrap_or_else(|p| p.into_inner());
+            guard = next;
+        }
+        self.is_set()
     }
 }
 
@@ -116,7 +152,7 @@ fn needs_reconcile(summary: &str) -> WorkerError {
     execution("needs_reconcile", summary)
 }
 
-fn error_outcome(error: &WorkerError) -> (String, String) {
+pub(crate) fn error_outcome(error: &WorkerError) -> (String, String) {
     match error {
         WorkerError::Execution { outcome, summary } => (outcome.clone(), summary.clone()),
         WorkerError::Transport { .. } => (
@@ -1579,4 +1615,42 @@ pub fn utf8_chunks(content: &str, maximum: usize) -> Result<Vec<String>, String>
         offset = end;
     }
     Ok(chunks)
+}
+
+impl crate::ports_runtime::RunnerPort for CommandRunnerProvider {
+    fn prepare(&mut self) -> Result<(), WorkerError> {
+        CommandRunnerProvider::prepare(self)
+    }
+
+    fn run(
+        &mut self,
+        lease: &Lease,
+        workspace: &WorkspaceLease,
+        callbacks: RunCallbacks,
+        stop: &StopFlag,
+        contexts: &InvocationContexts,
+    ) -> Result<CliOutcome, WorkerError> {
+        CommandRunnerProvider::run(self, lease, workspace, callbacks, stop, contexts)
+    }
+}
+
+/// The factory's default transport diagnostic reporter
+/// (work_cli_transport.CliDiagnosticReporter): validate the
+/// structural diagnostic, then emit one canonical-JSON warning
+/// line carrying the attempt identity.
+pub struct LogDiagnosticReporter;
+
+impl TransportDiagnosticPort for LogDiagnosticReporter {
+    fn report(&mut self, lease: &Lease, diagnostic: &serde_json::Value) {
+        if !crate::cli_transport::valid_diagnostic(diagnostic) {
+            return;
+        }
+        let mut merged = diagnostic.clone();
+        merged["task_id"] = serde_json::json!(lease.task_id);
+        merged["attempt_id"] = serde_json::json!(lease.attempt_id);
+        eprintln!(
+            "cli_transport_failure {}",
+            crate::policy::canonical_json(&merged)
+        );
+    }
 }

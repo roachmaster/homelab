@@ -314,6 +314,16 @@ impl WorkerStorePort for WorkerApi {
         let claim = lease_to_claim(lease)?;
         WorkerApi::cancellation_requested(self, &claim).map_err(map_err)
     }
+
+    fn queue_review(
+        &mut self,
+        lease: &Lease,
+        reconciliation_receipt_id: &str,
+    ) -> Result<Option<String>, WorkerError> {
+        let claim = lease_to_claim(lease)?;
+        let receipt = parse_uuid(reconciliation_receipt_id, "reconciliation_receipt_id")?;
+        WorkerApi::queue_review(self, &claim, receipt).map_err(map_err)
+    }
 }
 
 impl ExecutionContextPort for WorkerApi {
