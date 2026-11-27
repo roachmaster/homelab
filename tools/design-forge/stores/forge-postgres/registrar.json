@@ -1,0 +1,27 @@
+{
+ "collaborators": [
+  "config",
+  "factory",
+  "error",
+  "forge_core_bootstrap"
+ ],
+ "file": "registrar.rs",
+ "glossary": [
+  "registrar",
+  "freeze",
+  "session"
+ ],
+ "id": "registrar",
+ "invariants": [
+  "Neither function connects, reads the environment, or performs any I/O.",
+  "Each group provides exactly one binding and holds exactly one factory - nothing optional survives the freeze."
+ ],
+ "kind": "functions",
+ "responsibilities": [
+  "register_worker validates the config effect-free, then wraps PgSessionFactory in a PreparedGroup providing \"pg-worker-session\" and requiring nothing.",
+  "register_reconciler is the same shape, providing \"pg-reconciler-session\".",
+  "RegistrationError from PreparedGroup::new maps into AdapterError through the From impl in error.rs."
+ ],
+ "signature": "// pub fn register_worker(config: crate::config::PgConfig)\n//     -> Result<forge_core::bootstrap::PreparedGroup<crate::factory::PgSessionFactory>, crate::error::AdapterError>\n//   provides: &[\"pg-worker-session\"], requires: &[]\n// pub fn register_reconciler(config: crate::config::PgConfig)\n//     -> Result<forge_core::bootstrap::PreparedGroup<crate::factory::PgSessionFactory>, crate::error::AdapterError>\n//   provides: &[\"pg-reconciler-session\"], requires: &[]",
+ "summary": "The crate's staging entry points: one register function per role, each returning a PreparedGroup with exactly one session factory. No I/O at staging."
+}

@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from assemble import load_store, build_packet
 import generate
+import llm
 from generate import strip_fences, SYSTEM
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -13,11 +14,15 @@ OUT = os.path.join(HERE, "out")
 
 
 def main():
-    target, errors_path = sys.argv[1], sys.argv[2]
-    cards, glossary, rules = load_store()
+    args = sys.argv[1:]
+    store_dir = generate._flag(args, "--store", os.path.join(HERE, "design"))
+    out_dir = generate._flag(args, "--out", OUT)
+    target, errors_path = args[0], args[1]
+    llm.set_out_dir(out_dir)
+    cards, glossary, rules = load_store(store_dir)
     card = cards[target]
     packet = build_packet(target, cards, glossary, rules)
-    path = os.path.join(OUT, "src", card["file"])
+    path = os.path.join(out_dir, "src", card["file"])
     with open(path) as f:
         current = f.read()
     with open(errors_path) as f:

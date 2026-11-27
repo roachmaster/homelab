@@ -1,0 +1,26 @@
+{
+ "collaborators": [
+  "error",
+  "config",
+  "client",
+  "worker",
+  "reconciler",
+  "factory",
+  "registrar"
+ ],
+ "file": "lib.rs",
+ "glossary": [
+  "lease"
+ ],
+ "id": "lib",
+ "invariants": [
+  "Crate doc states: forge-postgres is the dedicated Postgres adapter (Rust stores do not route through forge-pg-proxy); a synchronous facade over tokio-postgres; leases are explicit values and nothing is cleaned up by Drop."
+ ],
+ "kind": "module root",
+ "responsibilities": [
+  "Open with the crate doc comment from the invariants, verbatim in spirit: what this adapter is, the transport decision, and the explicit-lease rule.",
+  "Declare the six modules and re-export the public surface in the signature."
+ ],
+ "signature": "pub mod client;\npub mod config;\npub mod error;\npub mod factory;\npub mod reconciler;\npub mod registrar;\npub mod worker;\n\npub use client::PgSession;\npub use config::PgConfig;\npub use error::AdapterError;\npub use factory::PgSessionFactory;\npub use reconciler::ReconcilerApi;\npub use worker::{Claim, RenewStatus, WorkerApi};",
+ "summary": "The crate root: the design's public contract in one doc comment, the module list, and the re-exports."
+}

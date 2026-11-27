@@ -1,0 +1,14 @@
+{
+ "attempt": "One try at a task by one worker incarnation, bounded by a lease expiry and a hard deadline.",
+ "claim": "The JSONB payload forge_coding_worker_api.claim returns for the next task, decoded into the Claim struct.",
+ "freeze": "The bootstrap moment after which the registry's factories may be constructed; nothing is built before it.",
+ "incarnation": "A worker process lifetime, identified by a uuid; claims are tied to it.",
+ "lease": "A claimed attempt: the pair (attempt_id, attempt_token). Explicit value, never a Drop guard; it expires server-side on its own schedule.",
+ "outcome": "The terminal state an attempt publishes: completed work awaiting review, failure, or needs-reconcile.",
+ "owner": "The coding owner identity stamped on every transaction via set_config('forge.coding_owner', owner, true); it scopes what the session may see and do.",
+ "policy digest": "The frozen work-policy digest a worker advertises; the server rejects claims and publishes that do not match it.",
+ "reconciler": "The second database role: expires leases and reports pending reconciliations, over its own session.",
+ "registrar": "The staging entry point that hands a validated factory group to the bootstrap registry; performs no I/O.",
+ "session": "One database connection behind the synchronous facade; owns its runtime; never shared across threads.",
+ "stop proof": "JSON evidence that the attempt's worker process actually stopped, required by publish and record_stop."
+}

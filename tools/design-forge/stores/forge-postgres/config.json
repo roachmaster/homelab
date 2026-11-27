@@ -1,0 +1,24 @@
+{
+ "collaborators": [
+  "error"
+ ],
+ "file": "config.rs",
+ "glossary": [
+  "owner",
+  "session"
+ ],
+ "id": "config",
+ "invariants": [
+  "A PgConfig with an empty owner must be impossible to validate: an unscoped session is a bug, not a default.",
+  "Debug output never contains the password value."
+ ],
+ "kind": "struct",
+ "responsibilities": [
+  "Hold the public fields in the signature, with the defaults from PgConfig::new.",
+  "validate() is effect-free: non-empty host/dbname/user/owner, port != 0, both timeouts > 0; each failure is a Protocol error naming the field.",
+  "to_tokio_config() is pub(crate) and maps the fields onto tokio_postgres::Config, including application_name \"forge-postgres\" and the connect timeout.",
+  "The manual Debug impl redacts the password."
+ ],
+ "signature": "#[derive(Clone)]\npub struct PgConfig {\n    pub host: String,\n    pub port: u16,\n    pub dbname: String,\n    pub user: String,\n    pub password: Option<String>,\n    pub owner: String,\n    pub connect_timeout: std::time::Duration,\n    pub statement_timeout: std::time::Duration,\n}\n// impl PgConfig:\n//   pub fn new(owner: impl Into<String>) -> Self\n//     defaults: host \"127.0.0.1\", port 5432, dbname \"forge_agent\", user \"forge_coding_worker\",\n//     password None, connect_timeout 10s, statement_timeout 30s\n//   pub fn validate(&self) -> Result<(), crate::error::AdapterError>\n//   pub(crate) fn to_tokio_config(&self) -> tokio_postgres::Config\n// impl std::fmt::Debug for PgConfig (manual; password shown as \"<redacted>\" when Some)",
+ "summary": "Everything one adapter session needs: connection fields, the coding owner, and both timeouts. Pure typed values - this crate never reads the environment."
+}

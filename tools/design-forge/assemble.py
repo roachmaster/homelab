@@ -16,19 +16,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DESIGN = os.path.join(HERE, "design")
 
 
-def load_store():
+def load_store(design_dir=None):
+    design_dir = design_dir or DESIGN
     cards = {}
     glossary = {}
     rules = []
-    for name in sorted(os.listdir(DESIGN)):
+    for name in sorted(os.listdir(design_dir)):
         if not name.endswith(".json"):
             continue
-        with open(os.path.join(DESIGN, name)) as f:
+        with open(os.path.join(design_dir, name)) as f:
             data = json.load(f)
         if name == "glossary.json":
             glossary = data
         elif name == "rules.json":
             rules = data["rules"]
+        elif name == "crate.json":
+            continue  # crate manifest spec, not a card
         else:
             cards[data["id"]] = data
     return cards, glossary, rules

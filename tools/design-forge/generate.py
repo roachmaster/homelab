@@ -13,6 +13,7 @@ implementations are deliberately withheld, program against the
 signatures. The model then generates with the same packet plus that
 answer appended.
 """
+import json
 import os
 import re
 import sys
@@ -80,15 +81,42 @@ def split_needs(text):
     return needs, "\n".join(code).strip()
 
 
+def _flag(args, name, default):
+    if name in args:
+        i = args.index(name)
+        value = args[i + 1]
+        del args[i:i + 2]
+        return value
+    return default
+
+
+def _cargo_toml(store_dir):
+    crate_json = os.path.join(store_dir, "crate.json")
+    if not os.path.exists(crate_json):
+        return CARGO_TOML
+    with open(crate_json) as f:
+        spec = json.load(f)
+    lines = ["[package]", f'name = "{spec["package"]}"',
+             'version = "0.1.0"', f'edition = "{spec.get("edition", "2021")}"',
+             "", "[dependencies]"]
+    lines += spec.get("dependencies", [])
+    return "\n".join(lines) + "\n"
+
+
 def main():
-    global KNOWN_MODULES
-    targets = sys.argv[1:]
-    cards, glossary, rules = load_store()
-    KNOWN_MODULES = {os.path.splitext(c["file"])[0] for c in cards.values()}
+    global KNOWN_MODULES, OUT
+    args = sys.argv[1:]
+    store_dir = _flag(args, "--store", os.path.join(HERE, "design"))
+    OUT = _flag(args, "--out", OUT)
+    targets = args
+    cards, glossary, rules = load_store(store_dir)
+    KNOWN_MODULES = {os.path.splitext(c["file"])[0] for c in cards.values()
+                     if "(" not in c["file"]}
+    llm.set_out_dir(OUT)
     os.makedirs(os.path.join(OUT, "src"), exist_ok=True)
     os.makedirs(os.path.join(OUT, "packets"), exist_ok=True)
     with open(os.path.join(OUT, "Cargo.toml"), "w") as f:
-        f.write(CARGO_TOML)
+        f.write(_cargo_toml(store_dir))
     for target in targets:
         card = cards[target]
         packet = build_packet(target, cards, glossary, rules)

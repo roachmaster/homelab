@@ -1,0 +1,32 @@
+{
+ "collaborators": [
+  "client",
+  "error"
+ ],
+ "file": "worker.rs",
+ "glossary": [
+  "lease",
+  "claim",
+  "attempt",
+  "incarnation",
+  "policy digest",
+  "outcome",
+  "stop proof"
+ ],
+ "id": "worker",
+ "invariants": [
+  "A Claim is a value, not a guard: dropping it does nothing on the server.",
+  "claim returns Ok(None) when the server returns SQL NULL (nothing claimable) - never an error.",
+  "No method builds SQL beyond the fixed function-call strings in the signature."
+ ],
+ "kind": "structs + impl",
+ "responsibilities": [
+  "Claim::from_json decodes the claim payload; a missing or mistyped required field is a Protocol error naming the field. Optional payload fields stay in raw.",
+  "WorkerApi methods call exactly the SQL functions named in the signature comments, in the session's owner-scoped transaction, via PgSession's call_* helpers.",
+  "renew_status probes to_regprocedure for the typed function and falls back to boolean renew (Renewed/LeaseExpired) when it is absent.",
+  "publish probes publish_with_cause only for outcome \"failed\" with a cause, and otherwise calls publish.",
+  "RenewStatus::parse accepts exactly the five statuses and rejects anything else as Protocol."
+ ],
+ "signature": "#[derive(Debug, Clone)]\npub struct Claim {\n    pub task_id: String,\n    pub project_alias: String,\n    pub base_revision: String,\n    pub mode: String,\n    pub agent_profile: String,\n    pub prompt: String,\n    pub acceptance_criteria: String,\n    pub recipe: serde_json::Value,\n    pub attempt_id: uuid::Uuid,\n    pub attempt_token: uuid::Uuid,\n    pub worker_id: String,\n    pub incarnation: uuid::Uuid,\n    pub lease_expires_at: String,\n    pub deadline_at: String,\n    pub unit_name: String,\n    pub raw: serde_json::Value,\n}\n// impl Claim:\n//   pub fn from_json(payload: serde_json::Value) -> Result<Claim, crate::error::AdapterError>\n\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum RenewStatus { Renewed, LeaseExpired, DeadlineExceeded, TaskCancelled, TaskGone }\n// impl RenewStatus:\n//   pub fn parse(text: &str) -> Result<RenewStatus, crate::error::AdapterError>\n//     \"renewed\" | \"lease_expired\" | \"deadline_exceeded\" | \"task_cancelled\" | \"task_gone\"\n\npub struct WorkerApi {\n    // private: session: crate::client::PgSession\n}\n// impl WorkerApi:\n//   pub fn new(session: crate::client::PgSession) -> Self\n//   pub fn advertise(&mut self, worker_id: &str, incarnation: uuid::Uuid, projects: &serde_json::Value,\n//       profiles: &serde_json::Value, policy_digest: &str) -> Result<(), AdapterError>\n//       SQL: forge_coding_worker_api.advertise($1, $2, $3, $4, $5) -> void, via call_void\n//   pub fn claim(&mut self, worker_id: &str, incarnation: uuid::Uuid, allowed_profiles: &[String])\n//       -> Result<Option<Claim>, AdapterError>\n//       SQL: forge_coding_worker_api.claim($1, $2, $3) -> jsonb, via call_json; profiles passed as Vec<&str>\n//   pub fn renew(&mut self, claim: &Claim) -> Result<bool, AdapterError>\n//       SQL: forge_coding_worker_api.renew($1, $2) -> boolean, via call_bool\n//   pub fn renew_status(&mut self, claim: &Claim, progress_signal: Option<&str>) -> Result<RenewStatus, AdapterError>\n//       probe: to_regprocedure('forge_coding_worker_api.renew_status(uuid,uuid,text)') IS NOT NULL (call_bool)\n//       typed: forge_coding_worker_api.renew_status($1, $2, $3) -> text, via call_text, then RenewStatus::parse\n//   pub fn renew_deadline(&mut self, claim: &Claim, progress_signal: Option<&str>)\n//       -> Result<Option<serde_json::Value>, AdapterError>\n//       SQL: forge_coding_worker_api.renew_deadline($1, $2, $3) -> jsonb, via call_json\n//   pub fn publish(&mut self, claim: &Claim, outcome: &str, manifest: Option<serde_json::Value>,\n//       usage: Option<serde_json::Value>, summary: &str, stop_proof: &serde_json::Value,\n//       failure_cause: Option<&str>) -> Result<Option<serde_json::Value>, AdapterError>\n//       SQL: forge_coding_worker_api.publish($1..$7) -> jsonb; for outcome \"failed\" with a cause, probe\n//       to_regprocedure('forge_coding_worker_api.publish_with_cause(uuid,uuid,text,jsonb,jsonb,text,jsonb,text)')\n//       and prefer forge_coding_worker_api.publish_with_cause($1..$8) -> jsonb\n//   pub fn record_stop(&mut self, claim: &Claim, stop_proof: &serde_json::Value, summary: &str, cause: &str)\n//       -> Result<(), AdapterError>\n//       SQL: forge_coding_worker_api.record_stop($1, $2, $3, $4, $5) -> void, via call_void\n//   pub fn cancellation_requested(&mut self, claim: &Claim) -> Result<bool, AdapterError>\n//       SQL: forge_coding_worker_api.cancellation_requested($1, $2) -> boolean, via call_bool\n//   pub fn report_progress(&mut self, claim: &Claim, sequence: i32, kind: &str, summary: &str)\n//       -> Result<(), AdapterError>\n//       SQL: forge_coding_worker_api.report_progress($1, $2, $3, $4, $5) -> void, via call_void",
+ "summary": "The worker surface: Claim (the lease), RenewStatus, and WorkerApi - typed calls over forge_coding_worker_api, one function per method, mirroring WorkerDB's worker role."
+}

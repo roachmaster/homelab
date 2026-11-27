@@ -1,0 +1,15 @@
+{
+ "collaborators": [],
+ "file": "forge-core/src/bootstrap.rs (external - do not implement)",
+ "glossary": [],
+ "id": "forge_core_bootstrap",
+ "invariants": [
+  "Never generate this file."
+ ],
+ "kind": "external types",
+ "responsibilities": [
+  "Exist as a collaborator signature only."
+ ],
+ "signature": "// forge-core::bootstrap (already exists - do not implement)\npub struct PreparedGroup<F> { /* opaque: one factory plus validated group metadata */ }\nimpl<F> PreparedGroup<F> {\n    pub fn new(factory: F, provides: &[&str], requires: &[&str])\n        -> Result<Self, forge_core::bootstrap::RegistrationError>;\n}\n#[derive(Debug)]\npub enum RegistrationError {\n    InvalidIdentifier(&'static str),\n    EmptyGroup,\n    DuplicateProvided(String),\n    DuplicateRequirement(String),\n    DuplicateGroup(String),\n    BindingConflict { binding: String, owner: String },\n}",
+ "summary": "forge-core's bootstrap registration types. Already exist; this card is their interface for packets that collaborate with them."
+}

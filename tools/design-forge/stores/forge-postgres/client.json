@@ -1,0 +1,26 @@
+{
+ "collaborators": [
+  "config",
+  "error"
+ ],
+ "file": "client.rs",
+ "glossary": [
+  "owner",
+  "session"
+ ],
+ "id": "client",
+ "invariants": [
+  "No SQL executes outside the owner-scoped transaction, including the readiness probe.",
+  "A call that fails because the connection broke surfaces as AdapterError::Unavailable; the session is then dead and is never silently reconnected.",
+  "PgSession is not Sync and is never shared: one session, one connection, one thread."
+ ],
+ "kind": "struct",
+ "responsibilities": [
+  "Own the PgConfig, a tokio current-thread Runtime, and the tokio_postgres Client; all fields private.",
+  "connect(): validate the config, build the runtime, connect with NoTls, spawn the connection driver onto the runtime, apply the statement timeout, then prove readiness with one owner-scoped SELECT 1 round trip before returning.",
+  "Every call_* runs ONE transaction: set_config('forge.coding_owner', owner, true) first, then SELECT <the given select expression>, then commit. Dropping the transaction uncommitted rolls back.",
+  "call_scalar is the only generic path; call_json/call_bool/call_text/call_void are thin specializations or siblings with the same transaction discipline."
+ ],
+ "signature": "pub struct PgSession {\n    // private: config: PgConfig, rt: tokio::runtime::Runtime, client: tokio_postgres::Client\n}\n// impl PgSession:\n//   pub fn connect(config: crate::config::PgConfig) -> Result<PgSession, crate::error::AdapterError>\n//   pub fn config(&self) -> &crate::config::PgConfig\n//   pub fn call_scalar<T>(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<Option<T>, crate::error::AdapterError>\n//       where T: for<'a> tokio_postgres::types::FromSql<'a>\n//   pub fn call_void(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<(), crate::error::AdapterError>\n//   pub fn call_json(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<Option<serde_json::Value>, crate::error::AdapterError>\n//   pub fn call_bool(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<bool, crate::error::AdapterError>\n//   pub fn call_text(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<Option<String>, crate::error::AdapterError>",
+ "summary": "One adapter session: a tokio-postgres client behind a synchronous facade, and the owner-scoped transaction every call runs in."
+}

@@ -45,6 +45,12 @@ ABORT_S = 120.0
 LOG = os.path.join(HERE, "out", "llm-log.jsonl")
 
 
+def set_out_dir(path):
+    """Point the request log at the active run's out dir."""
+    global LOG
+    LOG = os.path.join(path, "llm-log.jsonl")
+
+
 class LlmTimeout(Exception):
     kind = "timeout"
 

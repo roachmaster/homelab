@@ -1,0 +1,11 @@
+{
+ "rules": [
+  "Rust edition 2021. No unsafe code. Use only the dependencies in the crate manifest (forge-core, tokio, tokio-postgres, serde_json, uuid).",
+  "The public surface is synchronous. Never expose tokio or tokio-postgres types in public signatures; they stay inside PgSession.",
+  "All SQL goes through PgSession's call_* helpers. Never build SQL strings in other modules. Function names, argument order and result types come from the card exactly.",
+  "Leases are explicit values: nothing is cleaned up by Drop, and every fallible operation returns Result<_, AdapterError>.",
+  "Every public item carries a /// doc comment.",
+  "Unit tests go in a #[cfg(test)] mod tests at the bottom of the same file and test pure logic only - never a live database.",
+  "No binary, no main function, no environment access anywhere in this crate."
+ ]
+}

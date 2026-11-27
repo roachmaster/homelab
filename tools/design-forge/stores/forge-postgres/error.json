@@ -1,0 +1,23 @@
+{
+ "collaborators": [],
+ "file": "error.rs",
+ "glossary": [
+  "lease"
+ ],
+ "id": "error",
+ "invariants": [
+  "categorize checks message rules BEFORE sqlstate: a message containing 'result_mismatch' is ResultMismatch; a message containing 'lease' and ('expired' or 'lost') is LeaseExpired (comparisons are case-insensitive).",
+  "SQLSTATE 42501 -> AccessDenied; 40001, 40P01, 23505 -> OutcomeConflict; everything else -> Sql{state, message}.",
+  "categorize never panics and never returns Unavailable or Protocol."
+ ],
+ "kind": "enum + functions",
+ "responsibilities": [
+  "Define AdapterError with the seven variants in the signature.",
+  "categorize(sqlstate, message) is a pure function implementing the mapping rules in the invariants.",
+  "From<tokio_postgres::Error>: a database error maps through categorize with its SQLSTATE and message; a closed connection maps to Unavailable; anything else maps to Sql with no state.",
+  "From<forge_core::bootstrap::RegistrationError> maps to Protocol with the error's Display text.",
+  "Display writes the prefixes given in the signature comments."
+ ],
+ "signature": "#[derive(Debug)]\npub enum AdapterError {\n    Unavailable(String),\n    AccessDenied(String),\n    LeaseExpired(String),\n    OutcomeConflict(String),\n    ResultMismatch(String),\n    Protocol(String),\n    Sql { state: Option<String>, message: String },\n}\n// impl std::fmt::Display: Unavailable -> \"database unavailable: {m}\", AccessDenied -> \"access denied: {m}\",\n//   LeaseExpired -> \"lease expired: {m}\", OutcomeConflict -> \"outcome conflict: {m}\",\n//   ResultMismatch -> \"result mismatch: {m}\", Protocol -> \"adapter protocol error: {m}\",\n//   Sql -> \"database error [{state, or ----- when None}]: {message}\"\n// impl std::error::Error for AdapterError\n// pub fn categorize(state: Option<&str>, message: &str) -> AdapterError\n// impl From<tokio_postgres::Error> for AdapterError\n// impl From<forge_core::bootstrap::RegistrationError> for AdapterError",
+ "summary": "The adapter's error categories, mirroring the Python WorkerDB's translated exceptions so migrated callers make the same decisions."
+}
