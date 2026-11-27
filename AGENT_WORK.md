@@ -1,4 +1,41 @@
-# Current: Root-cause analysis and contract-name handoff correction — 2026-11-27
+# Current: Muse proxy task reassigned to Grok — 2026-11-27
+
+User explicitly requested replacing Muse with Grok or AGY. Selected Grok, the
+existing native default, without another project-policy change. New task
+97711535-4007-4bec-b995-67d90c560ead / workflow e1683a99-9d9e-4155-88bc-8129840301a2
+is queued for grok-primary with codex-primary independent review. Its prompt
+links the original request/acceptance, prior plan artifact and read-only Muse
+source, requires a fresh reviewed plan and feature/grok-only edits/publication.
+Only after verifying this successor, cancelled original Muse workflow b3a05d8a
+through the normal operator API, retaining every task/artifact/review/event.
+Original task6fdff749 remains historical, not falsely completed.
+
+Execution is held: native Grok config resolves forge/agent/grok-primary; Python
+native profile/branch validation and SQL native publication receipt validation
+still require forge/*, so merely changing a prompt/config cannot qualify
+feature/grok. Grok worker was idle and stopped before admission. No attempt or
+branch reservation exists for the new task. Do not start it before an explicitly
+qualified branch-policy transition; preserve all other workflow identities.
+An explicit root-owned systemd condition preserves this hold across reboot:
+`/etc/systemd/system/forge-grok-worker.service.d/~owned-branch-hold.conf`, gated by
+`/opt/homelab-forge/operations/muse-to-grok-20261127/execution.hold`.
+Remove the hold only after feature/grok admission, execution and publication are
+qualified. The API and all other worker/portal/MCP services remain running.
+Evidence: `/opt/homelab-forge/operations/muse-to-grok-20261127/`.
+
+Admission exposed the same strict response/audit mismatch as cancellation:
+WorkStore.submit durably records actor, but Rust WorkSubmitted has no actor field.
+The first request committed one task then portal returned503. Never submit a new
+key on that response; verify/replay the original key. Root is applying the same
+public response projection while retaining the full audited admission receipt.
+Correction a1b0d44d is now published and live in the API-only release
+`/opt/homelab-forge/releases/admission-response-a1b0d44d370b/source`. All27 API
+tests passed; independent review found no blockers. Two authenticated same-key
+live submission replays returned202 and the same task UUID, without creating
+another task or starting an attempt. Queue counts are active1, attention13,
+history48, all62. No global project defaults or frozen identities were changed.
+
+# Previous checkpoint: Root-cause analysis and contract-name handoff correction — 2026-11-27
 
 Code/history/production-evidence review confirms two separate completion blockers.
 No CPU or hashing-performance claim is made: the evidence establishes control-flow
