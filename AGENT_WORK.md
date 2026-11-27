@@ -1,4 +1,50 @@
-## Baseline recovery and main-CI linkage — source qualification pending, 2026-11-27
+## Event-stream recovery and delivery checkpoint — 2026-11-27
+
+Reviewed main7ae49268 includes PR36–39. Jenkins134 passed all46 full-main
+checks, real browser and all four zero-skip backend suites (1856 runner tests).
+Portal release5eadce13 is durably deployed. Schema52 remains current. The five
+model/publication services use immutable main4c2ba8b9 source; the API alone uses
+immutable feature source89ff01c7, separately qualified by Jenkins133 all45 and
+51 focused tests with zero skips. This temporary qualified feature deployment
+does not claim main provenance. Preserve its selected Jenkins ingress allowlist.
+
+The qualified API binds generated-correlation main events, artifacts and logs
+through the task's exact authorized delivery action/commit/main scope. Live
+Jenkins134 main progress was visible on task2411dd36 and its parent. PR39 binds
+terminal observations to action plus commit, retaining commit-only fallback for
+unbound legacy data. Local follow-up uses genuine execution timestamps to sort
+runs so late artifact ingestion cannot make an older branch build appear latest.
+
+Stopped implementation258e6354 genuinely handed off with no_source_changes.
+Private once-only baseline recovery checked its unchanged stopped native source,
+protected full-main134 evidence and qualified API89 before creating fresh Plan
+2ede1336 in the same workflow5aded552. Independent Plan review passed; normal
+implementation is running from main7ae49268 on feature/codex. Planning was charged
+once, plan revisions advanced to2, and original repair budgets/history remain.
+The native implementation owns the remote branch reservation. Root maintenance
+must wait for normal release of that reservation before pushing.
+
+Root maintenance adds a private, exact two-diagnostic archive audit. It preserves
+failed tasks, attempts, receipts and controls; only a matching current operator
+disposition moves these obsolete diagnostics into History. No public archive or
+retry authority is added. This follow-up is not deployed or executed. After
+merging reviewed main7ae, all52 archive/projection tests passed with zero skips.
+
+The defect implementation currently reserves migration53. Never create another
+53, alter applied migrations1–52 or restore the owner-reserved digest-column drop.
+Its database, protocol compatibility, protected verifier and runtime consumers
+must be reviewed and deployed as one qualified cohort. Release activation alone
+is temporarily held; implementation, review, CI, merge and main observation stay
+enabled. Three older deferred release journals remain unchanged. Preserve the
+canonical main checkout and other agent branches.
+
+The live catalog has one active workflow, five Needs attention and56 History.
+Two attention items are the obsolete diagnostics awaiting qualified archival;
+the others concern Drive retention semantics (owner answer pending), unfinished
+Grok transient-readiness deferral and unfinished AGY refresh_base capability.
+Do not mark these delivered or reset their spent authority to hide attention.
+
+## Baseline recovery and main-CI linkage — historical source checkpoint, 2026-11-27
 
 PR37/main4c2ba8b9 passed Jenkins130 all46 checks, real browser and all four
 zero-skip backend suites (1846 runner tests). Portal releaseeee7d464 and six
