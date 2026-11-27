@@ -132,6 +132,14 @@ class WorkflowContinuationTest(unittest.TestCase):
         context=self.process_native(retried,'Fresh Plan after reconciled startup failure.')
         self.assertIn('before native launch',context['feedback_context'].legacy_resume_note)
         self.assertEqual(self.rows('SELECT phase,reservation_active FROM forge_agent.coding_attempts WHERE attempt_id=%s',(old.attempt_id,))[0],('stopped',False))
+        self.coordinator.run_once();peer=self.claim('codex-v2')
+        self.process_native(peer,self.verdict(peer));self.coordinator.run_once()
+        implementation=self.claim('agy-v2')
+        self.assertEqual(implementation.resume_attempt_id,retried.attempt_id)
+        context=self.process_native(implementation,'Implemented the independently approved Plan.')
+        self.assertEqual(context['plan_context']['plan_attempt_id'],retried.attempt_id)
+        self.assertEqual(context['peer_feedback_context'].target_kind,'plan')
+        self.assertNotIn('feedback_context',context)
 
     def test_unstarted_resume_does_not_ignore_operator_cancellation(self):
         from work_workflow_continuation import UnstartedPlanResume
@@ -155,6 +163,92 @@ class WorkflowContinuationTest(unittest.TestCase):
         command=UnstartedPlanResume('homelab',UUID(old.task_id),UUID(old.attempt_id),self.get(old.task_id)['revision'],rec,uuid4(),'a'*40)
         with self.assertRaises(Rejected) as changed:self.resume_unstarted(port,command)
         self.assertEqual(changed.exception.code,'branch_not_qualified')
+
+    def phase_direction_failure(self,*,interrupted=False):
+        from work_retry_events import RetryEventProvider
+        from work_workflow_continuation import UnstartedPlanResume,ApprovedPlanDirectionResume
+        from test_work_execution_and_usage import make_stop_proof
+        self.flow.retry_events=RetryEventProvider('mission-control')
+        port,old,rec=self.unstarted_plan();self.attested_materialization(old,rec)
+        self.resume_unstarted(port,UnstartedPlanResume('homelab',UUID(old.task_id),UUID(old.attempt_id),self.get(old.task_id)['revision'],rec,uuid4(),'a'*40))
+        self.coordinator.run_once();plan=self.claim('agy-v2');self.process_native(plan,'Fresh approved Plan.')
+        self.coordinator.run_once();peer=self.claim('codex-v2');self.process_native(peer,self.verdict(peer));self.coordinator.run_once()
+        author=self.claim('agy-v2')
+        if interrupted:
+            self.db.record_stop(author,make_stop_proof(author.unit_name),'Worker shutdown requires review before any replacement attempt.','interrupted')
+            rec=self.db.reconcile(author,'c'*64,make_stop_proof(author.unit_name));self.coordinator.run_once()
+        else:
+            self.process_native(author,'A stale Plan-only note incorrectly prevented implementation.')
+            self.coordinator.run_once();q=self.db.review_claim('fixed-checks')
+            self.db.review_finish(q,{'disposition':'handoff','reason':'no_source_changes','candidate_commit':None,
+                'gate_manifest_sha256':'e'*64,'findings':[],'verified_finding_ids':[],'fingerprint':None,
+                'summary':'Independent review stopped before approval.','cleanup_confirmed':True,
+                'verification':{'checks_passed':False,'checks':[],'cleanup_confirmed':True}})
+            self.coordinator.run_once()
+            rec=self.rows('SELECT receipt_id FROM forge_agent.coding_reconciliation_receipts WHERE task_id=%s AND attempt_id=%s ORDER BY created_at DESC LIMIT 1',(author.task_id,author.attempt_id))[0][0]
+        command=ApprovedPlanDirectionResume('homelab',UUID(author.task_id),UUID(author.attempt_id),self.get(author.task_id)['revision'],UUID(str(rec)),uuid4(),'b'*40)
+        return port,command,plan,author
+
+    def resume_direction(self,port,command):
+        with patch.dict('work_agent_branch.OWNED_FEATURE_BRANCHES',{p:self.config.profiles[p].branch for p in ('agy-v2','codex-v2')}):
+            return port.resume_approved_plan_direction(command)
+
+    def test_empty_source_direction_retry_preserves_review_and_approved_plan(self):
+        port,command,plan,author=self.phase_direction_failure()
+        before=self.rows('SELECT to_jsonb(q) FROM forge_agent.coding_reviews q WHERE task_id=%s',(author.task_id,))
+        decision=self.get(author.task_id)['plan_decision_id'] if 'plan_decision_id' in self.get(author.task_id) else self.rows('SELECT plan_decision_id FROM forge_agent.coding_tasks WHERE id=%s',(author.task_id,))[0][0]
+        result=self.resume_direction(port,command)
+        self.assertEqual(self.resume_direction(port,command),result)
+        self.assertEqual(result['retry_charge']['used'],1)
+        self.assertEqual(self.rows('SELECT to_jsonb(q) FROM forge_agent.coding_reviews q WHERE task_id=%s',(author.task_id,)),before)
+        self.assertEqual(str(result['plan_decision_id']),str(decision))
+        retried=self.claim('agy-v2');self.assertEqual(retried.task_id,author.task_id)
+        context=self.process_native(retried,'Implemented the retained independently approved Plan.')
+        self.assertEqual(context['plan_context']['plan_attempt_id'],plan.attempt_id)
+        self.assertTrue(context['feedback_context'].legacy_resume_note.startswith('Implement the saved independently approved Plan.'))
+        self.assertEqual(context['peer_feedback_context'].target_kind,'plan')
+
+    def test_worker_shutdown_direction_retry_preserves_partial_workspace_receipt(self):
+        port,command,plan,author=self.phase_direction_failure(interrupted=True)
+        result=self.resume_direction(port,command);self.assertIsNone(result['review_id'])
+        retried=self.claim('agy-v2');self.assertEqual(retried.resume_workspace_digest,'c'*64)
+        self.assertEqual(self.get(author.task_id)['workflow']['phase'],'implement')
+
+    def test_direction_retry_rejects_operator_cancel(self):
+        from work_api import WorkCancel
+        port,command,plan,author=self.phase_direction_failure()
+        self.service.cancel(WorkCancel('homelab',UUID(author.task_id),self.get(author.task_id)['revision'],'cancel-direction'))
+        with self.assertRaises(Rejected):self.resume_direction(port,command)
+
+    def test_direction_retry_rejects_changed_empty_source_receipt(self):
+        port,command,plan,author=self.phase_direction_failure()
+        self.cluster.admin_exec("UPDATE forge_agent.coding_reconciliation_receipts SET workspace_digest='"+'c'*64+"' WHERE receipt_id='"+str(command.reconciliation_receipt_id)+"'",owner=False)
+        with self.assertRaises(Rejected):self.resume_direction(port,command)
+
+    def test_direction_retry_rejects_other_review_failure(self):
+        port,command,plan,author=self.phase_direction_failure()
+        self.cluster.admin_exec("UPDATE forge_agent.coding_workflows SET escalation_reason='publication_command_failed' WHERE workflow_id='"+author.workflow_id+"'",owner=False)
+        with self.assertRaises(Rejected):self.resume_direction(port,command)
+
+    def test_direction_retry_keeps_exhausted_history_blocking(self):
+        port,command,plan,author=self.phase_direction_failure()
+        with self.flow._transaction() as cursor:
+            scope=self.flow._retry_scope({'project_alias':'homelab','workflow_id':UUID(author.workflow_id)})
+            event=self.flow.retry_events.observe_failure(cursor,scope,'tests','historical-tests','c'*64)
+            for index in range(20):self.flow.retry_events.reserve(cursor,event['event_id'],'spent-'+str(index))
+        with self.assertRaises(Rejected) as error:self.resume_direction(port,command)
+        self.assertEqual(error.exception.code,'retry_exhausted')
+        self.assertEqual(self.get(author.task_id)['status'],'awaiting_review')
+
+    def test_direction_retry_refuses_a_second_execution_recovery(self):
+        from test_work_execution_and_usage import make_stop_proof
+        port,command,plan,author=self.phase_direction_failure()
+        self.resume_direction(port,command);next_attempt=self.claim('agy-v2')
+        proof=make_stop_proof(next_attempt.unit_name)
+        self.db.record_stop(next_attempt,proof,'Worker shutdown requires review before any replacement attempt.','interrupted')
+        rec=self.db.reconcile(next_attempt,'b'*64,proof);self.coordinator.run_once()
+        later=replace(command,attempt_id=UUID(next_attempt.attempt_id),expected_revision=self.get(author.task_id)['revision'],reconciliation_receipt_id=UUID(rec),idempotency_key=uuid4())
+        with self.assertRaises(Rejected):self.resume_direction(port,later)
 
     def test_native_process_continuation_reaches_independent_review_and_exact_merge(self):
         _, admitted = self.submit()

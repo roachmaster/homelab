@@ -327,6 +327,23 @@ and unqualified branches. The same Plan resumes with its own recorded workspace;
 its eventual implementation still requires independent Plan approval. It cannot
 manufacture stop/workspace evidence or convert an unknown scope into success.
 
+Legacy note-only resume direction is phase-scoped. When a saved Plan has been
+approved for implementation and the prior resume attempt is that exact Plan,
+the old Plan-phase note is retained in history but omitted from the implementation
+prompt and artifacts. Notes from later implementation attempts and immutable
+repair/peer-review packets retain their existing validation and delivery.
+
+`work_external_recovery.py approved-plan-direction` is a private, once-only
+recovery for the first implementation after the above unstarted-Plan recovery.
+It requires that original recovery history, the same independently approved
+Plan, the exact old note, genuine stopped/reconciled workspace evidence, and
+either a terminal empty-source review without a candidate or a worker-shutdown
+attempt without publication. An interrupted workspace may retain partial edits.
+It resumes the same task, preserves the old result/review, charges the durable
+feedback-delivery retry ledger, and retains scope and all planning/repair budgets.
+It cannot approve code, invent a candidate, ignore a cancellation or retry a
+second implementation failure. The HTTP service has no route to this authority.
+
 Grok `auto_compact_*` updates are advisory progress, not terminal success or
 accounting authority. Turn-limit notices remain failures. Antigravity's
 `Third-party quota reached` diagnostic follows the configured quota handoff

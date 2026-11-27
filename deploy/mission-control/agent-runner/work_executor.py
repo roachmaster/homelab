@@ -27,7 +27,7 @@ from work_muse import MuseEvents, argv as muse_argv, BINARY_SHA256 as MUSE_BINAR
 from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
 from work_sessions import SessionError, SessionSelection
-from work_review_context import MAX_FEEDBACK_BYTES, ReviewContext
+from work_review_context import MAX_FEEDBACK_BYTES, ReviewContext, current_phase_context
 from work_build_context import BuildContext, BUILD_INFO_SCRIPT
 from work_consumer_cache import ConsumerCacheError
 from work_candidate_source import CandidateSourceError, linked_candidate_input
@@ -1350,6 +1350,7 @@ class CommandRunnerProvider:
             prompt += ("\n\nEXPLICIT PLAN DECISION: " + decision.upper() + ". " + instruction
                        + "The original assignment above is retained context. Read the exact saved plan at "
                        + str(CHILD_STATE / plan_file.name) + ".\nREVIEW FEEDBACK:\n" + note)
+        feedback_context = current_phase_context(lease, feedback_context, plan_context)
         feedback_file = None
         build_files = ()
         if lease.get("feedback_id") is not None and feedback_context is None:

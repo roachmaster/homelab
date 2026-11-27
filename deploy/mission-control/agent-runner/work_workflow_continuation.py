@@ -74,6 +74,11 @@ class UnstartedPlanResume:
             raise ValueError('Invalid unstarted Plan resume')
 
 
+@dataclass(frozen=True)
+class ApprovedPlanDirectionResume(UnstartedPlanResume):
+    """Exact stopped first implementation after a recovered and approved Plan."""
+
+
 class WorkflowContinuation:
     """Operator-owned port; composition supplies the ready workflow store."""
     def __init__(self, flow, retry_evidence):
@@ -141,6 +146,114 @@ class WorkflowContinuation:
             return {'policy': POLICY, 'workflow_id': str(workflow_id),
                     'source_sha256': sha256_canonical(source),
                     'retained_sources': [task_binding(t) for t in source['tasks']]}
+
+    def resume_approved_plan_direction(self,command):
+        """Retry only the first implementation misdirected by an old Plan note."""
+        from work_workflow import BoundPlanDirectionAuthority,recipe_from_snapshot,_ready_for_recipe
+        from work_policy import NATIVE_POLICIES
+        from work_peer_review import parse_review_target,parse_review_verdict
+        from work_agent_branch import OWNED_FEATURE_BRANCHES
+        if type(command) is not ApprovedPlanDirectionResume:raise Rejected(400,'invalid_request')
+        flow,store=self.flow,self.flow.store
+        intent={'policy':'forge-approved-plan-direction-v1',**{k:str(v) for k,v in vars(command).items()}}
+        key='approved-plan-direction:'+str(command.attempt_id)
+        with flow._transaction() as cursor:
+            store._require_project(command.project_alias);flow._project_lock(cursor,command.project_alias)
+            cursor.execute('SELECT workflow_id FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s',
+                (store.owner,command.project_alias,command.task_id));found=cursor.fetchone()
+            if not found or found['workflow_id'] is None:raise Rejected(404,'not_found')
+            root,w=self._lock(cursor,command.project_alias,found['workflow_id'])
+            cursor.execute("SELECT intent,finish_receipt FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",(w['workflow_id'],key));prior=cursor.fetchone()
+            if prior:
+                if prior['intent']!=intent:raise Rejected(409,'idempotency_conflict')
+                return prior['finish_receipt']['receipt']
+            cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE id=%s FOR UPDATE',(command.task_id,));task=cursor.fetchone()
+            old_note='The prior Plan claim was rejected before native launch. The pristine pinned workspace was materialized and reconciled after that failure. Produce the fresh Plan; independent review remains required.'
+            if (w['enabled'] or w['phase']!='escalated' or task['mode']!='implement'
+                    or task['status'] not in {'awaiting_review','needs_reconcile'} or task['cancelled_at'] is not None
+                    or task['revision']!=command.expected_revision or task['latest_attempt_id']!=command.attempt_id
+                    or task['parent_task_id']!=root['id'] or task['repair_root_task_id']!=root['id']
+                    or task['legacy_resume_note']!=old_note or task['plan_decision_id'] is None
+                    or any(task[k] is not None for k in ('scope_plan_decision_id','workflow_review_id','feedback_id','repair_source_review_id'))):
+                raise Rejected(409,'not_plan_direction_defect')
+            cursor.execute("SELECT action_id FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s AND finish_receipt->'receipt'->>'task_id'=%s",(w['workflow_id'],PREFIX+'%',str(task['id'])))
+            if cursor.fetchone() is None:raise Rejected(409,'source_changed')
+            cursor.execute("SELECT intent FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE 'unstarted-plan-resume:%%' AND finish_receipt->'receipt'->>'task_id'=%s",(w['workflow_id'],str(task['id'])));startup=cursor.fetchone()
+            cursor.execute('SELECT * FROM forge_agent.coding_attempts WHERE task_id=%s ORDER BY attempt_no',(task['id'],));attempts=cursor.fetchall()
+            if (not startup or len(attempts)!=3 or str(attempts[0]['attempt_id'])!=startup['intent']['attempt_id']
+                    or attempts[-1]['attempt_id']!=command.attempt_id or any(a['phase']!='stopped' or a['reservation_active'] or a['lease_expires_at'] is not None for a in attempts)):
+                raise Rejected(409,'reconcile_required')
+            attempt=attempts[-1]
+            if attempt['legacy_resume_note']!=old_note:raise Rejected(409,'source_changed')
+            cursor.execute('SELECT * FROM forge_agent.coding_plan_decisions WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND decision_id=%s',(store.owner,command.project_alias,task['id'],task['plan_decision_id']));plan=cursor.fetchone()
+            if (not plan or plan['decision']!='resume' or plan['plan_attempt_id']!=attempts[1]['attempt_id']
+                    or plan['base_revision']!=task['base_revision'] or plan['agent_profile']!=task['agent_profile']
+                    or plan['plan_sha256']!=flow._artifact(cursor,task['id'],plan['plan_attempt_id'])['result_sha256']):
+                raise Rejected(409,'plan_changed')
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_reviews WHERE workflow_id=%s AND target_kind='plan' AND source_task_id=%s AND source_attempt_id=%s AND status='decided'",(w['workflow_id'],task['id'],plan['plan_attempt_id']));peers=cursor.fetchall()
+            if len(peers)!=1:raise Rejected(409,'plan_changed')
+            peer=peers[0]
+            try:
+                target=parse_review_target(peer['target_json'],peer['target_sha256'])
+                verdict=parse_review_verdict(peer['verdict_json'],target)
+                if verdict['decision']!='approve' or target['source_result_sha256']!=plan['plan_sha256']:raise ValueError()
+            except (ValueError,KeyError,TypeError):raise Rejected(409,'plan_changed') from None
+            cursor.execute('SELECT * FROM forge_agent.coding_reconciliation_receipts WHERE task_id=%s AND receipt_id=%s',(task['id'],command.reconciliation_receipt_id));rec=cursor.fetchone()
+            cursor.execute('SELECT workspace_digest FROM forge_agent.coding_reconciliation_receipts WHERE task_id=%s AND attempt_id=%s AND task_revision=%s',(task['id'],plan['plan_attempt_id'],plan['source_revision']));plan_rec=cursor.fetchone()
+            if (not rec or not plan_rec or rec['attempt_id']!=command.attempt_id or rec['task_revision']!=task['revision']
+                    or rec['stop_proof'].get('scope_stopped') is not True
+                    or rec['stop_proof'].get('source')!='systemd' or rec['stop_proof'].get('unit_name')!=attempt['unit_name']):raise Rejected(409,'reconcile_required')
+            cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE task_id=%s AND attempt_id=%s FOR UPDATE',(task['id'],command.attempt_id));reviews=cursor.fetchall();review=None
+            if task['status']=='awaiting_review':
+                if len(reviews)!=1:raise Rejected(409,'review_changed')
+                review=reviews[0];outcome=(review['finish_receipt'] or {}).get('outcome',{})
+                if (rec['workspace_digest']!=plan_rec['workspace_digest']
+                        or w['escalation_reason']!='no_source_changes' or review['status']!='handoff' or review['reason']!='no_source_changes'
+                        or review['candidate_commit'] is not None or review['phase']!='local' or review['feedback_id'] is not None
+                        or review['attempt_id']!=attempt['attempt_id'] or review['source_revision']!=task['revision']
+                        or review['plan_decision_id']!=plan['decision_id'] or review['reconciliation_receipt_id']!=rec['receipt_id']
+                        or review['workspace_digest']!=rec['workspace_digest'] or review['finish_token'] is None
+                        or review['finish_receipt'].get('review_id')!=str(review['review_id'])
+                        or review['finish_receipt'].get('status')!='handoff'
+                        or outcome.get('reason')!='no_source_changes' or outcome.get('candidate_commit') is not None
+                        or outcome.get('verification',{}).get('cleanup_confirmed') is not True
+                        or outcome.get('verification',{}).get('checks_passed') is not False
+                        or outcome.get('verification',{}).get('checks')!=[]
+                        or review['verification'].get('cleanup_confirmed') is not True
+                        or review['verification'].get('checks_passed') is not False or review['verification'].get('checks')!=[]):raise Rejected(409,'review_changed')
+                if flow._artifact(cursor,task['id'],attempt['attempt_id'])['result_sha256']!=review['parent_result_sha256']:raise Rejected(409,'result_mismatch')
+            elif (reviews or w['escalation_reason']!='Agent stopped: needs_reconcile'
+                    or attempt['result_sha256'] is not None or attempt['published_at'] is not None
+                    or attempt['summary']!='Worker shutdown requires review before any replacement attempt.'):
+                raise Rejected(409,'not_plan_direction_defect')
+            cursor.execute("""SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested'))
+              OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased'))
+              OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t USING(owner_id,project_alias) WHERE t.id=p.task_id AND t.workflow_id=%s)
+              OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON t.id=q.task_id WHERE t.workflow_id=%s AND q.status IN('pending','checking'))
+              OR EXISTS(SELECT 1 FROM forge_agent.coding_control_receipts c JOIN forge_agent.coding_tasks t ON t.id=c.task_id WHERE t.workflow_id=%s AND c.action='cancel')
+              OR EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON t.id=e.task_id WHERE t.workflow_id=%s AND e.event_kind IN('cancelled','cancel_requested') AND(e.payload->>'cause'='operator_request' OR e.payload->'actor'->>'kind'='operator')) AS busy""",(w['workflow_id'],)*6)
+            if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
+            flow._current_policy(w);p=flow._snapshot(w);recipe=recipe_from_snapshot(p,'author_implement')
+            if (p['author_profile'] not in OWNED_FEATURE_BRANCHES or flow.config.profiles[p['author_profile']].branch!=OWNED_FEATURE_BRANCHES[p['author_profile']]
+                    or task['agent_profile']!=p['author_profile'] or task['pinned_recipe']!=recipe.to_dict() or task['recipe_digest']!=recipe.digest
+                    or attempt['pinned_recipe']!=recipe.to_dict() or attempt['recipe_digest']!=recipe.digest):raise Rejected(409,'source_changed')
+            if flow.retry_events is None:raise Rejected(503,'unavailable')
+            if any(e['status'] in ('open','exhausted') or e['used']>=e['attempt_limit'] for e in self.retry_evidence.read(store.owner,w['project_alias'],w['workflow_id'])):raise Rejected(409,'retry_exhausted')
+            source=sha256_canonical({'plan':str(plan['decision_id']),'attempt':str(attempt['attempt_id']),'result':attempt['result_sha256'],'review':str(review['review_id']) if review else None,'reconciliation':str(rec['receipt_id']),'fix':command.deployed_fix_revision})
+            episode=flow.retry_events.observe_failure(cursor,flow._retry_scope(w),'feedback_delivery',str(attempt['attempt_id']),source,phase_id='approved-plan-direction')
+            charged=flow.retry_events.reserve(cursor,episode['event_id'],key)
+            if charged['status']!='open' or charged['used']!=1:raise Rejected(409,'retry_exhausted')
+            cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='implement',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
+            for profile,mode in ((p['author_profile'],'implement'),(p['reviewer_profile'],'review')):flow._grant(cursor,w,profile,mode)
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(store.owner,[v[0] for v in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
+            for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
+                if not _ready_for_recipe(ready,w['project_alias'],profile,mode,recipe_from_snapshot(p,entry)):raise Rejected(503,'unavailable')
+            authority=BoundPlanDirectionAuthority(store,cursor,w['workflow_id'],task['id'],attempt['attempt_id'],task['revision'],review['review_id'] if review else None)
+            receipt=store.resume(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],idempotency_key='plan-direction-'+str(command.idempotency_key),agent_profile=p['author_profile'],reconciliation_receipt_id=rec['receipt_id'],note='Implement the saved independently approved Plan. The earlier startup recovery note applied only before Plan approval and is historical now. Preserve scope and report actual changes; normal independent checks and review remain required.',allowed_modes={'implement'},resolve_recipe=lambda _:recipe,_authority=authority,actor=operator_actor(store.owner))
+            audit={**receipt,'plan_decision_id':str(plan['decision_id']),'source_attempt_id':str(attempt['attempt_id']),'review_id':str(review['review_id']) if review else None,'reconciliation_receipt_id':str(rec['receipt_id']),'retry_event_id':str(episode['event_id']),'retry_charge':charged,'retained_plan_revisions':w['plan_revisions']}
+            cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",(w['workflow_id'],store.owner,w['project_alias'],key,Json(intent),Json({'receipt':audit})))
+            insert_event(cursor,store.owner,w['project_alias'],root['id'],'checkpoint',{'workflow_id':str(w['workflow_id']),'phase':'implement','related_task_id':str(task['id']),'summary':'The approved implementation is queued after correcting stale Plan-only retry direction. The same Plan, task, historical results and budgets are retained; independent code review is still required.'},actor=COORDINATOR_ACTOR)
+            return audit
 
     def resume_unstarted_plan(self,command):
         """Resume the same initial Plan after audited post-failure materialization.
