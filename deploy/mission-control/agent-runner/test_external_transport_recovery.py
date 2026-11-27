@@ -47,6 +47,14 @@ class ExternalTransportRecoveryTest(unittest.TestCase):
         self.db.publish(lease,'failed',None,None,summary,proof)
         self.db.reconcile(lease,'b'*64,proof)
         self.assertTrue(flow.run_once())
+        self.write("UPDATE forge_external_workflow.workflows SET state=jsonb_set(state,'{review_retry_wait,not_before}',to_jsonb((clock_timestamp()-interval '1 second')::text))")
+        self.assertTrue(flow.run_once())
+        # Retained transport recovery is bound to the predecessor's cancelled
+        # source; seed that historical state without changing new retry policy.
+        w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
+        if w['phase']=='escalated':
+            with flow._transaction() as cursor:
+                flow._cancel_children(cursor,w,actor={'kind':'coordinator','id':'forge-coordinator'},cause='workflow_cancelled')
         return lease
 
     def exhausted(self):
