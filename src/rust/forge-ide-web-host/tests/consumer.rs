@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":18,"files":files}))
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":19,"files":files}))
                 .unwrap(),
         )
         .unwrap();
@@ -1765,8 +1765,8 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for (abi, expected_error) in (0..=17)
-        .chain([19, 65_535])
+    for (abi, expected_error) in (0..=18)
+        .chain([20, 65_535])
         .map(|abi| (json!(abi), "asset versions/count"))
         .chain(
             [

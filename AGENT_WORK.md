@@ -1,4 +1,44 @@
-## Event-stream recovery and delivery checkpoint — 2026-11-27
+## Combined event-stream maintenance and ABI19 handoff — 2026-11-27
+
+Native workflow5aded552 completed normally after a real independent revise/repair
+cycle. Candidate4a2de4dc passed Jenkins136 all45 checks and cleanup; reviewer5104d878
+approved and attested defect-child-discovery-link. Main8b921df3 integrates that
+reviewed source. Its migration0053_defect_tasks is reserved by this implementation;
+never duplicate53, rewrite applied1–52 or restore the reserved digest-column drop.
+The branch reservation released normally at epoch8 before root maintenance resumed.
+
+This candidate combines exact task-authorized main-CI joins, honest action/run
+projection and execution ordering, evidence-bound baseline replay, and private
+archival of two obsolete diagnostics without rewriting failed tasks or receipts.
+The legacy workspace PostgreSQL fixture now honors branch memory scope; all14
+scope tests pass and full main still requires every database test with zero skips.
+
+Only the separately reviewed compatibility correction was imported from4c03894f;
+its draft snapshot parent was not integrated. New clients explicitly request
+defect metadata; old browser requests retain raw legacy task/failure shapes.
+Unknown/null/duplicate negotiation fails before effects and does not alter feature
+intent hashes. ABI19 is matched across WASM, generated assets, host and actor.
+Focused correction evidence includes59 Python,24 protocol,108 Agents,74 host and35
+generator tests plus actual WASM. Combined candidate qualification remains required.
+
+For deployment, retain the old producer/verifier pair through exact tree/main
+verification. Drain all replay-required CI generations before switching the
+new paired helper, its configuration pin and runtime source. Rehearse and back up
+schema52, apply qualified53 and strict grants/privilege checks, then select the
+defect-aware API/workers and ABI19 actor/portal cohort. Request negotiation keeps
+the old ABI18 host/tabs compatible during the staged switch. Supersede overtaken
+fresh ABI18 releases through the normal old actor before changing its ABI config.
+Preserve the three older deferred/journalled operations and canonical checkout.
+
+Release activation is held during this authoring checkpoint; normal CI/review/
+merge/main observation remain enabled. The two diagnostic archives have not been
+executed. Qualify and deploy their exact source before admission. Operational
+release state belongs to actual process identities, protected CI and delivery
+receipts under /opt/homelab-forge/operations/event-autonomy-20261127/, not to these
+historical authoring notes. The Drive retention answer remains pending; do not
+invent completion or reset spent authority for unfinished Grok/AGY scopes.
+
+## Event-stream recovery and delivery checkpoint — historical, 2026-11-27
 
 Reviewed main7ae49268 includes PR36–39. Jenkins134 passed all46 full-main
 checks, real browser and all four zero-skip backend suites (1856 runner tests).

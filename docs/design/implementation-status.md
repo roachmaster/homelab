@@ -29,6 +29,13 @@ publication and live activation require their own verification receipts.
 
 ## The system we are building
 
+ABI19 source adds request-scoped defect metadata negotiation. New list/get/submit
+requests select version1; omission preserves the strict legacy task shape and
+failure vocabulary, including already-open ABI18 tabs. The host derives the
+backend header from the typed request; it never upgrades all browser requests.
+Atomic host/assets/WASM and the matching release actor require their own verified
+rollout. This source note does not claim deployment.
+
 Forge has two complementary layers. The reusable Rust framework supplies typed
 admission, explicit configuration, registrars, factories, providers and owned
 lifetimes. The concrete delivery application uses those boundaries to let an

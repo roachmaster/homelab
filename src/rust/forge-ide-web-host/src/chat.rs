@@ -131,6 +131,22 @@ impl ChatRelay {
         body: Vec<u8>,
         deadline: Instant,
     ) -> Result<(StatusCode, Bytes), Rejection> {
+        self.dispatch_work_metadata(destination, request_id, body, deadline, None)
+    }
+
+    pub(crate) fn dispatch_work_metadata(
+        &self,
+        destination: &str,
+        request_id: &str,
+        body: Vec<u8>,
+        deadline: Instant,
+        defect_metadata_version: Option<u8>,
+    ) -> Result<(StatusCode, Bytes), Rejection> {
+        if defect_metadata_version
+            .is_some_and(|version| version != 1 || !destination.starts_with("ide.work."))
+        {
+            return Err(Rejection::Invalid);
+        }
         let mut request = self
             .request("/v1/dispatch")
             .header("Forge-Destination", destination)
@@ -144,6 +160,9 @@ impl ChatRelay {
                 .header("Forge-Delivery-Version", "1")
                 .header("Forge-Retry-Events-Version", "1")
                 .header("Forge-Event-Attribution-Version", "1");
+        }
+        if defect_metadata_version == Some(1) {
+            request = request.header("Forge-Defect-Metadata-Version", "1");
         }
         self.post(request, body, workspace::MAX_BYTES, true, deadline)
             .map_err(|_| Rejection::Unavailable)

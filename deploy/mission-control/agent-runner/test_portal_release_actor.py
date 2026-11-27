@@ -74,12 +74,12 @@ class PortalReleaseActorTest(unittest.TestCase):
             web_user='homelab-web', web_group='homelab-web', source_account='lrocha',
             source_github_config_dir='/home/lrocha/.config/gh', candidate_port=18788,
             expected_abi=16)
-    def test_configuration_supports_abi18_and_retains_closed_legacy_abi_selection(self):
+    def test_configuration_supports_abi19_and_retains_closed_legacy_abi_selection(self):
         raw = self.production_config()
-        for abi in (14, 15, 16, 17, 18):
+        for abi in (14, 15, 16, 17, 18, 19):
             with self.subTest(supported=abi):
                 self.assertEqual(ACTOR.ActorConfig.parse(dict(raw, expected_abi=abi)).expected_abi, abi)
-        for abi in (13, 19, True, '18', 18.0):
+        for abi in (13, 20, True, '19', 19.0):
             with self.subTest(unsupported=abi), self.assertRaises(ValueError):
                 ACTOR.ActorConfig.parse(dict(raw, expected_abi=abi))
 
@@ -304,6 +304,9 @@ class PortalReleaseActorTest(unittest.TestCase):
 
     def test_abi17_artifacts_require_the_matching_selected_abi(self):
         self._assert_artifacts_require_the_matching_selected_abi(17)
+
+    def test_abi19_artifacts_require_the_matching_selected_abi(self):
+        self._assert_artifacts_require_the_matching_selected_abi(19)
 
     def test_presence_overlay_changes_only_candidate_and_preserves_rollback_config(self):
         reader = dict(endpoint='127.0.0.1:8791',

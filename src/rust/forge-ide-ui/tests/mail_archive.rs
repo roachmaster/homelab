@@ -61,6 +61,7 @@ fn agent(retry: bool) -> AgentsNavigationSnapshot {
         review_note: String::new(),
         task_id: None,
         retry_intent: retry.then(|| WorkRequest::WorkSubmit {
+            defect_metadata_version: None,
             task_kind: WorkTaskKind::Feature,
             defect: None,
             request_id: "saved-submit".into(),

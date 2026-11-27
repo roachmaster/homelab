@@ -208,6 +208,7 @@ fn submission_uses_catalog_revision_and_preserves_exact_retry_intent() {
     assert!(
         matches!(original,WorkRequest::WorkSubmit{base_revision,agent_profile,..} if base_revision==&"a".repeat(40)&&agent_profile=="agy-primary")
     );
+    assert_eq!(original.defect_metadata_version(), Some(1));
     assert!(agents.locked());
     assert!(!agents.prompt.is_empty());
     agents.network_failed("send", "watch".into(), &mut vec![]);
@@ -376,7 +377,7 @@ fn polling_uses_owned_watch_and_accepts_events_beyond_task_revision() {
     assert_eq!(agents.event_sequence, 55);
     assert!(effects
         .iter()
-        .any(|e| matches!(e,UiEffect::Work(WorkRequest::WorkGet{task_id,..}) if task_id==TASK)));
+        .any(|e| matches!(e,UiEffect::Work(WorkRequest::WorkGet{task_id,defect_metadata_version:Some(1),..}) if task_id==TASK)));
 }
 #[test]
 fn result_pages_are_utf8_bounded_manifest_bound_and_previous_is_exact() {
