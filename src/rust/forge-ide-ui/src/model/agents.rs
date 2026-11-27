@@ -96,6 +96,8 @@ pub(super) struct Agents {
     usage_waiting: bool,
     usage_page: usize,
     clock_watch: Option<String>,
+    presence_refresh_id: Option<String>,
+    presence_refresh_ms: u64,
     pub(super) now_ms: u64,
     watch: Option<String>,
     status: String,
@@ -139,6 +141,9 @@ impl Agents {
     }
     pub fn close(&mut self) {
         self.active = false;
+        if self.presence_refresh_id.take().is_some() {
+            self.pending = None;
+        }
         self.watch = None;
         self.clock_watch = None;
         self.cicd.clear();
@@ -386,6 +391,16 @@ impl Agents {
                     }))
     }
     pub fn network_failed(&mut self, id: &str, watch: String, effects: &mut Vec<UiEffect>) {
+        if self.presence_refresh_id.as_deref() == Some(id) {
+            self.presence_refresh_id = None;
+            if self.pending.as_ref().is_some_and(|r| r.request_id() == id) {
+                self.pending = None;
+            }
+            if let Some(catalog) = &mut self.catalog {
+                catalog.mcp_presence = Some(McpPresence::Unavailable);
+            }
+            return;
+        }
         if self.pending.as_ref().is_some_and(|r| r.request_id() == id) {
             let request = self.pending.take().expect("checked request");
             self.history_request = None;
@@ -459,7 +474,20 @@ impl Agents {
             UiEvent::TickAgentTime { watch } => {
                 if self.active && self.clock_watch.as_ref() == Some(&watch) {
                     self.clock_watch = Some(id.clone());
-                    effects.push(UiEffect::AgentsClock { watch: id });
+                    effects.push(UiEffect::AgentsClock { watch: id.clone() });
+                    if work
+                        && self.pending.is_none()
+                        && self.retry.is_none()
+                        && self
+                            .catalog
+                            .as_ref()
+                            .is_some_and(|c| c.mcp_presence.is_some())
+                        && self.now_ms.saturating_sub(self.presence_refresh_ms) >= 60_000
+                    {
+                        self.presence_refresh_ms = self.now_ms;
+                        self.presence_refresh_id = Some(id.clone());
+                        self.request(WorkRequest::WorkCatalog { request_id: id }, effects);
+                    }
                 }
             }
             UiEvent::Work(response) => self.complete_work(response, id, aux, effects),
@@ -1453,13 +1481,27 @@ impl Agents {
             _ => 200,
         };
         if !response.valid_for(&request, status) {
+            let presence_refresh =
+                self.presence_refresh_id.as_deref() == Some(request.request_id());
             self.network_failed(request.request_id(), id, effects);
-            self.status =
-                "Rejected an inconsistent agent response. Refresh or retry the saved request."
-                    .into();
+            if !presence_refresh {
+                self.status =
+                    "Rejected an inconsistent agent response. Refresh or retry the saved request."
+                        .into();
+            }
             return;
         }
         self.pending = None;
+        if self.presence_refresh_id.as_deref() == Some(response.request_id()) {
+            self.presence_refresh_id = None;
+            if let Some(catalog) = &mut self.catalog {
+                catalog.mcp_presence = match response {
+                    WorkResponse::WorkCatalog { mcp_presence, .. } => mcp_presence,
+                    _ => Some(McpPresence::Unavailable),
+                };
+            }
+            return;
+        }
         if matches!(&response, WorkResponse::WorkFailed { .. }) {
             self.history_request = None;
         }
@@ -1470,14 +1512,17 @@ impl Agents {
                 worker_status,
                 observed_at,
                 agent_branches,
+                mcp_presence,
                 ..
             } => {
+                self.presence_refresh_ms = self.now_ms;
                 self.catalog = Some(WorkCatalog {
                     projects,
                     profiles,
                     worker_status,
                     observed_at,
                     agent_branches,
+                    mcp_presence,
                 });
                 let c = self.catalog.as_ref().expect("stored catalog");
                 if !c.projects.iter().any(|p| p.alias == self.project) {
@@ -2735,6 +2780,54 @@ impl Agents {
                             ),
                         time: triage::task_time(t, self.now_ms),
                     }),
+                })
+                .collect(),
+        });
+        let presence = self.catalog.as_ref().and_then(|c| c.mcp_presence.as_ref());
+        let (presence_status, connections) = match presence {
+            Some(McpPresence::Available { report }) => (
+                if report.agents.is_empty() {
+                    "No MCP clients configured."
+                } else {
+                    "Connection heartbeats observed."
+                },
+                report.agents.as_slice(),
+            ),
+            Some(McpPresence::Unavailable) => (
+                "Unavailable — MCP connection observations could not be read.",
+                &[][..],
+            ),
+            None if self.catalog.is_none() => ("Waiting for connection observations…", &[][..]),
+            None => ("MCP connection presence is not enabled.", &[][..]),
+        };
+        view.texts.push(text("agents-mcp-status", presence_status));
+        view.visibility
+            .push(visible("agents-mcp-times", !connections.is_empty()));
+        view.tables.push(TableBinding {
+            id: "agents-mcp-connections",
+            rows: connections
+                .iter()
+                .map(|a| Property {
+                    label: a.label.clone(),
+                    value: match a.state {
+                        McpConnectionState::Online => "Online",
+                        McpConnectionState::Stale => "Stale",
+                        McpConnectionState::Never => "Never seen",
+                    }
+                    .into(),
+                })
+                .collect(),
+        });
+        view.tables.push(TableBinding {
+            id: "agents-mcp-heartbeats",
+            rows: connections
+                .iter()
+                .map(|a| Property {
+                    label: a.label.clone(),
+                    value: a
+                        .last_seen_at
+                        .clone()
+                        .unwrap_or_else(|| "No heartbeat received".into()),
                 })
                 .collect(),
         });

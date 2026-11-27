@@ -562,6 +562,58 @@ class OAuthHttpTest(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertTrue(headers["www-authenticate"].endswith(', error="invalid_token"'))
 
+    def test_browser_consent_preserves_origin_and_rejects_untrusted_origins(self):
+        params = {"response_type": "code", "client_id": self.client_id, "redirect_uri": REDIRECT,
+                  "code_challenge": mcp_oauth.s256("v" * 50), "code_challenge_method": "S256",
+                  "scope": "read", "state": "browser-origin"}
+        status, page_headers, page = self.http("GET", "/oauth/authorize?" + urlencode(params))
+        self.assertEqual(status, 200)
+        cookie = page_headers["set-cookie"].split(";")[0]
+        csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', page.decode()).group(1)
+        # Fetch's append-a-request-origin-header algorithm makes no-referrer
+        # navigation POSTs send Origin: null, including same-origin HTML forms.
+        origin = "null" if page_headers["referrer-policy"] == "no-referrer" else "https://mcp.test"
+        status, headers, body = self.http("POST", "/oauth/authorize",
+                                         {**params, "csrf": csrf, "decision": "allow", "password": self.password},
+                                         {"Cookie": cookie, "Origin": origin})
+        self.assertEqual(status, 302, body[:300])
+        self.assertIn("code=", headers["location"])
+        self.assertEqual(page_headers["referrer-policy"], "same-origin")
+        self.assertEqual(headers["referrer-policy"], "no-referrer")
+        for rejected_origin in ("null", "https://evil.example"):
+            with self.subTest(origin=rejected_origin):
+                status, _, body = self.http("POST", "/oauth/authorize", {}, {"Origin": rejected_origin})
+                self.assertEqual(status, 403)
+                self.assertEqual(json.loads(body), {"error": "origin_not_allowed"})
+
+    def test_gemini_2025_11_25_handshake_and_read_only_discovery(self):
+        status, _, token = self.exchange(self.code_for())
+        self.assertEqual(status, 200)
+        headers = {"Authorization": "Bearer " + token["access_token"],
+                   "Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                   "MCP-Protocol-Version": "2025-11-25"}
+        initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                      "params": {"protocolVersion": "2025-11-25", "capabilities": {},
+                                 "clientInfo": {"name": "gemini-proxy", "version": "test"}}}
+        status, _, body = self.http("POST", "/mcp", json.dumps(initialize).encode(), headers)
+        self.assertEqual(status, 200, body[:300])
+        result = json.loads(body)["result"]
+        self.assertEqual(result["protocolVersion"], "2025-11-25")
+        self.assertIn("tools", result["capabilities"])
+        initialized = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        status, _, body = self.http("POST", "/mcp", json.dumps(initialized).encode(), headers)
+        self.assertEqual(status, 202)
+        self.assertEqual(body, b"")
+        listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+        status, _, body = self.http("POST", "/mcp", json.dumps(listing).encode(), headers)
+        self.assertEqual(status, 200)
+        tools = json.loads(body)["result"]["tools"]
+        self.assertEqual({tool["name"] for tool in tools}, {"query", "list_tables", "describe_table"})
+        self.assertTrue(all(tool["annotations"]["readOnlyHint"] for tool in tools))
+        status, _, _ = self.http("POST", "/mcp", json.dumps(listing).encode(),
+                                 {**headers, "MCP-Protocol-Version": "2099-01-01"})
+        self.assertEqual(status, 400)
+
     def test_pkce_happy_path_dual_auth_and_static_token(self):
         code = self.code_for()
         status, headers, body = self.exchange(code)

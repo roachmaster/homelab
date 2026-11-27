@@ -1,6 +1,9 @@
 {
   "listen": "127.0.0.1:8791",
-  "allowed_hosts": ["mcp.thedevex.com", "127.0.0.1:8791"],
+  "allowed_hosts": [
+    "mcp.thedevex.com",
+    "127.0.0.1:8791"
+  ],
   "allowed_origins": [],
   "token_file": "/etc/homelab-forge/mcp/tokens.json",
   "dsn": "host=/var/run/postgresql dbname=forge_agent user=homelab_mcp",
@@ -13,6 +16,20 @@
   "max_response_bytes": 1000000,
   "max_concurrent_queries": 4,
   "trust_cf_connecting_ip": true,
-  "rate_limit": {"failures": 10, "window_seconds": 60, "lockout_seconds": 300, "global_failures_per_minute": 120},
-  "oauth": {"enabled": true, "issuer": "https://mcp.thedevex.com"}
+  "rate_limit": {
+    "failures": 10,
+    "window_seconds": 60,
+    "lockout_seconds": 300,
+    "global_failures_per_minute": 120
+  },
+  "oauth": {
+    "enabled": true,
+    "issuer": "https://mcp.thedevex.com"
+  },
+  "presence": {
+    "enabled": false,
+    "store_path": "/var/lib/homelab-forge/mcp/presence.sqlite3",
+    "reader_token_file": "/etc/homelab-forge/mcp/presence-reader.token",
+    "subjects": {}
+  }
 }

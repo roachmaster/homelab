@@ -148,6 +148,14 @@ impl ChatRelay {
             .map_err(|_| Rejection::Unavailable)
     }
 
+    pub(crate) fn read_mcp_presence(&self, deadline: Instant) -> Option<Bytes> {
+        let head = Request::get("/internal/agent-presence")
+            .header("Host", self.endpoint.to_string())
+            .header("Authorization", format!("Bearer {}", self.token));
+        let (status, bytes) = self.post(head, Vec::new(), 8192, false, deadline).ok()?;
+        (status == StatusCode::OK).then_some(bytes)
+    }
+
     fn request(&self, path: &'static str) -> hyper::http::request::Builder {
         Request::post(path)
             .header("Host", self.endpoint.to_string())

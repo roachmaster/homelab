@@ -726,6 +726,68 @@ impl WorkProfile {
                 == self.modes.len()
     }
 }
+/// Authenticated MCP connection observations. These never grant execution readiness.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpConnectionState {
+    Online,
+    Stale,
+    Never,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpConnection {
+    pub agent_id: String,
+    pub label: String,
+    pub state: McpConnectionState,
+    #[serde(deserialize_with = "required_nullable")]
+    pub last_seen_at: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpPresenceReport {
+    pub version: u16,
+    pub agents: Vec<McpConnection>,
+}
+impl McpPresenceReport {
+    pub fn is_valid(&self) -> bool {
+        self.version == 1
+            && self.agents.len() <= 16
+            && self.agents.iter().all(|a| {
+                valid_work_name(&a.agent_id, 64)
+                    && valid_work_label(&a.label, 128)
+                    && match (&a.state, &a.last_seen_at) {
+                        (McpConnectionState::Never, None) => true,
+                        (McpConnectionState::Online | McpConnectionState::Stale, Some(t)) => {
+                            t.len() == 20 && valid_work_timestamp(t)
+                        }
+                        _ => false,
+                    }
+            })
+            && self
+                .agents
+                .iter()
+                .map(|a| &a.agent_id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                == self.agents.len()
+    }
+}
+/// Absent means disabled; unavailable is an observed reader failure, never offline.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum McpPresence {
+    Available { report: McpPresenceReport },
+    Unavailable,
+}
+impl McpPresence {
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Available { report } => report.is_valid(),
+            Self::Unavailable => true,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkCatalog {
@@ -736,11 +798,14 @@ pub struct WorkCatalog {
     pub observed_at: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_branches: Vec<AgentBranchState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_presence: Option<McpPresence>,
 }
 impl WorkCatalog {
     pub fn is_valid(&self) -> bool {
         self.projects.len() <= 64
             && self.profiles.len() <= 64
+            && self.mcp_presence.as_ref().is_none_or(McpPresence::is_valid)
             && self.agent_branches.len() <= MAX_AGENT_BRANCHES
             && self.projects.iter().all(|p| {
                 p.delivery.as_ref().is_none_or(WorkDelivery::is_valid)
@@ -1767,6 +1832,8 @@ pub enum WorkResponse {
         observed_at: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         agent_branches: Vec<AgentBranchState>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mcp_presence: Option<McpPresence>,
     },
     WorkSubmitted {
         request_id: String,
@@ -1957,6 +2024,7 @@ impl WorkResponse {
                     worker_status,
                     observed_at,
                     agent_branches,
+                    mcp_presence,
                     ..
                 },
                 WorkRequest::WorkCatalog { .. },
@@ -1968,6 +2036,7 @@ impl WorkResponse {
                         worker_status: *worker_status,
                         observed_at: observed_at.clone(),
                         agent_branches: agent_branches.clone(),
+                        mcp_presence: mcp_presence.clone(),
                     }
                     .is_valid()
             }
@@ -2806,6 +2875,51 @@ mod plan_lifecycle_tests {
         assert!(!publication.is_valid());
         assert!(serde_json::from_str::<WorkPublication>(
             r#"{"status":"published","lease_token":"private"}"#
+        )
+        .is_err());
+    }
+}
+
+#[cfg(test)]
+mod mcp_presence_tests {
+    use super::*;
+    #[test]
+    fn presence_is_bounded_typed_unique_and_requires_honest_timestamps() {
+        let connection = McpConnection {
+            agent_id: "dot".into(),
+            label: "Dot".into(),
+            state: McpConnectionState::Never,
+            last_seen_at: None,
+        };
+        let mut report = McpPresenceReport {
+            version: 1,
+            agents: vec![connection.clone()],
+        };
+        assert!(report.is_valid());
+        report.agents[0].state = McpConnectionState::Online;
+        assert!(!report.is_valid());
+        report.agents[0].last_seen_at = Some("2026-11-27T12:00:00Z".into());
+        assert!(report.is_valid());
+        report.agents[0].last_seen_at = Some("2026-02-30T12:00:00Z".into());
+        assert!(!report.is_valid());
+        report.agents = vec![connection.clone(), connection.clone()];
+        assert!(!report.is_valid());
+        report.agents = (0..17)
+            .map(|i| McpConnection {
+                agent_id: format!("agent-{i}"),
+                ..connection.clone()
+            })
+            .collect();
+        assert!(!report.is_valid());
+        report.agents = vec![connection];
+        report.version = 2;
+        assert!(!report.is_valid());
+        assert!(serde_json::from_str::<McpConnection>(
+            r#"{"agent_id":"dot","label":"Dot","state":"offline","last_seen_at":null}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<McpConnection>(
+            r#"{"agent_id":"dot","label":"Dot","state":"never"}"#
         )
         .is_err());
     }

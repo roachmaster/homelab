@@ -238,6 +238,15 @@ pub fn ide_document() -> Document {
                             component!(uuid_button "agents-accept", "Accept result", "accept_agent_task", "agents-review-note", "idempotency_key"),
                         ]),
                     ]),
+                    component!(region "agents-mcp"; [
+                        component!(heading "agents-mcp-heading", "MCP connections"),
+                        component!(caption "agents-mcp-help", "Authenticated connection heartbeats, separate from coding workers and execution readiness. Online means seen within 3 minutes; clients should heartbeat every minute."),
+                        component!(status "agents-mcp-status", ""),
+                        component!(details "agents-mcp-connections"),
+                        component!(disclosure "agents-mcp-times", "Last heartbeat times (UTC)"; [
+                            component!(details "agents-mcp-heartbeats"),
+                        ]),
+                    ]),
                     component!(region "agents-usage"; [
                         component!(heading "agents-usage-heading", "Agent usage"),
                         component!(status "agents-usage-status", ""),

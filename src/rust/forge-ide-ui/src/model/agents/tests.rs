@@ -32,6 +32,7 @@ fn ready() -> Agents {
             worker_status: WorkWorkerStatus::Ready,
             observed_at: Some(TIME.into()),
             agent_branches: vec![],
+            mcp_presence: None,
         }),
         ..Agents::default()
     }
@@ -1580,4 +1581,167 @@ fn submit_rejection_reason_names_what_to_refresh() {
         assert_eq!(agents.status, message, "{reason:?}");
         assert!(agents.retry.is_none());
     }
+}
+
+#[test]
+fn mcp_connections_are_separate_from_execution_readiness_and_clear_on_unavailable() {
+    let mut agents = ready();
+    agents.catalog.as_mut().unwrap().mcp_presence = Some(McpPresence::Available {
+        report: McpPresenceReport {
+            version: 1,
+            agents: vec![
+                McpConnection {
+                    agent_id: "dot".into(),
+                    label: "Dot <ChatGPT>".into(),
+                    state: McpConnectionState::Online,
+                    last_seen_at: Some(TIME.into()),
+                },
+                McpConnection {
+                    agent_id: "grok".into(),
+                    label: "Grok".into(),
+                    state: McpConnectionState::Never,
+                    last_seen_at: None,
+                },
+            ],
+        },
+    });
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    let rows = &view
+        .tables
+        .iter()
+        .find(|b| b.id == "agents-mcp-connections")
+        .unwrap()
+        .rows;
+    assert_eq!(rows[0].label, "Dot <ChatGPT>");
+    assert_eq!(rows[0].value, "Online");
+    assert_eq!(rows[1].value, "Never seen");
+    assert_eq!(
+        view.badges
+            .iter()
+            .find(|b| b.id == "agents-worker")
+            .unwrap()
+            .badge
+            .label,
+        "Worker ready"
+    );
+    agents.catalog.as_mut().unwrap().mcp_presence = Some(McpPresence::Unavailable);
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert!(view
+        .tables
+        .iter()
+        .find(|b| b.id == "agents-mcp-connections")
+        .unwrap()
+        .rows
+        .is_empty());
+    assert!(view
+        .texts
+        .iter()
+        .find(|b| b.id == "agents-mcp-status")
+        .unwrap()
+        .text
+        .starts_with("Unavailable"));
+    assert_eq!(
+        view.badges
+            .iter()
+            .find(|b| b.id == "agents-worker")
+            .unwrap()
+            .badge
+            .label,
+        "Worker ready"
+    );
+}
+
+#[test]
+fn configured_presence_refresh_uses_clock_guards_without_usage_or_selection_effects() {
+    let mut agents = ready();
+    agents.catalog.as_mut().unwrap().mcp_presence = Some(McpPresence::Unavailable);
+    agents.clock_watch = Some("clock".into());
+    agents.now_ms = 59_999;
+    let effects = step(
+        &mut agents,
+        UiEvent::TickAgentTime {
+            watch: "clock".into(),
+        },
+        "early",
+    );
+    assert!(matches!(&effects[..], [UiEffect::AgentsClock { .. }]));
+    agents.now_ms = 60_000;
+    let effects = step(
+        &mut agents,
+        UiEvent::TickAgentTime {
+            watch: "early".into(),
+        },
+        "due",
+    );
+    assert!(matches!(
+        &effects[..],
+        [
+            UiEffect::AgentsClock { .. },
+            UiEffect::Work(WorkRequest::WorkCatalog { .. })
+        ]
+    ));
+    agents.now_ms = 120_000;
+    let effects = step(
+        &mut agents,
+        UiEvent::TickAgentTime {
+            watch: "due".into(),
+        },
+        "pending",
+    );
+    assert!(matches!(&effects[..], [UiEffect::AgentsClock { .. }]));
+    let old_project = agents.project.clone();
+    let old_profile = agents.profile.clone();
+    let effects = step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkCatalog {
+            request_id: "due".into(),
+            projects: vec![],
+            profiles: vec![],
+            worker_status: WorkWorkerStatus::Offline,
+            observed_at: None,
+            agent_branches: vec![],
+            mcp_presence: Some(McpPresence::Available {
+                report: McpPresenceReport {
+                    version: 1,
+                    agents: vec![],
+                },
+            }),
+        }),
+        "accepted",
+    );
+    assert!(effects.is_empty());
+    assert_eq!(agents.project, old_project);
+    assert_eq!(agents.profile, old_profile);
+    assert_eq!(
+        agents.catalog.as_ref().unwrap().worker_status,
+        WorkWorkerStatus::Ready
+    );
+    // A later refresh cannot survive closing and overwrite the next active view.
+    let effects = step(
+        &mut agents,
+        UiEvent::TickAgentTime {
+            watch: "pending".into(),
+        },
+        "next",
+    );
+    assert!(matches!(
+        &effects[..],
+        [
+            UiEffect::AgentsClock { .. },
+            UiEffect::Work(WorkRequest::WorkCatalog { .. })
+        ]
+    ));
+    agents.close();
+    assert!(agents.pending.is_none());
+    assert!(agents.presence_refresh_id.is_none());
+    assert!(step(
+        &mut agents,
+        UiEvent::TickAgentTime {
+            watch: "next".into()
+        },
+        "closed"
+    )
+    .is_empty());
 }

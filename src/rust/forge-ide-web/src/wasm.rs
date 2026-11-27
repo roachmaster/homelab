@@ -6,6 +6,8 @@
 //! Host order: reserve_input(len), copy exactly len bytes through memory.buffer,
 //! dispatch_input(), copy output_ptr/output_len bytes, release_output(). Refresh
 //! JavaScript memory views after every call; reentry returns 0, never panics.
+//! ABI 17 adds optional authenticated MCP connection presence and active-view
+//! read-only refresh, separate from coding worker readiness.
 //! ABI 16 adds correlation-scoped Jenkins CI/CD stages, per-agent persistent
 //! branch state, interactive `FlowStageNode` stage dot controls, and bounded
 //! Errors/Tests/Console stage inspection in `ViewModel`.
@@ -50,7 +52,7 @@ impl Write for BoundedBytes {
 #[allow(unsafe_code)]
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    16
+    17
 }
 
 /// Returns zero on invalid size/reentry. Reserving invalidates previous input.

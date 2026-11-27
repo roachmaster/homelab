@@ -107,6 +107,41 @@ Open **Forge Studio** from the Game Engine design page or go to `/studio`.
 The last qualified live `95651a5` host had no `studio` block. A launcher or static
 Studio page does not establish that its build service is enabled.
 
+### Optional MCP connection presence
+
+The ABI17 portal can compose authenticated MCP heartbeat observations into the
+Work catalog without changing the coding runner or PostgreSQL. Configure this
+optional block inside `work`; absence disables presence and performs no reader I/O:
+
+```json
+"mcp_presence": {
+  "endpoint": "127.0.0.1:8791",
+  "token_file": "/etc/homelab-forge/web/mcp-presence-reader.token"
+}
+```
+
+`McpPresenceConfig` validates a loopback socket and absolute private token path.
+Registration is effect-free. Host factory creation reads the dedicated reader
+credential using the existing private-file checks; no MCP client credential enters
+the browser. The injected narrow read port issues only `GET /internal/agent-presence`,
+with its own bearer, an 8 KiB response bound and at most 300 ms within the admitted
+request deadline. Version1 reports contain at most 16 unique configured clients;
+Online/Stale require a valid UTC heartbeat time, and Never requires null. Unknown
+versions, malformed/oversized replies, denial or transport failure produce an
+explicit Unavailable presence observation while preserving the coding catalog.
+The host always replaces/clears any runner-supplied presence, including when disabled.
+
+The separate **MCP connections** section does not add execution profiles, job modes
+or worker readiness. Dot is the ChatGPT MCP client, distinct from Codex's native
+orchestrator profile. The MCP server determines Online from a heartbeat within
+180 seconds and recommends a 60-second client interval; the portal never emits
+heartbeats on a client's behalf. While Agents is active and presence configured,
+the existing typed clock refreshes only the read-only catalog every 60 seconds when
+no request/retry is pending. Background acceptance updates only presence, not task
+selection, execution readiness or quota refresh. Leaving Agents stops this refresh;
+reader failure clears previously observed connection states to Unavailable.
+Exact heartbeat times are available in an accessible UTC disclosure.
+
 ### Coding assignments and agent usage
 
 The optional `work` block enables durable coding assignments through the existing
@@ -162,7 +197,7 @@ See [the complete contracts and worker setup](../../../docs/architecture/coding-
 and [the runner guide](../../../deploy/mission-control/agent-runner/README.md).
 The host validates browser ABI15; deploy the matching generated bundle atomically.
 
-Work requests are at most16 KiB on the wire, with an8 KiB UTF-8 prompt and2 KiB
+Work requests are at most 16 KiB on the wire, with an8 KiB UTF-8 prompt and2 KiB
 acceptance criteria. Escaped JSON may reach the wire limit first. Lists default to20
 tasks (maximum50), and event pages default to50 (maximum100). These admission and
 transport bounds do not impose a model output-token limit or alter Chat/Mail budgets.

@@ -9,7 +9,8 @@ adapts inspection and bounded source reads to the remote agent; native credentia
 
 The [workbench guide](WORKBENCH.md) describes the compact toolbar, report-keyed
 project-wide file/symbol search, numbered source windows, Outline, Problems and
-reversible keyboard/narrow panes. The current atomic portal bundle uses local ABI 16.
+reversible keyboard/narrow panes. The current atomic portal bundle uses local ABI 17. MCP connection presence is a separate, optional authenticated
+heartbeat view; it does not grant coding-worker readiness or execution roles.
 
 ## Authoring and build boundary
 

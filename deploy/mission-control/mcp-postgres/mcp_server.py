@@ -29,13 +29,14 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mcp_auth import BearerTokenAuth, FailureLimiter  # noqa: E402
+from mcp_presence import DEFAULT_PRESENCE, PresenceError, PresenceProviderFactory, validate_config as validate_presence  # noqa: E402
 import mcp_oauth  # noqa: E402
 from mcp_oauth import DualAuth, OAuthError, OAuthServer  # noqa: E402
 from sql_guard import WORD, GuardError, check_read_only  # noqa: E402
 
 SERVER_NAME = "homelab-mcp-postgres"
 SERVER_VERSION = "0.1.0"
-PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 MAX_BODY_BYTES = 64 * 1024
 MCP_PATH = "/mcp"
 LOG = logging.getLogger("homelab-mcp")
@@ -58,6 +59,7 @@ DEFAULTS = {
     "rate_limit": {"failures": 10, "window_seconds": 60, "lockout_seconds": 300,
                    "global_failures_per_minute": 120},
     "oauth": mcp_oauth.DEFAULT_OAUTH,
+    "presence": DEFAULT_PRESENCE,
 }
 CSRF_COOKIE = "__Host-hmcp_csrf"
 WELL_KNOWN_PRM = ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp")
@@ -117,7 +119,18 @@ TOOLS = [
                         "openWorldHint": False},
     },
 ]
-TOOL_SCOPES = {"query": "read", "list_tables": "read", "describe_table": "read"}
+HEARTBEAT_TOOL = {
+    "name": "heartbeat",
+    "title": "Report this authenticated agent connection",
+    "description": ("Record connection presence for the administrator-mapped authenticated client. "
+                    "Call every 60 seconds while connected; presence becomes stale after 180 seconds. "
+                    "This never advertises execution readiness or changes PostgreSQL."),
+    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
+                    "openWorldHint": False},
+}
+TOOL_SCOPES = {"query": "read", "list_tables": "read", "describe_table": "read", "heartbeat": "read"}
+PRESENCE_PATH = "/internal/agent-presence"
 
 LIST_TABLES_SQL = """
 SELECT table_schema, table_name, table_type FROM information_schema.tables
@@ -168,6 +181,15 @@ def load_config(path):
         value = config["oauth"][key]
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise ConfigError(f"oauth.{key} must be a positive integer")
+    try:
+        config["presence"] = validate_presence(raw.get("presence", {}))
+    except PresenceError as error:
+        raise ConfigError(str(error)) from None
+    if config["presence"]["enabled"]:
+        protected = {Path(config["token_file"]), *(Path(config["oauth"][key])
+                     for key in ("state_db", "clients_file", "operator_file"))}
+        if any(Path(config["presence"][key]) in protected for key in ("store_path", "reader_token_file")):
+            raise ConfigError("presence files must be separate from existing authentication files")
     host, _, port = config["listen"].rpartition(":")
     try:
         if not ipaddress.ip_address(host.strip("[]")).is_loopback:
@@ -267,9 +289,10 @@ class PostgresBackend:
 
 
 class McpApp:
-    def __init__(self, config, auth, backend, limiter, oauth=None):
+    def __init__(self, config, auth, backend, limiter, oauth=None, presence=None):
         self.config = config
         self.oauth = oauth
+        self.presence = presence
         self.auth = DualAuth(auth, oauth) if oauth is not None else auth
         self.backend = backend
         self.limiter = limiter
@@ -304,7 +327,8 @@ class McpApp:
         if method == "ping":
             return result_response(request_id, {})
         if method == "tools/list":
-            return result_response(request_id, {"tools": TOOLS})
+            tools = TOOLS + ([HEARTBEAT_TOOL] if self.presence is not None and self.presence.is_mapped(principal) else [])
+            return result_response(request_id, {"tools": tools})
         if method == "tools/call":
             return result_response(request_id, self.call_tool(params, principal))
         return error_response(request_id, -32601, f"Method not found: {method}")
@@ -313,8 +337,12 @@ class McpApp:
         name, arguments = params.get("name"), params.get("arguments") or {}
         if name not in TOOL_SCOPES:
             return tool_error(f"unknown tool: {name}")
-        if TOOL_SCOPES[name] not in principal.scopes:
+        if principal is None or TOOL_SCOPES[name] not in principal.scopes:
             return tool_error("token lacks the required scope")
+        if name == "heartbeat":
+            if set(params) - {"name", "arguments", "_meta"}:
+                return tool_error("heartbeat does not accept identity or other parameters")
+            arguments = params.get("arguments", {})
         if not isinstance(arguments, dict):
             return tool_error("arguments must be an object")
         started, status = time.monotonic(), "error"
@@ -324,12 +352,21 @@ class McpApp:
             outcome = getattr(self, f"tool_{name}")(arguments, principal)
             status = "ok"
             return outcome
-        except (ToolError, GuardError) as error:
+        except (ToolError, GuardError, PresenceError) as error:
             return tool_error(str(error))
         finally:
             self.slots.release()
             LOG.info("tool=%s token=%s status=%s ms=%d", name, principal.token_id, status,
                      (time.monotonic() - started) * 1000)
+
+    def tool_heartbeat(self, arguments, principal):
+        if arguments:
+            raise ToolError("heartbeat accepts only an empty arguments object")
+        if self.presence is None:
+            raise ToolError("connection presence is not enabled")
+        result = self.presence.heartbeat(principal)
+        return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
+                "structuredContent": result, "isError": False}
 
     # --- pagination -----------------------------------------------------
     def _page_args(self, arguments):
@@ -577,7 +614,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Referrer-Policy", "same-origin")
         self.send_header("Content-Security-Policy",
                          f"default-src 'none'; style-src 'unsafe-inline'; form-action {sources}; "
                          "frame-ancestors 'none'; base-uri 'none'")
@@ -716,7 +753,48 @@ class Handler(BaseHTTPRequestHandler):
             LOG.exception("oauth state database error")
             self.send_json(500, {"error": "server_error"}, no_store)
 
+    def presence_read(self):
+        # A tunnel or browser request cannot become an internal backend read by
+        # possessing an MCP token or choosing a mapped identity.
+        try:
+            local = ipaddress.ip_address(self.client_address[0]).is_loopback
+        except ValueError:
+            local = False
+        hosts = self.headers.get_all("Host") or []
+        port = self.server.server_address[1]
+        allowed = {host + suffix for host in ("localhost", "127.0.0.1", "[::1]")
+                   for suffix in ("", ":" + str(port))}
+        if (not local or len(hosts) != 1 or hosts[0].lower() not in allowed
+                or "CF-Connecting-IP" in self.headers or "Origin" in self.headers):
+            self.send_json(403, {"error": "local_reader_required"}, {"Connection": "close"})
+            return
+        if self.path != PRESENCE_PATH:
+            self.send_json(400, {"error": "unexpected_query"})
+            return
+        if self.app.presence is None:
+            self.send_json(503, {"error": "presence_unavailable"})
+            return
+        key = "presence-reader:" + self.client_address[0]
+        wait = self.app.limiter.retry_after(key)
+        if wait:
+            self.send_json(429, {"error": "too_many_failed_attempts"}, {"Retry-After": str(wait)})
+            return
+        if not self.app.presence.reader.authenticate(self.headers):
+            self.app.limiter.record_failure(key)
+            self.send_json(401, {"error": "invalid_reader_token"})
+            return
+        self.app.limiter.record_success(key)
+        try:
+            result = self.app.presence.snapshot()
+        except PresenceError:
+            self.send_json(503, {"error": "presence_unavailable"})
+        else:
+            self.send_json(200, result)
+
     def do_GET(self):
+        if self.path.split("?")[0] == PRESENCE_PATH:
+            self.presence_read()
+            return
         if not self.admit():
             return
         route = self.path.split("?")[0]
@@ -796,7 +874,8 @@ class Server(ThreadingHTTPServer):
         super().__init__(address, Handler)
 
 
-def build_app(config):
+def build_app(config, *, presence_factory=PresenceProviderFactory):
+    presence = presence_factory(config.get("presence", {})).create()
     auth = BearerTokenAuth(config["token_file"])
     limiter = FailureLimiter(**config["rate_limit"])
     oauth = None
@@ -809,7 +888,7 @@ def build_app(config):
         else:
             for problem in oauth.problems():
                 LOG.warning("OAuth: %s", problem)
-    return McpApp(config, auth, PostgresBackend(config["dsn"], config["statement_timeout_ms"]), limiter, oauth)
+    return McpApp(config, auth, PostgresBackend(config["dsn"], config["statement_timeout_ms"]), limiter, oauth, presence)
 
 
 def main(argv=None):
@@ -823,7 +902,11 @@ def main(argv=None):
     except ConfigError as error:
         LOG.error("%s", error)
         return 2
-    app = build_app(config)
+    try:
+        app = build_app(config)
+    except PresenceError as error:
+        LOG.error("presence unavailable: %s", error)
+        return 2
     if app.auth.error:
         LOG.error("token file problem: %s", app.auth.error)
         if args.check_config:

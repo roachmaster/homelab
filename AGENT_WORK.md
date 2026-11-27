@@ -1,3 +1,57 @@
+# Current: Authenticated MCP heartbeat and portal connection presence — 2026-11-27
+
+User authorizes adding an authenticated heartbeat MCP tool and connecting it to
+portal agent presence, including separate Dot (ChatGPT), Gemini, Grok and Muse.
+Codex is the primary orchestrator, distinct from Dot and native worker profiles.
+Keep SQL tools read-only and all PostgreSQL grants/schema50 unchanged. Store only
+presence metadata outside PostgreSQL in service-owned SQLite. Bind identities to
+administrator-configured authenticated static-token/OAuth-client subjects; a caller
+must not supply another agent identity, label, server timestamp or execution role.
+Heartbeat connection presence must not advertise execution readiness or job modes.
+
+Root coordinates integration, publication and matched MCP/portal deployment.
+Separate worktrees own MCP/auth/presence and Rust typed portal/host/UI. Use existing
+Forge provider/UI skills, maintain effects at composition roots, preserve tokens,
+OAuth stores/clients/passwords, private configs, task/event histories and worker
+roles. The live ad20beed Gemini compatibility fix is retained as09d2b0a4 before new
+work. Main wasab65003d with Jenkins103-qualified running ABI16/schema50 portal.
+Do not apply the deferred destructive digest-column migration. Keep three obsolete
+release retry deferrals and their uncertainty intact. Current heartbeat agents
+should appear only after actual calls; never simulate continuous live heartbeats.
+
+## MCP backend implementation checkpoint — 2026-11-27
+
+Isolated worktree `/mnt/data/homelab-build/mcp-heartbeat-server-20261127` owns
+only MCP authentication/presence/backend tests and its README/example config.
+Stable authenticated subjects are `static:<token_id>` and `oauth:<client_id>`;
+existing token/grant IDs and read-only SQL behavior remain intact. Optional
+presence factories are selected at `build_app`, then open a separate private
+SQLite store and dedicated local-reader credential. No background beat exists.
+The local reader returns version1/at most16 configured agents with server UTC
+last-seen timestamps; portal host integration and all live configuration/deploy
+remain root-owned. Initial existing MCP qualification passed56 tests; the final
+combined suite including spoofing, restart/freshness, OAuth-client identity,
+reader isolation and the bounded store is pending at this checkpoint.
+
+## Integrated validation and rollout checkpoint — 2026-11-27
+
+The MCP backend passed70 tests (56 retained +14 presence), with no skips or
+failures. Portal native presence/clock tests,35 generation tests and make ui-check
+passed. A real isolated sandboxed browser fixture at1440 and390 pixels verified
+four MCP clients, all three states, exact timestamps, unchanged worker readiness,
+no phone overflow/runtime errors and successful cleanup. Root inspected both
+screenshots. Root actor/recovery/startup tests passed39, including ABI17 and a
+presence overlay that preserves the predecessor configuration for rollback.
+
+The host owns the optional reader and clears any runner-provided presence. Its
+read is bounded to8KiB/300ms; failure renders Unavailable without changing coding
+readiness. An active-only60-second typed catalog refresh updates presence without
+changing project/task selection or usage, and late replies after close are ignored.
+Normal PostgreSQL/runtime worker APIs and all SQL files remain unchanged. The
+full integrated main Jenkins gate and real deployment/production presence proof
+remain required. A temporary clearly named verification identity may exercise the
+live tool, then is revoked/removed; never generate fake production-client beats.
+
 # Current: Match portal host admission to generated UI ABI16 — 2026-11-26
 
 The user authorizes fixing verified deployment blockers. Jenkins100 and a clean
