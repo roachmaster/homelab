@@ -19,12 +19,14 @@ pub mod native_auth;
 pub mod policy;
 pub mod ports_runtime;
 pub mod ports_store;
+pub mod process;
 pub mod provider_events;
 pub mod quota;
 pub mod supervisor;
 pub mod types;
 pub mod workspace;
 pub mod workspace_digest;
+pub mod workspace_provider;
 
 pub use branch::{AgentBranch, AgentBranchUpsert};
 pub use config::{parse_config, ConfigError, WorkerConfig};
