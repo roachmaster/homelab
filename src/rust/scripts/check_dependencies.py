@@ -34,7 +34,7 @@ ALLOWED = {
 EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
 EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
 EXTERNAL = {
-    "forge-jenkins": {"serde", "serde_json", "url", "base64", "ureq"},
+    "forge-jenkins": {"serde", "serde_json", "sha2", "url", "base64", "ureq"},
     "forge-ide-ui": {"serde"},
     "forge-terminal": {"ctrlc", "nix", "serde", "serde_json"},
     "forge-jobs": {"cap-std", "serde", "serde_json"},

@@ -40,6 +40,7 @@ pub mod review_candidate;
 pub mod review_job;
 pub mod review_ports;
 pub mod review_worker;
+pub mod source_revision;
 pub mod runner;
 pub mod sessions;
 pub mod supervisor;

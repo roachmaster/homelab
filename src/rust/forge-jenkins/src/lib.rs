@@ -7,6 +7,7 @@
 #![doc = include_str!("../README.md")]
 
 mod client;
+pub mod events;
 mod observation;
 
 #[cfg(feature = "http")]

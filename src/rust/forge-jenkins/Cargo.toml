@@ -13,6 +13,7 @@ http = ["dep:ureq"]
 forge-core.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 url = "2"
 base64 = "0.22"
 ureq = { version = "=3.5.2", default-features = false, features = ["rustls"], optional = true }
