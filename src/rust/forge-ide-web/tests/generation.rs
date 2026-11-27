@@ -423,9 +423,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==16"));
+    assert!(worker.contains("wasm.abi_version()!==17"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 16);
+    assert_eq!(manifest["abi_version"], 17);
 }
 
 #[test]
@@ -518,7 +518,9 @@ fn list_detail_navigation_is_a_reusable_typed_presentation_contract() {
     assert!(html.contains("data-list-detail=\"record-reader\""));
     assert!(html.contains("data-detail-focus=\"record-title\""));
     assert!(html.contains("data-list-scroll=\"record-viewport\""));
-    assert!(html.contains("id=\"record-title\" class=\"fg-selection-heading\" data-bind-text tabindex=\"-1\""));
+    assert!(html.contains(
+        "id=\"record-title\" class=\"fg-selection-heading\" data-bind-text tabindex=\"-1\""
+    ));
     assert!(!html.contains("onclick="));
     let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
     assert!(!main.contains("record-reader"));
@@ -566,7 +568,9 @@ fn agents_triage_discloses_evidence_behind_one_primary_summary() {
         "agents-history-panel",
         "agents-assignment-details",
     ] {
-        assert!(html.contains(&format!("<details id=\"{id}\" class=\"fg-disclosure\"><summary>")));
+        assert!(html.contains(&format!(
+            "<details id=\"{id}\" class=\"fg-disclosure\"><summary>"
+        )));
     }
     assert!(html.contains("id=\"agents-task-prompt\""));
     assert!(html.contains("id=\"agents-task-correlation\""));
@@ -781,7 +785,7 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
     assert!(main.contains("navigation_checkpoint_saved"));
     assert!(worker.contains("!await localCheckpoint.pending"));
     assert!(worker.contains("restore_agents_navigation"));
-    assert!(worker.contains("wasm.abi_version()!==16"));
+    assert!(worker.contains("wasm.abi_version()!==17"));
 }
 
 #[test]
@@ -1181,6 +1185,6 @@ fn flow_diagram_component_validates_renders_deterministically_and_clears_on_tear
     assert!(main.contains("fg-flow-hop-exact"));
     assert!(main.contains(".fg-flow-diagram"));
     assert!(main.contains("flowDiagramViews=new WeakMap()"));
-    assert!(worker.contains("wasm.abi_version()!==16"));
-    assert_eq!(manifest["abi_version"], 16);
+    assert!(worker.contains("wasm.abi_version()!==17"));
+    assert_eq!(manifest["abi_version"], 17);
 }

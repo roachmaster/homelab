@@ -17,7 +17,7 @@ BEGIN
   expected_shape:=replace(expected_shape,'"forge_agent=arw/forge_agent_owner"','"forge_agent=r/forge_agent_owner"');
  END IF;
  SELECT jsonb_build_object('table',jsonb_build_array(c.relkind,c.relpersistence,pg_get_userbyid(c.relowner),c.relrowsecurity,c.relforcerowsecurity,c.relreplident,c.reloptions),
- 'acl',(SELECT jsonb_agg(a::text ORDER BY n) FROM unnest(c.relacl) WITH ORDINALITY entries(a,n) WHERE a::text<>'muse_events=r/forge_agent_owner'),
+ 'acl',(SELECT jsonb_agg(a::text ORDER BY n) FROM unnest(c.relacl) WITH ORDINALITY entries(a,n) WHERE a::text NOT IN ('muse_events=r/forge_agent_owner','homelab_mcp=r/forge_agent_owner')),
  'columns',(SELECT jsonb_agg(jsonb_build_array(a.attnum,a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,a.attidentity,a.attgenerated,a.attcollation::regcollation::text,pg_get_expr(d.adbin,d.adrelid),a.attacl) ORDER BY a.attnum) FROM pg_attribute a LEFT JOIN pg_attrdef d ON(d.adrelid,d.adnum)=(a.attrelid,a.attnum) WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),
  'constraints',(SELECT jsonb_agg(jsonb_build_array(k.conname,k.contype,k.convalidated,k.condeferrable,k.condeferred,pg_get_constraintdef(k.oid,false)) ORDER BY k.conname) FROM pg_constraint k WHERE k.conrelid=c.oid),
  'indexes',(SELECT jsonb_agg(jsonb_build_array(ic.relname,i.indisvalid,i.indisready,pg_get_indexdef(i.indexrelid)) ORDER BY ic.relname) FROM pg_index i JOIN pg_class ic ON ic.oid=i.indexrelid WHERE i.indrelid=c.oid),

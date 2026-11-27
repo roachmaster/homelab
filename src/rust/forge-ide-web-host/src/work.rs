@@ -21,6 +21,8 @@ pub struct WorkConfig {
     pub allowed_projects: Vec<String>,
     pub allowed_profiles: Vec<String>,
     pub allowed_modes: Vec<WorkMode>,
+    #[serde(default)]
+    pub mcp_presence: Option<crate::McpPresenceConfig>,
 }
 impl WorkConfig {
     pub(crate) fn validate(&self) -> Result<(), HostError> {
@@ -40,6 +42,9 @@ impl WorkConfig {
                 != self.allowed_modes.len()
         {
             return Err(HostError::Configuration("invalid work transport or grants"));
+        }
+        if let Some(presence) = &self.mcp_presence {
+            presence.validate()?;
         }
         Ok(())
     }
@@ -117,12 +122,20 @@ impl Factory<WorkRelay> for WorkRelayFactory {
         Ok(WorkRelay {
             relay: transport(self.0.endpoint, self.0.token_file.clone()).create()?,
             grants: self.0.clone(),
+            presence: self
+                .0
+                .mcp_presence
+                .as_ref()
+                .map(crate::presence::PresenceReaderFactory::new)
+                .map(|f| f.create())
+                .transpose()?,
         })
     }
 }
 pub(crate) struct WorkRelay {
     relay: ChatRelay,
     grants: WorkConfig,
+    presence: Option<Box<dyn crate::presence::PresenceReader>>,
 }
 pub(crate) fn handles(destination: &str) -> bool {
     destination.starts_with("ide.work.")
@@ -149,7 +162,10 @@ impl WorkRelay {
             .relay
             .dispatch(request.destination(), request.request_id(), bytes, deadline)
             .ok()?;
-        let reply: Envelope<WorkReply> = serde_json::from_slice(&body).ok()?;
+        let mut reply: Envelope<WorkReply> = serde_json::from_slice(&body).ok()?;
+        if let WorkReply::WorkCatalog { mcp_presence, .. } = &mut reply.event {
+            *mcp_presence = None;
+        }
         (reply.protocol_version == 1 && reply.event.valid_for(request, status.as_u16()))
             .then_some((status.as_u16(), body, reply))
     }
@@ -211,9 +227,12 @@ impl WorkRelay {
             projects,
             profiles,
             agent_branches,
+            mcp_presence,
             ..
         } = &mut reply.event
         {
+            // Only the configured host reader may supply connection presence.
+            *mcp_presence = self.presence.as_ref().map(|reader| reader.read(deadline));
             projects.retain(|p| self.grants.allowed_projects.contains(&p.alias));
             profiles.retain(|p| self.grants.allowed_profiles.contains(&p.alias));
             for profile in profiles.iter_mut() {

@@ -2034,14 +2034,14 @@ async function implementationDesignJourney(page, designUrl) {
   assert.deepEqual(page.context().pages(), pages, 'the current implementation reader opens in the existing Design page');
   const main = page.getByRole('main');
   await check(main.getByRole('heading', { level: 1 })).toHaveText('Current Forge implementation');
-  await check(main.getByRole('table')).toHaveCount(3);
+  await check(main.getByRole('table')).toHaveCount(6);
   const report = main.locator('article.implementation-report');
   await check(report).toHaveCount(1);
-  await check(report).toContainText('Active navigation is Agents, Workbench, Home and Design');
-  await check(report).toContainText('with Agents as the default admitted view');
+  await check(report).toContainText('The current portal navigation is Agents, Workbench, Home and Design');
+  await check(report).toContainText('Chat is inactive and Mail retired as portal views');
   const browserContract = report.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Browser application', exact: true }) });
-  await check(browserContract).toContainText('browser ABI is 15');
-  await check(report).toContainText('The retained pre-delivery live checkpoint is main 95651a5 (tree 6d380c5a)');
+  await check(browserContract).toContainText('browser ABI is 16');
+  await check(report).toContainText('The retained pre-delivery live checkpoint was main 95651a5 (tree 6d380c5a)');
   await check(report).toContainText('actual built revision a3a14e9');
   await check(report).toContainText('499 consumed build inputs');
   await check(report).toContainText('The Agents project/task delivery panel and protected Root receipts are the runtime authority for the latest source, checks and activation');
@@ -2932,6 +2932,14 @@ async function agentsJourney() {
     await check(page.locator('#ide-navigation > :is(button,a)')).toHaveCount(4);
     await chooseTaskScope('attention');
     await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
+    await check(page.locator('#agents-mcp-heading')).toHaveText('MCP connections');
+    await check(page.locator('#agents-mcp-connections')).toContainText('Dot');
+    await check(page.locator('#agents-mcp-connections')).toContainText('Online');
+    await check(page.locator('#agents-mcp-connections')).toContainText('Stale');
+    await check(page.locator('#agents-mcp-connections')).toContainText('Never seen');
+    await check(page.locator('#agents-mcp-connections')).not.toContainText('Codex');
+    await page.locator('#agents-mcp-times summary').click();
+    await check(page.locator('#agents-mcp-heartbeats')).toContainText('No heartbeat received');
     const cards = page.locator('#agents-providers article.fg-metric-card');
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
@@ -3121,6 +3129,8 @@ async function agentsJourney() {
     await check(page.locator('#agents-accept')).toBeHidden();
     const historyReads = relay.calls.filter(kind => kind === 'work_events').length;
     const acceptedTitle = await page.locator('#agents-task-title').innerText();
+    const acceptedCorrelation = await page.locator('#agents-task-correlation').textContent();
+    assert.match(acceptedCorrelation, /^Correlation · [0-9a-f-]{36}$/);
     await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
     // Reload restores the earlier local handoff draft. Reopen the saved task
     // from the list; progress history comes from PostgreSQL, not that draft.
@@ -3128,8 +3138,14 @@ async function agentsJourney() {
     await page.locator('#agents-back').click();
     await check(page.locator('#agents-overview')).toBeVisible();
     await chooseTaskScope('history');
-    await page.locator('#agents-tasks .fg-row-select').filter({ hasText: acceptedTitle }).click();
+    // Inbox titles are compact; reopen by this fixture's unique visible prefix,
+    // then verify the reader recovered the exact full accepted title.
+    const acceptedRow = page.locator('#agents-tasks .fg-row-select').filter({ hasText: 'Keep this local Agents draft.' });
+    await check(acceptedRow).toHaveCount(1);
+    await acceptedRow.click();
     await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-title')).toHaveText(acceptedTitle);
+    await check(page.locator('#agents-task-correlation')).toHaveText(acceptedCorrelation);
     await check(page.locator('#agents-task-status')).toContainText('Accepted');
     await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
     await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
@@ -3211,10 +3227,14 @@ async function agentsJourney() {
         const [a, b] = nodes.map(node => node.getBoundingClientRect());
         return phone ? b.top >= a.bottom - 1 : Math.abs(a.top - b.top) <= 1;
       }, width < 800), true, 'provider cards stack on phones and share a desktop row');
-      assert.equal(await accepted.locator('.fg-row-label').evaluate(node => {
-        const style = getComputedStyle(node);
-        return style.webkitLineClamp === '2' && node.getBoundingClientRect().height <= 2 * parseFloat(style.lineHeight) + 1;
-      }), true, 'long task titles occupy at most two readable lines');
+      const acceptedLabel = accepted.locator('.fg-row-label');
+      const titlePrefix = (await acceptedLabel.textContent()).replace(/…$/, '');
+      assert(titlePrefix.length <= 96 && acceptedTitle.startsWith(titlePrefix),
+        'the bounded inbox title preserves the exact assignment prefix');
+      assert(/\s/.test(acceptedTitle[titlePrefix.length]),
+        'the bounded inbox title ends at a whole-word boundary');
+      assert.equal(await acceptedLabel.evaluate(node => node.scrollHeight <= node.clientHeight + 1), true,
+        'the whole-word inbox title is readable without vertical clipping');
       for (const control of [codexCard.locator('.fg-metric-refresh'), summary]) {
         const box = await control.boundingBox();
         assert(box && box.width >= 44 && box.height >= 44, 'card actions retain touch-sized targets');
@@ -3785,6 +3805,7 @@ async function agentsJourney() {
       ],
     },{
       [`${branchActionId}:unit-tests:console`]:{content:cicdConsoleLog,pageSize:200,tests_passed:964,tests_failed:1,tests_skipped:0,test_cases:[{name:'tests::failing_case',status:'failed'}]},
+      [`${branchActionId}:unit-tests:tests`]:{content:'Tests: 964 passed, 1 failed, 0 skipped\n[failed] tests::failing_case',tests_passed:964,tests_failed:1,tests_skipped:0,test_cases:[{name:'tests::failing_case',status:'failed'}]},
     });
     await page.locator('#agents-refresh').click();
     await check(page.locator('#agents-cicd-panel')).toBeVisible();

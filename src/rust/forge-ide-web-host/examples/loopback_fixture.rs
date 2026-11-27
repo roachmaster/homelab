@@ -210,7 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some((bind, relay, token_file)) = agents {
         host_config["bind"] = json!(bind.to_str().ok_or("invalid Agents bind")?);
-        host_config["work"] = json!({"endpoint":relay.to_str().ok_or("invalid Agents endpoint")?,"token_file":PathBuf::from(token_file),"allowed_projects":["workspace"],"allowed_profiles":["agy-primary","codex-primary","grok-primary","muse-db-primary"],"allowed_modes":["plan","review","implement"]});
+        host_config["work"] = json!({"endpoint":relay.to_str().ok_or("invalid Agents endpoint")?,"token_file":PathBuf::from(token_file),"allowed_projects":["workspace"],"allowed_profiles":["agy-primary","codex-primary","grok-primary","muse-db-primary"],"allowed_modes":["plan","review","implement"],"mcp_presence":{"endpoint":relay.to_str().ok_or("invalid presence endpoint")?,"token_file":PathBuf::from(token_file)}});
         host_config["usage"] = json!({"endpoint":relay.to_str().ok_or("invalid Usage endpoint")?,"token_file":PathBuf::from(token_file),"allowed_projects":["workspace"],"allowed_profiles":["agy-primary","codex-primary","grok-primary"]});
     }
     let config_path = fixture.root.join("host.json");

@@ -58,7 +58,10 @@ const MAX_DOCUMENT_MARKDOWN_BYTES: usize = 64 * 1024;
 /// literal Markdown examples inside code. Collisions fail closed. This helper
 /// must never render model output or user-owned file contents.
 pub(super) fn render_document_markdown(markdown: &str) -> Option<String> {
-    if markdown.len() > MAX_DOCUMENT_MARKDOWN_BYTES || markdown.contains(DOCUMENT_MARKER) {
+    if markdown.trim().is_empty()
+        || markdown.len() > MAX_DOCUMENT_MARKDOWN_BYTES
+        || markdown.contains(DOCUMENT_MARKER)
+    {
         return None;
     }
     let mut prepared = markdown.to_owned();
@@ -68,7 +71,9 @@ pub(super) fn render_document_markdown(markdown: &str) -> Option<String> {
             &format!("]({DOCUMENT_MARKER}{index}/)"),
         );
     }
-    let mut html = forge_ide_ui::render_markdown(&prepared)?;
+    // Embedded documents use the existing file-sized input/output/work budget;
+    // model replies keep their separate 32 KiB rendered-output budget.
+    let mut html = forge_ide_ui::render_markdown_file(&prepared)?;
     for (index, route) in DOCUMENT_ROUTES.iter().enumerate() {
         let marker = format!("{DOCUMENT_MARKER}{index}/");
         let generated =

@@ -177,6 +177,15 @@ export async function startAgentsRelay() {
   let refreshes = 0, progressRefetches = 0;
   const server = createServer(async (request, response) => {
     try {
+      if (request.method === 'GET' && request.url === '/internal/agent-presence' && request.headers.authorization === `Bearer ${token}`) {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({version:1,agents:[
+          {agent_id:'dot',label:'Dot',state:'online',last_seen_at:time},
+          {agent_id:'gemini',label:'Gemini',state:'stale',last_seen_at:time},
+          {agent_id:'grok',label:'Grok',state:'never',last_seen_at:null},
+          {agent_id:'muse',label:'Muse',state:'online',last_seen_at:time},
+        ]})); return;
+      }
       if (request.method !== 'POST' || request.url !== '/v1/dispatch' || request.headers.authorization !== `Bearer ${token}`) {
         response.writeHead(401, { 'Content-Type': 'application/json' }); response.end('{}'); return;
       }

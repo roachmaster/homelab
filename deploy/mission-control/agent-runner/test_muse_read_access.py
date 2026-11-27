@@ -27,6 +27,7 @@ TABLES = (
     "agent_branch_state", "jenkins_stage_results", "jenkins_stage_log_chunks",
 )
 GRANT = SQL_DIR / "management/grant-muse-read-access.sql"
+MCP_GRANT = SQL_DIR.parent / "mcp-postgres/sql/grant-mcp-readonly.sql"
 VERIFY = SQL_DIR / "management/verify.sql"
 
 
@@ -41,10 +42,11 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
         # Discard only roles/grants created inside this owned fixture.
         with closing(self.cluster.connect("postgres")) as connection:
             with connection, connection.cursor() as cursor:
-                cursor.execute("SELECT to_regrole('muse_events')")
-                if cursor.fetchone()[0] is not None:
-                    cursor.execute("DROP OWNED BY muse_events")
-                    cursor.execute("DROP ROLE muse_events")
+                for role in ("muse_events", "homelab_mcp", "other_reader"):
+                    cursor.execute("SELECT to_regrole(%s)", (role,))
+                    if cursor.fetchone()[0] is not None:
+                        cursor.execute(f"DROP OWNED BY {role}")
+                        cursor.execute(f"DROP ROLE {role}")
 
     def rows(self, statement, parameters=()):
         with closing(self.cluster.connect("postgres")) as connection, connection.cursor() as cursor:
@@ -60,6 +62,14 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
             "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent "
             "GRANT SELECT ON TABLES TO muse_events",
         )
+
+    def fixture_mcp_reader(self):
+        self.cluster.admin_exec(
+            "CREATE ROLE homelab_mcp LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION",
+            "ALTER ROLE homelab_mcp SET default_transaction_read_only = on", owner=False)
+        result = self.cluster.run_sql_script(MCP_GRANT)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("homelab_mcp reader verified", result.stdout)
 
     def assert_verifies(self):
         result = self.cluster.run_sql_script(VERIFY)
@@ -82,6 +92,64 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
             "p.proname IN ('submit_muse_intake','claim_muse_intake','release_muse_intake',"
             "'reject_muse_intake','admit_muse_result')"), [(0,)])
         self.assert_verifies()
+
+    def test_homelab_mcp_select_only_reader_passes_schema_verification(self):
+        self.assert_verifies()
+        self.fixture_mcp_reader()
+        self.assertGreater(self.rows(
+            "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee='homelab_mcp'")[0][0], 0)
+        self.assert_verifies()
+        self.cluster.apply_and_verify()
+        self.fixture_reader()
+        self.assert_verifies()
+
+    def test_homelab_mcp_write_or_other_reader_still_rejected(self):
+        self.fixture_mcp_reader()
+        for grant, revoke in (
+            ("GRANT UPDATE ON forge_agent.coding_workflow_reviews TO homelab_mcp",
+             "REVOKE UPDATE ON forge_agent.coding_workflow_reviews FROM homelab_mcp"),
+            ("GRANT SELECT ON forge_agent.coding_workflow_reviews TO homelab_mcp WITH GRANT OPTION",
+             "REVOKE GRANT OPTION FOR SELECT ON forge_agent.coding_workflow_reviews FROM homelab_mcp"),
+            ("CREATE ROLE other_reader; GRANT SELECT ON forge_agent.coding_workflow_reviews TO other_reader",
+             "REVOKE SELECT ON forge_agent.coding_workflow_reviews FROM other_reader; DROP ROLE other_reader"),
+        ):
+            with self.subTest(grant=grant):
+                self.cluster.admin_exec(*grant.split("; "), owner="CREATE ROLE" not in grant)
+                try:
+                    self.assert_rejected()
+                finally:
+                    self.cluster.admin_exec(*revoke.split("; "), owner="DROP ROLE" not in revoke)
+                self.assert_verifies()
+
+    def test_jenkins_reader_acl_items_allow_only_select_without_grant_option(self):
+        self.fixture_mcp_reader()
+        self.fixture_reader()
+        self.assert_verifies()
+        self.cluster.admin_exec("CREATE ROLE other_reader", owner=False)
+        try:
+            for table in ("jenkins_events", "jenkins_event_deliveries", "jenkins_observations"):
+                for role, privilege, grant_option in (
+                    ("homelab_mcp", "UPDATE", False),
+                    ("muse_events", "UPDATE", False),
+                    ("homelab_mcp", "SELECT", True),
+                    ("other_reader", "SELECT", False),
+                ):
+                    with self.subTest(table=table, role=role, privilege=privilege,
+                                      grant_option=grant_option):
+                        grant = f"GRANT {privilege} ON forge_agent.{table} TO {role}"
+                        revoke = f"REVOKE {privilege} ON forge_agent.{table} FROM {role}"
+                        if grant_option:
+                            grant += " WITH GRANT OPTION"
+                            revoke = f"REVOKE GRANT OPTION FOR SELECT ON forge_agent.{table} FROM {role}"
+                        self.cluster.admin_exec(grant)
+                        try:
+                            self.assert_rejected()
+                        finally:
+                            self.cluster.admin_exec(revoke)
+                        # Both authorized readers retain their original SELECT.
+                        self.assert_verifies()
+        finally:
+            self.cluster.admin_exec("DROP ROLE other_reader", owner=False)
 
     def test_existing_reads_and_role_attributes_survive_reapply_and_provision(self):
         self.fixture_reader()

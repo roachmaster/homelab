@@ -66,6 +66,19 @@ components:
   listener: 127.0.0.1:8090
   service: bitwave-portal-cloudflare.socket
   responsibility: Pass Cloudflare tunnel traffic to the local Forge IDE web host.
+- id: homelab-mcp
+  status: proposed
+  placement: mission-control
+  service: homelab-mcp.service
+  lifecycle: {}
+  listener: 127.0.0.1:8791
+  public_origin: https://mcp.thedevex.com
+  responsibilities:
+  - Serve read-only PostgreSQL MCP tools over Streamable HTTP at /mcp.
+  - Authenticate every MCP request with a static, scoped, expiring bearer token or an OAuth 2.1 access token (no Cloudflare Access).
+  - Serve a minimal OAuth 2.1 authorization server (code + PKCE S256, pre-registered clients, single operator login) for hosted connectors.
+  - Query as the SELECT-only homelab_mcp role in rolled-back READ ONLY transactions with a statement timeout.
+  source: ../../deploy/mission-control/mcp-postgres/README.md
 - id: forge-ide-web-host
   status: deployed
   placement: mission-control

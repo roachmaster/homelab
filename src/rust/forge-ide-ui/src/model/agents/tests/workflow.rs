@@ -568,6 +568,7 @@ fn new_assignment_cannot_discard_an_inflight_initial_or_refreshed_catalog() {
                 worker_status: incoming.worker_status,
                 observed_at: incoming.observed_at,
                 agent_branches: vec![],
+                mcp_presence: None,
             }),
             "loaded",
         );

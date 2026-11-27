@@ -12,8 +12,7 @@ BEGIN
   SELECT jsonb_build_object(
    'table',jsonb_build_array(c.relkind,c.relpersistence,pg_get_userbyid(c.relowner),c.relrowsecurity,c.relforcerowsecurity,c.relreplident,c.reloptions),
    'acl',(SELECT jsonb_agg(item::text ORDER BY item::text) FROM unnest(coalesce(c.relacl,acldefault('r',c.relowner))) item
-    WHERE NOT EXISTS(SELECT FROM aclexplode(ARRAY[item]) a WHERE a.grantee=to_regrole('muse_events')
-     AND a.grantor='forge_agent_owner'::regrole AND a.privilege_type='SELECT' AND NOT a.is_grantable)),
+    WHERE item::text NOT IN ('muse_events=r/forge_agent_owner','homelab_mcp=r/forge_agent_owner')),
    'columns',(SELECT jsonb_agg(jsonb_build_array(a.attnum,a.attname,a.atttypid::regtype::text,a.atttypmod,a.attnotnull,
       a.attidentity,a.attgenerated,a.attcollation::regcollation::text,pg_get_expr(d.adbin,d.adrelid),a.attacl) ORDER BY a.attnum)
      FROM pg_attribute a LEFT JOIN pg_attrdef d ON(d.adrelid,d.adnum)=(a.attrelid,a.attnum) WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),

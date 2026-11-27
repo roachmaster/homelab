@@ -187,7 +187,7 @@ class NativePostfixProof:
             if set(new_files)-set(old_files)!=M38 or set(old_files)-set(new_files):raise ValueError('Verifier drift is not the exact M38 defect')
             if (_gate(new_files,OLD_HELPER,old['branch_scope'])!=old['gate_manifest_sha256']or _gate(old_files,OLD_HELPER,old['branch_scope'])==old['gate_manifest_sha256']):raise ValueError('Historical gate mismatch was not reproduced')
             expected_new=_gate(new_files,new_sha,old['branch_scope'])
-            if jenkins_gate_manifest(selected,files,old['branch_scope'])[2]!=expected_new:raise ValueError('Fixed producer and actual helper policy still differ')
+            if jenkins_gate_manifest(selected,files,old['branch_scope'],legacy_digest=True)[2]!=expected_new:raise ValueError('Fixed producer and actual helper policy still differ')
             proof={'cleanup_confirmed':True,'checks_executed':0,'matched_m38_policy':True,'old_action_id':action,'old_helper_sha256':OLD_HELPER,
                 'old_receipt_sha256':digest,'index_sha256':hashlib.sha256(index_raw).hexdigest(),'binding_sha256':hashlib.sha256(binding_raw).hexdigest(),
                 'publication_config_sha256':hashlib.sha256(pub_raw).hexdigest(),'delivery_config_sha256':hashlib.sha256(delivery_raw).hexdigest(),

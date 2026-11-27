@@ -123,7 +123,9 @@ class ArtifactRepairEventPGTests(unittest.TestCase):
     def connect(cls):return cls.pg.connect('forge_agent')
     def setUp(self):
         flow_fixture.ExternalFlowPGTest.setUp(self)
-        self.pg.admin_exec('TRUNCATE forge_agent.coding_retry_events CASCADE')
+        # M41 branch ownership survives task deletion; each independent fixture
+        # must clear the prior workflow's retained reservation as well.
+        self.pg.admin_exec('TRUNCATE forge_agent.agent_branch_state,forge_agent.coding_retry_events CASCADE')
     def service(self):return WorkServiceFactory(flow_fixture.cfg(), self.connect).create()
 
     def plan_at(self, base):

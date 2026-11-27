@@ -76,7 +76,7 @@ class SessionExecutionTest(unittest.TestCase):
             self.assertNotIn("-p", invocation.argv)
             for flag in ("--input-format", "--output-format"):
                 self.assertEqual(invocation.argv[invocation.argv.index(flag) + 1], "stream-json")
-            self.assertEqual(invocation.argv[invocation.argv.index("--print-timeout") + 1], "1800s")
+            self.assertEqual(invocation.argv[invocation.argv.index("--print-timeout") + 1], "14400s")
             self.assertNotIn(value["prompt"], invocation.argv)
             self.assertIn(value["prompt"], json.loads(invocation.stdin)["message"]["content"])
             settings = json.loads((invocation.scratch / "settings.json").read_text())

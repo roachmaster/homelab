@@ -3,7 +3,9 @@
 Run the existing **28 ordered browser acceptance groups** with one repository-root
 command. This is test automation around the workbench, not a new UI, scheduler or
 replacement backend. Test-driver JavaScript is not a hand-authored application asset.
-The Agents journey covers separate 50-event history pages with durable correlation,
+The Agents fixture also covers host-composed MCP connections (Online, Stale and
+Never seen) separately from native worker readiness, using only disposable reader
+credentials and controlled heartbeat observations. The Agents journey covers separate 50-event history pages with durable correlation,
 keyboard disclosure preservation, failed-page retry and external database workflow
 phases through reviewed merge, using deterministic owned runner fixtures.
 

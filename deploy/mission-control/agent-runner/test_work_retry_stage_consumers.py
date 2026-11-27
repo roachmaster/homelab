@@ -93,7 +93,7 @@ class RetryStageConsumerTest(unittest.TestCase):
 
     def test_producer_and_consumer_hash_the_identical_closed_phase_plan(self):
         import test_ci_supervision as supervision
-        from work_external_delivery import jenkins_gate_manifest, protected_delivery_gate
+        from work_external_delivery import canonical as delivery_canonical, jenkins_gate_manifest, protected_delivery_gate
         files = {'deploy/mission-control/agent-runner/work_ci_phases.py': 'a' * 64,
             'src/rust/fixture.rs': 'b' * 64}
         config = SimpleNamespace(verification_profile=EVENT_PROFILE, verifier=Path('/owned/verifier.py'))
@@ -101,9 +101,10 @@ class RetryStageConsumerTest(unittest.TestCase):
             with self.subTest(scope=scope), patch('work_external_delivery.read_private', return_value=b'owned verifier'):
                 source, helper, observed = jenkins_gate_manifest(config, files, scope)
             protected = {key: value for key, value in files.items() if protected_delivery_gate(key, EVENT_PROFILE)}
-            expected = supervision.CI.profile_gate_manifest(EVENT_PROFILE, scope, protected, helper)
+            expected = supervision.CI.gate_contract_name(EVENT_PROFILE, scope)
             self.assertEqual(helper, hashlib.sha256(b'owned verifier').hexdigest())
             self.assertEqual(observed, expected)
+            self.assertEqual(source, hashlib.sha256(delivery_canonical(protected)).hexdigest())
 
 
 if __name__ == '__main__':

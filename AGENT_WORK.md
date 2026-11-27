@@ -1,4 +1,148 @@
-# Current: Reconcile the system picture and delivery direction — 2026-11-26
+# Current: Authenticated MCP heartbeat and portal connection presence — 2026-11-27
+
+User authorizes adding an authenticated heartbeat MCP tool and connecting it to
+portal agent presence, including separate Dot (ChatGPT), Gemini, Grok and Muse.
+Codex is the primary orchestrator, distinct from Dot and native worker profiles.
+Keep SQL tools read-only and all PostgreSQL grants/schema50 unchanged. Store only
+presence metadata outside PostgreSQL in service-owned SQLite. Bind identities to
+administrator-configured authenticated static-token/OAuth-client subjects; a caller
+must not supply another agent identity, label, server timestamp or execution role.
+Heartbeat connection presence must not advertise execution readiness or job modes.
+
+Root coordinates integration, publication and matched MCP/portal deployment.
+Separate worktrees own MCP/auth/presence and Rust typed portal/host/UI. Use existing
+Forge provider/UI skills, maintain effects at composition roots, preserve tokens,
+OAuth stores/clients/passwords, private configs, task/event histories and worker
+roles. The live ad20beed Gemini compatibility fix is retained as09d2b0a4 before new
+work. Main wasab65003d with Jenkins103-qualified running ABI16/schema50 portal.
+Do not apply the deferred destructive digest-column migration. Keep three obsolete
+release retry deferrals and their uncertainty intact. Current heartbeat agents
+should appear only after actual calls; never simulate continuous live heartbeats.
+
+## MCP backend implementation checkpoint — 2026-11-27
+
+Isolated worktree `/mnt/data/homelab-build/mcp-heartbeat-server-20261127` owns
+only MCP authentication/presence/backend tests and its README/example config.
+Stable authenticated subjects are `static:<token_id>` and `oauth:<client_id>`;
+existing token/grant IDs and read-only SQL behavior remain intact. Optional
+presence factories are selected at `build_app`, then open a separate private
+SQLite store and dedicated local-reader credential. No background beat exists.
+The local reader returns version1/at most16 configured agents with server UTC
+last-seen timestamps; portal host integration and all live configuration/deploy
+remain root-owned. Initial existing MCP qualification passed56 tests; the final
+combined suite including spoofing, restart/freshness, OAuth-client identity,
+reader isolation and the bounded store is pending at this checkpoint.
+
+## Integrated validation and rollout checkpoint — 2026-11-27
+
+The MCP backend passed70 tests (56 retained +14 presence), with no skips or
+failures. Portal native presence/clock tests,35 generation tests and make ui-check
+passed. A real isolated sandboxed browser fixture at1440 and390 pixels verified
+four MCP clients, all three states, exact timestamps, unchanged worker readiness,
+no phone overflow/runtime errors and successful cleanup. Root inspected both
+screenshots. Root actor/recovery/startup tests passed39, including ABI17 and a
+presence overlay that preserves the predecessor configuration for rollback.
+
+The host owns the optional reader and clears any runner-provided presence. Its
+read is bounded to8KiB/300ms; failure renders Unavailable without changing coding
+readiness. An active-only60-second typed catalog refresh updates presence without
+changing project/task selection or usage, and late replies after close are ignored.
+Normal PostgreSQL/runtime worker APIs and all SQL files remain unchanged. The
+full integrated main Jenkins gate and real deployment/production presence proof
+remain required. A temporary clearly named verification identity may exercise the
+live tool, then is revoked/removed; never generate fake production-client beats.
+
+# Current: Match portal host admission to generated UI ABI16 — 2026-11-26
+
+The user authorizes fixing verified deployment blockers. Jenkins100 and a clean
+local full browser gate on source908fbab1 fail at the first owned Agents fixture:
+Assets::load still requires ABI15 while the actual generator/WASM use ABI16.
+Make host admission strict to ABI16, retain all manifest/file integrity checks,
+and update native synthetic fixtures to the current ABI. Cover stale15, future17
+and malformed ABI rejection before remote effects, plus actual generated assets
+through the fixed full browser gate. Use pinned existing CI toolchain/browser
+prerequisites without installation/security changes or fixture credential logs.
+Root owns publication/deployment review; source work stays in this isolated908
+worktree with Cargo and QA evidence outside tracked source paths.
+
+The first fixed full browser run passed fixture startup and reached accepted-task
+reload. Its stale locator searched the inbox for the reader's full long title,
+although triage intentionally compacts inbox titles. Reopen by the fixture's
+unique visible prefix and assert exact full-title restoration in the reader.
+The failed run confirmed owned-resource cleanup; later groups remained not run.
+A subsequent stale assertion still required two-line CSS clipping, which triage
+intentionally replaced with whole-word bounded prose. The browser now verifies
+its exact bounded prefix, word boundary and no vertical clipping at all three
+viewports, while retaining horizontal-overflow and touch-target checks. Reload
+also verifies a single matching row and unchanged full title/correlation.
+The next browser obstruction was a missing explicit Tests-view fixture record:
+the journey seeded only Console, so its legitimate Tests request received404.
+Seed the structured test summary/cases for that view without changing application
+behavior or weakening the inspector's text, paging or escaping assertions.
+The full browser run then reached the expanded implementation reader, whose
+acceptance still expected three tables and earlier checkpoint/navigation wording.
+Its source document now contains six tables. Keep current source ABI references
+at16 in both current-contract rows; dated historical release identities remain
+unchanged. Align the reader assertions to the reviewed document and retain all
+same-tab, table, safe-link and narrow-layout checks.
+The expanded reader's Mermaid text fence caused real phone overflow:375px
+viewport,631px document,615px unwrapped code. A scoped declarative pre-wrap /
+overflow-wrap rule keeps implementation code readable within the page. Preserve
+the existing browser overflow check and inspect owned before/after geometry and
+phone screenshots; do not replace the check with a CSS-string assertion.
+
+Validation: all six affected native asset tests and five public asset consumer
+checks passed, as did workspace formatting. The fixed full `make ui-qa` passed
+28/28 ordered groups with all owned cleanup passed on clean checkpoint
+`48dd58f70e0bdc1941270da9f6df5b1c8bb5651e`, unchanged source fingerprint
+`030ad6fa51f70b79d48ca6d6a70e65f5bab6437aacbc78b8403e6a9b704bdb8b`.
+Evidence: `/mnt/data/homelab-build/portal-browser-fix-908-qa/forge-ui-qa-r2gjr1p0`.
+Pinned existing CI Rust1.97.1, browser dependencies and sandbox were preserved.
+Owned after-fix geometry matches375/390/1440px viewports; the375px code screenshot
+is readable and contained. Final follow-up changes only documentation: neutral
+responsibility labels, explicitly dated pre-deployment observations, and the
+schema50 source target. Tested application bytes remain unchanged. Exact final
+published-source Jenkins qualification and deployment remain root-owned work.
+
+# Previous: Restore bounded embedded documentation rendering — 2026-11-26
+
+The user authorizes fixing deployment blockers. Jenkins99 on main a55a17f8
+failed while building the web host: the 38 KiB implementation document uses
+an adapter whose selected reply renderer permits only 32 KiB of HTML output.
+Expose and reuse the existing bounded document/file renderer for trusted
+embedded documentation. Preserve reply limits, HTML escaping, external-only
+untrusted links, file input/output/work limits and fixed local reader routes.
+Work in an isolated a55 worktree; root reviews publication/deployment separately.
+Check the actual embedded document, external library consumer, sanitizer/bounds,
+formatting and host build with Cargo output outside the source tree.
+
+Validation on code checkpoint41d05701: workspace formatting passed; all156 UI
+library tests, two public renderer consumer tests, six document adapter tests,
+and the public host fixed-document HTTP consumer test passed. The actual host
+all-features build passed offline/locked. These checks reuse
+`/mnt/data/homelab-build/task-consolidation-target`; full exact-source Jenkins
+qualification and deployment remain root-owned follow-up work.
+
+# Current: Qualify and deploy merged main, migrate DB, restore portal — 2026-11-26
+
+User authorizes starting Jenkins verification, fixing failures, deploying the
+matched web/UI, database and runner/worker release, and restoring the portal.
+Start from merged main e9b29210 including timeout fix 8a86dd4. Preserve existing
+workspaces, task/Plan/review history, credentials and independently configured
+agent roles. No database reset or legacy digest-column drop is authorized.
+
+Deploy matching web host/UI before or together with the runner. Install the
+matching Jenkins verifier before any coordinated switch to transmitting named
+contracts; leave that producer switch separate pending the requested handoff.
+Keep genuine failed CI results and qualify each changed exact source. Read-only
+preflight found schema40, API runner inactive/disabled, other worker and web
+services active. Jenkins #96 failed source preflight on a contradictory
+prepare-source diagnostic assertion. ABI16 release-actor admission and two stale
+M39/M41 database grant guards are being corrected before final qualification.
+Use isolated source worktrees and /mnt/data evidence; inspect leases before
+service cutover and preserve a verified DB backup and rollback selectors.
+
+# Previous: Reconcile the system picture and delivery direction — 2026-11-26
 
 User requests reviewing the consolidated changes and updating files/notes to
 reflect the current system and where it is headed. Update the existing status,

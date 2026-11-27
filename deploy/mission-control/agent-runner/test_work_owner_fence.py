@@ -281,7 +281,8 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                 before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
                 self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(50,)])
-                self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(27,)])
+                # M41 adds the three authorized branch/CI evidence reads.
+                self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(30,)])
                 self.assertEqual(execute("SELECT has_function_privilege('muse_events','forge_agent._coding_owner_continuation_fenced(uuid)','EXECUTE')"),[(False,)])
             finally:cluster.stop()
 

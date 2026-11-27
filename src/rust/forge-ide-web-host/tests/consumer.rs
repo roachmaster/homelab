@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":15,"files":files}))
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":17,"files":files}))
                 .unwrap(),
         )
         .unwrap();
@@ -451,6 +451,7 @@ fn configured_host_resources_open_only_at_factory_creation() {
                     allowed_projects: vec!["coding-only".into()],
                     allowed_profiles: vec!["agy-plan-v1".into()],
                     allowed_modes: vec![forge_ide_web_host::WorkMode::Plan],
+                    mcp_presence: None,
                 }),
                 ..config(&files)
             },
@@ -1760,11 +1761,28 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16] {
+    for (abi, expected_error) in (0..=16)
+        .chain([18, 65_535])
+        .map(|abi| (json!(abi), "asset versions/count"))
+        .chain(
+            [
+                json!(null),
+                json!(true),
+                json!("16"),
+                json!(-1),
+                json!(16.0),
+                json!(65_536),
+                json!([]),
+                json!({}),
+            ]
+            .into_iter()
+            .map(|abi| (abi, "asset manifest")),
+        )
+    {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        manifest["abi_version"] = abi.into();
+        manifest["abi_version"] = abi;
         fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
         let group = register_host("ui", config(&f)).unwrap();
         let ((), factory) = Registry::new()
@@ -1780,9 +1798,7 @@ fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
         )]);
         assert!(matches!(
             factory.create_with_ports(ports),
-            Err(forge_ide_web_host::HostError::Configuration(
-                "asset versions/count"
-            ))
+            Err(forge_ide_web_host::HostError::Configuration(message)) if message == expected_error
         ));
         assert_eq!(calls.get(), 0);
     }

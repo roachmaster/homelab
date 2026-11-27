@@ -213,6 +213,7 @@ fn external_and_workflow_summaries_keep_their_real_provenance_and_links() {
         phase: WorkWorkflowPhase::PlanReview,
         summary: "Independent review queued".into(),
         related_task_id: Some(ATTEMPT.into()),
+        escalation_cause: None,
     });
     a.history = vec![external, flow];
     let mut view = ViewModel::default();

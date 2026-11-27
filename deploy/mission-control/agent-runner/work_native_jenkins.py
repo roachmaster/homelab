@@ -20,7 +20,7 @@ from work_agent_branch import BranchOwnershipConflictError, PERSISTENT_BRANCH_PO
 from work_executor import unit_name
 from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory, contract_for_config
 from work_external_delivery import (native_action_id, native_action_ids, CHECKS, DeliveryConfig, DeliveryProviderFactory,
-    LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, protected_delivery_gate, read_private, sha, uid)
+    LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, gate_ref, jenkins_gate_manifest, protected_delivery_gate, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
 from work_jenkins_lifecycle import LifecycleTracker
 from work_publication_checks import VerificationFailure
@@ -214,7 +214,7 @@ class NativeJenkinsVerification:
         expected = {'version': plan.result_version, 'action_id': action, 'workflow_id': scope['workflow_id'],
             'project_alias': scope['project_alias'], 'candidate_commit': sha(request['candidate_commit']),
             'candidate_tree': sha(request['candidate_tree']), 'expected_main': sha(request['integration_base']),
-            'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
+            'gate_manifest_sha256': gate_ref(request['gate_manifest_sha256']),
             'verification_profile': request.get('verification_profile', LEGACY_PROFILE),
             'correlation_id': scope['correlation_id']}
         if 'branch_scope' in request:
@@ -276,7 +276,7 @@ class NativeJenkinsVerification:
             expected = {'version': plan.result_version, 'action_id': action, 'workflow_id': scope['workflow_id'],
                 'project_alias': scope['project_alias'], 'candidate_commit': sha(request['candidate_commit']),
                 'candidate_tree': sha(request['candidate_tree']), 'expected_main': sha(request['integration_base']),
-                'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
+                'gate_manifest_sha256': gate_ref(request['gate_manifest_sha256']),
                 'verification_profile': profile, 'correlation_id': scope['correlation_id']}
             if 'branch_scope' in request:
                 expected['branch_scope'] = request['branch_scope']

@@ -62,6 +62,40 @@ class FakeSystem:
 
 
 class PortalReleaseActorTest(unittest.TestCase):
+    def production_config(self):
+        return dict(owner='owner', project_alias='homelab', repository='roachmaster/homelab',
+            canonical_repo='/home/lrocha/repos/homelab',
+            ci_results_root='/var/lib/forge-provisioning/delivery-ci-results',
+            releases_root='/opt/homelab-forge/releases',
+            web_config_root='/etc/homelab-forge/web',
+            state_root='/var/lib/forge-provisioning/portal-release',
+            override='/etc/systemd/system/homelab-web.service.d/portal.conf',
+            replay_archive_root='/opt/homelab-forge/replay-archive',
+            web_user='homelab-web', web_group='homelab-web', source_account='lrocha',
+            source_github_config_dir='/home/lrocha/.config/gh', candidate_port=18788,
+            expected_abi=16)
+    def test_configuration_supports_abi17_and_retains_closed_legacy_abi_selection(self):
+        raw = self.production_config()
+        for abi in (14, 15, 16, 17):
+            with self.subTest(supported=abi):
+                self.assertEqual(ACTOR.ActorConfig.parse(dict(raw, expected_abi=abi)).expected_abi, abi)
+        for abi in (13, 18, True, '17', 17.0):
+            with self.subTest(unsupported=abi), self.assertRaises(ValueError):
+                ACTOR.ActorConfig.parse(dict(raw, expected_abi=abi))
+
+    def test_presence_reader_selection_is_optional_and_root_scoped(self):
+        raw = self.production_config()
+        self.assertIsNone(ACTOR.ActorConfig.parse(raw).mcp_presence)
+        reader = dict(endpoint='127.0.0.1:8791',
+            token_file='/etc/homelab-forge/web/mcp-presence-reader.token')
+        self.assertEqual(ACTOR.ActorConfig.parse(dict(raw, mcp_presence=reader)).mcp_presence, reader)
+        for reader in ({}, {'endpoint': 'remote.example:8791'},
+                dict(reader, endpoint='10.0.0.1:8791'),
+                dict(reader, token_file='/tmp/reader.token'),
+                dict(reader, token='candidate-secret'), 'enabled'):
+            with self.subTest(reader=reader), self.assertRaises(ValueError):
+                ACTOR.ActorConfig.parse(dict(raw, mcp_presence=reader))
+
     def test_atomic_root_writer_handles_existing_near_name_max_override(self):
         # Exercise real filesystem atomic replacement; substitute only Root
         # ownership metadata so this regression also runs under the CI UID.
@@ -242,9 +276,9 @@ class PortalReleaseActorTest(unittest.TestCase):
             self.invoke('plan')
         self.assertEqual(self.system.restarts, 0)
 
-    def test_abi15_artifacts_require_the_matching_selected_abi(self):
+    def _assert_artifacts_require_the_matching_selected_abi(self, abi):
         assets = json.loads(self.inventory['assets/manifest.json'])
-        assets['abi_version'] = 15
+        assets['abi_version'] = abi
         self.inventory['assets/manifest.json'] = ACTOR.canonical(assets)
         self.put(self.packet / 'assets/manifest.json', self.inventory['assets/manifest.json'])
         for item in self.manifest['files']:
@@ -258,8 +292,35 @@ class PortalReleaseActorTest(unittest.TestCase):
         self.save_result()
         with self.assertRaises(ValueError):
             self.invoke('plan')
-        self.config.expected_abi = 15
+        self.config.expected_abi = abi
         self.assertEqual(self.invoke('plan')['status'], 'planned')
+        self.assertEqual(self.system.restarts, 0)
+
+    def test_abi15_artifacts_require_the_matching_selected_abi(self):
+        self._assert_artifacts_require_the_matching_selected_abi(15)
+
+    def test_abi16_artifacts_require_the_matching_selected_abi(self):
+        self._assert_artifacts_require_the_matching_selected_abi(16)
+
+    def test_abi17_artifacts_require_the_matching_selected_abi(self):
+        self._assert_artifacts_require_the_matching_selected_abi(17)
+
+    def test_presence_overlay_changes_only_candidate_and_preserves_rollback_config(self):
+        reader = dict(endpoint='127.0.0.1:8791',
+            token_file='/etc/homelab-forge/web/mcp-presence-reader.token')
+        self.config.mcp_presence = reader
+        before = {**self.old_config, 'work': {'endpoint': '127.0.0.1:18083',
+            'token_file': '/existing/runner.token', 'allowed_profiles': ['native']}}
+        original = ACTOR.canonical(before)
+        config_path = Path(self.system.config_path)
+        self.put(config_path, original)
+        outcome = self.invoke('plan')
+        self.assertEqual(outcome['status'], 'planned')
+        state = json.loads(self.reader(self.config.state_root / self.job['release_id'] / 'state.json'))
+        selected = json.loads(self.reader(Path(state['live_config'])))
+        self.assertEqual(selected['work'], {**before['work'], 'mcp_presence': reader})
+        self.assertEqual(ACTOR.canonical(state['before']['value']), original)
+        self.assertEqual(self.reader(config_path), original)
         self.assertEqual(self.system.restarts, 0)
 
     def test_ready_provider_and_actual_actor_agree_on_plan_replay_and_activation(self):
