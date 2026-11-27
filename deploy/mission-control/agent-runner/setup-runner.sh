@@ -99,6 +99,7 @@ publish "$directory/work_external_identity.py" "$target/work_external_identity.p
 publish "$directory/work_store.py" "$target/work_store.py"
 publish "$directory/work_events.py" "$target/work_events.py"
 publish "$directory/work_failure_cause.py" "$target/work_failure_cause.py"
+publish "$directory/work_event_attribution.py" "$target/work_event_attribution.py"
 publish "$directory/work_api.py" "$target/work_api.py"
 publish "$directory/work_owner_control.py" "$target/work_owner_control.py"
 publish "$directory/work_owner_reverification.py" "$target/work_owner_reverification.py"

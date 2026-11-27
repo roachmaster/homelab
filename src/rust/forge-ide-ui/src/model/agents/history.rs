@@ -119,6 +119,17 @@ impl Agents {
         }
     }
     fn history_summary(&self, event: &WorkLogEvent) -> String {
+        if matches!(
+            event.kind,
+            WorkEventKind::CancelRequested
+                | WorkEventKind::Cancelled
+                | WorkEventKind::NeedsReconcile
+        ) {
+            return event
+                .attribution
+                .as_ref()
+                .map_or_else(|| "Reason not recorded".into(), |a| a.reason().into());
+        }
         if let Some(f) = event.failure.as_ref() {
             return format!("Failed ({}): {}", f.cause.label(), f.summary);
         }
@@ -287,6 +298,29 @@ impl Agents {
                         details.push(Property {
                             label: "Phase".into(),
                             value: p.phase.label().into(),
+                        });
+                    }
+                    if WorkEventAttribution::supports(e.kind) {
+                        let attribution = e.attribution.as_ref();
+                        details.push(Property {
+                            label: "Actor".into(),
+                            value: attribution.and_then(|a| a.actor.as_ref()).map_or_else(
+                                || "Actor not recorded".into(),
+                                |a| format!("{} ({})", a.kind, a.id),
+                            ),
+                        });
+                        details.push(Property {
+                            label: "Recorded reason".into(),
+                            value: attribution
+                                .map_or("Reason not recorded", |a| a.reason())
+                                .into(),
+                        });
+                        details.push(Property {
+                            label: "Detail".into(),
+                            value: attribution
+                                .and_then(|a| a.detail.as_ref())
+                                .cloned()
+                                .unwrap_or_else(|| "Detail not recorded".into()),
                         });
                     }
                     if let Some(f) = e.failure.as_ref() {

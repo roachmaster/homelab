@@ -26,6 +26,7 @@ fn event(sequence: u64) -> WorkLogEvent {
         workflow_progress: None,
         failure: None,
         deadline_extension: None,
+        attribution: None,
     }
 }
 fn reader() -> Agents {
@@ -258,6 +259,7 @@ fn event_page_bookmarks_are_bounded_and_context_changes_clear_history() {
                 workflow_progress: None,
                 failure: None,
                 deadline_extension: None,
+                attribution: None,
             })
             .collect();
         let request = a.pending.as_ref().unwrap().request_id().to_owned();
@@ -304,4 +306,47 @@ fn manual_refresh_reads_unseen_events_even_after_the_workflow_finishes() {
             ..
         })
     ));
+}
+
+#[test]
+fn cancelled_history_displays_recorded_cause_and_preserves_missing_evidence() {
+    let mut a = reader();
+    let mut e = event(1);
+    e.kind = WorkEventKind::Cancelled;
+    e.progress = None;
+    e.progress_verified = false;
+    a.history = vec![e.clone()];
+    let mut view = ViewModel::default();
+    a.project(&mut view, true, true, false);
+    assert_eq!(view.timelines[0].rows[0].summary, "Reason not recorded");
+    assert!(view.timelines[0].rows[0]
+        .details
+        .iter()
+        .any(|p| p.label == "Actor" && p.value == "Actor not recorded"));
+    e.attribution = Some(WorkEventAttribution {
+        actor: Some(WorkEventActor {
+            kind: "worker".into(),
+            id: "grok-primary".into(),
+        }),
+        cause: Some("workflow_cancelled".into()),
+        detail: None,
+    });
+    a.history = vec![e.clone()];
+    let mut view = ViewModel::default();
+    a.project(&mut view, true, true, false);
+    assert_eq!(view.timelines[0].rows[0].summary, "Workflow cancellation");
+    assert!(view.timelines[0].rows[0]
+        .details
+        .iter()
+        .any(|p| p.label == "Actor" && p.value == "worker (grok-primary)"));
+    assert!(e.attribution.as_ref().unwrap().is_valid(e.kind));
+    let mut invalid = e.attribution.unwrap();
+    assert!(!invalid.is_valid(WorkEventKind::Checkpoint));
+    invalid.cause = Some("permission_cancelled".into());
+    assert!(!invalid.is_valid(WorkEventKind::Cancelled));
+    invalid.cause = Some("operator_request".into());
+    invalid.detail = Some("x".repeat(513));
+    assert!(!invalid.is_valid(WorkEventKind::Cancelled));
+    invalid.detail = Some("bad\u{0085}text".into());
+    assert!(!invalid.is_valid(WorkEventKind::Cancelled));
 }

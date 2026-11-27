@@ -1078,12 +1078,104 @@ pub struct WorkLogEvent {
     pub external_progress: Option<WorkExternalProgress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_progress: Option<WorkWorkflowProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<WorkEventAttribution>,
     /// Why a failed attempt failed (M46); absent on older events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<WorkEventFailure>,
     /// A recorded attempt deadline extension (M47); checkpoint events only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline_extension: Option<WorkDeadlineExtension>,
+}
+/// Recorded stop-event provenance, not an inference from the current task status.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkEventAttribution {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<WorkEventActor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkEventActor {
+    pub kind: String,
+    pub id: String,
+}
+impl WorkEventAttribution {
+    pub fn supports(kind: WorkEventKind) -> bool {
+        matches!(
+            kind,
+            WorkEventKind::CancelRequested
+                | WorkEventKind::Cancelled
+                | WorkEventKind::NeedsReconcile
+                | WorkEventKind::Failed
+                | WorkEventKind::BlockedPermission
+                | WorkEventKind::BlockedAuth
+                | WorkEventKind::QuotaBlocked
+        )
+    }
+    pub fn is_valid(&self, kind: WorkEventKind) -> bool {
+        Self::supports(kind)
+            && (self.actor.is_some() || self.cause.is_some())
+            && self.actor.as_ref().is_none_or(|a| {
+                matches!(
+                    a.kind.as_str(),
+                    "operator" | "coordinator" | "worker" | "agent" | "service" | "system"
+                ) && !a.id.is_empty()
+                    && a.id.len() <= 128
+                    && a.id
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"_.:@/-".contains(&c))
+            })
+            && self.cause.as_deref().is_none_or(|cause| match kind {
+                WorkEventKind::CancelRequested | WorkEventKind::Cancelled => matches!(
+                    cause,
+                    "operator_request" | "workflow_cancelled" | "budget_exhausted" | "superseded"
+                ),
+                WorkEventKind::NeedsReconcile => matches!(
+                    cause,
+                    "lease_lost" | "deadline_exceeded" | "scope_stopped" | "interrupted"
+                ),
+                WorkEventKind::Failed => matches!(
+                    cause,
+                    "malformed_output"
+                        | "policy_unavailable"
+                        | "context_unavailable"
+                        | "resource_bound"
+                        | "agent_input"
+                        | "agent_failed"
+                ),
+                _ => false,
+            })
+            && self.detail.as_ref().is_none_or(|d| {
+                self.cause.is_some()
+                    && !d.trim().is_empty()
+                    && d.len() <= 512
+                    && !d.chars().any(char::is_control)
+            })
+    }
+    pub fn reason(&self) -> &str {
+        match self.cause.as_deref() {
+            Some("operator_request") => "Operator request",
+            Some("workflow_cancelled") => "Workflow cancellation",
+            Some("budget_exhausted") => "Retry or revision budget exhausted",
+            Some("superseded") => "Superseded by other work",
+            Some("lease_lost") => "Worker lease lost",
+            Some("deadline_exceeded") => "Deadline exceeded",
+            Some("scope_stopped") => "Process scope stopped",
+            Some("interrupted") => "Worker interrupted",
+            Some("malformed_output") => "Malformed agent output",
+            Some("policy_unavailable") => "Execution policy unavailable",
+            Some("context_unavailable") => "Repository or context unavailable",
+            Some("resource_bound") => "Resource bound exceeded",
+            Some("agent_input") => "Agent input not delivered",
+            Some("agent_failed") => "Agent failed",
+            _ => "Reason not recorded",
+        }
+    }
 }
 /// The worker's progress signal let a nearly due attempt deadline move.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2168,6 +2260,7 @@ impl WorkResponse {
                             .count()
                                 <= 1
                             && (!e.progress_verified || e.progress.is_some())
+                            && e.attribution.as_ref().is_none_or(|a| a.is_valid(e.kind))
                             && e.failure
                                 .as_ref()
                                 .is_none_or(|f| e.kind == WorkEventKind::Failed && f.is_valid())
@@ -2654,6 +2747,7 @@ mod tests {
                 workflow_progress: None,
                 failure: None,
                 deadline_extension: None,
+                attribution: None,
                 sequence: 5,
                 kind: WorkEventKind::Checkpoint,
                 progress: None,
