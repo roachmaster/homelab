@@ -1,0 +1,1 @@
+{"collaborators":[],"file":"name.rs","glossary":[],"id":"name","invariants":[],"kind":"trait","responsibilities":["report the bearer's name"],"signature":"pub trait Name {\n    fn name(&self) -> String;\n}","summary":"A small trait for anything that has a name."}

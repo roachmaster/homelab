@@ -1,0 +1,1 @@
+{"rules":["Rust 2021, standard library only, no external crates.","Every data struct derives Debug and Clone.","Items and fields shown in a signature are pub, with the exact names, types and crate:: paths given.","No placeholder code, no TODOs, no unused imports."]}
