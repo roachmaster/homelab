@@ -45,6 +45,7 @@ pub mod runner;
 pub mod sessions;
 pub mod supervisor;
 pub mod types;
+pub mod usage_composition;
 pub mod worker;
 pub mod workspace;
 pub mod workspace_digest;

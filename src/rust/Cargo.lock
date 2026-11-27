@@ -769,6 +769,7 @@ name = "forge-work-worker"
 version = "0.1.0"
 dependencies = [
  "forge-core",
+ "forge-usage",
  "nix",
  "serde_json",
  "sha2 0.10.9",
