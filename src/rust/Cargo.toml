@@ -1,5 +1,5 @@
 [workspace]
-members = ["forge-jenkins", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-agent", "forge-remote", "forge-remote-https", "forge-ide", "forge-template", "forge-core", "forge-system", "forge-local", "forge-terminal", "forge-jobs", "forge-mcp", "forge-mcp-host", "forge-postgres", "forge-work"]
+members = ["forge-jenkins", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-agent", "forge-remote", "forge-remote-https", "forge-ide", "forge-template", "forge-core", "forge-system", "forge-local", "forge-terminal", "forge-jobs", "forge-mcp", "forge-mcp-host", "forge-postgres", "forge-work", "forge-work-worker"]
 resolver = "2"
 
 [workspace.package]
@@ -16,6 +16,7 @@ forge-core = { path = "forge-core" }
 forge-mcp = { path = "forge-mcp" }
 forge-postgres = { path = "forge-postgres" }
 forge-work = { path = "forge-work" }
+forge-work-worker = { path = "forge-work-worker" }
 
 forge-system = { path = "forge-system" }
 
