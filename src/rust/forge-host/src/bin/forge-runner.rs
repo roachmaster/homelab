@@ -148,16 +148,29 @@ fn main() {
             }
             default.to_owned()
         });
+    // In dispatch mode, a successful database scan is the readiness witness.
+    // API-only processes intentionally start no claimants.
+    let ready = Arc::new(AtomicBool::new(api_only || inference_model.is_none()));
     let mut background: Vec<std::thread::JoinHandle<()>> = Vec::new();
     let mut consumer_thread = None;
     if !api_only {
         if inference_model.is_some() {
             let pg = workspace.clone();
             let stop = stop.clone();
+            let ready = Arc::clone(&ready);
             background.push(std::thread::spawn(move || {
                 while !stop.load(Ordering::SeqCst) {
-                    if forge_postgres::inference_runs::reconcile(&pg).is_err() {
-                        eprintln!("GPU completion scan unavailable");
+                    match forge_postgres::inference_runs::reconcile(&pg) {
+                        Ok(processed) => {
+                            ready.store(true, Ordering::SeqCst);
+                            if processed == forge_postgres::inference_runs::RECONCILE_BATCH {
+                                continue;
+                            }
+                        }
+                        Err(_) => {
+                            ready.store(false, Ordering::SeqCst);
+                            eprintln!("GPU completion scan unavailable");
+                        }
                     }
                     for _ in 0..20 {
                         if stop.load(Ordering::SeqCst) {
@@ -182,7 +195,6 @@ fn main() {
             ));
         }
     }
-    let ready = Arc::new(AtomicBool::new(true));
 
     let services = Arc::new(Services {
         workspace,

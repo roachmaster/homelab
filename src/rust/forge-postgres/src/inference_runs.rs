@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 const OWNER: &str = "mission-control";
 const MAX_MESSAGES: usize = 64;
+pub const RECONCILE_BATCH: usize = 20;
 pub const DEFAULT_MODEL: &str = "gpt-oss-20b";
 pub const SECOND_MODEL: &str = "qwen2.5-coder-7b";
 
@@ -213,7 +214,7 @@ pub fn lookup(pg: &PgConfig, id: &str, after: Option<i64>) -> Result<Value, Work
 /// checkpoint owners and must go through their corresponding finalizer.
 pub fn reconcile(pg: &PgConfig) -> Result<usize, WorkError> {
     let mut processed = 0;
-    for _ in 0..20 {
+    for _ in 0..RECONCILE_BATCH {
         let found = transaction(pg, false, |tx| {
             let rows = tx.query_rows("SELECT r.id,r.conversation_id,r.status,r.attempt_token,r.attempt_no,
                 r.run_deadline<=clock_timestamp() AS expired FROM forge_agent.runs r JOIN forge_agent.conversations c ON c.id=r.conversation_id
