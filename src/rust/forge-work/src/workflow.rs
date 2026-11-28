@@ -451,6 +451,10 @@ impl BoundDelegatedAuthority {
     }
 }
 
+/// The native-policy predicate the store consults.
+pub type NativePolicyMatcher =
+    Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>;
+
 /// A sub-port's handle to the store it serves.
 ///
 /// The store's default sub-ports are created with the store itself
@@ -482,29 +486,68 @@ pub struct WorkflowStore {
     catalog: Box<dyn WorkflowCatalog>,
     tx_factory: Box<dyn WorkflowTxFactory>,
     decisions: Box<dyn WorkflowDecisionPort>,
-    native_policy_matches: Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+    native_policy_matches: NativePolicyMatcher,
     /// Mirrors Python's `self.retry_events is not None`: the
     /// transaction itself implements RetryEvents; this flag says
     /// the durable retry-event accounting is engaged (vs. the
     /// legacy budget path).
     retry_events_enabled: bool,
-    execution_policy: RefCell<Option<Box<dyn ExecutionPolicyHook>>>,
-    feedback_recovery: RefCell<Option<Box<dyn RunOnceHook>>>,
-    peer_feedback_recovery: RefCell<Option<Box<dyn RunOnceHook>>>,
-    superseding_review: RefCell<Option<Box<dyn SupersedingHook>>>,
-    reviewer_correction: RefCell<Option<Box<dyn ReviewerCorrectionHook>>>,
+    execution_policy: Option<Box<dyn ExecutionPolicyHook>>,
+    feedback_recovery: Option<Box<dyn RunOnceHook>>,
+    peer_feedback_recovery: Option<Box<dyn RunOnceHook>>,
+    superseding_review: Option<Box<dyn SupersedingHook>>,
+    reviewer_correction: Option<Box<dyn ReviewerCorrectionHook>>,
     retry_allowance_position: RefCell<Option<(String, Uuid)>>,
     manual_allowance_position: RefCell<Option<(String, Uuid)>>,
 }
 
+/// The store's sub-ports, bound at construction.
+///
+/// Each is a capability selection whose presence the store consults
+/// (`superseding_present`, the snapshot fallback, the review-family
+/// fallback), so absence stays meaningful and these remain `Option`.
+/// `StoreHooks::default()` selects none: the bare store.
+#[derive(Default)]
+pub struct StoreHooks {
+    pub execution_policy: Option<Box<dyn ExecutionPolicyHook>>,
+    pub feedback_recovery: Option<Box<dyn RunOnceHook>>,
+    pub peer_feedback_recovery: Option<Box<dyn RunOnceHook>>,
+    pub superseding_review: Option<Box<dyn SupersedingHook>>,
+    pub reviewer_correction: Option<Box<dyn ReviewerCorrectionHook>>,
+}
+
 impl WorkflowStore {
+    /// The bare store, with no sub-ports selected.
     pub fn new(
         config: CoordinatorConfig,
         catalog: Box<dyn WorkflowCatalog>,
         tx_factory: Box<dyn WorkflowTxFactory>,
         decisions: Box<dyn WorkflowDecisionPort>,
-        native_policy_matches: Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+        native_policy_matches: NativePolicyMatcher,
         retry_events_enabled: bool,
+    ) -> WorkflowStore {
+        WorkflowStore::with_hooks(
+            config,
+            catalog,
+            tx_factory,
+            decisions,
+            native_policy_matches,
+            retry_events_enabled,
+            StoreHooks::default(),
+        )
+    }
+
+    /// The store with its sub-ports bound; nothing can be installed
+    /// into a live store.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_hooks(
+        config: CoordinatorConfig,
+        catalog: Box<dyn WorkflowCatalog>,
+        tx_factory: Box<dyn WorkflowTxFactory>,
+        decisions: Box<dyn WorkflowDecisionPort>,
+        native_policy_matches: NativePolicyMatcher,
+        retry_events_enabled: bool,
+        hooks: StoreHooks,
     ) -> WorkflowStore {
         WorkflowStore {
             config,
@@ -513,34 +556,14 @@ impl WorkflowStore {
             decisions,
             native_policy_matches,
             retry_events_enabled,
-            execution_policy: RefCell::new(None),
-            feedback_recovery: RefCell::new(None),
-            peer_feedback_recovery: RefCell::new(None),
-            superseding_review: RefCell::new(None),
-            reviewer_correction: RefCell::new(None),
+            execution_policy: hooks.execution_policy,
+            feedback_recovery: hooks.feedback_recovery,
+            peer_feedback_recovery: hooks.peer_feedback_recovery,
+            superseding_review: hooks.superseding_review,
+            reviewer_correction: hooks.reviewer_correction,
             retry_allowance_position: RefCell::new(None),
             manual_allowance_position: RefCell::new(None),
         }
-    }
-
-    pub fn set_execution_policy(&self, hook: Box<dyn ExecutionPolicyHook>) {
-        *self.execution_policy.borrow_mut() = Some(hook);
-    }
-
-    pub fn set_feedback_recovery(&self, hook: Box<dyn RunOnceHook>) {
-        *self.feedback_recovery.borrow_mut() = Some(hook);
-    }
-
-    pub fn set_peer_feedback_recovery(&self, hook: Box<dyn RunOnceHook>) {
-        *self.peer_feedback_recovery.borrow_mut() = Some(hook);
-    }
-
-    pub fn set_superseding_review(&self, hook: Box<dyn SupersedingHook>) {
-        *self.superseding_review.borrow_mut() = Some(hook);
-    }
-
-    pub fn set_reviewer_correction(&self, hook: Box<dyn ReviewerCorrectionHook>) {
-        *self.reviewer_correction.borrow_mut() = Some(hook);
     }
 
     pub fn owner(&self) -> &str {
@@ -568,7 +591,7 @@ impl WorkflowStore {
     }
 
     pub(crate) fn superseding_present(&self) -> bool {
-        self.superseding_review.borrow().is_some()
+        self.superseding_review.is_some()
     }
 
     /// WorkStore._require_project.
@@ -592,7 +615,7 @@ impl WorkflowStore {
 
     /// _snapshot: select future execution only.
     pub(crate) fn snapshot_of(&self, workflow: &Value) -> Result<Value, WorkError> {
-        if let Some(hook) = self.execution_policy.borrow().as_ref() {
+        if let Some(hook) = self.execution_policy.as_ref() {
             return hook.effective(workflow);
         }
         Ok(workflow["snapshot"].clone())
@@ -1089,7 +1112,7 @@ impl WorkflowStore {
             for task in &tasks {
                 let status = text(task, "status");
                 if status == "quota_blocked" {
-                    if let Some(hook) = self.execution_policy.borrow().as_ref() {
+                    if let Some(hook) = self.execution_policy.as_ref() {
                         if hook.handles_quota(workflow, task) {
                             continue;
                         }
@@ -1302,20 +1325,20 @@ impl WorkflowStore {
 
     /// claim(): run the recovery passes, then lease one action.
     pub fn claim(&self, worker_id: &str) -> Result<Option<Value>, WorkError> {
-        if let Some(hook) = self.execution_policy.borrow().as_ref() {
+        if let Some(hook) = self.execution_policy.as_ref() {
             hook.run_once(self)?;
         }
         self.apply_retry_allowances()?;
-        if let Some(hook) = self.feedback_recovery.borrow().as_ref() {
+        if let Some(hook) = self.feedback_recovery.as_ref() {
             hook.run_once()?;
         }
-        if let Some(hook) = self.peer_feedback_recovery.borrow().as_ref() {
+        if let Some(hook) = self.peer_feedback_recovery.as_ref() {
             hook.run_once()?;
         }
         self.recover_source_readiness()?;
         self.recover_preparations()?;
         self.recover_peer_verdicts()?;
-        if let Some(hook) = self.superseding_review.borrow().as_ref() {
+        if let Some(hook) = self.superseding_review.as_ref() {
             hook.recover()?;
         }
         self.recover_native_timeouts()?;
@@ -1786,7 +1809,7 @@ impl WorkflowStore {
             Ok(verdict) => verdict,
             Err(error) => {
                 if let Some(incomplete) = &error.incomplete {
-                    if let Some(hook) = self.reviewer_correction.borrow().as_ref() {
+                    if let Some(hook) = self.reviewer_correction.as_ref() {
                         return Ok(hook.correct(
                             CorrectionContext {
                                 tx,
@@ -1802,7 +1825,7 @@ impl WorkflowStore {
                     }
                     return Err(WorkError::rejected(503, "unavailable").into());
                 }
-                if let Some(hook) = self.superseding_review.borrow().as_ref() {
+                if let Some(hook) = self.superseding_review.as_ref() {
                     if let Some(receipt) = hook.correct(
                         CorrectionContext {
                             tx,
@@ -1847,7 +1870,7 @@ impl WorkflowStore {
             };
             let source = text(&review, "workflow_review_id").to_string();
             let family = if present(&review, "supersedes_review_id") {
-                match self.superseding_review.borrow().as_ref() {
+                match self.superseding_review.as_ref() {
                     Some(hook) => hook.root_review_id(tx, &review)?,
                     None => uuid_of(&review, "workflow_review_id"),
                 }

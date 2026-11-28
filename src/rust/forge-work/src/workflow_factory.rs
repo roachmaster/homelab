@@ -7,7 +7,8 @@
 //! port is "ready". The Rust providers take `Arc<WorkflowStore>` at
 //! construction — the same self-reference — and readiness is
 //! structural (the hook traits carry exactly the required methods),
-//! so create() wires the defaults and installs them. The execution
+//! so create() binds the defaults at construction (weak handles
+//! via Arc::new_cyclic, so the store owns them without a cycle). The execution
 //! policy hook is host-supplied: its provider composes its own
 //! catalog/transaction/handoff ports, which the host owns.
 
@@ -18,7 +19,7 @@ use crate::reviewer_correction::ReviewerCorrectionProvider;
 use crate::superseding_review::SupersedingReviewProvider;
 use crate::workflow::{
     CoordinatorConfig, CoordinatorHooks, ExecutionPolicyHook, ExternalWorkflowHook, RunOnceHook,
-    WorkflowCoordinator, WorkflowDecisionPort, WorkflowStore,
+    StoreHooks, WorkflowCoordinator, WorkflowDecisionPort, WorkflowStore,
 };
 use crate::workflow_policy::WorkflowCatalog;
 use crate::workflow_tx::WorkflowTxFactory;
@@ -45,26 +46,34 @@ pub struct WorkflowStoreFactory {
 
 impl WorkflowStoreFactory {
     pub fn create(self) -> Arc<WorkflowStore> {
-        let store = Arc::new(WorkflowStore::new(
-            self.config,
-            self.catalog,
-            self.tx_factory,
-            self.decisions,
-            self.native_policy_matches,
-            self.retry_events_enabled,
-        ));
-        store.set_reviewer_correction(Box::new(ReviewerCorrectionProvider::new(Arc::clone(
-            &store,
-        ))));
-        store.set_feedback_recovery(Box::new(FeedbackRecoveryProvider::new(Arc::clone(&store))));
-        store.set_peer_feedback_recovery(Box::new(PeerFeedbackRecoveryProvider::new(Arc::clone(
-            &store,
-        ))));
-        store.set_superseding_review(Box::new(SupersedingReviewProvider::new(Arc::clone(&store))));
-        if let Some(hook) = self.execution_policy {
-            store.set_execution_policy(hook);
-        }
-        store
+        // The default sub-ports are created with the store and hold a
+        // weak handle to it, so they are bound at construction and the
+        // store owns them without a reference cycle.
+        Arc::new_cyclic(|store| {
+            WorkflowStore::with_hooks(
+                self.config,
+                self.catalog,
+                self.tx_factory,
+                self.decisions,
+                self.native_policy_matches,
+                self.retry_events_enabled,
+                StoreHooks {
+                    execution_policy: self.execution_policy,
+                    feedback_recovery: Some(Box::new(FeedbackRecoveryProvider::bound(
+                        store.clone(),
+                    ))),
+                    peer_feedback_recovery: Some(Box::new(PeerFeedbackRecoveryProvider::bound(
+                        store.clone(),
+                    ))),
+                    superseding_review: Some(Box::new(SupersedingReviewProvider::bound(
+                        store.clone(),
+                    ))),
+                    reviewer_correction: Some(Box::new(ReviewerCorrectionProvider::bound(
+                        store.clone(),
+                    ))),
+                },
+            )
+        })
     }
 }
 
@@ -349,5 +358,30 @@ mod tests {
         assert_eq!(runs.get(), 1, "second pass inside 30s is skipped");
         coordinator.run_once(130.0).unwrap();
         assert_eq!(runs.get(), 2);
+    }
+
+    #[test]
+    fn the_store_owns_its_sub_ports_without_a_cycle() {
+        let store = store();
+        assert!(store.superseding_present(), "default sub-ports are bound at create()");
+        let weak = Arc::downgrade(&store);
+        drop(store);
+        assert!(
+            weak.upgrade().is_none(),
+            "the sub-ports hold weak handles, so the store is released"
+        );
+    }
+
+    #[test]
+    fn a_bare_store_selects_no_sub_ports() {
+        let store = WorkflowStore::new(
+            config(),
+            Box::new(NoCatalog),
+            Box::new(NoTx),
+            Box::new(NoDecisions),
+            Box::new(|_, _, _| false),
+            true,
+        );
+        assert!(!store.superseding_present());
     }
 }
