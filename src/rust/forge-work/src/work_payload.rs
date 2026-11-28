@@ -127,6 +127,7 @@ pub enum WorkPayload {
         stage_id: String,
         view: String,
         cursor_token: Option<String>,
+        delivery_enabled: bool,
     },
     ApproveExternalPlanOverride(ExternalOverrideRequest),
     RecoverExternalReviewInfrastructure(ExternalRecoveryRequest),

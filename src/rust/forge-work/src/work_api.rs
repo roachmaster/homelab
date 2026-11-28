@@ -1765,6 +1765,7 @@ impl WorkApiService {
                         stage_id,
                         view,
                         cursor_token: cursor,
+                        delivery_enabled: self.config.delivery_enabled,
                     },
                 )? {
                     WorkResponse::StageLog(view) => Ok((
@@ -2192,6 +2193,7 @@ mod tests {
             _stage_id: &str,
             _view: &str,
             _cursor_token: Option<&str>,
+            _delivery_enabled: bool,
         ) -> Result<crate::work_types::StageLogView, WorkError> {
             Err(WorkError::store("stub"))
         }

@@ -109,6 +109,7 @@ pub fn register_reads(
                     stage_id,
                     view,
                     cursor_token,
+                    delivery_enabled,
                 } => ctx
                     .read
                     .cicd_stage_log(
@@ -119,6 +120,7 @@ pub fn register_reads(
                         &stage_id,
                         &view,
                         cursor_token.as_deref(),
+                        delivery_enabled,
                     )
                     .map(WorkResponse::StageLog),
                 _ => Err(WorkError::rejected(500, "payload_mismatch")),

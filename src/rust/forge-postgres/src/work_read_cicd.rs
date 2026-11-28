@@ -57,6 +57,7 @@ pub(crate) fn cicd_stage_log(
     stage_id: &str,
     view: &str,
     cursor_token: Option<&str>,
+    delivery_enabled: bool,
 ) -> Result<forge_work::work_types::StageLogView, forge_work::WorkError> {
     let invalid = || forge_work::WorkError::rejected(400, "invalid_request");
     if stage_id.is_empty()
@@ -112,6 +113,26 @@ pub(crate) fn cicd_stage_log(
                 family_ids.push(id);
             }
         }
+        // The M39 main binding: only the task-authorized delivery
+        // projection can widen CI visibility to the post-merge main
+        // run (work_store._delivery_projection +
+        // _delivery_main_binding, via stage_log_rows).
+        let (main_action, main_commit) = if delivery_enabled {
+            let projection_params: &[&(dyn ToSql + Sync)] = &[&project_alias, &task_id];
+            let projection_rows = tx
+                .query_rows(
+                    "SELECT forge_agent.delivery_projection($1, $2) AS value",
+                    projection_params,
+                )
+                .map_err(work_err)?;
+            let projection = projection_rows
+                .first()
+                .and_then(|row| col::<Option<serde_json::Value>>(row, "value").ok())
+                .flatten();
+            delivery_main_binding(projection.as_ref())
+        } else {
+            (None, None)
+        };
         let exists_rows = tx
             .query_rows(
                 "SELECT to_regclass('forge_agent.jenkins_stage_results') IS NOT NULL AS present",
@@ -131,10 +152,12 @@ pub(crate) fn cicd_stage_log(
             &action_id,
             &family_ids,
             &stage_id,
+            &main_action,
+            &main_commit,
         ];
         let rows = tx
             .query_rows(
-                "SELECT stage_index, phase_id, logical_stage_id, label, status, returncode, tests_passed, tests_failed, tests_skipped, test_summary, error_excerpt, log_sha256, log_byte_count, log_chunk_count FROM forge_agent.jenkins_stage_results WHERE owner_id = $1 AND project_alias = $2 AND action_id = $3 AND correlation_id = ANY($4::uuid[]) AND (logical_stage_id = $5 OR phase_id = $5) ORDER BY stage_index ASC",
+                "SELECT stage_index, phase_id, logical_stage_id, label, status, returncode, tests_passed, tests_failed, tests_skipped, test_summary, error_excerpt, log_sha256, log_byte_count, log_chunk_count FROM forge_agent.jenkins_stage_results WHERE owner_id = $1 AND project_alias = $2 AND action_id = $3 AND (correlation_id = ANY($4::uuid[]) OR (action_id = $6 AND commit_sha = $7 AND branch_scope = 'main' AND pipeline_scope = 'main')) AND (logical_stage_id = $5 OR phase_id = $5) ORDER BY stage_index ASC",
                 stage_params,
             )
             .map_err(work_err)?;
@@ -259,5 +282,84 @@ fn assemble(view: &str, rows: &[tokio_postgres::Row]) -> Result<String, forge_wo
             }
             Ok(out)
         }
+    }
+}
+
+/// Only the task-authorized delivery projection can widen CI
+/// visibility (work_store._delivery_main_binding): the delivery's
+/// verification must be a dict, its verification_id a canonical
+/// UUID string, and its commit_sha a 40-char lowercase hex SHA;
+/// anything else binds nothing.
+fn delivery_main_binding(
+    delivery: Option<&serde_json::Value>,
+) -> (Option<Uuid>, Option<String>) {
+    let Some(delivery) = delivery else {
+        return (None, None);
+    };
+    if delivery.get("verification").and_then(|v| v.as_object()).is_none() {
+        return (None, None);
+    }
+    let action = delivery.get("verification_id").and_then(|v| v.as_str());
+    let commit = delivery.get("commit_sha").and_then(|v| v.as_str());
+    let (Some(action), Some(commit)) = (action, commit) else {
+        return (None, None);
+    };
+    let Ok(parsed) = Uuid::parse_str(action) else {
+        return (None, None);
+    };
+    if parsed.to_string() != action {
+        return (None, None);
+    }
+    let action = parsed;
+    if commit.len() != 40
+        || !commit
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return (None, None);
+    }
+    (Some(action), Some(commit.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::delivery_main_binding;
+    use serde_json::json;
+
+    const ACTION: &str = "11111111-1111-4111-8111-11111111111a";
+    const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[test]
+    fn exact_delivery_binds_main_run() {
+        let delivery = json!({
+            "verification_id": ACTION,
+            "commit_sha": COMMIT,
+            "verification": {"status": "running"},
+        });
+        let (action, commit) = delivery_main_binding(Some(&delivery));
+        assert_eq!(action.map(|a| a.to_string()), Some(ACTION.to_string()));
+        assert_eq!(commit, Some(COMMIT.to_string()));
+    }
+
+    #[test]
+    fn missing_or_malformed_delivery_binds_nothing() {
+        for delivery in [
+            json!(null),
+            json!({"verification_id": ACTION, "commit_sha": COMMIT}),
+            json!({"verification_id": ACTION.to_uppercase(), "commit_sha": COMMIT,
+                   "verification": {}}),
+            json!({"verification_id": ACTION, "commit_sha": "abc", "verification": {}}),
+            json!({"verification_id": ACTION, "commit_sha": COMMIT.to_uppercase(),
+                   "verification": {}}),
+            json!({"verification_id": "not-a-uuid", "commit_sha": COMMIT,
+                   "verification": {}}),
+        ] {
+            assert_eq!(
+                delivery_main_binding(Some(&delivery)),
+                (None, None),
+                "{delivery}"
+            );
+        }
+        assert_eq!(delivery_main_binding(None), (None, None));
     }
 }

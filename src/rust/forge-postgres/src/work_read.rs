@@ -81,6 +81,7 @@ impl forge_work::WorkReadPort for PgWorkStore {
         stage_id: &str,
         view: &str,
         cursor_token: Option<&str>,
+        delivery_enabled: bool,
     ) -> Result<forge_work::work_types::StageLogView, forge_work::WorkError> {
         work_common::require_project(self, project_alias)?;
         work_read_cicd::cicd_stage_log(
@@ -92,6 +93,7 @@ impl forge_work::WorkReadPort for PgWorkStore {
             stage_id,
             view,
             cursor_token,
+            delivery_enabled,
         )
     }
 }

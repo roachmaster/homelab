@@ -47,5 +47,6 @@ pub trait WorkReadPort {
         stage_id: &str,
         view: &str,
         cursor_token: Option<&str>,
+        delivery_enabled: bool,
     ) -> Result<StageLogView, WorkError>;
 }

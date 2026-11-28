@@ -100,6 +100,7 @@ mod tests {
             _stage_id: &str,
             _view: &str,
             _cursor_token: Option<&str>,
+            _delivery_enabled: bool,
         ) -> Result<StageLogView, WorkError> {
             Err(WorkError::store("stub"))
         }
