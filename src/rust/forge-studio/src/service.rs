@@ -5,11 +5,12 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
 use crate::artifact;
-use crate::store::{BuildRow, Store, StoreError};
+use crate::store::{BuildRow, BuildStore, StoreError};
 
 pub const PROFILE: &str = "static-web";
 
@@ -223,14 +224,30 @@ const ROUTES: [(&str, &str, &str); 6] = [
     ("game.artifact.get", "game_artifact_get", "game_artifact_opened"),
 ];
 
+/// The Studio control API. Its store is a port, bound by the
+/// composition root (PostgreSQL in production, fakes in tests).
 pub struct Service {
-    pub store: Store,
-    pub catalog: Catalog,
-    pub preview_origin: String,
-    pub signing_key: Vec<u8>,
+    store: Arc<dyn BuildStore>,
+    catalog: Catalog,
+    preview_origin: String,
+    signing_key: Vec<u8>,
 }
 
 impl Service {
+    pub fn new(
+        store: Arc<dyn BuildStore>,
+        catalog: Catalog,
+        preview_origin: String,
+        signing_key: Vec<u8>,
+    ) -> Service {
+        Service {
+            store,
+            catalog,
+            preview_origin,
+            signing_key,
+        }
+    }
+
     fn artifact_view(&self, row: &BuildRow) -> Value {
         match &row.artifact_digest {
             None => Value::Null,

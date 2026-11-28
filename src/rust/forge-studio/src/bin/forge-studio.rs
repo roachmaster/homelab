@@ -10,8 +10,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use forge_studio::artifact;
+use forge_studio::composition::{create_service, create_store, create_worker};
 use forge_studio::service::{Catalog, Service, parse_strict_json};
-use forge_studio::store::{Store, StoreError};
 use serde_json::{Value, json};
 
 const ACCEPTED_HEADERS: [&str; 4] = [
@@ -320,60 +320,6 @@ fn preview_handle(server: &PreviewServer, request: &Request, stream: &mut TcpStr
     }
 }
 
-// --- Worker ---------------------------------------------------------
-
-fn worker_loop(store: &Store, catalog: &Catalog, directory: &Path) {
-    loop {
-        match store.claim() {
-            Err(StoreError::Db(_)) => {
-                std::thread::sleep(Duration::from_secs(2));
-            }
-            Err(_) => {
-                std::thread::sleep(Duration::from_secs(1));
-            }
-            Ok(None) => {
-                std::thread::sleep(Duration::from_secs(1));
-            }
-            Ok(Some(claim)) => {
-                let project = catalog
-                    .projects
-                    .get(&(claim.node_alias.clone(), claim.project_alias.clone()));
-                let Some(project) = project else {
-                    let _ = store.finish(&claim, None);
-                    continue;
-                };
-                if claim.profile != forge_studio::service::PROFILE
-                    || claim.source_recipe != project.source_recipe()
-                {
-                    let _ = store.finish(&claim, None);
-                    continue;
-                }
-                let built = artifact::build(
-                    &project.repository,
-                    &claim.revision,
-                    &project.directory,
-                );
-                match built {
-                    Ok(content) => match store.renew(&claim) {
-                        Ok(true) => match artifact::publish(directory, &content) {
-                            Ok((digest, size)) => {
-                                let _ = store.finish(&claim, Some((&digest, size)));
-                            }
-                            Err(_) => {
-                                let _ = store.finish(&claim, None);
-                            }
-                        },
-                        _ => continue,
-                    },
-                    Err(_) => {
-                        let _ = store.finish(&claim, None);
-                    }
-                }
-            }
-        }
-    }
-}
-
 // --- Main -----------------------------------------------------------
 
 fn run() -> Result<(), String> {
@@ -424,8 +370,7 @@ fn run() -> Result<(), String> {
             let directory = config_path_value(&config, "artifact_directory")?
                 .canonicalize()
                 .map_err(|error| error.to_string())?;
-            worker_loop(&Store::new(dsn), &catalog, &directory);
-            Ok(())
+            create_worker(create_store(dsn), catalog, directory).run()
         }
         "api" => {
             let catalog = Catalog::load(&config)?;
@@ -452,12 +397,12 @@ fn run() -> Result<(), String> {
             let mut authorization = b"Bearer ".to_vec();
             authorization.extend_from_slice(&token);
             let server = ApiServer {
-                service: Service {
-                    store: Store::new(dsn),
+                service: create_service(
+                    create_store(dsn),
                     catalog,
                     preview_origin,
-                    signing_key: secret(&config_path_value(&config, "preview_key_file")?)?,
-                },
+                    secret(&config_path_value(&config, "preview_key_file")?)?,
+                ),
                 authorization,
             };
             let listener = TcpListener::bind(("127.0.0.1", config_port(&config, "api_port", 18085)?))
