@@ -284,7 +284,7 @@ pub fn execute(
         let stderr = err_thread.join().unwrap_or_default();
         let code = status
             .code()
-            .unwrap_or_else(|| status.signal().map(|s| -(s as i32)).unwrap_or(-1));
+            .unwrap_or_else(|| status.signal().map(|s| -s).unwrap_or(-1));
         if code != 0 {
             return Ok((
                 code,

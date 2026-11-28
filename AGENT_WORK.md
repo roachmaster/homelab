@@ -20,6 +20,26 @@ cache was copied without sharing writable files. Private evidence is under
 /mnt/data/homelab-build/codex-clippy-services-20261128-evidence/.
 Source publication and live operations remain with the orchestrator.
 
+## Bounded Rust adapter lint correction — 2026-11-28
+
+On isolated feature/codex based at437c0030, the assigned MCP DB, portal release
+actor, agent driver and Studio crates now pass Rust1.97.1 Clippy across all targets
+and features with warnings denied. Existing API/JSON fields, authentication
+checks, permission bounds and receipt booleans are unchanged. Private actor
+receipt flags are grouped into a named proof value; OAuth credential branches
+produce the same values without overwritten initial assignments. Studio's public
+eight-argument submit contract has one explicitly approved targeted lint expect
+with a reason; no blanket allow or gate change was added. Previously masked
+Studio binary iterator warnings are fixed with equivalent error-discarding loops.
+
+All33 selected package tests pass with zero failures/ignored tests, and selected
+package formatting plus diff checks pass. Cargo uses the validated incoming-lock
+registry with an owned external target directory; lockfiles and other crates are
+untouched. Logs are outside source under
+/mnt/data/homelab-build/cohort54-forward-20261128/adapters-*.log. This is bounded
+package qualification, not full-workspace or production runtime proof. No source
+push, deployment, live database/config/service change or model call was performed.
+
 ## Reviewed proxy context pin renewal — 2026-11-28
 
 Jenkins146 reproduced the exact PG proxy context test failure after the reviewed

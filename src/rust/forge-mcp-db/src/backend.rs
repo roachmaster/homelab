@@ -98,7 +98,7 @@ impl Backend {
             .map_err(|_| ToolError("database is unavailable".to_string()))?;
         config.connect_timeout(std::time::Duration::from_secs(5));
         config.application_name("homelab-mcp-postgres");
-        config.options(&format!(
+        config.options(format!(
             "-c statement_timeout={} -c lock_timeout={} \
              -c idle_in_transaction_session_timeout={} \
              -c default_transaction_read_only=on",

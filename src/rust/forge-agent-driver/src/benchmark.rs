@@ -448,7 +448,7 @@ pub fn run_benchmark(
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                writeln!(ledger, "{}", Value::Object(row).to_string())
+                writeln!(ledger, "{}", Value::Object(row))
                     .and_then(|_| ledger.flush())
                     .map_err(|error| forge_error(error.to_string()))?;
                 *counts.entry(result.clone()).or_insert(0) += 1;

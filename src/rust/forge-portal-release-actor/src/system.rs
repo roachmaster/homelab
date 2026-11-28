@@ -13,6 +13,8 @@ use crate::config::{
     canonical, decode, sha, ActorConfig, ENTRY_PORT, ENTRY_SOCKET, ENTRY_UNIT, UNIT,
 };
 
+type DispatchResponse = (u32, Map<String, Value>, Option<String>);
+
 pub trait SystemPort: Send {
     fn call(
         &self,
@@ -566,7 +568,7 @@ impl PortalProbe {
         fields: Option<&Map<String, Value>>,
         session: bool,
         changes: Option<&std::collections::BTreeMap<String, String>>,
-    ) -> Result<(u32, Map<String, Value>, Option<String>), String> {
+    ) -> Result<DispatchResponse, String> {
         let identifier = format!("release-{}", uuid_hex());
         let mut headers: Vec<(String, String)> = vec![
             ("Content-Type".to_string(), "application/json".to_string()),

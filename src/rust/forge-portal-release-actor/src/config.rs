@@ -121,11 +121,10 @@ fn parse_strict(text: &str) -> Result<Value, String> {
     // object keys need this streaming check (a context stack tracks
     // whether the next string is an object key).
     let mut stack: Vec<Context> = Vec::new();
-    let mut chars = text.chars();
     let mut in_string = false;
     let mut escaped = false;
     let mut current_key: Option<String> = None;
-    while let Some(c) = chars.next() {
+    for c in text.chars() {
         if in_string {
             if escaped {
                 escaped = false;
@@ -457,7 +456,7 @@ impl ActorConfig {
             candidate_port: object
                 .get("candidate_port")
                 .and_then(Value::as_i64)
-                .filter(|value| {
+                .filter(|_| {
                     object
                         .get("candidate_port")
                         .map(|v| v.is_i64())

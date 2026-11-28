@@ -101,7 +101,7 @@ pub fn s256(verifier: &str) -> String {
 fn split_url(uri: &str) -> Option<(String, String, String)> {
     // (scheme, netloc, path) for an absolute URI, fragment excluded.
     let (scheme, rest) = uri.split_once("://")?;
-    let netloc_end = rest.find(|c| c == '/' || c == '?').unwrap_or(rest.len());
+    let netloc_end = rest.find(['/', '?']).unwrap_or(rest.len());
     let netloc = &rest[..netloc_end];
     let after = &rest[netloc_end..];
     let path = after.split('?').next().unwrap_or_default();
@@ -157,7 +157,7 @@ pub fn read_private_json(
 ) -> Result<(Value, Signature), OAuthFileError> {
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
-    let mut file = std::fs::OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
         .read(true)
         // O_NOFOLLOW | O_CLOEXEC
         .custom_flags(0o400000 | 0o2000000)
@@ -1272,14 +1272,12 @@ impl OAuthServer {
         headers: &[(String, String)],
         form: &BTreeMap<String, String>,
     ) -> Result<Value, OAuthError> {
-        let mut client_id: Option<String> = None;
-        let mut secret: Option<String> = None;
-        let mut used_basic = false;
         let authorization = header_get(headers, "Authorization")
             .unwrap_or_default()
             .to_string();
-        if authorization.len() >= 6 && authorization[..6].eq_ignore_ascii_case("basic ") {
-            used_basic = true;
+        let (client_id, secret, used_basic) = if authorization.len() >= 6
+            && authorization[..6].eq_ignore_ascii_case("basic ")
+        {
             if form.contains_key("client_secret") {
                 return Err(OAuthError::new(
                     "invalid_request",
@@ -1298,8 +1296,8 @@ impl OAuthServer {
                 .map_err(|_| malformed())?;
             let text = String::from_utf8(decoded).map_err(|_| malformed())?;
             let (id, password) = text.split_once(':').ok_or_else(malformed)?;
-            client_id = Some(unquote_plus(id));
-            secret = Some(unquote_plus(password));
+            let client_id = Some(unquote_plus(id));
+            let secret = Some(unquote_plus(password));
             if let Some(form_id) = form.get("client_id") {
                 if Some(form_id) != client_id.as_ref() {
                     return Err(OAuthError::new(
@@ -1308,10 +1306,14 @@ impl OAuthServer {
                     ));
                 }
             }
+            (client_id, secret, true)
         } else {
-            client_id = form.get("client_id").cloned();
-            secret = form.get("client_secret").cloned();
-        }
+            (
+                form.get("client_id").cloned(),
+                form.get("client_secret").cloned(),
+                false,
+            )
+        };
         let client = client_id.as_deref().and_then(|id| self.find_client(id));
         let expected = client
             .as_ref()

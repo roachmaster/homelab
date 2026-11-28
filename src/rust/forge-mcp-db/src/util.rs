@@ -136,8 +136,7 @@ pub fn epoch_from_iso(text: &str) -> Option<i64> {
     }
     let field = |start: usize, len: usize| -> Option<i64> {
         let mut value: i64 = 0;
-        for index in start..start + len {
-            let digit = bytes[index];
+        for &digit in &bytes[start..start + len] {
             if !digit.is_ascii_digit() {
                 return None;
             }
@@ -195,7 +194,7 @@ mod tests {
         assert_eq!(iso_from_epoch(1_764_000_000), "2025-11-24T16:00:00Z");
         assert_eq!(epoch_from_iso("2025-11-24T16:00:00Z"), Some(1_764_000_000));
         assert_eq!(epoch_from_iso("2025-02-29T00:00:00Z"), None);
-        assert_eq!(epoch_from_iso("2024-02-29T00:00:00Z").is_some(), true);
+        assert!(epoch_from_iso("2024-02-29T00:00:00Z").is_some());
         assert_eq!(epoch_from_iso("2025-11-27 18:40:00"), None);
     }
 

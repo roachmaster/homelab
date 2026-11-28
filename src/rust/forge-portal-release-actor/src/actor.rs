@@ -21,6 +21,12 @@ pub type ReadFn = Arc<dyn Fn(&Path, usize) -> Result<Vec<u8>, String> + Send + S
 pub type WriteFn = Arc<dyn Fn(&Path, &[u8], u32, u32) -> Result<(), String> + Send + Sync>;
 pub type PublicDirFn = Arc<dyn Fn(&Path, &Path) -> Result<(), String> + Send + Sync>;
 
+struct ReceiptEvidence {
+    health: bool,
+    rollback: bool,
+    entry: bool,
+}
+
 pub fn is_canonical_uuid(value: &str) -> bool {
     let bytes = value.as_bytes();
     bytes.len() == 36
@@ -57,8 +63,8 @@ impl PortalReleaseActor {
         PortalReleaseActor {
             config,
             system,
-            read: Arc::new(|path, maximum| read_root(path, maximum)),
-            write: Arc::new(|path, raw, mode, group| write_root(path, raw, mode, group)),
+            read: Arc::new(read_root),
+            write: Arc::new(write_root),
             probe_factory: portal_probe_factory(),
             public_directory: None,
             clock: Arc::new(|| {
@@ -82,7 +88,7 @@ impl PortalReleaseActor {
             .ok_or_else(|| "Release lease or capability is no longer current".to_string())?;
         // The authorizer is the system port by default (Python:
         // authorizer or system.authorize).
-        if self.system.authorize(job, &authority, start, plan_sha256)? != true {
+        if !self.system.authorize(job, &authority, start, plan_sha256)? {
             return Err("Release lease or capability is no longer current".to_string());
         }
         Ok(())
@@ -468,7 +474,6 @@ impl PortalReleaseActor {
     }
 
     fn archive(&self, current: &Map<String, Value>) -> Result<(), String> {
-        use std::os::unix::fs::PermissionsExt;
         let assets = current
             .get("value")
             .and_then(|value| get_str(value, "assets"))
@@ -574,9 +579,11 @@ impl PortalReleaseActor {
                 &directory,
                 &mut state,
                 "superseded",
-                false,
-                false,
-                false,
+                ReceiptEvidence {
+                    health: false,
+                    rollback: false,
+                    entry: false,
+                },
                 "Main advanced before release preparation; portal was not changed.",
             );
         }
@@ -708,9 +715,11 @@ impl PortalReleaseActor {
                     directory,
                     state,
                     "failed",
-                    false,
-                    false,
-                    false,
+                    ReceiptEvidence {
+                        health: false,
+                        rollback: false,
+                        entry: false,
+                    },
                     "Candidate failed; an independent portal change was preserved.",
                 );
             }
@@ -731,9 +740,7 @@ impl PortalReleaseActor {
                 directory,
                 state,
                 "failed",
-                true,
-                true,
-                true,
+                ReceiptEvidence { health: true, rollback: true, entry: true },
                 "Candidate health failed; the existing healthy portal was retained without a restart.",
             );
         }
@@ -801,11 +808,14 @@ impl PortalReleaseActor {
         directory: &Path,
         state: &mut Map<String, Value>,
         status: &str,
-        health: bool,
-        rollback: bool,
-        entry: bool,
+        evidence: ReceiptEvidence,
         summary: &str,
     ) -> Result<Map<String, Value>, String> {
+        let ReceiptEvidence {
+            health,
+            rollback,
+            entry,
+        } = evidence;
         let plan = map_of(state.get("plan").unwrap_or(&Value::Null));
         let mut body = Map::new();
         body.insert("version".to_string(), json!(1));
@@ -972,9 +982,11 @@ impl PortalReleaseActor {
                 &directory,
                 &mut state,
                 "superseded",
-                false,
-                false,
-                false,
+                ReceiptEvidence {
+                    health: false,
+                    rollback: false,
+                    entry: false,
+                },
                 "Main advanced; the previous release was retained.",
             );
         }
@@ -1093,9 +1105,11 @@ impl PortalReleaseActor {
                     &directory,
                     &mut state,
                     "deployed",
-                    true,
-                    false,
-                    true,
+                    ReceiptEvidence {
+                        health: true,
+                        rollback: false,
+                        entry: true,
+                    },
                     "Exact verified main is active; portal health and admission passed.",
                 );
             }
@@ -1228,9 +1242,11 @@ impl PortalReleaseActor {
             &directory,
             &mut state,
             "failed",
-            true,
-            true,
-            true,
+            ReceiptEvidence {
+                health: true,
+                rollback: true,
+                entry: true,
+            },
             "Release failed; the previous healthy portal was restored.",
         )
     }
