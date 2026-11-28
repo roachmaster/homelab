@@ -59,12 +59,35 @@ const RUNNER_DB_NAME: &str = "forge_agent";
 const WORKER_FRESHNESS_SECONDS: i32 = 90;
 const MODE_ORDER: [&str; 3] = ["plan", "review", "implement"];
 
+/// The process identity the runner's database config is resolved
+/// from. The composition root reads the environment once and hands
+/// the values in, so this library never reads process state itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunnerPgEnv {
+    /// `PGUSER`; an empty value counts as unset.
+    pub pguser: Option<String>,
+    /// `HOME`, where the libpq passfile lives; empty when unset.
+    pub home: String,
+}
+
+impl RunnerPgEnv {
+    /// Select the two runner database settings from an already
+    /// collected environment map.
+    pub fn from_environ(environ: &std::collections::HashMap<String, String>) -> Self {
+        RunnerPgEnv {
+            pguser: environ.get("PGUSER").cloned(),
+            home: environ.get("HOME").cloned().unwrap_or_default(),
+        }
+    }
+}
+
 /// The runner's database config: Python's queue_store.connect
 /// direct arm (socket dir, forge_agent) with the process user
 /// and the libpq passfile password.
-pub fn runner_pg_config(owner: &str) -> Result<PgConfig, String> {
-    let user = std::env::var("PGUSER")
-        .ok()
+pub fn runner_pg_config(owner: &str, env: &RunnerPgEnv) -> Result<PgConfig, String> {
+    let user = env
+        .pguser
+        .clone()
         .filter(|value| !value.is_empty())
         .or_else(|| {
             nix::unistd::User::from_uid(nix::unistd::getuid())
@@ -73,16 +96,10 @@ pub fn runner_pg_config(owner: &str) -> Result<PgConfig, String> {
                 .map(|user| user.name)
         })
         .ok_or("Unable to determine the runner database user")?;
-    let home = std::env::var("HOME").unwrap_or_default();
-    let passfile = std::path::Path::new(&home).join(".pgpass");
+    let home = env.home.as_str();
+    let passfile = std::path::Path::new(home).join(".pgpass");
     let password = if passfile.exists() {
-        passfile_password(
-            &passfile,
-            RUNNER_DB_HOST,
-            5432,
-            RUNNER_DB_NAME,
-            &user,
-        )
+        passfile_password(&passfile, RUNNER_DB_HOST, 5432, RUNNER_DB_NAME, &user)
     } else {
         None
     };
@@ -146,12 +163,7 @@ pub struct PgPolicyIdentity {
 }
 
 impl PolicyIdentityPort for PgPolicyIdentity {
-    fn policy_identity(
-        &self,
-        project_alias: &str,
-        kind: &str,
-        snapshot: &Value,
-    ) -> Option<Value> {
+    fn policy_identity(&self, project_alias: &str, kind: &str, snapshot: &Value) -> Option<Value> {
         let store = &self.store;
         let digest = snapshot.get("policy_digest")?.as_str()?;
         let document = policy_document(snapshot);
@@ -195,9 +207,8 @@ fn profile_label(config: &WorkApiConfig, alias: &str) -> String {
 
 impl PgWorkCatalog {
     fn session(&self) -> Result<PgSession, WorkError> {
-        PgSession::connect(self.pg.clone()).map_err(|error| {
-            WorkError::store(format!("catalog session: {error}"))
-        })
+        PgSession::connect(self.pg.clone())
+            .map_err(|error| WorkError::store(format!("catalog session: {error}")))
     }
 
     fn external_entries(&self) -> Result<Vec<ExternalReadiness>, WorkError> {
@@ -285,8 +296,7 @@ impl WorkCatalogPort for PgWorkCatalog {
             if entry.is_fresh {
                 worker_status = "ready";
                 let policy_modes: &[&str] =
-                    match forge_work::pinned_recipe::external_policy(&profile.resource_profile)
-                    {
+                    match forge_work::pinned_recipe::external_policy(&profile.resource_profile) {
                         Some((_, modes)) => modes,
                         None => &[],
                     };
@@ -329,8 +339,7 @@ impl WorkCatalogPort for PgWorkCatalog {
                     let valid = match revision {
                         None | Some(Value::Null) => true,
                         Some(Value::String(text)) => {
-                            text.len() == 40
-                                && text.chars().all(|c| c.is_ascii_hexdigit())
+                            text.len() == 40 && text.chars().all(|c| c.is_ascii_hexdigit())
                         }
                         _ => false,
                     };
@@ -413,11 +422,7 @@ impl WorkCatalogPort for PgWorkCatalog {
         }
 
         let mut projects = Vec::new();
-        for alias in config
-            .allowed_projects
-            .iter()
-            .take(64)
-        {
+        for alias in config.allowed_projects.iter().take(64) {
             let workflow = match config.project_workflow(alias) {
                 Some(policy) => {
                     let snapshot = policy.snapshot(
@@ -429,17 +434,12 @@ impl WorkCatalogPort for PgWorkCatalog {
                 }
                 None => None,
             };
-            let external_workflow = config.external_workflow(alias).and_then(|policy| {
-                policy
-                    .summary(config, &config.native_policy_ref())
-                    .ok()
-            });
+            let external_workflow = config
+                .external_workflow(alias)
+                .and_then(|policy| policy.summary(config, &config.native_policy_ref()).ok());
             let mut project = Map::new();
             project.insert("alias".to_string(), json!(alias));
-            project.insert(
-                "label".to_string(),
-                json!(config.project_label(alias)),
-            );
+            project.insert("label".to_string(), json!(config.project_label(alias)));
             project.insert(
                 "base_revision".to_string(),
                 advertised_revisions
@@ -524,7 +524,10 @@ fn project_summary(snapshot: &Value) -> Value {
         "max_code_revisions",
         "auto_merge",
     ] {
-        summary.insert(key.to_string(), snapshot.get(key).cloned().unwrap_or(Value::Null));
+        summary.insert(
+            key.to_string(),
+            snapshot.get(key).cloned().unwrap_or(Value::Null),
+        );
     }
     Value::Object(summary)
 }
@@ -721,8 +724,14 @@ impl PgWorkCatalog {
             for row in &rows {
                 let dto = branch_row_dto(row)?;
                 let key = (
-                    dto["project_alias"].as_str().unwrap_or_default().to_string(),
-                    dto["agent_profile"].as_str().unwrap_or_default().to_string(),
+                    dto["project_alias"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    dto["agent_profile"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
                 );
                 live.insert(key, dto);
             }
@@ -733,15 +742,12 @@ impl PgWorkCatalog {
                 config.profiles.iter().collect();
             profiles.sort_by(|a, b| a.alias.cmp(&b.alias));
             for profile in profiles.into_iter().take(64) {
-                if let Some(existing) =
-                    live.get(&(project_alias.clone(), profile.alias.clone()))
-                {
+                if let Some(existing) = live.get(&(project_alias.clone(), profile.alias.clone())) {
                     result.push(existing.clone());
                 } else {
-                    let scope = forge_work_worker::agent_branch::branch_scope_for_branch(
-                        &profile.branch,
-                    )
-                    .map_err(|error| WorkError::store(error.to_string()))?;
+                    let scope =
+                        forge_work_worker::agent_branch::branch_scope_for_branch(&profile.branch)
+                            .map_err(|error| WorkError::store(error.to_string()))?;
                     result.push(json!({
                         "project_alias": project_alias,
                         "agent_profile": profile.alias,
@@ -884,10 +890,7 @@ impl NativeControlPort for ChannelNativeControl {
         )
     }
 
-    fn review_decide(
-        &self,
-        command: &WorkReviewDecide,
-    ) -> Result<Option<Value>, WorkError> {
+    fn review_decide(&self, command: &WorkReviewDecide) -> Result<Option<Value>, WorkError> {
         let _ = &self.owner;
         let (reply, receiver) = std::sync::mpsc::channel();
         send_request(
@@ -926,11 +929,7 @@ impl ExternalControlPort for ChannelExternalControl {
         )
     }
 
-    fn forbid_manual_control(
-        &self,
-        project_alias: &str,
-        task_id: Uuid,
-    ) -> Result<(), WorkError> {
+    fn forbid_manual_control(&self, project_alias: &str, task_id: Uuid) -> Result<(), WorkError> {
         let (reply, receiver) = std::sync::mpsc::channel();
         send_request(
             &self.sender,
@@ -976,10 +975,7 @@ fn coordinator_config(config: &WorkApiConfig) -> forge_work::workflow::Coordinat
     }
 }
 
-fn pg_workflow_tx_factory(
-    config: &WorkApiConfig,
-    pg: &PgConfig,
-) -> PgWorkflowTxFactory {
+fn pg_workflow_tx_factory(config: &WorkApiConfig, pg: &PgConfig) -> PgWorkflowTxFactory {
     PgWorkflowTxFactory::new(
         PgSessionFactory::new(pg.clone()),
         config.owner.clone(),
@@ -1099,10 +1095,7 @@ impl forge_work_publication::delivery_repair::RepairSnapshotsPort for RepairSnap
         )
     }
 
-    fn external_snapshot(
-        &mut self,
-        policy: &ExternalWorkflowPolicy,
-    ) -> Result<Value, WorkError> {
+    fn external_snapshot(&mut self, policy: &ExternalWorkflowPolicy) -> Result<Value, WorkError> {
         policy
             .snapshot(&self.config, &self.config.native_policy_ref())
             .map_err(WorkError::store)
@@ -1155,11 +1148,7 @@ fn build_delivery_repair(
 ) -> Result<forge_work_publication::delivery_repair::DeliveryRepairConsumer, WorkError> {
     let repair_config = forge_work_publication::delivery_repair::DeliveryRepairConfig {
         delivery_enabled: config.delivery_enabled,
-        delivery_repair_projects: config
-            .delivery_repair_projects
-            .iter()
-            .cloned()
-            .collect(),
+        delivery_repair_projects: config.delivery_repair_projects.iter().cloned().collect(),
         project_workflows: config.project_workflows.clone(),
         external_workflows: config.external_workflows.clone(),
         profiles: config
@@ -1267,21 +1256,20 @@ fn build_external_store(
         PgSessionFactory::new(pg.clone()),
         config.owner.clone(),
     ));
-    let profiles: BTreeMap<String, forge_work::external_workflow::ExternalProfileInfo> =
-        config
-            .profiles
-            .iter()
-            .filter(|profile| profile.is_external())
-            .map(|profile| {
-                (
-                    profile.alias.clone(),
-                    forge_work::external_workflow::ExternalProfileInfo {
-                        execution_enabled: profile.execution_enabled,
-                        branch: Some(profile.branch.clone()),
-                    },
-                )
-            })
-            .collect();
+    let profiles: BTreeMap<String, forge_work::external_workflow::ExternalProfileInfo> = config
+        .profiles
+        .iter()
+        .filter(|profile| profile.is_external())
+        .map(|profile| {
+            (
+                profile.alias.clone(),
+                forge_work::external_workflow::ExternalProfileInfo {
+                    execution_enabled: profile.execution_enabled,
+                    branch: Some(profile.branch.clone()),
+                },
+            )
+        })
+        .collect();
     let policies: BTreeMap<String, ExternalWorkflowPolicy> =
         config.external_workflows.iter().cloned().collect();
     Ok(Some(Arc::new(ExternalWorkflowStore::new(
@@ -1311,9 +1299,7 @@ fn workflow_thread_main(
     } = start;
     let external_store = build_external_store(&config, &pg)?;
     let workflow_store = build_workflow_store(&config, &pg)?;
-    let correction = Arc::new(ReviewerCorrectionProvider::new(Arc::clone(
-        &workflow_store,
-    )));
+    let correction = Arc::new(ReviewerCorrectionProvider::new(Arc::clone(&workflow_store)));
     let owner_control = OwnerControlProvider::new(workflow_store, Some(correction));
     let external_maintenance: Option<Box<dyn RunOnceHook>> =
         if config.profiles.iter().any(|p| p.is_external()) {
@@ -1396,25 +1382,23 @@ fn handle_control(
                 let decision =
                     forge_work::decision_requests::ReviewDecision::parse(&command.decision)
                         .ok_or_else(|| WorkError::rejected(400, "invalid_request"))?;
-                owner_control.review_decide(
-                    &forge_work::decision_requests::ReviewDecideRequest {
-                        project_alias: command.project_alias.clone(),
-                        task_id: command.task_id,
-                        expected_revision: command.expected_revision,
-                        review_id: command.review_id,
-                        decision,
-                        agent_profile: Some(command.agent_profile.clone()),
-                        note: command.note.clone(),
-                        idempotency_key: command.idempotency_key.clone(),
-                        findings: command.findings.clone(),
-                        verified_finding_ids: command.verified_finding_ids.clone(),
-                        recipe_digest: None,
-                        actor: forge_work::work_actors::Actor::new(
-                            forge_work::work_actors::ActorKind::Operator,
-                            owner.to_string(),
-                        ),
-                    },
-                )
+                owner_control.review_decide(&forge_work::decision_requests::ReviewDecideRequest {
+                    project_alias: command.project_alias.clone(),
+                    task_id: command.task_id,
+                    expected_revision: command.expected_revision,
+                    review_id: command.review_id,
+                    decision,
+                    agent_profile: Some(command.agent_profile.clone()),
+                    note: command.note.clone(),
+                    idempotency_key: command.idempotency_key.clone(),
+                    findings: command.findings.clone(),
+                    verified_finding_ids: command.verified_finding_ids.clone(),
+                    recipe_digest: None,
+                    actor: forge_work::work_actors::Actor::new(
+                        forge_work::work_actors::ActorKind::Operator,
+                        owner.to_string(),
+                    ),
+                })
             })();
             let _ = reply.send(result);
         }
@@ -1462,10 +1446,7 @@ pub struct RunnerWork {
     pub workflow_thread: WorkflowThreadStart,
 }
 
-pub fn create_work_service(
-    config: &WorkApiConfig,
-    pg: &PgConfig,
-) -> Result<RunnerWork, WorkError> {
+pub fn create_work_service(config: &WorkApiConfig, pg: &PgConfig) -> Result<RunnerWork, WorkError> {
     let (sender, receiver) = std::sync::mpsc::channel();
     let has_external_workflows = !config.external_workflows.is_empty();
     let external_control: Option<Arc<dyn ExternalControlPort + Send + Sync>> =
@@ -1538,20 +1519,51 @@ pub fn create_usage_service(
     let pg_config = pg.clone();
     let factory = forge_usage::api::UsageServiceFactory::new(
         Some(usage_config),
-        Some(Arc::new(
-            move |config: &forge_usage::store::UsageConfig| {
-                let port = crate::usage_store_adapter::PgUsageStore::new(pg_config.clone());
-                Arc::new(
-                    forge_usage::store::UsageStore::new(
-                        config.clone(),
-                        Arc::new(port),
-                        900,
-                        15,
-                    )
+        Some(Arc::new(move |config: &forge_usage::store::UsageConfig| {
+            let port = crate::usage_store_adapter::PgUsageStore::new(pg_config.clone());
+            Arc::new(
+                forge_usage::store::UsageStore::new(config.clone(), Arc::new(port), 900, 15)
                     .expect("usage store"),
-                ) as Arc<dyn forge_usage::store::UsageReadStore>
-            },
-        )),
+            ) as Arc<dyn forge_usage::store::UsageReadStore>
+        })),
     )?;
     factory.create()
+}
+
+#[cfg(test)]
+mod runner_pg_env_tests {
+    use super::{runner_pg_config, RunnerPgEnv};
+    use std::collections::HashMap;
+
+    #[test]
+    fn the_runner_database_user_comes_from_the_handed_in_environment() {
+        let environ: HashMap<String, String> = [
+            ("PGUSER".to_string(), "forge_runner".to_string()),
+            ("HOME".to_string(), "/nonexistent-runner-home".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let env = RunnerPgEnv::from_environ(&environ);
+        let pg = runner_pg_config("lrocha", &env).expect("explicit user");
+        assert_eq!(pg.user, "forge_runner");
+        assert_eq!(pg.owner, "lrocha");
+        assert_eq!(pg.dbname, "forge_agent");
+        assert_eq!(pg.password, None, "no passfile under the handed-in home");
+    }
+
+    #[test]
+    fn an_empty_pguser_falls_back_to_the_process_user() {
+        let env = RunnerPgEnv {
+            pguser: Some(String::new()),
+            home: String::new(),
+        };
+        let pg = runner_pg_config("lrocha", &env).expect("process user resolves");
+        assert!(!pg.user.is_empty());
+    }
+
+    #[test]
+    fn a_missing_home_is_empty_not_an_error() {
+        let env = RunnerPgEnv::from_environ(&HashMap::new());
+        assert_eq!(env, RunnerPgEnv::default());
+    }
 }
