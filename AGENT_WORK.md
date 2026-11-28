@@ -3088,3 +3088,27 @@ the actual branch runner and proves executed=5, db_not_run=1 and no unexpected
 skips. Proxy-client and backend-scope suites pass all 86 tests. A read-only
 inventory checks all setup-owning, inherited and per-method database fixtures.
 Jenkins155 was normally cancelled before its backend gate; no pass is claimed.
+
+## Identity snapshot lock release — 2026-11-28
+
+Jenkins156 genuinely failed release check22: a changed identity was reported as
+Busy after prior writes. No cancellation or successful qualification is claimed.
+The Rust snapshot port only dropped its lock File after publishing; a concurrent
+fork can retain the shared open file description until exec, keeping flock held.
+A deterministic owned fork reproduction demonstrates that lifetime. Exact old
+source plus the actual strict JSON parser reproduces Busy under concurrent spawn;
+the fixed source passes 25 equivalent runs. This is a lifecycle correction, not
+an assertion relaxation or a retry allowance change.
+
+The snapshot port now explicitly unlocks after publishing on both success and
+returned failure. The original write failure takes precedence; unlock failure
+cannot return success. Private-file validation, nonblocking exclusive admission,
+identity comparison, atomic rename, fsync and source authority remain unchanged.
+A deterministic duplicate-descriptor regression proves exclusion during the
+write and immediate reacquisition after either result while a shared descriptor
+remains alive. Three focused release tests, strict all-target/all-feature Clippy
+and formatting pass. Full normal qualification is still required. Evidence:
+/mnt/data/homelab-build/identity-lock-j156-20261128/.
+
+The complete publication crate also passes all 78 release tests concurrently
+under the pinned Rust1.97.1 toolchain after this correction.
