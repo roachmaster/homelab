@@ -149,12 +149,58 @@ class PolicyIdentityTest(unittest.TestCase):
 
 
 
+class HistoricalDefectConnection(psycopg2.extensions.connection):
+    """Only pre-M53 fixtures project the three reviewed metadata read queries.
+
+    Canonical migrations stay immutable. Once M53 exists this connection returns
+    the real requested cursor and executes all current SQL without alteration.
+    """
+    projections = (
+        ('task_kind, defect, title, prompt, acceptance_criteria, latest_attempt_id',
+         "'feature'::text AS task_kind, NULL::jsonb AS defect, title, prompt, acceptance_criteria, latest_attempt_id"),
+        ('SELECT prompt,acceptance_criteria,task_kind,defect FROM forge_agent.coding_tasks',
+         "SELECT prompt,acceptance_criteria,'feature'::text AS task_kind,NULL::jsonb AS defect FROM forge_agent.coding_tasks"),
+    )
+
+    def cursor(self, *args, **kwargs):
+        if not getattr(self,'historical_defect_projection',False):
+            return super().cursor(*args, **kwargs)
+        requested=kwargs.pop('cursor_factory', None) or self.cursor_factory or psycopg2.extensions.cursor
+        connection=self
+        class HistoricalCursor(requested):
+            def execute(self, query, parameters=None):
+                # Shape-only historical tasks cannot have discovery links.
+                compact=' '.join(query.split()) if isinstance(query,str) else ''
+                if compact.startswith("SELECT id AS task_id,title,defect->>'severity' AS severity FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND task_kind='defect'"):
+                    connection.defect_projection_count+=1
+                    return super().execute('SELECT NULL::uuid AS task_id,NULL::text AS title,NULL::text AS severity WHERE false')
+                if isinstance(query,str):
+                    for source, target in connection.projections:
+                        if source in query:
+                            connection.defect_projection_count+=1
+                            query=query.replace(source,target)
+                return super().execute(query,parameters)
+        kwargs['cursor_factory']=HistoricalCursor
+        return super().cursor(*args, **kwargs)
+
+
 class PreUpgradeCluster(DisposablePostgresCluster):
     """Apply an owned historical registry copy before the production upgrade."""
 
     def __init__(self, legacy_sql):
         super().__init__()
         self.legacy_sql = legacy_sql
+
+    def connect(self, user="forge_agent"):
+        connection=psycopg2.connect(host=str(self.root),dbname='forge_agent',user=user,connect_timeout=2,
+            connection_factory=HistoricalDefectConnection)
+        connection.autocommit=True
+        with connection.cursor() as probe:
+            probe.execute("SELECT EXISTS(SELECT FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='forge_agent' AND c.relname='coding_tasks' AND a.attname='task_kind' AND NOT a.attisdropped)")
+            connection.historical_defect_projection=not probe.fetchone()[0]
+        connection.autocommit=False
+        connection.defect_projection_count=0
+        return connection
 
     def apply_and_verify(self):
         self._run(
@@ -281,7 +327,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 proof = make_stop_proof(lease.unit_name)
                 receipt = db.publish(lease, "awaiting_review", manifest, None, "Old policy result", proof)
                 snapshots = self.rows(
-                    cluster, "SELECT to_jsonb(t)-ARRAY['correlation_id','plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id','plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 )
@@ -290,7 +336,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(self.rows(cluster, "SELECT version FROM forge_agent.schema_migrations WHERE version = 11")[0][0], 11)
                 self.assertEqual(self.rows(
-                    cluster, "SELECT to_jsonb(t)-ARRAY['correlation_id','plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id','plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 ), snapshots)
@@ -322,7 +368,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                                      "v2-accept-before-session-policy", "Reviewed before upgrade")
                 acceptance = self.legacy_accept(cluster,command)
                 snapshot_query = (
-                    "SELECT to_jsonb(t)-ARRAY['correlation_id','plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], "
+                    "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id','plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], "
                     "(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.idempotency_key) "
                     "FROM forge_agent.coding_control_receipts r WHERE r.task_id=t.id) "
                     "FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
@@ -331,7 +377,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 51)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 53)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -368,7 +414,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 db.reconcile(lease,"c"*64,proof)
                 command=WorkAccept("homelab",UUID(lease.task_id),publication["revision"],"old-v3-accept","Historical approval")
                 acceptance=self.legacy_accept(cluster,command)
-                snapshot="SELECT to_jsonb(t)-ARRAY['correlation_id','plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'],to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
+                snapshot="SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id','plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'],to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
                 before=self.rows(cluster,snapshot,(UUID(lease.task_id),))
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
@@ -464,15 +510,15 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                     (UUID(receipt),),
                 )
                 before = self.rows(
-                    cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 51)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 53)
                 self.assertEqual(
-                    self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    self.rows(cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                               (UUID(lease.task_id),)),
                     before,
@@ -524,15 +570,15 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                     (UUID(receipt),),
                 )
                 before = self.rows(
-                    cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 51)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 53)
                 self.assertEqual(
-                    self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    self.rows(cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                               (UUID(lease.task_id),)),
                     before,
@@ -584,15 +630,15 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                     (UUID(receipt),),
                 )
                 before = self.rows(
-                    cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 51)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 53)
                 self.assertEqual(
-                    self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    self.rows(cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                               (UUID(lease.task_id),)),
                     before,
@@ -973,7 +1019,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
     def test_fresh_reapply_roles_and_untrusted_event_storage_have_no_coding_effect(self):
         self.cluster.apply_and_verify()
         self.event()
-        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(51,)])
+        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(53,)])
         self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_hosted_checks"), [(0,)])
         self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_workflow_actions"), [(0,)])
         for role in ("forge_gpu_worker", "forge_coding_worker", "forge_coding_reconciler"):
@@ -1090,6 +1136,11 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                                      # fifth parameter); their sources are
                                      # pinned separately by the current
                                      # verifier snapshots.
+                                     # M52 deliberately widens approved Plan ownership
+                                     # through bound repair lineage. Its full body and
+                                     # security metadata are separately pinned by
+                                     # verify-continuation-plan-lineage.sql.
+                                     'forge_coding_worker_api.read_plan(uuid,uuid)',
                                      'forge_agent.coding_schedule_repair(uuid,uuid)',
                                      'forge_coding_reconciler_api.expire_leases()',
                                      'forge_coding_reconciler_api.native_branch_first_replay(uuid,bigint)',
@@ -1119,7 +1170,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                         definition="replace(pg_get_functiondef(p.oid),p.prosrc,"+normalized_source+")"
                     return (
                         self.execute("SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=26 ORDER BY version", cluster=cluster),
-                        {table:self.execute("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM forge_agent."+table+" t", cluster=cluster) for table in previous_tables},
+                        {table:self.execute("SELECT coalesce(jsonb_agg("+("to_jsonb(t)-ARRAY['task_kind','defect']" if table=='coding_tasks' else 'to_jsonb(t)')+" ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM forge_agent."+table+" t", cluster=cluster) for table in previous_tables},
                         self.execute("SELECT nspname,nspowner,nspacl FROM pg_namespace WHERE nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') ORDER BY nspname", cluster=cluster),
                         self.execute("SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r", cluster=cluster),
                         self.execute("SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid", cluster=cluster),
@@ -1134,7 +1185,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                 for table in ("jenkins_events", "jenkins_event_deliveries", "jenkins_observations"):
                     self.assertEqual(self.execute("SELECT has_table_privilege('muse_events',%s,'SELECT'),has_table_privilege('muse_events',%s,'INSERT,UPDATE,DELETE')",
                         ("forge_agent."+table,"forge_agent."+table),cluster=cluster), [(True, False)])
-                self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(51,)])
+                self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(53,)])
             finally: cluster.stop()
 
 

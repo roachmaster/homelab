@@ -1203,6 +1203,9 @@ mod tests {
 
     fn sample_task_with_cicd() -> WorkTaskDetail {
         WorkTaskDetail {
+            task_kind: WorkTaskKind::Feature,
+            defect: None,
+            filed_defects: vec![],
             retry_event: None,
             delivery: None,
             task_id: TASK.into(),

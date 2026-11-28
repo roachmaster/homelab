@@ -95,6 +95,124 @@ pub fn valid_work_timestamp(value: &str) -> bool {
     work_timestamp_key(value).is_some()
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkTaskKind {
+    #[default]
+    Feature,
+    Defect,
+}
+impl WorkTaskKind {
+    pub fn value(self) -> &'static str {
+        match self {
+            Self::Feature => "feature",
+            Self::Defect => "defect",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "feature" => Some(Self::Feature),
+            "defect" => Some(Self::Defect),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkDefectSeverity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+impl WorkDefectSeverity {
+    pub fn value(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
+}
+impl std::fmt::Display for WorkDefectSeverity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.value())
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkDefectLocation {
+    pub repo_path: String,
+    pub function: String,
+    pub commit: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkDefect {
+    pub summary: String,
+    pub location: WorkDefectLocation,
+    pub observed_behavior: String,
+    pub expected_behavior: String,
+    pub severity: WorkDefectSeverity,
+    pub evidence: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovering_task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovering_workflow_id: Option<String>,
+}
+impl WorkDefect {
+    pub fn is_valid(&self) -> bool {
+        let prose = |text: &str, maximum| valid_chat_text(text, maximum) && !text.contains('\r');
+        prose(&self.summary, 512)
+            && valid_work_label(&self.location.repo_path, 1024)
+            && !self.location.repo_path.starts_with('/')
+            && !self.location.repo_path.contains('\\')
+            && !self
+                .location
+                .repo_path
+                .split('/')
+                .any(|s| matches!(s, "" | "." | ".."))
+            && valid_work_label(&self.location.function, 512)
+            && valid_work_hex(&self.location.commit, 40)
+            && prose(&self.observed_behavior, 4096)
+            && prose(&self.expected_behavior, 4096)
+            && prose(&self.evidence, 8192)
+            && self
+                .discovering_task_id
+                .as_deref()
+                .is_none_or(valid_chat_id)
+            && self
+                .discovering_workflow_id
+                .as_deref()
+                .is_none_or(valid_chat_id)
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkDefectLink {
+    pub task_id: String,
+    pub title: String,
+    pub severity: WorkDefectSeverity,
+}
+fn deserialize_defect_metadata_version<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u8>, D::Error> {
+    let version = u8::deserialize(deserializer)?;
+    if version != 1 {
+        return Err(serde::de::Error::custom("Unknown defect metadata version"));
+    }
+    Ok(Some(version))
+}
+
+fn valid_defect_metadata(kind: WorkTaskKind, defect: Option<&WorkDefect>) -> bool {
+    match (kind, defect) {
+        (WorkTaskKind::Feature, None) => true,
+        (WorkTaskKind::Defect, Some(defect)) => defect.is_valid(),
+        _ => false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkMode {
@@ -841,6 +959,13 @@ impl WorkCatalog {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkTaskSummary {
+    #[serde(default)]
+    pub task_kind: WorkTaskKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defect: Option<WorkDefect>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filed_defects: Vec<WorkDefectLink>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_event: Option<WorkRetryEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -869,9 +994,17 @@ pub struct WorkTaskSummary {
 }
 impl WorkTaskSummary {
     pub fn is_valid(&self) -> bool {
-        self.retry_event
-            .as_ref()
-            .is_none_or(WorkRetryEvent::is_valid)
+        valid_defect_metadata(self.task_kind, self.defect.as_ref())
+            && self.filed_defects.len() <= 50
+            && self.filed_defects.iter().all(|link| {
+                valid_chat_id(&link.task_id)
+                    && valid_work_label(&link.title, 512)
+                    && link.title.chars().count() <= 128
+            })
+            && self
+                .retry_event
+                .as_ref()
+                .is_none_or(WorkRetryEvent::is_valid)
             && self.delivery.as_ref().is_none_or(WorkDelivery::is_valid)
             && valid_chat_id(&self.task_id)
             && valid_chat_id(&self.correlation_id)
@@ -929,6 +1062,13 @@ impl WorkResultManifest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkTaskDetail {
+    #[serde(default)]
+    pub task_kind: WorkTaskKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defect: Option<WorkDefect>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filed_defects: Vec<WorkDefectLink>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_event: Option<WorkRetryEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -995,6 +1135,9 @@ impl WorkExternalResult {
 impl WorkTaskDetail {
     pub fn summary(&self) -> WorkTaskSummary {
         WorkTaskSummary {
+            task_kind: self.task_kind,
+            defect: self.defect.clone(),
+            filed_defects: self.filed_defects.clone(),
             retry_event: self.retry_event.clone(),
             delivery: self.delivery.clone(),
             task_id: self.task_id.clone(),
@@ -1376,6 +1519,16 @@ pub enum WorkRequest {
         request_id: String,
     },
     WorkSubmit {
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_defect_metadata_version"
+        )]
+        defect_metadata_version: Option<u8>,
+        #[serde(default)]
+        task_kind: WorkTaskKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        defect: Option<Box<WorkDefect>>,
         request_id: String,
         project_alias: String,
         base_revision: String,
@@ -1393,11 +1546,25 @@ pub enum WorkRequest {
         workflow_policy_id: Option<String>,
     },
     WorkGet {
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_defect_metadata_version"
+        )]
+        defect_metadata_version: Option<u8>,
         request_id: String,
         project_alias: String,
         task_id: String,
     },
     WorkList {
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_defect_metadata_version"
+        )]
+        defect_metadata_version: Option<u8>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_kind_filter: Option<WorkTaskKind>,
         request_id: String,
         project_alias: String,
         #[serde(default)]
@@ -1637,13 +1804,35 @@ impl WorkRequest {
                 | Self::WorkPublicationRetry { .. }
         )
     }
+    pub fn defect_metadata_version(&self) -> Option<u8> {
+        match self {
+            Self::WorkSubmit {
+                defect_metadata_version,
+                ..
+            }
+            | Self::WorkGet {
+                defect_metadata_version,
+                ..
+            }
+            | Self::WorkList {
+                defect_metadata_version,
+                ..
+            } => *defect_metadata_version,
+            _ => None,
+        }
+    }
     pub fn is_valid(&self) -> bool {
         valid_work_request_id(self.request_id())
+            && self
+                .defect_metadata_version()
+                .is_none_or(|version| version == 1)
             && self.project_alias().is_none_or(|v| valid_work_name(v, 64))
             && self.task_id().is_none_or(valid_chat_id)
             && match self {
                 Self::WorkCatalog { .. } | Self::WorkGet { .. } => true,
                 Self::WorkSubmit {
+                    task_kind,
+                    defect,
                     mode,
                     auto_repair,
                     workflow_policy_digest,
@@ -1655,7 +1844,8 @@ impl WorkRequest {
                     idempotency_key,
                     ..
                 } => {
-                    valid_work_hex(base_revision, 40)
+                    valid_defect_metadata(*task_kind, defect.as_deref())
+                        && valid_work_hex(base_revision, 40)
                         && workflow_policy_digest.as_deref().is_none_or(|digest| {
                             valid_work_hex(digest, 64) && *mode == WorkMode::Plan && !auto_repair
                         })
@@ -1884,6 +2074,37 @@ impl WorkFailure {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkFailureReason {
+    #[serde(rename = "defect.task_kind")]
+    DefectTaskKind,
+    #[serde(rename = "defect.task_kind_filter")]
+    DefectTaskKindFilter,
+    #[serde(rename = "defect.unexpected_payload")]
+    DefectUnexpectedPayload,
+    #[serde(rename = "defect.fields")]
+    DefectFields,
+    #[serde(rename = "defect.summary")]
+    DefectSummary,
+    #[serde(rename = "defect.location")]
+    DefectLocation,
+    #[serde(rename = "defect.location.repo_path")]
+    DefectLocationRepoPath,
+    #[serde(rename = "defect.location.function")]
+    DefectLocationFunction,
+    #[serde(rename = "defect.location.commit")]
+    DefectLocationCommit,
+    #[serde(rename = "defect.observed_behavior")]
+    DefectObservedBehavior,
+    #[serde(rename = "defect.expected_behavior")]
+    DefectExpectedBehavior,
+    #[serde(rename = "defect.severity")]
+    DefectSeverity,
+    #[serde(rename = "defect.evidence")]
+    DefectEvidence,
+    #[serde(rename = "defect.discovering_task_id")]
+    DefectDiscoveringTaskId,
+    #[serde(rename = "defect.discovering_workflow_id")]
+    DefectDiscoveringWorkflowId,
+
     BaseStale,
     PolicyStale,
     PolicyMissing,
@@ -1899,6 +2120,21 @@ impl WorkFailureReason {
     /// The failure code this reason may refine.
     pub fn code(self) -> WorkFailure {
         match self {
+            Self::DefectTaskKind
+            | Self::DefectTaskKindFilter
+            | Self::DefectUnexpectedPayload
+            | Self::DefectFields
+            | Self::DefectSummary
+            | Self::DefectLocation
+            | Self::DefectLocationRepoPath
+            | Self::DefectLocationFunction
+            | Self::DefectLocationCommit
+            | Self::DefectObservedBehavior
+            | Self::DefectExpectedBehavior
+            | Self::DefectSeverity
+            | Self::DefectEvidence
+            | Self::DefectDiscoveringTaskId
+            | Self::DefectDiscoveringWorkflowId => WorkFailure::InvalidRequest,
             Self::BaseStale
             | Self::PolicyStale
             | Self::PolicyMissing
@@ -2106,7 +2342,10 @@ impl WorkResponse {
             (Self::WorkFailed { code, reason, .. }, _) => {
                 http_status == code.status()
                     && reason.is_none_or(|reason| {
-                        reason.code() == *code && matches!(request, WorkRequest::WorkSubmit { .. })
+                        reason.code() == *code
+                            && (matches!(request, WorkRequest::WorkSubmit { .. })
+                                || (reason == WorkFailureReason::DefectTaskKindFilter
+                                    && matches!(request, WorkRequest::WorkList { .. })))
                     })
             }
             (
@@ -2165,6 +2404,7 @@ impl WorkResponse {
                     ..
                 },
                 WorkRequest::WorkList {
+                    task_kind_filter,
                     status_filter,
                     limit,
                     cursor,
@@ -2177,6 +2417,7 @@ impl WorkResponse {
                     && tasks.iter().all(|t| {
                         t.is_valid()
                             && project(&t.project_alias)
+                            && task_kind_filter.is_none_or(|kind| kind == t.task_kind)
                             && status_filter.is_none_or(|s| s.accepts(t))
                             && (!matches!(status_filter, Some(WorkListFilter::Scope(_)))
                                 || t.updated_at.is_some())

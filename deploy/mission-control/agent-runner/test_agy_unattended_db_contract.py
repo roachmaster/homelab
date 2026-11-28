@@ -203,7 +203,7 @@ class AgYUnattendedDatabaseContractTest(unittest.TestCase):
                 receipt = db.publish(lease, "awaiting_review", manifest, None,
                                      "Owned policy upgrade fixture", proof)
                 snapshot_query = """SELECT
-                    (SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM forge_agent.coding_tasks t),
+                    (SELECT jsonb_agg(to_jsonb(t)-ARRAY['task_kind','defect'] ORDER BY t.id) FROM forge_agent.coding_tasks t),
                     (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.attempt_id) FROM forge_agent.coding_attempts a),
                     (SELECT jsonb_agg(to_jsonb(e) ORDER BY e.task_id,e.sequence) FROM forge_agent.coding_events e),
                     (SELECT jsonb_agg(to_jsonb(r) ORDER BY r.attempt_id,r.chunk_index) FROM forge_agent.coding_result_chunks r)"""
@@ -211,7 +211,7 @@ class AgYUnattendedDatabaseContractTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(self.rows(snapshot_query, cluster=cluster), before)
-                self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(51,)])
+                self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(53,)])
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None,
                                            "Owned policy upgrade fixture", proof), receipt)
                 self.assertEqual(service.submit(make_submit(idempotency_key="pre-m23")), submitted)

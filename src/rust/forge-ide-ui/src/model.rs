@@ -234,6 +234,7 @@ impl UiModel {
                 | UiEvent::SelectAgentProject { .. }
                 | UiEvent::SelectAgentProfile { .. }
                 | UiEvent::SelectAgentMode { .. }
+                | UiEvent::SelectAgentTaskKind { .. }
                 | UiEvent::SelectAgentTaskScope { .. }
                 | UiEvent::SetAgentPrompt { .. }
                 | UiEvent::SetAgentCriteria { .. }
@@ -513,6 +514,7 @@ impl UiModel {
             | UiEvent::SelectAgentProject { .. }
             | UiEvent::SelectAgentProfile { .. }
             | UiEvent::SelectAgentMode { .. }
+            | UiEvent::SelectAgentTaskKind { .. }
             | UiEvent::SelectAgentTaskScope { .. }
             | UiEvent::SetAgentPrompt { .. }
             | UiEvent::SetAgentCriteria { .. }

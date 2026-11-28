@@ -16,6 +16,7 @@ from agent_tools import ToolCall
 import queue_store as store
 from chat_history_store import dao
 from file_context import FileAttachment
+from work_pg_fixture import PG16_AVAILABLE
 
 
 POSTGRES_BIN = Path("/usr/lib/postgresql/16/bin")
@@ -1468,7 +1469,7 @@ class WorkspaceStoreTest(RunnerPrivilegeDriftMixin, unittest.TestCase):
                      "Disposable PostgreSQL 16 integration requires its binaries and a non-root user; DB tests run only on main")
 class WorkspaceStoreCutoverTest(RunnerPrivilegeDriftMixin, unittest.TestCase):
     """The cutover stage of the same drift machinery: this fixture
-    applies migration 53 (pg_proxy_cutover) via apply-cutover.sql
+    applies migration 55 (pg_proxy_cutover) via apply-cutover.sql
     on top of the preparation fixture, so forge_agent keeps SELECT
     only — the proxy is the only writer. Round-6 finding 7: this
     matrix was previously asserted against a preparation-only

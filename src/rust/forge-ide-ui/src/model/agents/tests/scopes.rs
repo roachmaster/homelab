@@ -8,6 +8,7 @@ fn active_is_explicit_default_and_changing_scope_resets_server_pagination() {
     assert!(matches!(
         &effects[0],
         UiEffect::Work(WorkRequest::WorkList {
+            defect_metadata_version: Some(1),
             status_filter: Some(WorkListFilter::Scope(WorkListScope::Active)),
             cursor: None,
             ..
@@ -190,5 +191,135 @@ fn authoritative_workflow_badges_preserve_cancellation_completion_and_retry_evid
     assert_eq!(
         agents.task_summary_badge(&root),
         badge("Cancelled", BadgeTone::Neutral)
+    );
+}
+
+#[test]
+fn defect_filter_composes_with_scope_and_resets_pagination() {
+    let mut agents = ready();
+    agents.task_scope = WorkListScope::Attention;
+    agents.list_cursor = Some(TASK.into());
+    agents.list_next = Some(KEY.into());
+    agents.list_history.push(None);
+    let effects = step(
+        &mut agents,
+        UiEvent::SelectAgentTaskKind {
+            value: "defect".into(),
+        },
+        "defects",
+    );
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkList {
+            task_kind_filter: Some(WorkTaskKind::Defect),
+            status_filter: Some(WorkListFilter::Scope(WorkListScope::Attention)),
+            cursor: None,
+            ..
+        })
+    ));
+    assert!(agents.list_history.is_empty());
+    assert!(agents.list_next.is_none());
+    assert!(step(
+        &mut agents,
+        UiEvent::SelectAgentTaskKind {
+            value: "feature".into()
+        },
+        "pending"
+    )
+    .is_empty());
+    agents.pending = None;
+    assert!(step(
+        &mut agents,
+        UiEvent::SelectAgentTaskKind {
+            value: "invalid".into()
+        },
+        "invalid"
+    )
+    .is_empty());
+    let effects = step(
+        &mut agents,
+        UiEvent::SelectAgentTaskKind {
+            value: "all".into(),
+        },
+        "all",
+    );
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkList {
+            task_kind_filter: None,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn defect_badges_details_and_discovery_links_project_from_authoritative_data() {
+    let mut agents = ready();
+    let mut task = detail(WorkStatus::Queued);
+    task.task_kind = WorkTaskKind::Defect;
+    task.defect = Some(WorkDefect {
+        summary: "Malformed report".into(),
+        location: WorkDefectLocation {
+            repo_path: "src/report.rs".into(),
+            function: "parse".into(),
+            commit: "a".repeat(40),
+        },
+        observed_behavior: "Parser fails".into(),
+        expected_behavior: "Parser returns report".into(),
+        severity: WorkDefectSeverity::High,
+        evidence: "Reproduction fixture".into(),
+        discovering_task_id: Some(KEY.into()),
+        discovering_workflow_id: None,
+    });
+    agents.tasks.push(task.summary());
+    agents.task = Some(task);
+    agents.selected = Some(TASK.into());
+    agents.pane = Pane::Reader;
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, false);
+    assert!(view
+        .badges
+        .iter()
+        .any(|b| b.id == "agents-defect-badge" && b.badge.label == "Defect · high"));
+    assert!(view
+        .texts
+        .iter()
+        .any(|t| t.id == "agents-defect-context" && t.text.contains("Parser returns report")));
+    assert!(view
+        .buttons
+        .iter()
+        .any(|b| b.id == "agents-defect-discovery"
+            && matches!(&b.action, Some(RowAction::OpenAgentTask { task_id }) if task_id == KEY)));
+    let list = view
+        .lists
+        .iter()
+        .find(|list| list.id == "agents-tasks")
+        .unwrap();
+    assert!(list.rows[0]
+        .summary
+        .as_ref()
+        .unwrap()
+        .badge
+        .label
+        .starts_with("Defect ·"));
+    agents
+        .task
+        .as_mut()
+        .unwrap()
+        .filed_defects
+        .push(WorkDefectLink {
+            task_id: KEY.into(),
+            title: "Discovered failure".into(),
+            severity: WorkDefectSeverity::High,
+        });
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, false);
+    let links = view
+        .lists
+        .iter()
+        .find(|list| list.id == "agents-filed-defects")
+        .unwrap();
+    assert!(
+        matches!(&links.rows[0].action, RowAction::OpenAgentTask { task_id } if task_id == KEY)
     );
 }

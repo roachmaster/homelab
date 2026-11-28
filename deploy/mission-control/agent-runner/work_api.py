@@ -10,6 +10,7 @@ from uuid import UUID
 
 import chat_history_api as common
 from queue_store import Rejected
+from work_defect import validate_defect, FAILURE_REASONS
 from work_events import COORDINATOR_ACTOR, operator_actor
 from work_config import VALID_MODES, WorkCatalog, WorkConfig
 from work_external_policy import MODES as EXTERNAL_MODES
@@ -21,7 +22,7 @@ from work_store import (
     WorkStore,
 )
 
-MAX_REQUEST_BYTES = 16 * 1024
+MAX_REQUEST_BYTES = 32 * 1024
 MAX_PROMPT_BYTES = 8192
 MAX_ACCEPTANCE_BYTES = 2048
 MAX_NOTE_BYTES = 2048
@@ -102,6 +103,8 @@ class WorkSubmit:
     workflow_policy_digest: str | None = None
     workflow_policy_id: UUID | None = None  # M44 catalog identity; preferred over the digest.
     delivery_admission: dict | None = None  # Internal ready-port authority, never admitted from JSON.
+    task_kind: str = "feature"
+    defect: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +120,7 @@ class WorkList:
     limit: int
     cursor: UUID | None
     delivery_visible: bool = True
+    task_kind_filter: str | None = None
 
 
 @dataclass(frozen=True)
@@ -293,6 +297,7 @@ class WorkService:
             workflow_policy_digest=command.workflow_policy_digest,
             **({"workflow_policy_id":command.workflow_policy_id} if command.workflow_policy_id is not None else {}),
             delivery_admission=command.delivery_admission,
+            task_kind=command.task_kind, defect=command.defect,
             # The submitter (plan section 4.2): the operator via portal/CLI,
             # or the coordinator for auto-repair submissions.
             actor=COORDINATOR_ACTOR if command.auto_repair else operator_actor(self._store.owner),
@@ -350,6 +355,7 @@ class WorkService:
             limit=command.limit,
             cursor_task_id=command.cursor,
             **options,
+            **({"task_kind_filter":command.task_kind_filter} if command.task_kind_filter is not None else {}),
         )
 
     def events(self, command):
@@ -584,6 +590,37 @@ def handles(headers):
     return any(value.startswith("ide.work.") for value in headers.get_all("Forge-Destination", []))
 
 
+def defect_metadata_version(headers):
+    values = headers.get_all('Forge-Defect-Metadata-Version', [])
+    if not values:
+        return None
+    if values != ['1']:
+        raise Rejected(400, 'invalid_request')
+    return 1
+
+
+def defect_metadata_response(response, version):
+    """Keep strict legacy Work DTOs usable, including already-open browser tabs."""
+    if version == 1:
+        return response
+    status, body = response
+    if not isinstance(body, dict) or not isinstance(body.get('event'), dict):
+        return response
+    event = dict(body['event'])
+    def legacy(task):
+        return {key: value for key, value in task.items()
+                if key not in {'task_kind', 'defect', 'filed_defects'}} if isinstance(task, dict) else task
+    if event.get('kind') == 'work_opened':
+        event['task'] = legacy(event.get('task'))
+    elif event.get('kind') == 'work_listed' and isinstance(event.get('tasks'), list):
+        event['tasks'] = [legacy(task) for task in event['tasks']]
+    elif event.get('kind') == 'work_failed' and isinstance(event.get('reason'), str) and event['reason'].startswith('defect.'):
+        event.pop('reason')
+    else:
+        return response
+    return status, {**body, 'event': event}
+
+
 def event_attribution_version(headers):
     values = headers.get_all('Forge-Event-Attribution-Version', [])
     if not values:
@@ -663,6 +700,7 @@ def delivery_response(response, version):
 
 
 def destination(headers):
+    defect_metadata_version(headers)
     delivery_version(headers)  # Reject malformed negotiation before request effects.
     retry_events_version(headers)
     event_attribution_version(headers)
@@ -670,7 +708,7 @@ def destination(headers):
     # for the shared closed-envelope validator rather than relaxing that contract.
     route_headers = Message()
     for name, value in headers.items():
-        if name.lower() not in {'forge-delivery-version','forge-retry-events-version','forge-event-attribution-version'}:
+        if name.lower() not in {'forge-delivery-version','forge-retry-events-version','forge-event-attribution-version','forge-defect-metadata-version'}:
             route_headers[name] = value
     value = common.dispatch_destination(route_headers)
     try:
@@ -766,14 +804,22 @@ def decode(route, correlation, body):
     base = {"kind", "request_id", "project_alias"}
     if not base <= body.keys():
         raise Rejected(400, "invalid_request")
+    # Presentation capability, not business intent or idempotency authority.
+    if 'defect_metadata_version' in body:
+        if (kind not in {'work_submit', 'work_get', 'work_list'}
+                or type(body['defect_metadata_version']) is not int or body['defect_metadata_version'] != 1):
+            raise Rejected(400, 'invalid_request')
+        body = {key: value for key, value in body.items() if key != 'defect_metadata_version'}
     project_alias = _identifier(body["project_alias"])
 
     if (route is Destination.SUBMIT and kind == "work_submit"
-            and body.keys() - {"auto_repair","workflow_policy_digest","workflow_policy_id"} == base | {
+            and body.keys() - {"auto_repair","workflow_policy_digest","workflow_policy_id","task_kind","defect"} == base | {
                 "base_revision", "mode", "agent_profile",
                 "prompt", "acceptance_criteria", "idempotency_key",
             }):
+        defect = validate_defect(body.get("task_kind", "feature"), body.get("defect"))
         return WorkSubmit(
+            task_kind=body.get("task_kind", "feature"), defect=defect,
             project_alias=project_alias,
             base_revision=_base_revision(body["base_revision"]),
             mode=_mode(body["mode"]),
@@ -789,14 +835,17 @@ def decode(route, correlation, body):
     if route is Destination.GET and kind == "work_get" and body.keys() == base | {"task_id"}:
         return WorkGet(project_alias=project_alias, task_id=_uuid(body["task_id"]))
 
-    if route is Destination.LIST and kind == "work_list" and body.keys() <= base | {"status_filter", "limit", "cursor"}:
+    if route is Destination.LIST and kind == "work_list" and body.keys() <= base | {"status_filter", "limit", "cursor", "task_kind_filter"}:
         status_filter = body.get("status_filter", None)
         if status_filter is not None and (not isinstance(status_filter, str) or status_filter not in VALID_STATUS_FILTERS):
             raise Rejected(400, "invalid_request")
+        task_kind_filter = body.get("task_kind_filter")
+        if task_kind_filter is not None and task_kind_filter not in ("feature", "defect"):
+            raise Rejected(400, "invalid_request", "defect.task_kind_filter")
         limit = _int_range(body.get("limit", LIST_DEFAULT_LIMIT), 1, LIST_MAX_LIMIT)
         raw_cursor = body.get("cursor", None)
         cursor = None if raw_cursor is None else _uuid(raw_cursor)
-        return WorkList(project_alias=project_alias, status_filter=status_filter, limit=limit, cursor=cursor)
+        return WorkList(project_alias=project_alias, status_filter=status_filter, limit=limit, cursor=cursor, task_kind_filter=task_kind_filter)
 
     if route is Destination.EVENTS and kind == "work_events":
         required = base | {"task_id"}
@@ -954,6 +1003,8 @@ def _require_workflow_submission(mode, profile, author_profile, digest, current_
 def failure_reason(code, error):
     """Return the bounded public reason for a failure code, if any."""
     reason = getattr(error, "reason", None)
+    if code == "invalid_request" and reason in FAILURE_REASONS:
+        return reason
     if code == "result_mismatch" and reason in SUBMIT_MISMATCH_REASONS:
         return reason
     if code == "denied" and reason in SUBMIT_DENIED_REASONS:

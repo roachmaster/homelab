@@ -338,3 +338,52 @@ retention/garbage collection. Uncertain or reserved workspaces must not be remov
 by a generic cleanup. See [usage visibility](forge-agent-usage.md),
 [runner operations](../../../deploy/mission-control/agent-runner/README.md) and
 [current source status](../../design/implementation-status.md).
+
+### Structured defect filing
+
+The existing `work_submit` dispatch accepts `task_kind: "defect"` and a `defect`
+object in the same call. Omitted `task_kind` remains `feature`; a feature request
+must not carry a defect payload. Filing does not pause or change the discovering
+assignment. Supply the existing project, base revision, profile, mode, prompt,
+acceptance criteria, idempotency key and configured workflow policy as usual.
+
+```json
+{
+  "task_kind": "defect",
+  "defect": {
+    "summary": "Report parser drops a failed check",
+    "location": {
+      "repo_path": "src/report.rs",
+      "function": "parse_report",
+      "commit": "0123456789abcdef0123456789abcdef01234567"
+    },
+    "observed_behavior": "A failed check disappears from the report",
+    "expected_behavior": "The report retains the failed check",
+    "severity": "high",
+    "evidence": "Reproduce with the failing-check fixture",
+    "discovering_task_id": "11111111-1111-4111-8111-111111111111"
+  }
+}
+```
+
+All six top-level defect fields shown before `discovering_task_id` are required.
+`location` requires all three fields, a relative repository path without traversal,
+and a full lowercase 40-character commit. Text limits in UTF-8 bytes are 512 for
+summary and function, 1024 for repository path, 4096 each for observed and expected
+behavior, and 8192 for evidence. Severity is `low`, `medium`, `high`, or `critical`.
+Discovery task and workflow UUIDs are optional and must belong to the authorized
+owner and project. Unknown fields and mismatched marker/payload pairs fail before
+admission. Metadata participates in defect idempotency; historical feature intent
+hashes retain their original representation.
+
+Defects use the normal plan–implement–review workflow. Their Plan performs triage:
+reproduce, identify root cause or remaining uncertainty, and recommend fix or
+defer with reasons. Deferring still requires the existing review and decision
+process. Revisions and repair descendants retain defect identity and context.
+
+`work_list` accepts optional `task_kind_filter` (`feature` or `defect`), composed
+with existing status/scope and pagination. List/detail records expose `task_kind`,
+`defect`, and bounded `filed_defects` links. Agents displays the marker and severity,
+structured details, discovery navigation, and an All kinds/Features/Defects filter.
+Migration 53 adds the metadata, constraints, inheritance and lease-scoped worker
+reader; apply through `sql/apply.sql` and check through `management/verify.sql`.

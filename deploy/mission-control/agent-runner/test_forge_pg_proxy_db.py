@@ -278,7 +278,7 @@ class ScratchCluster:
                 "SELECT pg_catalog.pg_advisory_xact_lock(20261111, 1);",
                 "DO $cutover_guard$ BEGIN IF NOT EXISTS("
                 "SELECT 1 FROM forge_agent.schema_migrations"
-                " WHERE version = 52 AND name = 'pg_proxy_preparation'"
+                " WHERE version = 54 AND name = 'pg_proxy_preparation'"
                 ") THEN RAISE EXCEPTION 'cutover requires the"
                 " preparation migration (51) first'; END IF; END"
                 " $cutover_guard$;",
@@ -1957,7 +1957,7 @@ class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
         self.assertEqual(versions[-1], 51)
         self.assertNotIn(52, versions)
         version, _, name = _parse_cutover_sql()
-        self.assertEqual((version, name), (53, "pg_proxy_cutover"))
+        self.assertEqual((version, name), (55, "pg_proxy_cutover"))
 
     def test_verify_sql_passes_at_preparation(self):
         ok, output = self.cluster.run_verifier(

@@ -877,7 +877,7 @@ CONTENT_IDENTITY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
     'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
     'deploy/mission-control/agent-runner/work_review.py': 'b67bf946b42789e93f9ccd8027375674810ec5d3f015c9ae1e294407b2f5d57d',
-    'deploy/mission-control/agent-runner/work_worker.py': '71f0f83f3f099f636980f3955b374ccc89b730bb0f3ec02caf73b234b123ff53',
+    'deploy/mission-control/agent-runner/work_worker.py': 'd2d3c638ec1ebc4dbd110313a04e2c906b93be0825cc570b5c87622805ac0090',
     'docs/README.md': '32ef6f43905db47f366dc062d840e343dd1635eba9b7aa218fe467141ab6fe28',
     'docs/architecture/README.md': '57aa514e18eb82a8e520d24fd41851e9070d536a39cc90641a9662e27781cbe1',
     'docs/architecture/content-identity.md': '433979bcf86e54d9bdf6c32566168cf0c233257c53f9dd2a0cef8e32abe50419',
@@ -1195,13 +1195,13 @@ CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '0618692a67377f33869343d
 # so this context heads the qualification chain for exactly those files.
 PG_PROXY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': '97348b5db6d9c5eac164bb54e5c6c134ba6a61116e108595fcc56f95a1a16535',
-    'deploy/mission-control/agent-runner/test_work_event_attribution.py': '6e069145d92e120ee0249a15408e78525c0b5d91d610490a5e5a8110ce83adf7',
+    'deploy/mission-control/agent-runner/test_work_event_attribution.py': 'e04fac9c6f834da5b80b2c9b5bff89cee26a4ebb9c7054af7703a40153486f72',
     'deploy/mission-control/agent-runner/work_owner_control.py': '38a3edda0caec8f079deb6533592f48786254038f3016423754b15ff652185a0',
     'deploy/mission-control/agent-runner/work_owner_reverification.py': '28c6f3314a4f93ab007299cca3234452bc84f0de72022c9726506930b3bd11b6',
     'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
     'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
-    'deploy/mission-control/agent-runner/work_worker.py': '71f0f83f3f099f636980f3955b374ccc89b730bb0f3ec02caf73b234b123ff53',
-    'deploy/mission-control/agent-runner/work_worker_config.py': 'e0cd1406cd929cefe67a7931f8510f0e83aac58be7d3819831d78d3e7646d0cd',
+    'deploy/mission-control/agent-runner/work_worker.py': 'd2d3c638ec1ebc4dbd110313a04e2c906b93be0825cc570b5c87622805ac0090',
+    'deploy/mission-control/agent-runner/work_worker_config.py': '9b35997fbd2e78ecfe0cddf15bbaec7dd4e2eb63453d780edba02cd3592db70e',
     'deploy/mission-control/sql/management/grant-external-workflows.sql': '4dec068db6250819e1388ec4d2c6c60a2557d98ee36778156959e67eaf489a67',
     'deploy/mission-control/sql/management/grant-runner.sql': 'b3c42606e1d2717cfb0f8e08cf336483331087838ce92cc1268c7d0304f4163f',
     'deploy/mission-control/sql/management/verify-external-agent.sql': '18149b72731e222fb78953f8657f302d7669095785e5ad1eb6887b378dee66db',
@@ -1885,7 +1885,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             visited.add(source)
             for name in re.findall(r"^\\ir\s+(\S+)\s*$", source.read_text(), re.MULTILINE):
                 pending.append(source.parent / name)
-        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES | {"verify-author-handoff.sql"})
+        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES | {"verify-author-handoff.sql", "verify-continuation-plan-lineage.sql", "verify-defect-tasks.sql"})
 
     def test_normal_installer_preserves_owner_control_and_installs_event_service(self):
         published = {
@@ -1895,7 +1895,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         required = (
             "work_owner_control.py", "work_owner_reverification.py", "work_publication_clients.py", "work_review.py",
-            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py", "work_superseding_review.py",
+            "work_store.py", "work_defect.py", "work_worker_store.py", "work_reviewer_correction.py", "work_superseding_review.py",
             "work_peer_feedback_recovery.py", "work_cli_transport.py",
             "work_post_merge.py", "work_post_merge_provider.py", "jenkins_events.py", "jenkins_config.py",
             "jenkins_codec.py", "jenkins_store.py", "jenkins_consumer.py",

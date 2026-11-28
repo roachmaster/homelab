@@ -980,6 +980,44 @@ process acquisition, while read-only managed policy blocks unmanaged hooks,
 MCP servers and marketplace installs. The immutable config disables `.envrc`
 loading; the outer supervisor forwards no parent API-key environment.
 
+The optional worker field `"grok_transport": "acp-constrained-v1"` selects the
+constrained ACP1 broker in `work_grok_acp.py`. It belongs only in a newly staged
+Grok worker config. Its default is `headless-v1`; API catalogs, frozen recipes,
+historical configs and other providers retain their existing identities. The
+worker composition root injects the selected factory; selection performs no
+native I/O. There is no fallback from ACP into the old headless callback.
+
+ACP uses a fresh session, no leader or G1, no client filesystem/terminal RPC,
+and no supplied MCP servers. Documented bare `ask` rules route native reads and
+commands through the broker, with no `Bash(*)`/edit/read auto-allow rules. Only a
+provided `allow_once` option can admit a scoped native operation. Unsupported
+operations select the provided `reject_once` option, with fixed guidance in the
+controller prompt and response metadata; they do not send ACP cancellation.
+Plan/review admit scoped native reads, a closed Git/search command set and the
+immutable public progress helper. Implementation additionally permits workspace
+edits and closed make/Cargo/Python test commands. Publishing, shell substitution,
+redirection, outside working directories, external tools and unknown operations
+are denied. Git commands require a closed harmless configuration subset; includes,
+filters, signature programs and executable helpers are outside it.
+
+The existing supervisor still owns sandboxing, progress deadlines, resource
+bounds, scope-stop proof and native-auth cleanup. Build/test code retains that
+existing implementation boundary. ACP framing/session/request identity and tool
+inputs are bounded and checked. Explicit native `PermissionCancelled` remains
+`blocked_permission`; actual worker/user interruption remains cancellation.
+Only final prompt-result usage is attributed, with ACP's full input count
+projected into the existing disjoint headless-end accounting buckets. Missing
+counters stay unknown; per-step notifications are not summed. No SQL change is
+needed. The new authority module is published by setup-runner and appears in
+both protected-path maps, requiring the normal paired verifier/runtime rollout.
+
+Validation includes an owned fake ACP child, partial frames, denial followed by
+continued output, real progress-helper execution and cleanup failures. Installed
+Grok1.0.92 accepted the selected flag set and ACP1 initialize request in an empty
+HOME (using that isolated directory as test cwd) with networking disabled; offline inspect loaded the ask/deny rules and
+managed MCP lockdown. These are handshake/config checks, not proof of a real
+model/tool-permission session. No account/model/quota call was made for them.
+
 
 ### Muse native source capability (policy10 / migration0019)
 

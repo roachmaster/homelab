@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS forge_agent.schema_migrations (
 DO $apply_cutover_guard$
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM forge_agent.schema_migrations
-               WHERE version = 52 AND name = 'pg_proxy_preparation') THEN
+               WHERE version = 54 AND name = 'pg_proxy_preparation') THEN
   RAISE EXCEPTION 'cutover requires the preparation migration (51) first';
  END IF;
 END
@@ -35,8 +35,8 @@ SELECT NOT EXISTS (
 \gset
 
 \if :apply_0052
-\ir migrations/0053_pg_proxy_cutover.sql
-INSERT INTO forge_agent.schema_migrations(version,name) VALUES(53,'pg_proxy_cutover');
+\ir migrations/0055_pg_proxy_cutover.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(55,'pg_proxy_cutover');
 \endif
 
 COMMIT;

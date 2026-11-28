@@ -251,6 +251,37 @@ export async function exerciseAgentsTriage({ page, relay, check, screenshot, ori
     await check(page.locator('#agents-worker')).toHaveText('Worker ready');
     await check(kind).not.toHaveText('Complete');
     await check(page.locator('#agents-delivery-state')).toHaveText('Main verification queued');
+    await page.locator('#agents-back').click();
+    const defectId = relay.seedDefects(corpus.automatic);
+    await page.locator('#agents-refresh').click();
+    const kindFilter = page.locator('#agents-task-kind');
+    await kindFilter.selectOption('defect');
+    await check(rows).toHaveCount(1);
+    await check(row(defectId)).toContainText('Defect');
+    await check(row(defectId)).toContainText('high');
+    for (const viewport of [{width:1440,height:1000},{width:390,height:844}]) {
+      await page.setViewportSize(viewport);
+      await check(kindFilter).toBeVisible();
+      const bounds=await kindFilter.boundingBox();
+      assert(bounds && bounds.height >= 44 && bounds.width >= 44, 'kind filter is touch sized');
+      await select(defectId).focus();
+      await page.keyboard.press('Enter');
+      await check(page.locator('#agents-defect-badge')).toHaveText('Defect · high');
+      await check(page.locator('#agents-defect-context')).toContainText('Failure remains visible');
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), 'defect reader fits viewport');
+      await top(page);
+      await screenshot(page, `ide-agents-defect-${viewport.width}.png`);
+      await page.locator('#agents-defect-discovery').focus();
+      await page.keyboard.press('Enter');
+      await check(page.locator('#agents-filed-defects')).toContainText('Report parser loses an observed failure');
+      await page.locator(`#agents-filed-defects [data-row-id="${defectId}"] .fg-row-select`).click();
+      await check(page.locator('#agents-defect-badge')).toBeVisible();
+      await page.locator('#agents-back').click();
+    }
+    await kindFilter.selectOption('feature');
+    await check(row(defectId)).toHaveCount(0);
+    await kindFilter.selectOption('all');
+    await check(row(defectId)).toBeVisible();
     assert.equal(mutationCount(), mutationsBefore, 'triage navigation and evidence reads never mutate any assignment');
   } finally {
     releaseRead();

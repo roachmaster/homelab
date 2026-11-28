@@ -746,7 +746,7 @@ class WorkHttpApiTest(unittest.TestCase):
             dup_json = json.dumps(submit_body()).replace(
                 '"mode": "plan"', '"mode": "plan", "mode": "review"'
             ).encode("utf-8")
-            overescaped = json.dumps(submit_body(prompt="a" * 3000)).replace("a", "\\u0061").encode("utf-8")
+            overescaped = json.dumps(submit_body(prompt="a" * (work_api.MAX_REQUEST_BYTES // 6 + 1))).replace("a", "\\u0061").encode("utf-8")
             self.assertGreater(len(overescaped), work_api.MAX_REQUEST_BYTES)
 
             for body, extra_headers, status, expected in [

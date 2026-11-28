@@ -206,6 +206,9 @@ fn final_acceptance_projection_requires_matching_hosted_evidence() {
 #[test]
 fn automatic_repair_is_an_explicit_implementation_only_choice() {
     let mut request = WorkRequest::WorkSubmit {
+        defect_metadata_version: None,
+        task_kind: WorkTaskKind::Feature,
+        defect: None,
         request_id: "submit".into(),
         project_alias: "homelab".into(),
         base_revision: "b".repeat(40),
@@ -299,6 +302,7 @@ fn per_event_retry_and_lifetime_forty_validate_in_the_actual_work_response() {
     assert!(task.is_valid());
     assert_eq!(task.review.as_ref().unwrap().round, 40);
     let request = WorkRequest::WorkGet {
+        defect_metadata_version: None,
         request_id: "event-budget".into(),
         project_alias: "homelab".into(),
         task_id: TASK.into(),
@@ -358,6 +362,9 @@ fn autonomous_policy_and_phase_contracts_are_strict_and_request_digest_is_plan_o
     assert!(serde_json::from_value::<WorkWorkflowPolicy>(unknown).is_err());
     assert!(serde_json::from_str::<WorkWorkflowPhase>("\"manual_approve\"").is_err());
     let mut request = WorkRequest::WorkSubmit {
+        defect_metadata_version: None,
+        task_kind: WorkTaskKind::Feature,
+        defect: None,
         request_id: "submit".into(),
         project_alias: "homelab".into(),
         base_revision: "a".repeat(40),

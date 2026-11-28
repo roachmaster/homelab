@@ -240,11 +240,11 @@ check_caller_routing() {
 
 check_ready() {
     local ready=true
-    if ! migration_applied 52 pg_proxy_preparation; then
+    if ! migration_applied 54 pg_proxy_preparation; then
         printf 'NOT READY: preparation migration (50) is not applied.\n'
         ready=false
     fi
-    if migration_applied 53 pg_proxy_cutover; then
+    if migration_applied 55 pg_proxy_cutover; then
         printf 'NOT READY: cutover migration (53) is already applied.\n'
         ready=false
     fi
@@ -275,9 +275,9 @@ if [[ "$action" == --check ]]; then
 fi
 
 # --- cutover run ----------------------------------------------------------
-migration_applied 52 pg_proxy_preparation ||
+migration_applied 54 pg_proxy_preparation ||
     fail 'Cutover requires the preparation migration (52) first.'
-migration_applied 53 pg_proxy_cutover &&
+migration_applied 55 pg_proxy_cutover &&
     fail 'Cutover migration (53) is already applied; nothing to do.'
 
 # Prove caller routing before stopping anything: cutover refuses

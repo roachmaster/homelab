@@ -290,7 +290,8 @@ class AuthorHandoffSchemaTest(unittest.TestCase):
                     with closing(cluster.connect('postgres')) as connection, connection.cursor() as cursor:
                         values = []
                         for table in ('coding_workflows', 'coding_tasks', 'coding_attempts', 'coding_events', 'coding_reconciliation_receipts', 'coding_result_chunks'):
-                            cursor.execute('SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM forge_agent.' + table + ' t')
+                            projection = "to_jsonb(t)-ARRAY['task_kind','defect']" if table == 'coding_tasks' else 'to_jsonb(t)'
+                            cursor.execute('SELECT jsonb_agg(' + projection + ' ORDER BY to_jsonb(t)::text) FROM forge_agent.' + table + ' t')
                             values.append(cursor.fetchone()[0])
                         cursor.execute('SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=38 ORDER BY version')
                         values.append(cursor.fetchall())
@@ -301,7 +302,7 @@ class AuthorHandoffSchemaTest(unittest.TestCase):
                 self.assertEqual(snapshot(), before)
                 with closing(cluster.connect('postgres')) as connection, connection.cursor() as cursor:
                     cursor.execute('SELECT max(version) FROM forge_agent.schema_migrations')
-                    self.assertEqual(cursor.fetchone(), (51,))
+                    self.assertEqual(cursor.fetchone(), (53,))
             finally:
                 cluster.stop()
 

@@ -7,6 +7,7 @@ import json
 import psycopg2
 import re
 import unicodedata
+from work_defect import validate_defect
 from uuid import UUID, uuid4
 
 from psycopg2.extras import Json, RealDictCursor, register_uuid
@@ -182,6 +183,9 @@ def _summary(row):
         "revision": row["revision"],
         "created_at": _timestamp(row["created_at"]),
     }
+    item["task_kind"] = row.get("task_kind", "feature")
+    item["defect"] = row.get("defect")
+    item["filed_defects"] = row.get("filed_defects", [])
     if row.get("title") is not None:
         item["title"] = row["title"]
     if "workflow_required" in row:
@@ -224,7 +228,7 @@ def _public_failure(payload):
 
 def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
                           prompt, acceptance_criteria, auto_repair=False, workflow_policy_digest=None,
-                          workflow_policy_id=None):
+                          workflow_policy_id=None, task_kind="feature", defect=None):
     return sha256_canonical({
         "project_alias": project_alias,
         "base_revision": base_revision,
@@ -232,6 +236,7 @@ def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
         "agent_profile": agent_profile,
         "prompt": prompt,
         "acceptance_criteria": acceptance_criteria,
+        **({"task_kind":task_kind,"defect":defect} if task_kind == "defect" else {}),
         **({"auto_repair":True} if auto_repair else {}),
         **({"workflow_policy_digest":workflow_policy_digest} if workflow_policy_digest is not None else {}),
         **({"workflow_policy_id":str(workflow_policy_id)} if workflow_policy_id is not None else {}),
@@ -709,7 +714,8 @@ class WorkStore:
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
                prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False,
                workflow_policy_digest=None,resolve_workflow=lambda:None,delivery_admission=None,actor=None,
-               workflow_policy_id=None):
+               workflow_policy_id=None, task_kind="feature", defect=None):
+        defect = validate_defect(task_kind, defect)
         self._require_project(project_alias)
         if type(auto_repair) is not bool:
             raise Rejected(400,"invalid_request")
@@ -722,7 +728,7 @@ class WorkStore:
             prompt=prompt,
             acceptance_criteria=acceptance_criteria,
             auto_repair=auto_repair,workflow_policy_digest=workflow_policy_digest,
-            workflow_policy_id=workflow_policy_id,
+            workflow_policy_id=workflow_policy_id, task_kind=task_kind, defect=defect,
         )
         lock_scope = f"{self._owner}\n{project_alias}"
         with self._transaction() as cursor:
@@ -742,7 +748,7 @@ class WorkStore:
                     # so a retry that switches between the two forms replays.
                     core = dict(project_alias=project_alias, base_revision=base_revision, mode=mode,
                                 agent_profile=agent_profile, prompt=prompt,
-                                acceptance_criteria=acceptance_criteria, auto_repair=auto_repair)
+                                acceptance_criteria=acceptance_criteria, auto_repair=auto_repair, task_kind=task_kind, defect=defect)
                     digests, ids = {None, workflow_policy_digest}, {None, workflow_policy_id}
                     cursor.execute("""SELECT w.workflow_id, w.policy_digest FROM forge_agent.coding_tasks t
                                       JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id
@@ -794,6 +800,19 @@ class WorkStore:
                     or recipe.generation_token_limit is not None):
                 raise ValueError("Recipe resolver returned an invalid pinned recipe")
 
+            if defect is not None:
+                for field, table, column in (("discovering_task_id", "coding_tasks", "id"),
+                                              ("discovering_workflow_id", "coding_workflows", "workflow_id")):
+                    if field in defect:
+                        cursor.execute(f"SELECT 1 FROM forge_agent.{table} WHERE owner_id=%s AND project_alias=%s AND {column}=%s FOR SHARE",
+                                       (self._owner, project_alias, UUID(defect[field])))
+                        found = cursor.fetchone() is not None
+                        if not found and field == "discovering_workflow_id" and self._external_workflow_for(project_alias) is not None:
+                            cursor.execute("SELECT 1 FROM forge_external_workflow.workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s FOR SHARE",
+                                           (self._owner, project_alias, UUID(defect[field])))
+                            found = cursor.fetchone() is not None
+                        if not found:
+                            raise Rejected(400, "invalid_request", "defect." + field)
             task_id = uuid4()
             actor = require_actor(actor, self._owner)
             receipt = {
@@ -816,6 +835,9 @@ class WorkStore:
                 base_revision, mode, agent_profile, title, prompt, acceptance_criteria,
                 Json(recipe.to_dict()), recipe.digest,auto_repair,mode=="implement",
             ))
+            if task_kind == "defect":
+                cursor.execute("UPDATE forge_agent.coding_tasks SET task_kind=%s,defect=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",
+                               (task_kind,Json(defect),self._owner,project_alias,task_id))
             self._ensure_review_policy(cursor,project_alias,task_id)
             if workflow is not None:
                 cursor.execute("INSERT INTO forge_agent.coding_workflows(owner_id,project_alias,root_task_id,policy_digest,snapshot) VALUES(%s,%s,%s,%s,%s) RETURNING workflow_id",(self._owner,project_alias,task_id,workflow["policy_digest"],Json(workflow)))
@@ -836,6 +858,37 @@ class WorkStore:
             cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
             return receipt
 
+    def _filed_defects(self, cursor, project_alias, row):
+        workflow_id = row.get('workflow_id')
+        if workflow_id is None and self._external_workflow_for(project_alias) is not None:
+            cursor.execute("SELECT workflow_id FROM forge_external_workflow.tasks WHERE owner_id=%s AND project_alias=%s AND task_id=%s",
+                           (self._owner, project_alias, row['id']))
+            link = cursor.fetchone()
+            workflow_id = link['workflow_id'] if link else None
+        external_enabled = self._external_workflow_for(project_alias) is not None
+        external_filter = "AND NOT forge_external_workflow_api.is_internal(owner_id,project_alias,id)" if external_enabled else ""
+        external_membership = """OR EXISTS (
+            SELECT 1 FROM forge_external_workflow.tasks membership
+            WHERE membership.owner_id=member.owner_id AND membership.project_alias=member.project_alias
+              AND membership.task_id=member.id AND membership.workflow_id=%s::uuid
+        )""" if external_enabled else ""
+        workflow_key = str(workflow_id) if workflow_id else None
+        parameters = [self._owner, project_alias, str(row['id']), workflow_key, workflow_key, workflow_key]
+        if external_enabled:
+            parameters.append(workflow_key)
+        cursor.execute(f"""SELECT id AS task_id,title,defect->>'severity' AS severity
+            FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND task_kind='defect'
+            AND (defect->>'discovering_task_id'=%s
+                 OR (%s::text IS NOT NULL AND defect->>'discovering_workflow_id'=%s)
+                 OR EXISTS (
+                     SELECT 1 FROM forge_agent.coding_tasks member
+                     WHERE member.owner_id=coding_tasks.owner_id AND member.project_alias=coding_tasks.project_alias
+                       AND member.id=(coding_tasks.defect->>'discovering_task_id')::uuid
+                       AND (member.workflow_id=%s::uuid {external_membership})
+                 ))
+            AND parent_task_id IS NULL {external_filter} ORDER BY created_at,id LIMIT 50""", parameters)
+        return [{**item,'task_id':str(item['task_id'])} for item in cursor.fetchall()]
+
     def get(self, *, project_alias, task_id):
         self._require_project(project_alias)
         if not isinstance(task_id, UUID):
@@ -848,7 +901,7 @@ class WorkStore:
             cursor.execute("""
                 SELECT id, correlation_id, project_alias, base_revision, mode, agent_profile,
                        recipe_digest, status, revision, created_at,
-                       title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id,workflow_review_id
+                       task_kind, defect, title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id,workflow_review_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
             """, (self._owner, project_alias, task_id))
@@ -904,7 +957,7 @@ class WorkStore:
                         reconciliation_receipt_id = str(rec["receipt_id"])
 
             detail = {
-                **_summary(row),
+                **_summary({**row, "filed_defects":self._filed_defects(cursor, project_alias, row)}),
                 "review_required":row["review_required"],
                 "workflow_required":row["workflow_required"],
                 "workflow":self._workflow_projection(cursor,row),
@@ -952,6 +1005,20 @@ class WorkStore:
                 detail["correlation_cicd"] = correlation_cicd
             return detail
 
+    @staticmethod
+    def _delivery_main_binding(delivery):
+        """Only the task-authorized delivery projection can widen CI visibility."""
+        if not isinstance(delivery, dict) or not isinstance(delivery.get('verification'), dict):
+            return None, None
+        action, commit = delivery.get('verification_id'), delivery.get('commit_sha')
+        try:
+            if (not isinstance(action, str) or str(UUID(action)) != action
+                    or not isinstance(commit, str) or not re.fullmatch('[0-9a-f]{40}', commit)):
+                return None, None
+        except ValueError:
+            return None, None
+        return action, commit
+
     def _correlation_cicd_projection(self, cursor, task, *, delivery=None):
         from work_agent_branch import branch_scope_for_branch, default_agent_branch
         from work_pipeline_projection import project_correlation_cicd
@@ -960,6 +1027,7 @@ class WorkStore:
             return None
         project_alias = task["project_alias"]
         corr_str = str(correlation_id)
+        main_action, main_commit = self._delivery_main_binding(delivery)
 
         def _can_select(relation_name):
             cursor.execute(
@@ -1065,6 +1133,8 @@ class WorkStore:
                 "owner_id": self._owner,
                 "project_alias": project_alias,
                 "correlation_ids": [str(c) for c in linked_corrs],
+                "main_action": main_action,
+                "main_commit": main_commit,
             })
             for r in stage_rows:
                 item = dict(r)
@@ -1083,6 +1153,8 @@ class WorkStore:
                 "project_alias": project_alias,
                 "correlation_ids": linked_corr_strs,
                 "commit_shas": candidate_commits,
+                "main_action": main_action,
+                "main_commit": main_commit,
             })
             for r in jenkins_rows:
                 item = dict(r)
@@ -1160,6 +1232,8 @@ class WorkStore:
                 "root_id": root_id,
             })
             allowed_corrs = list({r["correlation_id"] for r in family_rows} | {correlation_id})
+            main_action, main_commit = self._delivery_main_binding(
+                self._delivery_projection(cursor, project_alias, task_id))
 
             cursor.execute("SELECT to_regclass('forge_agent.jenkins_stage_results') IS NOT NULL AS has_table")
             if not cursor.fetchone()["has_table"]:
@@ -1172,6 +1246,8 @@ class WorkStore:
                 "action_id": action_id,
                 "correlation_ids": allowed_corrs,
                 "stage_id": stage_id,
+                "main_action": main_action,
+                "main_commit": main_commit,
             })
             if not stage_rows:
                 raise Rejected(404, "not_found")
@@ -1258,8 +1334,10 @@ class WorkStore:
             "error_excerpt": combined_excerpt,
         }
 
-    def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None, delivery_visible=True):
+    def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None, delivery_visible=True, task_kind_filter=None):
         self._require_project(project_alias)
+        if task_kind_filter is not None and task_kind_filter not in ("feature", "defect"):
+            raise Rejected(400, "invalid_request", "defect.task_kind_filter")
         if status_filter is not None and (not isinstance(status_filter, str) or status_filter not in VALID_LIST_FILTERS):
             raise Rejected(400, "invalid_request")
         if type(limit) is not int or not 1 <= limit <= 50:
@@ -1267,7 +1345,7 @@ class WorkStore:
         if cursor_task_id is not None and not isinstance(cursor_task_id, UUID):
             raise Rejected(400, "invalid_request")
         if status_filter in TASK_SCOPES:
-            return self._list_task_scope(project_alias, status_filter, limit, cursor_task_id, delivery_visible)
+            return self._list_task_scope(project_alias, status_filter, limit, cursor_task_id, delivery_visible, task_kind_filter)
 
         mode = {"repeatable_read": True} if self._external_workflow_for(project_alias) is not None else {"read_only": True}
         external_filter = "AND NOT forge_external_workflow_api.is_internal(t.owner_id,t.project_alias,t.id)" if self._external_workflow_for(project_alias) is not None else ""
@@ -1289,9 +1367,11 @@ class WorkStore:
                                 "project_alias": project_alias,
                                 "exclude_external": external_filter != "",
                                 "status_filter": status_filter,
+                                "task_kind_filter": task_kind_filter,
                                 "cursor_created_at": cursor_created_at,
                                 "cursor_id": cursor_task_id,
                                 "limit": limit + 1})
+            for row in rows:row["filed_defects"]=self._filed_defects(cursor, project_alias, row)
             if self.retry_events is not None:
                 for row in rows:row["retry_event"]=self._retry_projection(cursor,row)
             if self._delivery_enabled:
@@ -1321,13 +1401,15 @@ class WorkStore:
             "next_cursor": next_cursor,
         }
 
-    def _list_task_scope(self, project_alias, scope, limit, cursor_task_id, delivery_visible=True):
+    def _list_task_scope(self, project_alias, scope, limit, cursor_task_id, delivery_visible=True, task_kind_filter=None):
         """Classify complete workflow roots before counting and keyset paging.
 
         Raw statuses remain evidence. A running workflow can have a stopped
         author while an internal reviewer or repair task performs the next step.
         The independent external provider retains its existing scope guard.
         """
+        from work_diagnostic_archive import archive_activity
+        archived_at = archive_activity()
         external = self._external_workflow_for(project_alias)
         external_join = ""
         external_filter = ""
@@ -1355,11 +1437,11 @@ class WorkStore:
         classified = f"""
             WITH classified AS (
                 SELECT t.id,t.correlation_id,t.project_alias,t.base_revision,t.mode,t.agent_profile,t.workflow_id,
-                       t.recipe_digest,t.status,t.revision,t.created_at,t.title,
+                       t.recipe_digest,t.status,t.revision,t.created_at,t.title,t.task_kind,t.defect,
                        (t.workflow_required OR {phase} IS NOT NULL) AS workflow_required,
                        {phase} AS workflow_phase, {enabled} AS workflow_enabled,
                        {delivery} AS delivery,
-                       greatest(t.updated_at,coalesce(({delivery}->>'updated_at')::timestamptz,t.updated_at),coalesce(w.updated_at,t.updated_at),coalesce((
+                       greatest(t.updated_at,coalesce({archived_at},t.updated_at),coalesce(({delivery}->>'updated_at')::timestamptz,t.updated_at),coalesce(w.updated_at,t.updated_at),coalesce((
                            SELECT max(member.updated_at) FROM forge_agent.coding_tasks member
                            WHERE (member.owner_id,member.project_alias,member.workflow_id)=
                                  (w.owner_id,w.project_alias,w.workflow_id)
@@ -1369,6 +1451,7 @@ class WorkStore:
                             WHEN {phase} IS NOT NULL THEN
                                 CASE WHEN {phase}='escalated' OR NOT {enabled} THEN 'attention' ELSE 'active' END
                             WHEN t.workflow_required THEN 'attention'
+                            WHEN {archived_at} IS NOT NULL THEN 'history'
                             WHEN t.status IN ('completed','cancelled') THEN 'history'
                             WHEN t.status IN ('queued','running','cancel_requested') THEN 'active'
                             ELSE 'attention' END AS task_scope
@@ -1377,6 +1460,7 @@ class WorkStore:
                   ON (w.owner_id,w.project_alias,w.workflow_id)=(t.owner_id,t.project_alias,t.workflow_id)
                 {external_join}
                 WHERE t.owner_id=%s AND t.project_alias=%s
+                  AND (%s::text IS NULL OR t.task_kind=%s::text)
                   AND (w.workflow_id IS NULL OR t.id=w.root_task_id)
                   {external_filter}
             )
@@ -1388,12 +1472,12 @@ class WorkStore:
                        count(*) FILTER(WHERE task_scope='attention') AS attention,
                        count(*) FILTER(WHERE task_scope='history') AS history,count(*) AS "all"
                 FROM classified
-            """, (self._owner, project_alias))
+            """, (self._owner, project_alias, task_kind_filter, task_kind_filter))
             counts = dict(cursor.fetchone())
             anchor = None
             if cursor_task_id is not None:
                 cursor.execute(classified + "SELECT id,list_updated_at FROM classified WHERE id=%s",
-                               (self._owner, project_alias, cursor_task_id))
+                               (self._owner, project_alias, task_kind_filter, task_kind_filter, cursor_task_id))
                 anchor = cursor.fetchone()
                 if anchor is None:
                     raise Rejected(400, "invalid_request")
@@ -1401,10 +1485,11 @@ class WorkStore:
                 SELECT * FROM classified WHERE (%s='all' OR task_scope=%s)
                   AND (%s::timestamptz IS NULL OR (list_updated_at,id)<(%s::timestamptz,%s::uuid))
                 ORDER BY list_updated_at DESC,id DESC LIMIT %s
-            """, (self._owner, project_alias, scope, scope,
+            """, (self._owner, project_alias, task_kind_filter, task_kind_filter, scope, scope,
                   anchor["list_updated_at"] if anchor else None,
                   anchor["list_updated_at"] if anchor else None, cursor_task_id, limit + 1))
             rows = cursor.fetchall()
+            for row in rows:row["filed_defects"]=self._filed_defects(cursor, project_alias, row)
             if self.retry_events is not None:
                 for row in rows:row["retry_event"]=self._retry_projection(cursor,row)
             page = rows[:limit]
@@ -1803,7 +1888,9 @@ class WorkStore:
 
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
             from work_workflow import BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority
-            transition_kind=('plan_direction' if isinstance(_authority,BoundPlanDirectionAuthority)
+            from work_plan_lineage_recovery import BoundPlanLineageAuthority
+            transition_kind=('plan_lineage_fix' if isinstance(_authority,BoundPlanLineageAuthority)
+                             else 'plan_direction' if isinstance(_authority,BoundPlanDirectionAuthority)
                              else 'native_startup' if isinstance(_authority,BoundUnstartedPlanAuthority)
                              else 'stopped_binary_pin' if isinstance(_authority,BoundBinaryPinAuthority)
                              else 'provider_model_route' if isinstance(_authority,BoundProviderModelAuthority)
@@ -1988,7 +2075,8 @@ class WorkStore:
             from work_reviewer_correction import BoundReviewerCorrectionAuthority
             from work_provider_model_route import BoundProviderModelAuthority,BoundBinaryPinAuthority
             from work_agent_handoff import BoundAuthorHandoffAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority)) or authority.store is not self:
+            from work_plan_lineage_recovery import BoundPlanLineageAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundUnstartedPlanAuthority,BoundPlanDirectionAuthority,BoundReviewerCorrectionAuthority,BoundProviderModelAuthority,BoundBinaryPinAuthority,BoundAuthorHandoffAuthority,BoundPlanLineageAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 

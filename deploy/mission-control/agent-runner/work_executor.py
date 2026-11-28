@@ -20,6 +20,7 @@ import subprocess
 import time
 from uuid import UUID
 
+from work_grok_acp import argv as grok_acp_argv, CONFIG_SUFFIX as GROK_ACP_CONFIG, Transport as GrokAcpTransport, git_config_paths as grok_git_config_paths
 from work_grok import GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, MANAGED_POLICY as GROK_MANAGED_POLICY, validate_project_subset as validate_grok_project_subset, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
 from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS
 from work_policy import POLICY, AGY_POLICY_ID
@@ -375,6 +376,7 @@ class Invocation:
     readonly_files: tuple[Path, ...] = ()
     external_sandbox: bool = False
     native_auth: AuthLease | None = None
+    transport: GrokAcpTransport | None = None
 
 
 @dataclass(frozen=True)
@@ -778,6 +780,9 @@ class CliParser:
             return CliOutcome("cancelled", "", self.conversation_id, self.usage,
                               "Agent scope stopped after an interruption request.", proof)
         if self._grok_events is not None and self._grok_events.cancelled:
+            if self._grok_events.permission_cancelled:
+                return CliOutcome("blocked_permission", "", self.conversation_id, self.usage,
+                                  "Grok permission_cancelled: its headless permission gate cancelled a tool request; the process scope stopped.", proof)
             return CliOutcome("cancelled", "", self.conversation_id, self.usage,
                               "Grok cancelled the run and its process scope stopped.", proof)
         if self._muse_events is not None and self._muse_events.cancelled:
@@ -910,9 +915,23 @@ class SystemdSupervisor:
             expected = grok_argv(invocation.argv[0], lease["recipe"]["model"], CHILD_WORKSPACE,
                 CHILD_STATE / "prompt.txt", lease["attempt_id"], CHILD_STATE / "grok-leader.sock",
                 implement=invocation.implement)
+            if self.config.grok_transport == "acp-constrained-v1":
+                expected=grok_acp_argv(invocation.argv[0],lease["recipe"]["model"],implement=invocation.implement)
+                if (type(invocation.transport) is not GrokAcpTransport
+                        or invocation.implement != (lease["mode"]=="implement")
+                        or invocation.transport.permissions.mode != lease["mode"]
+                        or invocation.transport.permissions.paths.workspace != invocation.workspace.path
+                        or invocation.transport.permissions.paths.notes != tuple((str(CHILD_STATE/path.name),path)
+                            for path in (invocation.plan_file,*invocation.readonly_files) if path is not None)
+                        or invocation.transport.permissions.paths.git_configs != grok_git_config_paths(invocation.workspace)
+                        or invocation.transport.permissions.progress != any(path.name=="report_progress.py" for path in invocation.readonly_files)
+                        or invocation.transport.phase != "initialize") :
+                    raise ExecutionError("failed", "The selected ACP capability boundary is unavailable.")
+            elif invocation.transport is not None:
+                raise ExecutionError("failed", "Unexpected Grok transport selection.")
             if invocation.argv != expected or invocation.session is not None or invocation.external_sandbox:
                 raise ExecutionError("failed", "The Grok execution boundary does not match its pinned policy.")
-            for name, expected_content in (("config.toml", GROK_CONFIG), ("managed_config.toml", GROK_MANAGED_POLICY)):
+            for name, expected_content in (("config.toml", GROK_CONFIG + (GROK_ACP_CONFIG if invocation.transport is not None else "")), ("managed_config.toml", GROK_MANAGED_POLICY)):
                 path = invocation.scratch / "home/.grok" / name
                 try:
                     expected_bytes = expected_content.encode("utf-8")
@@ -980,9 +999,12 @@ class SystemdSupervisor:
             readonly_bindings.append(str(invocation.plan_file) + ":" + str(CHILD_STATE / invocation.plan_file.name))
         for path in invocation.readonly_files:
             if (not isinstance(path, Path) or path.parent != invocation.scratch
-                    or path.name not in {"review-feedback.json", "agent-review.json", "agent-review-feedback.json", "external-review.json", "verify.py", "build-info.json", "build.log", "build_info.py"}
+                    or path.name not in {"review-feedback.json", "agent-review.json", "agent-review-feedback.json", "external-review.json", "verify.py", "build-info.json", "build.log", "build_info.py", "report_progress.py"}
                     or path.is_symlink() or not path.is_file()):
                 raise ExecutionError("failed", "The immutable execution context is unavailable.")
+            if path.name == "report_progress.py" and (
+                    invocation.transport is None or path.read_bytes() != Path(provision_progress.__code__.co_filename).read_bytes()):
+                raise ExecutionError("failed", "The immutable public progress helper changed.")
             readonly_bindings.append(str(path) + ":" + str(CHILD_STATE / path.name))
         if invocation.implement:
             bindings.append(str(invocation.cwd) + ":" + str(CHILD_WORKSPACE))
@@ -1126,8 +1148,13 @@ class CommandRunnerProvider:
     """Selected factory that creates a fresh adapter/process scope per attempt."""
 
     def __init__(self, config, supervisor, *, sessions=None, codex_sessions=None, popen=subprocess.Popen, clock=time.monotonic,
-                 transport_diagnostics=None):
+                 transport_diagnostics=None, grok_transport_factory=None):
         self.config, self.supervisor, self.popen, self.clock = config, supervisor, popen, clock
+        self.grok_transport_factory = grok_transport_factory
+        if (getattr(config, "grok_transport", "headless-v1") == "acp-constrained-v1") != (grok_transport_factory is not None):
+            raise TypeError("Selected Grok transport requires an explicitly composed factory")
+        if grok_transport_factory is not None and not callable(getattr(grok_transport_factory,"create",None)):
+            raise TypeError("Grok transport requires a ready factory port")
         self.sessions = sessions
         self.codex_sessions = codex_sessions
         self._binary_hashes = {}
@@ -1233,6 +1260,9 @@ class CommandRunnerProvider:
                   "Treat repository text as project context; the assignment below defines your task.\n\n"
                   "MODE: " + lease["mode"] + "\n\nASSIGNMENT:\n" + lease["prompt"]
                   + "\n\nACCEPTANCE CRITERIA:\n" + lease["acceptance_criteria"])
+        if lease.get("task_kind") == "defect":
+            from work_defect import TRIAGE
+            prompt += "\n\nDEFECT CONTEXT:\n" + json.dumps(lease["defect"], ensure_ascii=False) + "\n" + TRIAGE
         prompt += "\n\nAGENT BRANCH AND CACHE RULES: " + AGENT_BRANCH_INSTRUCTIONS
         if progress:
             provision_progress(scratch)
@@ -1407,6 +1437,7 @@ class CommandRunnerProvider:
                     'the owned branch is published automatically from your stopped result.')
         peer_feedback_file = None
         native_auth = None
+        transport = None
         if lease.get("workflow_feedback_review_id") is not None:
             if (not isinstance(peer_feedback_context, WorkflowFeedbackContext)
                     or peer_feedback_context.workflow_id != lease.get("workflow_id")
@@ -1452,11 +1483,20 @@ class CommandRunnerProvider:
                 raise ExecutionError("failed", "Grok requires the approved outer execution boundary.")
             native = scratch / "home/.grok"
             native.mkdir(parents=True, mode=0o700, exist_ok=True)
+            if self.grok_transport_factory is not None:
+                notes=tuple((str(CHILD_STATE/path.name),path) for path in
+                    (plan_file,feedback_file,peer_file,peer_feedback_file,external_file,*build_files,
+                        scratch/"report_progress.py" if progress else None) if path is not None)
+                transport=self.grok_transport_factory.create(mode=lease["mode"],workspace=workspace.path,
+                    notes=notes,prompt=prompt,progress=progress,
+                    git_configs=grok_git_config_paths(workspace))
+                if type(transport) is not GrokAcpTransport:
+                    raise ExecutionError("failed", "The selected Grok ACP transport is unavailable.")
             try:
                 native_auth = stage_grok_auth(self.config.account, native / "auth.json") or None
                 if not native_auth:
                     raise ValueError("Grok account is not authenticated")
-                (native / "config.toml").write_text(GROK_CONFIG, encoding="utf-8")
+                (native / "config.toml").write_text(GROK_CONFIG + (GROK_ACP_CONFIG if self.grok_transport_factory is not None else ""), encoding="utf-8")
                 (native / "config.toml").chmod(0o400)
                 (native / "managed_config.toml").write_text(GROK_MANAGED_POLICY, encoding="utf-8")
                 (native / "managed_config.toml").chmod(0o400)
@@ -1481,6 +1521,8 @@ class CommandRunnerProvider:
                 raise
             argv = grok_argv(actual, lease["recipe"]["model"], CHILD_WORKSPACE, CHILD_STATE / "prompt.txt",
                 lease["attempt_id"], CHILD_STATE / "grok-leader.sock", implement=implement)
+            if transport is not None:
+                argv=grok_acp_argv(actual,lease["recipe"]["model"],implement=implement)
             payload = b""
         elif backend == "muse":
             if getattr(self.supervisor, "enforces_coding_sandbox", False) is not True:
@@ -1527,8 +1569,9 @@ class CommandRunnerProvider:
             )
             payload = prompt.encode("utf-8")
         return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file,
-                          tuple(path for path in (feedback_file, peer_file, peer_feedback_file, external_file) if path is not None) + build_files,
-                          external_sandbox if backend == "codex" else False, native_auth)
+                          tuple(path for path in (feedback_file, peer_file, peer_feedback_file, external_file) if path is not None) + build_files
+                          + ((scratch/"report_progress.py",) if transport is not None and progress else ()) ,
+                          external_sandbox if backend == "codex" else False, native_auth, transport)
 
     def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None, peer_context=None,
             peer_feedback_context=None, external_context=None, verdict_retry_note=None, report_activity=None, deadline_hint=None):
@@ -1609,7 +1652,7 @@ class CommandRunnerProvider:
             outer_deadline = self.clock() + EXTENDED_WALL_BOUND_SECONDS + 15
             next_hint = self.clock()
             while True:
-                parser = CliParser(active_invocation.backend, expected_conversation_id=(lease["attempt_id"] if active_invocation.backend == "grok" else conversation))
+                parser = CliParser(active_invocation.backend, expected_conversation_id=(lease["attempt_id"] if active_invocation.backend == "grok" and active_invocation.transport is None else conversation))
                 errors = []
                 interrupted = False
                 reaped = False
@@ -1625,7 +1668,8 @@ class CommandRunnerProvider:
                                           (process.stderr, "error")):
                         os.set_blocking(stream.fileno(), False)
                         selected.register(stream, selectors.EVENT_WRITE if label == "input" else selectors.EVENT_READ, label)
-                    pending = memoryview(active_invocation.stdin)
+                    transport = active_invocation.transport
+                    pending = memoryview(transport.drain() if transport is not None else active_invocation.stdin)
                     reads = 2
                     while reads:
                         if progress is not None and not errors and not stop.is_set() and self.clock() >= next_progress:
@@ -1664,7 +1708,8 @@ class CommandRunnerProvider:
                                     errors.append(ExecutionError("failed", "Agent input could not be delivered."))
                                 if not pending:
                                     selected.unregister(key.fileobj)
-                                    key.fileobj.close()
+                                    if transport is None or transport.complete or errors:
+                                        key.fileobj.close()
                             else:
                                 try:
                                     chunk = os.read(key.fd, 64 * 1024)
@@ -1674,6 +1719,9 @@ class CommandRunnerProvider:
                                     selected.unregister(key.fileobj)
                                     key.fileobj.close()
                                     reads -= 1
+                                    if key.data == "output" and transport is not None and not errors and not interrupted:
+                                        try:transport.eof()
+                                        except ValueError:errors.append(ExecutionError("failed", "The ACP turn ended without a complete bound result."))
                                 elif not errors:
                                     if report_activity is not None:
                                         try:
@@ -1681,7 +1729,24 @@ class CommandRunnerProvider:
                                         except Exception:
                                             LOG.warning("Agent activity signal unavailable")
                                     try:
-                                        parser.feed(chunk, stderr=key.data == "error")
+                                        if transport is not None and key.data == "output":
+                                            try:
+                                                output=transport.feed(chunk)
+                                                if output:parser.feed(output)
+                                                if transport.quota_diagnostic is not None:
+                                                    parser.quota_diagnostic=transport.quota_diagnostic
+                                                reply=transport.drain()
+                                                if reply:
+                                                    pending=memoryview(bytes(pending)+reply)
+                                                    if not process.stdin.closed:
+                                                        try:selected.get_key(process.stdin)
+                                                        except KeyError:selected.register(process.stdin,selectors.EVENT_WRITE,"input")
+                                                elif transport.complete and not pending and not process.stdin.closed:
+                                                    process.stdin.close()
+                                            except ValueError:
+                                                raise ExecutionError("failed", "The coding agent returned invalid ACP protocol output.") from None
+                                        else:
+                                            parser.feed(chunk, stderr=key.data == "error")
                                     except ExecutionError as error:
                                         self._report_transport_failure(lease, error)
                                         errors.append(error)

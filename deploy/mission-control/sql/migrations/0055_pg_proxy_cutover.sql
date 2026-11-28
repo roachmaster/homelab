@@ -1,4 +1,4 @@
--- M53: Postgres proxy cutover. The proxy is now the only writer.
+-- M55: Postgres proxy cutover. The proxy is now the only writer.
 -- Revokes the muse_events mutating EXECUTE and the direct table
 -- writes for the caller roles and muse_events. Preserves SELECT,
 -- function EXECUTE, schema USAGE, and the muse_events read-only

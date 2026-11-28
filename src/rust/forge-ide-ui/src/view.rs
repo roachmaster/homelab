@@ -424,6 +424,9 @@ pub struct MetricProperty {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    SelectAgentTaskKind {
+        value: String,
+    },
     SelectAgentTaskScope {
         value: String,
     },

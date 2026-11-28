@@ -58,6 +58,7 @@ pub(super) struct Agents {
     list_loaded: bool,
     list_selected: Option<String>,
     task_scope: WorkListScope,
+    task_kind_filter: Option<WorkTaskKind>,
     scope_counts: Option<WorkScopeCounts>,
     list_cursor: Option<String>,
     list_history: Vec<Option<String>>,
@@ -272,9 +273,11 @@ impl Agents {
         self.direction = direction;
         self.request(
             WorkRequest::WorkList {
+                defect_metadata_version: Some(1),
                 request_id: id,
                 project_alias: self.project.clone(),
                 status_filter: Some(WorkListFilter::Scope(self.task_scope)),
+                task_kind_filter: self.task_kind_filter,
                 limit: 20,
                 cursor,
             },
@@ -285,6 +288,7 @@ impl Agents {
         if let Some(task_id) = self.selected.clone() {
             self.request(
                 WorkRequest::WorkGet {
+                    defect_metadata_version: Some(1),
                     request_id: id,
                     project_alias: self.project.clone(),
                     task_id,
@@ -622,6 +626,26 @@ impl Agents {
             }
             UiEvent::AgentsNext {} if work => self.list(id, Direction::Next, effects),
             UiEvent::AgentsPrevious {} if work => self.list(id, Direction::Previous, effects),
+            UiEvent::SelectAgentTaskKind { value } if work && self.pane == Pane::List => {
+                if self.pending.is_none() {
+                    let kind = match value.as_str() {
+                        "all" => Some(None),
+                        "feature" => Some(Some(WorkTaskKind::Feature)),
+                        "defect" => Some(Some(WorkTaskKind::Defect)),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind.filter(|kind| *kind != self.task_kind_filter) {
+                        self.task_kind_filter = kind;
+                        self.tasks.clear();
+                        self.list_loaded = false;
+                        self.list_selected = None;
+                        self.list_cursor = None;
+                        self.list_next = None;
+                        self.list_history.clear();
+                        self.list(id, Direction::Current, effects);
+                    }
+                }
+            }
             UiEvent::SelectAgentTaskScope { value } if work && self.pane == Pane::List => {
                 if self.pending.is_none() {
                     if let Some(scope) =
@@ -747,6 +771,9 @@ impl Agents {
                     let base_revision = self.base().unwrap_or_default().to_owned();
                     self.request(
                         WorkRequest::WorkSubmit {
+                            defect_metadata_version: Some(1),
+                            task_kind: WorkTaskKind::Feature,
+                            defect: None,
                             request_id: id,
                             project_alias: self.project.clone(),
                             base_revision,
@@ -772,6 +799,14 @@ impl Agents {
             }
             UiEvent::OpenAgentTask { task_id } if work => {
                 if self.tasks.iter().any(|t| t.task_id == task_id)
+                    || self.task.as_ref().is_some_and(|task| {
+                        task.defect.as_ref().is_some_and(|defect| {
+                            defect.discovering_task_id.as_ref() == Some(&task_id)
+                        }) || task
+                            .filed_defects
+                            .iter()
+                            .any(|link| link.task_id == task_id)
+                    })
                     || self
                         .task
                         .as_ref()
@@ -2138,6 +2173,60 @@ impl Agents {
             ),
             visible("agents-unsupported", active && !work && !usage),
         ]);
+        let defect = self.task.as_ref().and_then(|task| task.defect.as_ref());
+        let filed = self
+            .task
+            .as_ref()
+            .map_or(&[][..], |task| task.filed_defects.as_slice());
+        view.visibility.extend([
+            visible("agents-defect-panel", active && reader && defect.is_some()),
+            visible(
+                "agents-filed-defects-panel",
+                active && reader && !filed.is_empty(),
+            ),
+            visible(
+                "agents-defect-discovery",
+                active && reader && defect.is_some_and(|d| d.discovering_task_id.is_some()),
+            ),
+        ]);
+        view.badges.push(BadgeBinding {
+            id: "agents-defect-badge",
+            badge: badge(
+                defect.map_or_else(
+                    || "Defect".into(),
+                    |d| format!("Defect · {}", d.severity.value()),
+                ),
+                BadgeTone::Warning,
+            ),
+        });
+        view.texts.push(text(
+            "agents-defect-context",
+            defect.map_or_else(String::new, |d| {
+                format!(
+                    "{}\nWhere: {} · {} @ {}\nObserved: {}\nExpected: {}\nEvidence: {}{}",
+                    d.summary,
+                    d.location.repo_path,
+                    d.location.function,
+                    d.location.commit,
+                    d.observed_behavior,
+                    d.expected_behavior,
+                    d.evidence,
+                    d.discovering_workflow_id
+                        .as_ref()
+                        .map_or_else(String::new, |id| format!("\nDiscovering workflow: {id}"))
+                )
+            }),
+        ));
+        view.buttons.push(ButtonBinding {
+            id: "agents-defect-discovery",
+            disabled: !active || locked || pending,
+            pressed: None,
+            action: defect
+                .and_then(|d| d.discovering_task_id.as_ref())
+                .map(|task_id| RowAction::OpenAgentTask {
+                    task_id: task_id.clone(),
+                }),
+        });
         let review = self.task.as_ref().and_then(|task| task.review.as_ref());
         view.badges.push(BadgeBinding {
             id: "agents-verification-status",
@@ -2648,6 +2737,25 @@ impl Agents {
         ]);
         view.choices.extend([
             SelectBinding {
+                id: "agents-task-kind",
+                value: self
+                    .task_kind_filter
+                    .map_or("all", |kind| kind.value())
+                    .into(),
+                disabled: !enabled || pending,
+                options: [
+                    ("all", "All kinds"),
+                    ("feature", "Features"),
+                    ("defect", "Defects"),
+                ]
+                .into_iter()
+                .map(|(value, label)| OptionView {
+                    value: value.into(),
+                    label: label.into(),
+                })
+                .collect(),
+            },
+            SelectBinding {
                 id: "agents-task-scope",
                 value: self.task_scope.value().into(),
                 disabled: !enabled || pending,
@@ -2714,9 +2822,10 @@ impl Agents {
         view.lists.push(ListBinding {
             id: "agents-tasks",
             context: Some(format!(
-                "{}:{}:{}",
+                "{}:{}:{}:{}",
                 self.project,
                 self.task_scope.value(),
+                self.task_kind_filter.map_or("all", |kind| kind.value()),
                 self.list_cursor.as_deref().unwrap_or("")
             )),
             empty_message: if self.warning {
@@ -2725,6 +2834,10 @@ impl Agents {
                 "Loading tasks…"
             } else if !self.list_loaded {
                 "Tasks have not been loaded. Refresh to check this scope."
+            } else if self.task_kind_filter == Some(WorkTaskKind::Defect) {
+                "No defects in this scope."
+            } else if self.task_kind_filter == Some(WorkTaskKind::Feature) {
+                "No features in this scope."
             } else {
                 match self.task_scope {
                     WorkListScope::Active => {
@@ -2749,12 +2862,29 @@ impl Agents {
                     }
                     .into(),
                     icon: RowIcon::Symbol,
-                    kind_label: "Coding task",
+                    kind_label: if t.task_kind == WorkTaskKind::Defect {
+                        "Defect"
+                    } else {
+                        "Coding task"
+                    },
                     parent: None,
-                    secondary: t
-                        .retry_event
-                        .as_ref()
-                        .map_or_else(String::new, triage::retry_budget),
+                    secondary: {
+                        let retry = t
+                            .retry_event
+                            .as_ref()
+                            .map_or_else(String::new, triage::retry_budget);
+                        t.defect.as_ref().map_or(retry.clone(), |defect| {
+                            format!(
+                                "Defect · {}{}",
+                                defect.severity.value(),
+                                if retry.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" · {retry}")
+                                }
+                            )
+                        })
+                    },
                     depth: 0,
                     selected: self.list_selected.as_ref().or(self.selected.as_ref())
                         == Some(&t.task_id),
@@ -2764,7 +2894,13 @@ impl Agents {
                     },
                     toggle: None,
                     summary: Some(RowSummary {
-                        badge: self.task_summary_badge(t),
+                        badge: {
+                            let mut badge = self.task_summary_badge(t);
+                            if t.task_kind == WorkTaskKind::Defect {
+                                badge.label = format!("Defect · {}", badge.label);
+                            }
+                            badge
+                        },
                         tag: self
                             .catalog
                             .as_ref()
@@ -2780,6 +2916,31 @@ impl Agents {
                             ),
                         time: triage::task_time(t, self.now_ms),
                     }),
+                })
+                .collect(),
+        });
+        view.lists.push(ListBinding {
+            id: "agents-filed-defects",
+            context: self.selected.clone(),
+            empty_message: "No defects filed from this workflow.".into(),
+            rows: filed
+                .iter()
+                .map(|link| RowView {
+                    id: link.task_id.clone(),
+                    label: link.title.clone(),
+                    glyph: "◇".into(),
+                    icon: RowIcon::Symbol,
+                    kind_label: "Defect",
+                    parent: None,
+                    secondary: format!("Defect · {}", link.severity.value()),
+                    depth: 0,
+                    selected: false,
+                    expanded: None,
+                    action: RowAction::OpenAgentTask {
+                        task_id: link.task_id.clone(),
+                    },
+                    toggle: None,
+                    summary: None,
                 })
                 .collect(),
         });
@@ -3298,6 +3459,41 @@ fn work_failure(code: WorkFailure) -> &'static str {
 
 fn work_failure_reason(reason: WorkFailureReason) -> &'static str {
     match reason {
+        WorkFailureReason::DefectTaskKind => "Task kind must be feature or defect.",
+        WorkFailureReason::DefectTaskKindFilter => "Choose All kinds, Features, or Defects.",
+        WorkFailureReason::DefectUnexpectedPayload => "Select defect when supplying defect fields.",
+        WorkFailureReason::DefectFields => {
+            "Supply the required defect fields and remove unknown fields."
+        }
+        WorkFailureReason::DefectSummary => "Supply a malfunction summary of at most 512 bytes.",
+        WorkFailureReason::DefectLocation => {
+            "Supply the repository path, function, and commit where the malfunction was observed."
+        }
+        WorkFailureReason::DefectLocationRepoPath => {
+            "Supply a relative repository path without traversal, at most 1024 bytes."
+        }
+        WorkFailureReason::DefectLocationFunction => {
+            "Supply the observed function, at most 512 bytes."
+        }
+        WorkFailureReason::DefectLocationCommit => {
+            "Supply the full 40-character lowercase commit SHA."
+        }
+        WorkFailureReason::DefectObservedBehavior => {
+            "Describe the observed behavior, at most 4096 bytes."
+        }
+        WorkFailureReason::DefectExpectedBehavior => {
+            "Describe the expected behavior, at most 4096 bytes."
+        }
+        WorkFailureReason::DefectSeverity => {
+            "Defect severity must be low, medium, high, or critical."
+        }
+        WorkFailureReason::DefectEvidence => "Supply evidence for the defect, at most 8192 bytes.",
+        WorkFailureReason::DefectDiscoveringTaskId => {
+            "The discovering task must exist in this authorized project."
+        }
+        WorkFailureReason::DefectDiscoveringWorkflowId => {
+            "The discovering workflow must exist in this authorized project."
+        }
         WorkFailureReason::BaseStale => {
             "The project base moved. Refresh the catalog and resubmit on the current base."
         }

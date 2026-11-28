@@ -193,7 +193,9 @@ class TaskEventTraceUpgradeTest(unittest.TestCase):
                 before_external = rows(cluster, 'SELECT to_jsonb(a) FROM forge_external_agent.assignments a ORDER BY assignment_id')
                 before_artifact = rows(cluster, 'SELECT to_jsonb(a) FROM forge_external_agent.artifacts a ORDER BY assignment_id')
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(before_task, rows(cluster, "SELECT to_jsonb(t)-'correlation_id' FROM forge_agent.coding_tasks t ORDER BY id"))
+                self.assertEqual(before_task, rows(cluster, "SELECT to_jsonb(t)-ARRAY['correlation_id','task_kind','defect'] FROM forge_agent.coding_tasks t ORDER BY id"))
+                self.assertEqual(rows(cluster, 'SELECT task_kind,defect FROM forge_agent.coding_tasks ORDER BY id'),
+                                 [('feature', None)] * len(before_task))
                 self.assertEqual(before_event, rows(cluster, "SELECT to_jsonb(e)-ARRAY['event_id','correlation_id'] FROM forge_agent.coding_events e ORDER BY task_id,sequence"))
                 self.assertEqual(before_external, rows(cluster, 'SELECT to_jsonb(a) FROM forge_external_agent.assignments a ORDER BY assignment_id'))
                 self.assertEqual(before_artifact, rows(cluster, 'SELECT to_jsonb(a) FROM forge_external_agent.artifacts a ORDER BY assignment_id'))

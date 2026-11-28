@@ -1,6 +1,7 @@
 """One post-fix code-context review preserves source and exhausted accounting."""
 from contextlib import closing
 from dataclasses import replace
+from datetime import datetime
 import hashlib
 import unittest
 from uuid import uuid4
@@ -48,14 +49,28 @@ class ExternalCodeContextRecoveryTest(unittest.TestCase):
         self.delivery.checkpoint(action,{'status':'passed','receipt':candidate,'summary':'Prepared exact clean candidate'})
         flow.run_once();return candidate
 
-    def context_failure(self,flow):
+    def context_failure(self,flow,status="needs_reconcile"):
         lease=self.db.claim('review-worker',self.inc,['codex-v2']);self.assertIsNotNone(lease)
         proof=make_stop_proof(lease.unit_name)
-        self.db.publish(lease,'needs_reconcile',None,None,'The complete external review context is unavailable.',proof)
+        self.db.publish(lease,status,None,None,'The complete external review context is unavailable.',proof)
         self.db.reconcile(lease,'b'*64,proof)
         self.assertTrue(flow.run_once())
-        # Escalation stops/cancels the row after the failing publication. A
-        # subsequent real reconciliation binds the current cancelled revision.
+        waiting=self.rows('SELECT state FROM forge_external_workflow.workflows')[0]['state']
+        self.assertIn('review_retry_wait',waiting)
+        now=self.rows('SELECT clock_timestamp() AS now')[0]['now']
+        remaining=(datetime.fromisoformat(waiting['review_retry_wait']['not_before'])-now).total_seconds()
+        expected=min(300,5 * 2 ** min(waiting.get('review_retries',0),6))
+        self.assertGreater(remaining,0)
+        self.assertLessEqual(remaining,expected)
+        before=self.rows('SELECT count(*) AS n FROM forge_agent.coding_retry_event_admissions')
+        # Reconstruct the coordinator to prove the wait is durable.
+        restarted=self.service()._store._external.workflow
+        self.assertFalse(restarted.run_once())
+        self.assertEqual(waiting,self.rows('SELECT state FROM forge_external_workflow.workflows')[0]['state'])
+        self.assertEqual(before,self.rows('SELECT count(*) AS n FROM forge_agent.coding_retry_event_admissions'))
+        self.assertIsNone(self.db.claim('review-worker',self.inc,['codex-v2']))
+        self.write("UPDATE forge_external_workflow.workflows SET state=jsonb_set(state,'{review_retry_wait,not_before}',to_jsonb((clock_timestamp()-interval '1 second')::text))")
+        self.assertTrue(flow.run_once())
         self.db.reconcile(lease,'b'*64,proof)
         return lease
 
@@ -95,6 +110,25 @@ class ExternalCodeContextRecoveryTest(unittest.TestCase):
         self.assertEqual(self.rows("SELECT count(*) AS n FROM forge_agent.coding_events WHERE event_kind IN('cancelled','cancel_requested')")[0]['n'],0)
         self.assertEqual((w['phase'],w['enabled']),('escalated',False))
         self.assertEqual(w['state']['candidate'],prior)
+
+    def test_context_recovers_without_candidate_resubmission(self):
+        _service,_root,flow,_job=self.submit_plan()
+        candidate=self.implementation(flow)
+        artifacts=self.rows('SELECT * FROM forge_external_agent.artifacts ORDER BY assignment_id')
+        for _ in range(3):self.context_failure(flow)
+        target=self.review(flow,'approve')
+        self.assertEqual(target['candidate'],candidate)
+        self.assertEqual(artifacts,self.rows('SELECT * FROM forge_external_agent.artifacts ORDER BY assignment_id'))
+        self.assertEqual(self.rows('SELECT phase FROM forge_external_workflow.workflows')[0]['phase'],'checks')
+
+    def test_failed_reviewer_infrastructure_also_preserves_candidate(self):
+        _service,_root,flow,_job=self.submit_plan()
+        candidate=self.implementation(flow)
+        for _ in range(21):self.context_failure(flow,status='failed')
+        w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
+        self.assertEqual(w['phase'],'escalated')
+        self.assertEqual(w['state']['candidate'],candidate)
+        self.assertEqual(self.rows("SELECT count(*) AS n FROM forge_agent.coding_events WHERE event_kind IN('cancelled','cancel_requested')")[0]['n'],0)
 
     def test_fresh_prepare_and_valid_review_resolve_same_twenty_spent_event(self):
         _service,root,flow,last,w,event,prior=self.exhausted()

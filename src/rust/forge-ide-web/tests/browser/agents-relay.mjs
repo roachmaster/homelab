@@ -53,6 +53,7 @@ function defaultAgentBranches() {
 function task(status, number, input = {}) {
   const taskId = number === 0 ? '11111111-1111-4111-8111-111111111111' : randomUUID();
   const item = {
+    task_kind: input.task_kind ?? "feature", defect: input.defect ?? null, filed_defects: [],
     task_id: taskId, correlation_id:randomUUID(), project_alias: project, base_revision: base, mode: input.mode ?? 'review',
     agent_profile: input.agent_profile ?? 'agy-primary', recipe_digest: 'b'.repeat(64),
     status, revision: status === 'awaiting_review' ? 3 : 1,
@@ -110,7 +111,7 @@ function taskScope(t) {
 }
 function summary(t) {
   return {
-    ...Object.fromEntries(['task_id', 'correlation_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]])),
+    ...Object.fromEntries(['task_kind', 'defect', 'filed_defects', 'task_id', 'correlation_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]])),
     workflow_required:t.workflow_required===true,
     workflow_phase:t.workflow?.phase??null,
     ...(t.delivery?{delivery:t.delivery}:{}),
@@ -215,7 +216,7 @@ export async function startAgentsRelay() {
       }
       if (input.kind === 'work_list') {
         if(faults.denyNextList){faults.denyNextList=false;failed(503,'unavailable');return;}
-        const roots=[...tasks.values()].filter(t=>!t.internal);
+        const roots=[...tasks.values()].filter(t=>!t.internal && (!input.task_kind_filter || t.task_kind === input.task_kind_filter));
         const scoped=['active','attention','history','all'].includes(input.status_filter);
         const counts={active:0,attention:0,history:0,all:roots.length};
         for(const item of roots)counts[taskScope(item)]++;
@@ -434,6 +435,14 @@ export async function startAgentsRelay() {
     planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,verificationRetries,reviewReads,eventReads,
     // This corpus is created directly in owned fixture memory. Its journey may
     // read and navigate; it never submits/retries/cancels/accepts an assignment.
+    seedDefects(discoveringTaskId){
+      const source=tasks.get(discoveringTaskId);if(!source)throw new Error('Missing discovering fixture');
+      const defect={summary:'Report parser loses an observed failure',location:{repo_path:'src/report.rs',function:'parse',commit:base},observed_behavior:'Failure disappears',expected_behavior:'Failure remains visible',severity:'high',evidence:'Owned parser reproduction fixture',discovering_task_id:source.task_id,discovering_workflow_id:source.workflow.workflow_id};
+      const next=task('queued',tasks.size,{prompt:defect.summary,mode:'plan',task_kind:'defect',defect,workflow_policy_digest:workflowPolicy.policy_digest});
+      next.workflow.phase='plan';tasks.set(next.task_id,next);
+      source.filed_defects.push({task_id:next.task_id,title:next.title,severity:'high'});
+      return next.task_id;
+    },
     seedTriage(){
       const add=(prompt,phase,{external=false,status='awaiting_review',retry=null,revisionCount=0}={})=>{
         const next=task(status,tasks.size,{prompt,mode:'plan',agent_profile:external?'muse-db-primary':'agy-primary',workflow_policy_digest:external?externalWorkflowPolicy.policy_digest:workflowPolicy.policy_digest});

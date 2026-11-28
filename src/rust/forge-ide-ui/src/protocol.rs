@@ -399,6 +399,9 @@ pub enum UiEvent {
     SelectAgentMode {
         value: String,
     },
+    SelectAgentTaskKind {
+        value: String,
+    },
     SelectAgentTaskScope {
         value: String,
     },

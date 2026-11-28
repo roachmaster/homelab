@@ -45,6 +45,8 @@ class SupersedingReviewSchemaTest(unittest.TestCase):
                 names = self.rows(cluster, "SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname<>'schema_migrations' ORDER BY 1,2")
                 def historical_rows(schema, name):
                     projection = "to_jsonb(t)-'review_generation'-'supersedes_review_id'"
+                    if (schema, name) == ('forge_agent', 'coding_tasks'):
+                        projection += "-'task_kind'-'defect'"
                     if (schema, name) == ('forge_agent', 'coding_workflow_reviews'):
                         projection += "-'diagnostics'-'supersedes_workflow_review_id'"
                     return self.rows(cluster, "SELECT coalesce(jsonb_agg((" + projection + ") ORDER BY (" + projection + ")::text),'[]'::jsonb) FROM " + schema + '.' + name + ' t')
@@ -61,7 +63,7 @@ class SupersedingReviewSchemaTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(), before)
-                self.assertEqual(self.rows(cluster, 'SELECT max(version) FROM forge_agent.schema_migrations'), [(51,)])
+                self.assertEqual(self.rows(cluster, 'SELECT max(version) FROM forge_agent.schema_migrations'), [(53,)])
                 self.assertEqual(self.rows(cluster, 'SELECT DISTINCT review_generation,supersedes_review_id,diagnostics,supersedes_workflow_review_id FROM forge_agent.coding_workflow_reviews'), [(0, None, None, None)])
             finally:
                 cluster.stop()

@@ -91,6 +91,7 @@ V2_PROTECTED_PATHS = frozenset({
     'deploy/mission-control/portal_release_actor.py',
     'deploy/mission-control/agent-runner/work_api.py',
     'deploy/mission-control/agent-runner/work_defect.py',
+    'deploy/mission-control/agent-runner/work_grok_acp.py',
     'deploy/mission-control/agent-runner/work_config.py',
     'deploy/mission-control/agent-runner/work_store.py',
     'deploy/mission-control/agent-runner/work_workflow.py',
@@ -252,7 +253,7 @@ SCOPED_MAIN_LOGICAL_NAMES = ('check', 'real-browser', 'backend-suites')
 
 def logical_checks_for_scope(branch_scope, profile=LEGACY_PROFILE):
     """Frozen logical check name per command index for the run's gate plan."""
-    if profile != SCOPED_PROFILE:
+    if profile not in {SCOPED_PROFILE, EVENT_PROFILE}:
         return CHECK_LOGICAL_NAMES
     if branch_scope == 'main':
         return SCOPED_MAIN_LOGICAL_NAMES
@@ -323,7 +324,7 @@ class StageEmitter:
                  max_attempts=STAGE_EMIT_MAX_ATTEMPTS,
                  total_budget_seconds=STAGE_EMIT_TOTAL_BUDGET_SECONDS,
                  connection_factory=HTTPConnection, clock=time.monotonic, log=None,
-                 correlation_id=None, branch=None, branch_scope=None):
+                 correlation_id=None, branch=None, branch_scope=None, phase_logical_names=None):
         self._action_id = action_id
         self._project_alias = project_alias
         self._commit_sha = commit_sha
@@ -331,6 +332,21 @@ class StageEmitter:
         self._build_number = build_number
         self._job_name = job_name
         self._logical_names = tuple(logical_names)
+        self._phase_names = None if phase_logical_names is None else tuple(phase_logical_names)
+        self._phase_first, self._phase_last = {}, {}
+        self._phase_terminal = set()
+        self._phase_failed = False
+        if self._phase_names is not None:
+            groups = []
+            for index, name in enumerate(self._phase_names):
+                if name not in self._logical_names:
+                    raise ValueError('Unknown phase logical gate')
+                if not groups or groups[-1] != name:
+                    groups.append(name)
+                self._phase_first.setdefault(name, index)
+                self._phase_last[name] = index
+            if tuple(groups) != self._logical_names:
+                raise ValueError('Noncontiguous or incomplete phase logical gates')
         self._correlation_id = correlation_id
         self._branch = branch
         self._branch_scope = branch_scope
@@ -456,11 +472,27 @@ class StageEmitter:
         return False
 
     def emit_started(self, index):
+        if self._phase_names is not None:
+            if self._phase_failed or not 0 <= index < len(self._phase_names):
+                return False
+            name = self._phase_names[index]
+            if index != self._phase_first[name] or name in self._phase_terminal:
+                return False
+            return self._emit('stage_started', name)
         if 0 <= index < len(self._logical_names):
             return self._emit('stage_started', self._logical_names[index])
         return False
 
     def emit_completed(self, index, passed):
+        if self._phase_names is not None:
+            if self._phase_failed or not 0 <= index < len(self._phase_names):
+                return False
+            name = self._phase_names[index]
+            if name in self._phase_terminal or (passed and index != self._phase_last[name]):
+                return False
+            self._phase_terminal.add(name)
+            self._phase_failed = not passed
+            return self._emit('stage_completed', name, 'success' if passed else 'failure')
         if 0 <= index < len(self._logical_names):
             return self._emit('stage_completed', self._logical_names[index],
                               'success' if passed else 'failure')
@@ -487,11 +519,18 @@ def build_stage_emitter(action, request, config):
     if not isinstance(instance, str) or not STAGE_IDENTIFIER_RE.fullmatch(instance):
         return None, 'invalid jenkins_instance'
     logical_names = logical_checks_for_scope(request['branch_scope'], config['verification_profile'])
+    phase_names = None
+    if config['verification_profile'] == EVENT_PROFILE:
+        phases = event_phases_for_scope(request['branch_scope'])
+        commands, _labels = checks_for_scope(request['branch_scope'], EVENT_PROFILE)
+        if tuple(phase.argv for phase in phases) != commands:
+            return None, 'phase command mapping changed'
+        phase_names = tuple(phase.logical_gate for phase in phases)
     return StageEmitter(
         action_id=action, project_alias=request['project_alias'],
         commit_sha=request['candidate_commit'], jenkins_instance=instance,
         build_number=int(raw_build), job_name=job_name,
-        logical_names=logical_names,
+        logical_names=logical_names, phase_logical_names=phase_names,
         correlation_id=request.get('correlation_id'),
         branch=request.get('source_branch'),
         branch_scope=request.get('branch_scope')), None

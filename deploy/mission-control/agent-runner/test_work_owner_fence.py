@@ -273,14 +273,14 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                 def snapshot():
                     return dict(
                         history=execute('SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=25 ORDER BY version'),
-                        rows={table:execute('SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),\'[]\'::jsonb) FROM forge_agent.'+table+' t') for table in tables},
+                        rows={table:execute('SELECT coalesce(jsonb_agg('+("to_jsonb(t)-ARRAY['task_kind','defect']" if table=='coding_tasks' else 'to_jsonb(t)')+' ORDER BY to_jsonb(t)::text),\'[]\'::jsonb) FROM forge_agent.'+table+' t') for table in tables},
                         credentials=execute('SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r'),
                         defaults=execute('SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
                         relation_acls=execute("SELECT relname,relowner,relacl FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname=ANY(%s) ORDER BY relname",(original_relations,)),
                         hba=hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest())
                 before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
-                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(51,)])
+                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(53,)])
                 # M41 adds the three authorized branch/CI evidence reads.
                 self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(30,)])
                 self.assertEqual(execute("SELECT has_function_privilege('muse_events','forge_agent._coding_owner_continuation_fenced(uuid)','EXECUTE')"),[(False,)])

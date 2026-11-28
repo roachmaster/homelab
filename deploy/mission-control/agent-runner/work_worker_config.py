@@ -180,6 +180,7 @@ class WorkerConfig:
     external_reviews: bool = False
     resource_profile: str = POLICY_ID
     build_results_root: Path | None = None
+    grok_transport: str = "headless-v1"
 
     @property
     def policy_digest(self):
@@ -202,7 +203,10 @@ class WorkerConfig:
 def parse_config(raw, *, source_path=None):
     raw = _object(raw, {"worker_id", "owner", "database", "account", "workspace_root",
                         "state_root", "projects", "profiles", "binaries"},
-                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds", "usage_only_profiles", "external_reviews", "resource_profile", "build_results_root"})
+                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds", "usage_only_profiles", "external_reviews", "resource_profile", "build_results_root", "grok_transport"})
+    grok_transport = raw.get("grok_transport", "headless-v1")
+    if not isinstance(grok_transport,str) or grok_transport not in {"headless-v1", "acp-constrained-v1"}:
+        raise ValueError("Unsupported Grok transport selection")
     worker_id = identifier(raw["worker_id"])
     owner = raw["owner"]
     if (not isinstance(owner, str) or not owner.strip() or len(owner) > 128
@@ -318,7 +322,7 @@ def parse_config(raw, *, source_path=None):
         MappingProxyType(projects), MappingProxyType(frozen_profiles), MappingProxyType(binaries),
         allow_implement, usage, absolute_path(source_path) if source_path is not None else None,
         frozenset(autonomous), codex_session_ttl_seconds, MappingProxyType(selected_usage),
-        external_reviews=external_reviews, resource_profile=resource_profile,
+        external_reviews=external_reviews, resource_profile=resource_profile, grok_transport=grok_transport,
         build_results_root=absolute_path(raw["build_results_root"]) if raw.get("build_results_root") is not None else None,
     )
 
@@ -382,6 +386,7 @@ def validated_copy(config):
         "allow_implement": config.allow_implement,
         "autonomous_projects": sorted(config.autonomous_projects),
         "external_reviews": config.external_reviews,
+        "grok_transport": config.grok_transport,
         "resource_profile": config.resource_profile,
         "build_results_root": str(config.build_results_root) if config.build_results_root is not None else None,
         "codex_session_ttl_seconds": config.codex_session_ttl_seconds,

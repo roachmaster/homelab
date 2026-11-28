@@ -377,8 +377,13 @@ class SupersedingReviewUpgradeIndependentTest(unittest.TestCase):
                 fixture.setUp()
                 _admitted, source, critic, checks, raw = fixture.legacy_failure()
                 def snapshot():
+                    handoff, workflow = fixture.authority(source, checks)
+                    # M53 adds task metadata; preserve every pre-existing task
+                    # field and all review/budget/workflow authority verbatim.
+                    historical_task = {key: value for key, value in handoff[0].items()
+                        if key not in {'task_kind', 'defect'}}
                     return {
-                        'source': fixture.authority(source, checks),
+                        'source': ((historical_task, *handoff[1:]), workflow),
                         'review': fixture.rows("SELECT to_jsonb(r)-'review_generation'-'supersedes_review_id'-'diagnostics'-'supersedes_workflow_review_id' "
                             'FROM forge_agent.coding_workflow_reviews r ORDER BY workflow_review_id'),
                         'artifact': fixture.artifact(critic),
@@ -391,11 +396,14 @@ class SupersedingReviewUpgradeIndependentTest(unittest.TestCase):
                         'hba': hashlib.sha256((cluster.data / 'pg_hba.conf').read_bytes()).hexdigest(),
                     }
                 before = snapshot()
+                historical_task_count = fixture.rows('SELECT count(*) FROM forge_agent.coding_tasks')[0][0]
                 self.assertEqual(fixture.rows('SELECT max(version) FROM forge_agent.schema_migrations'), [(32,)])
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(), before)
-                self.assertEqual(fixture.rows('SELECT max(version) FROM forge_agent.schema_migrations'), [(51,)])
+                self.assertEqual(fixture.rows('SELECT task_kind,defect FROM forge_agent.coding_tasks ORDER BY id'),
+                    [('feature', None)] * historical_task_count)
+                self.assertEqual(fixture.rows('SELECT max(version) FROM forge_agent.schema_migrations'), [(53,)])
                 self.assertEqual(fixture.rows('SELECT review_generation,supersedes_review_id,diagnostics,supersedes_workflow_review_id FROM '
                     'forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s',
                     (critic.workflow_review_id,)), [(0, None, None, None)])

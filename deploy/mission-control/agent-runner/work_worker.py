@@ -12,6 +12,7 @@ import threading
 import time
 from uuid import UUID, uuid4
 
+from work_grok_acp import selected_factory as selected_grok_transport_factory
 from work_executor import (
     CliOutcome, CommandRunnerProvider, ExecutionError, SystemdSupervisor,
     WorkspaceProvider, unit_name, utf8_chunks,
@@ -527,7 +528,8 @@ class CodingWorkerFactory:
                                    if "antigravity" in config.binaries else None,
                                    codex_sessions=self.codex_session_factory(config)
                                    if "codex" in config.binaries else None,
-                                   transport_diagnostics=CliDiagnosticReporter(LOG)))
+                                   transport_diagnostics=CliDiagnosticReporter(LOG),
+                                   grok_transport_factory=selected_grok_transport_factory(config)))
         self.workspace_factory = workspace_factory
         self.source_revision_factory = source_revision_factory
         self.external_context_factory = external_context_factory or default_external_context_factory

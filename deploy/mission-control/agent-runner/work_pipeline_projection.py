@@ -161,6 +161,7 @@ def project_pipeline_stages(*, plan, events, observation, findings=(), now=None,
     completed_status = [None] * len(names)  # 'passed' | 'failed' | None
     subsumed = [False] * len(names)
     build_started_at = None
+    stage_witness_at = None
     has_queued = has_started = False
     completed_event = None
     for row in events:
@@ -179,6 +180,12 @@ def project_pipeline_stages(*, plan, events, observation, findings=(), now=None,
                 LOG.warning("Pipeline projection ignoring event for unknown stage %r",
                             row.get("stage_name"))
                 continue
+            # A genuine named stage proves execution even when optional
+            # build lifecycle emission is unavailable. Keep the earliest
+            # recorded stage time as a bounded fallback, never invent an event.
+            witness = _as_utc(row.get("occurred_at"))
+            if witness is not None and (stage_witness_at is None or witness < stage_witness_at):
+                stage_witness_at = witness
             if kind == "stage_started":
                 if completed_status[index] is None:
                     started[index] = True
@@ -202,6 +209,10 @@ def project_pipeline_stages(*, plan, events, observation, findings=(), now=None,
                 if completed_status[earlier] is None:
                     completed_status[earlier] = "passed"
                     subsumed[earlier] = True
+
+    if not has_started and stage_witness_at is not None:
+        has_started = True
+        build_started_at = stage_witness_at
 
     terminal_observation = bool(observation_checks) and all(
         check.get("status") in ("success", "failure", "skipped", "cancelled")
@@ -490,7 +501,9 @@ def _build_run_from_stage_results(action_id, rows, events_for_run, *, release_st
             "sub_phases": sub_phases,
         })
 
-    started_at = next((e.get("occurred_at") for e in events_for_run if e.get("event_kind") == "build_started"), None)
+    event_plan = CiGateContractFactory(SCOPED_PROFILE).create().plan(
+        "main" if pipeline_scope == "main" else "detached")
+    started_at = _recorded_run_start(events_for_run, event_plan.logical_checks)
     completed_at = next((e.get("occurred_at") for e in reversed(events_for_run) if e.get("event_kind") == "build_completed"), None)
     if completed_at is None:
         completed_at = first.get("created_at")
@@ -512,6 +525,19 @@ def _build_run_from_stage_results(action_id, rows, events_for_run, *, release_st
         "completed_at": completed_at,
         "stages": stages,
     }
+
+
+def _recorded_run_start(events, logical_names):
+    """Use the same real execution witness for run ordering and stage state."""
+    explicit = [e for e in events if e.get("event_kind") == "build_started"]
+    if explicit:
+        return next((e.get("occurred_at") for e in explicit
+                     if _as_utc(e.get("occurred_at")) is not None), None)
+    witnesses = [(instant, e.get("occurred_at")) for e in events
+                 if e.get("event_kind") in {"stage_started", "stage_completed"}
+                 and e.get("stage_name") in logical_names
+                 and (instant := _as_utc(e.get("occurred_at"))) is not None]
+    return min(witnesses, key=lambda item: item[0])[1] if witnesses else None
 
 
 def _build_run_from_events_only(run_key, events_for_run, observation=None, *, pipeline_scope=None, now=None):
@@ -543,7 +569,7 @@ def _build_run_from_events_only(run_key, events_for_run, observation=None, *, pi
             "log_byte_count": 0,
             "sub_phases": [],
         })
-    started_at = next((e.get("occurred_at") for e in ordered if e.get("event_kind") == "build_started"), None)
+    started_at = _recorded_run_start(ordered, plan.logical_checks)
     completed_at = next((e.get("occurred_at") for e in reversed(ordered) if e.get("event_kind") == "build_completed"), None)
     build_number = next((e.get("build_number") for e in reversed(ordered) if isinstance(e.get("build_number"), int)), None)
     action_id = next((str(e["action_id"]) for e in ordered if e.get("action_id")), None)
@@ -604,11 +630,19 @@ def project_correlation_cicd(
         if not isinstance(checks, list):
             continue
         commit = obs.get("candidate_commit")
-        if commit:
+        if not commit or not checks or any(
+                not isinstance(chk, dict) or chk.get("head_sha") != commit
+                for chk in checks):
+            continue
+        action_ids = {str(chk["action_id"]) if chk.get("action_id") else None
+                      for chk in checks}
+        # A terminal observation belongs to one exact action and source.
+        # Commit-only fallback can otherwise turn a retry green using the
+        # preceding run's receipt. Retain it only for unbound legacy runs.
+        if action_ids == {None}:
             obs_by_commit[commit] = checks
-        for chk in checks:
-            if isinstance(chk, dict) and chk.get("action_id"):
-                obs_by_action[str(chk["action_id"])] = checks
+        elif len(action_ids) == 1 and None not in action_ids:
+            obs_by_action[(next(iter(action_ids)), commit)] = checks
 
     runs = []
     seen_actions = set()
@@ -627,7 +661,7 @@ def project_correlation_cicd(
             continue
         seen_actions.add(aid)
         commit = next((e.get("commit_sha") for e in evs if e.get("commit_sha")), None)
-        obs = obs_by_action.get(aid) or (obs_by_commit.get(commit) if commit else None)
+        obs = obs_by_action.get((aid, commit))
         runs.append(_build_run_from_events_only(aid, evs, obs, now=now))
 
     for key, evs in events_by_build.items():

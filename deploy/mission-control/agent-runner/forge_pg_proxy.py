@@ -974,10 +974,13 @@ READ_QUERIES = {
         "error_excerpt, log_sha256, log_byte_count, log_chunk_count, created_at "
         "FROM forge_agent.jenkins_stage_results "
         "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
-        "AND correlation_id = ANY(%(correlation_ids)s::uuid[]) "
+        "AND (correlation_id = ANY(%(correlation_ids)s::uuid[]) "
+        "OR (action_id = %(main_action)s AND commit_sha = %(main_commit)s "
+        "AND branch_scope = 'main' AND pipeline_scope = 'main')) "
         "ORDER BY created_at ASC, action_id ASC, stage_index ASC LIMIT 512",
         [("owner_id", "text", True), ("project_alias", "text", True),
-         ("correlation_ids", "uuid[]", True)]),
+         ("correlation_ids", "uuid[]", True),
+         ("main_action", "uuid", False), ("main_commit", "text", False)]),
     # work_store: the frozen policy document for a workflow (M44).
     "workflow_policy_document": (
         "SELECT c.document FROM forge_agent.coding_task_identities i "
@@ -1008,10 +1011,13 @@ READ_QUERIES = {
         "FROM forge_agent.jenkins_events "
         "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
         "AND (correlation_id = ANY(%(correlation_ids)s) "
-        "OR commit_sha = ANY(%(commit_shas)s)) "
+        "OR commit_sha = ANY(%(commit_shas)s) "
+        "OR (%(main_action)s IS NOT NULL AND action_id = %(main_action)s "
+        "AND commit_sha = %(main_commit)s AND branch_scope = 'main')) "
         "ORDER BY sequence ASC LIMIT 512",
         [("owner_id", "text", True), ("project_alias", "text", True),
-         ("correlation_ids", "text[]", True), ("commit_shas", "text[]", True)]),
+         ("correlation_ids", "text[]", True), ("commit_shas", "text[]", True),
+         ("main_action", "uuid", False), ("main_commit", "text", False)]),
     # work_store: stage rows for one stage of a CI/CD log view,
     # addressed by logical stage id or phase id.
     "stage_log_rows": (
@@ -1021,12 +1027,15 @@ READ_QUERIES = {
         "log_chunk_count FROM forge_agent.jenkins_stage_results "
         "WHERE owner_id = %(owner_id)s AND project_alias = %(project_alias)s "
         "AND action_id = %(action_id)s "
-        "AND correlation_id = ANY(%(correlation_ids)s::uuid[]) "
+        "AND (correlation_id = ANY(%(correlation_ids)s::uuid[]) "
+        "OR (action_id = %(main_action)s AND commit_sha = %(main_commit)s "
+        "AND branch_scope = 'main' AND pipeline_scope = 'main')) "
         "AND (logical_stage_id = %(stage_id)s OR phase_id = %(stage_id)s) "
         "ORDER BY stage_index ASC",
         [("owner_id", "text", True), ("project_alias", "text", True),
          ("action_id", "uuid", True), ("correlation_ids", "uuid[]", True),
-         ("stage_id", "text", True)]),
+         ("stage_id", "text", True),
+         ("main_action", "uuid", False), ("main_commit", "text", False)]),
     "workflow_root_task": (
         "SELECT w.root_task_id FROM forge_agent.coding_tasks t "
         "JOIN forge_agent.coding_workflows w ON w.workflow_id = t.workflow_id "
@@ -1043,6 +1052,7 @@ READ_QUERIES = {
         "SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, "
         "t.mode, t.agent_profile, t.recipe_digest, t.status, t.revision, "
         "t.created_at, t.title, t.workflow_id, t.workflow_required, "
+        "t.task_kind, t.defect, "
         "w.phase AS workflow_phase "
         "FROM forge_agent.coding_tasks t "
         "LEFT JOIN forge_agent.coding_workflows w "
@@ -1053,6 +1063,8 @@ READ_QUERIES = {
         "AND (NOT %(exclude_external)s OR NOT "
         "forge_external_workflow_api.is_internal(t.owner_id, "
         "t.project_alias, t.id)) "
+        "AND (%(task_kind_filter)s::text IS NULL "
+        "OR t.task_kind = %(task_kind_filter)s::text) "
         "AND (%(status_filter)s::text IS NULL "
         "OR t.status = %(status_filter)s::text) "
         "AND (%(cursor_created_at)s::timestamptz IS NULL "
@@ -1061,6 +1073,7 @@ READ_QUERIES = {
         "ORDER BY t.created_at ASC, t.id ASC LIMIT %(limit)s",
         [("owner_id", "text", True), ("project_alias", "text", True),
          ("exclude_external", "boolean", True),
+         ("task_kind_filter", "text", False),
          ("status_filter", "text", False),
          ("cursor_created_at", "timestamptz", False),
          ("cursor_id", "uuid", False), ("limit", "integer", True)]),

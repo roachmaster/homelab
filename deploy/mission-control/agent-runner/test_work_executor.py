@@ -284,6 +284,22 @@ class CliParserTest(unittest.TestCase):
 
 
 class SupervisorContractTest(unittest.TestCase):
+    def test_defect_native_prompt_delivers_structured_triage_context(self):
+        from test_work_defect import defect
+        with TemporaryDirectory(prefix="forge-defect-supervisor-") as root:
+            config = parse_config(raw_config(root))
+            provider = CommandRunnerProvider(config, SystemdSupervisor(config))
+            provider.prepare()
+            value = {**lease(config), "task_kind":"defect", "defect":defect()}
+            workspace = WorkspaceLease(Path(root) / "task", config.projects["homelab"],
+                                       config.projects["homelab"] / ".git/worktrees/fixture", value["task_id"], "a" * 40)
+            invocation = provider.invocation(value, workspace)
+            prompt = invocation.stdin.decode()
+            self.assertIn('DEFECT CONTEXT:', prompt)
+            self.assertIn('Build crashes', prompt)
+            self.assertIn('root cause', prompt)
+            self.assertIn('does not cancel or bypass', prompt)
+
     def test_fixed_root_launcher_drops_uid_caps_before_any_model_code(self):
         with TemporaryDirectory(prefix="forge-supervisor-") as root:
             raw = raw_config(root)

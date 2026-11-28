@@ -1,3 +1,5 @@
+\ir verify-defect-tasks.sql
+\ir verify-continuation-plan-lineage.sql
 \ir verify-agent-feature-branches.sql
 -- Full M26 pins precede the exact reviewed historical-body projections below.
 SELECT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=26) AS verify_owner_continuation
@@ -301,7 +303,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  -- M40 grants the proxy read surface (worker/reconciler SELECT, plus
  -- muse_proxy_writer SELECT on coding_tasks); the pinned catalog expects
  -- exactly those entries from here on.
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52 AND name='pg_proxy_preparation') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=54 AND name='pg_proxy_preparation') THEN
   expected.data:=CASE expected.name
    WHEN 'coding_review_policy' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
    WHEN 'coding_reviews' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
@@ -316,9 +318,15 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
    WHEN 'coding_workflow_actions' THEN jsonb_set(expected.data,'{acl}','["forge_agent_owner=arwdDxt/forge_agent_owner","forge_agent=arw/forge_agent_owner","forge_coding_reconciler=r/forge_agent_owner","forge_coding_worker=r/forge_agent_owner"]'::jsonb)
    ELSE expected.data END;
  END IF;
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=55 AND name='pg_proxy_cutover') THEN
   expected.data:=jsonb_set(expected.data,'{acl}',coalesce((SELECT jsonb_agg(CASE WHEN entry::text LIKE '"forge_agent=%' THEN to_jsonb('forge_agent=r/forge_agent_owner'::text) ELSE entry END ORDER BY ord)
    FROM jsonb_array_elements(expected.data->'acl') WITH ORDINALITY AS acl(entry,ord)),'[]'::jsonb));
+ -- M53's complete contract is verified before projecting its exact additions.
+ IF expected.name='coding_tasks' AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53) THEN
+   actual:=jsonb_set(actual,'{columns}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'columns') WITH ORDINALITY part(entry,ord) WHERE entry->>0 NOT IN('task_kind','defect')),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{constraints}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'constraints') WITH ORDINALITY part(entry,ord) WHERE entry->>0<>'coding_tasks_defect_check'),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{indexes}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'indexes') WITH ORDINALITY part(entry,ord) WHERE entry->>0<>'coding_tasks_defect_filter'),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{triggers}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'triggers') WITH ORDINALITY part(entry,ord) WHERE entry->>0<>'coding_tasks_inherit_defect'),'[]'::jsonb));
  END IF;
  IF actual IS DISTINCT FROM expected.data THEN RAISE EXCEPTION 'Feedback schema drift: %',expected.name;END IF;
  END LOOP;
@@ -648,7 +656,30 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
  END IF;
  IF actual IS DISTINCT FROM $function16$["\nBEGIN\n SELECT scope_plan_decision_id INTO NEW.scope_plan_decision_id FROM forge_agent.coding_tasks\n WHERE owner_id=NEW.owner_id AND project_alias=NEW.project_alias AND id=NEW.task_id;\n RETURN NEW;\nEND;",false,["search_path=pg_catalog, pg_temp"],"v",["forge_agent_owner=X/forge_agent_owner"]]$function16$::jsonb THEN RAISE EXCEPTION 'Feedback function drift: forge_agent.coding_review_scope_plan()';END IF;
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN
- SELECT jsonb_build_array(forge_agent._retry_legacy_source(p.oid,p.prosrc),p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.read_plan(uuid,uuid)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
+ SELECT jsonb_build_array(forge_agent._retry_legacy_source(p.oid,CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=52) THEN replace(p.prosrc,$new$(x.task_id=t.id OR x.task_id=coalesce(t.repair_root_task_id,t.id) OR EXISTS (
+        WITH RECURSIVE lineage(id,seen) AS (
+            SELECT t.id,ARRAY[t.id]
+            UNION ALL
+            SELECT parent.id,lineage.seen||parent.id
+            FROM lineage
+            JOIN forge_agent.coding_tasks child ON child.owner_id=t.owner_id AND child.project_alias=t.project_alias AND child.id=lineage.id
+            JOIN forge_agent.coding_reviews review ON review.owner_id=child.owner_id AND review.project_alias=child.project_alias
+              AND review.review_id=child.repair_source_review_id AND review.task_id=child.parent_task_id
+              AND review.repair_task_id=child.id AND review.status='repair'
+              AND review.candidate_commit=child.repair_candidate_commit AND review.candidate_commit=child.base_revision
+              AND coalesce(review.plan_decision_id,review.scope_plan_decision_id)=x.decision_id
+            JOIN forge_agent.coding_tasks parent ON parent.owner_id=child.owner_id AND parent.project_alias=child.project_alias
+              AND parent.id=review.task_id AND parent.workflow_id=t.workflow_id
+              AND coalesce(parent.plan_decision_id,parent.scope_plan_decision_id)=x.decision_id
+            JOIN forge_agent.coding_feedback feedback ON feedback.owner_id=child.owner_id AND feedback.project_alias=child.project_alias
+              AND feedback.feedback_id=child.feedback_id AND feedback.feedback_sha256=child.feedback_sha256
+              AND feedback.review_id=review.review_id AND feedback.task_id=child.id AND feedback.parent_attempt_id=review.attempt_id
+            WHERE child.workflow_id=t.workflow_id AND t.workflow_id IS NOT NULL AND x.decision='resume'
+              AND child.scope_plan_decision_id=x.decision_id AND child.plan_decision_id IS NULL
+              AND child.mode='implement' AND parent.mode='implement'
+              AND cardinality(lineage.seen)<32 AND NOT parent.id=ANY(lineage.seen)
+        ) SELECT 1 FROM lineage WHERE lineage.id=x.task_id AND cardinality(lineage.seen)>1
+    ))$new$,$old$(x.task_id=t.id OR x.task_id=coalesce(t.repair_root_task_id,t.id))$old$) ELSE p.prosrc END),p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.read_plan(uuid,uuid)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  ELSE
  SELECT jsonb_build_array(p.prosrc,p.prosecdef,p.proconfig,p.provolatile,p.proacl) INTO actual FROM pg_proc p WHERE p.oid='forge_coding_worker_api.read_plan(uuid,uuid)'::regprocedure AND p.proowner='forge_agent_owner'::regrole;
  END IF;

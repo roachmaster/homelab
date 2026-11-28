@@ -11,7 +11,7 @@ import test_delivery_retry_events as delivery_fixtures
 from test_work_policy_upgrade import historical_registry,PreUpgradeCluster
 
 
-# Migration 0053 (pg_proxy_cutover) revokes direct table writes
+# Migration 0055 (pg_proxy_cutover) revokes direct table writes
 # (INSERT/UPDATE/DELETE/TRUNCATE, ACL letters a/w/d/D) for the four
 # write-capable roles. Apply that revocation to a pg_class relacl value
 # so an upgrade test can pin exactly which privileges may disappear
@@ -55,7 +55,7 @@ def _normalize_null_acl(relacl, owner):
     return '{%s=arwdDxt/%s}' % (owner, owner)
 
 
-# Migration 0052 (pg_proxy_preparation) grants each caller role SELECT
+# Migration 0054 (pg_proxy_preparation) grants each caller role SELECT
 # on its allowlisted read tables, derived from the proxy registry (the
 # same source M50 was generated from, so the expected post-upgrade ACL
 # is exact). Coordinator/operator share forge_agent; a "*" read set
@@ -142,7 +142,7 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 original_acl_relations.append('forge_agent.schema_migrations')
                 def snapshot():
                     return {
-                        'rows':{schema+'.'+name:self.rows(cluster,"SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM "+schema+'.'+name+' t') for schema,name in names},
+                        'rows':{schema+'.'+name:self.rows(cluster,"SELECT coalesce(jsonb_agg("+("to_jsonb(t)-ARRAY['task_kind','defect']" if (schema,name)==('forge_agent','coding_tasks') else 'to_jsonb(t)')+" ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM "+schema+'.'+name+' t') for schema,name in names},
                         'migration_history':self.rows(cluster,'SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=31 ORDER BY version'),
                         'credentials':self.rows(cluster,'SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r'),
                         'defaults':self.rows(cluster,'SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
@@ -153,7 +153,7 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 # Preparation stage: apply.sql stops at migration
-                # 0052 (pg_proxy_preparation), which grants each
+                # 0054 (pg_proxy_preparation), which grants each
                 # caller role SELECT on its allowlisted read tables;
                 # the expected ACL adds exactly those entries (in
                 # grant order) to the M31 ACL, and nothing else about
@@ -166,8 +166,8 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                     for schema,name,owner,relacl in before['old_relation_acl']
                 ]
                 self.assertEqual(snapshot(),preparation)
-                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(52,)])
-                # Cutover stage: migration 0053 (pg_proxy_cutover),
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(54,)])
+                # Cutover stage: migration 0055 (pg_proxy_cutover),
                 # applied only via apply-cutover.sql, intentionally
                 # revokes direct table writes
                 # (INSERT/UPDATE/DELETE/TRUNCATE) for forge_agent,
@@ -180,8 +180,7 @@ class DeliveryLineageSchemaTest(unittest.TestCase):
                     for schema,name,owner,relacl in before['old_relation_acl']
                 ]
                 self.assertEqual(snapshot(),expected)
-                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(53,)])
-
+                self.assertEqual(self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations'),[(55,)])
                 self.assertEqual(self.rows(cluster,'SELECT count(*) FROM forge_agent.delivery_lineage_handoffs'),[(0,)])
                 self.assertEqual(self.rows(cluster,"SELECT has_table_privilege('muse_events','forge_agent.delivery_lineage_handoffs','SELECT')"),[(False,)])
                 # verify.sql itself starts BEGIN READ ONLY and pins the exact

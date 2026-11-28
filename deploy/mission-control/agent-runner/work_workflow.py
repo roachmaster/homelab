@@ -4,6 +4,7 @@ Native tasks run through the ordinary worker. This coordinator owns delegated
 state transitions; it has no process, filesystem-source or GitHub ports.
 """
 from contextlib import contextmanager
+from work_defect import defect_context
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
@@ -1240,9 +1241,9 @@ class WorkflowStore:
     def _admit_reviewer(self,cursor,w,review,task,validate_target,*,idempotency_key=None):
         p=self._snapshot(w);self._grant(cursor,w,p['reviewer_profile'],'review')
         source=self._artifact(cursor,task['id'],review['source_attempt_id']);reviewer_id=uuid4()
-        cursor.execute("SELECT prompt,acceptance_criteria FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,w['project_alias'],w['root_task_id']));assignment=cursor.fetchone()
+        cursor.execute("SELECT prompt,acceptance_criteria,task_kind,defect FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,w['project_alias'],w['root_task_id']));assignment=cursor.fetchone()
         if assignment is None:raise Rejected(409,'result_mismatch')
-        target={'version':1,'workflow_id':str(w['workflow_id']),'workflow_review_id':str(review['workflow_review_id']),'policy_digest':w['policy_digest'],
+        target={'version':1,**defect_context(assignment),'workflow_id':str(w['workflow_id']),'workflow_review_id':str(review['workflow_review_id']),'policy_digest':w['policy_digest'],
             'target_kind':review['target_kind'],'reviewer_task_id':str(reviewer_id),'author_profile':p['author_profile'],'reviewer_profile':p['reviewer_profile'],
             'source_task_id':str(task['id']),'source_attempt_id':str(review['source_attempt_id']),'source_result_sha256':review['source_result_sha256'],
             'source_revision':review['source_revision'],'base_revision':review['candidate_commit'] or task['base_revision'],'plan_revision':w['plan_revisions'],
