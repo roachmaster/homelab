@@ -29,8 +29,30 @@ impl McpPresenceConfig {
     }
 }
 /// Narrow ready read port. No tool dispatch, caller-selected URL or identity.
+///
+/// `None` means presence is not part of this host's catalog at all (the
+/// wire field is omitted); `Some(Unavailable)` means it is configured but
+/// could not be read.
 pub(crate) trait PresenceReader: Send + Sync {
-    fn read(&self, deadline: Instant) -> McpPresence;
+    fn read(&self, deadline: Instant) -> Option<McpPresence>;
+}
+/// Null object for a host without an MCP presence section: it never
+/// connects and never contributes presence to the catalog.
+pub(crate) struct NoPresence;
+impl PresenceReader for NoPresence {
+    fn read(&self, _deadline: Instant) -> Option<McpPresence> {
+        None
+    }
+}
+/// Select the reader for an optional `mcp_presence` config section: the
+/// HTTP reader when configured, [`NoPresence`] otherwise.
+pub(crate) fn create_presence_reader(
+    config: Option<&McpPresenceConfig>,
+) -> Result<Box<dyn PresenceReader>, HostError> {
+    match config {
+        Some(config) => PresenceReaderFactory::new(config).create(),
+        None => Ok(Box::new(NoPresence)),
+    }
 }
 /// Construction of this recipe is effect-free; creation reads the private token.
 pub(crate) struct PresenceReaderFactory(McpPresenceConfig);
@@ -50,15 +72,15 @@ impl Factory<Box<dyn PresenceReader>> for PresenceReaderFactory {
 }
 struct HttpPresenceReader(ChatRelay);
 impl PresenceReader for HttpPresenceReader {
-    fn read(&self, deadline: Instant) -> McpPresence {
+    fn read(&self, deadline: Instant) -> Option<McpPresence> {
         // A missing MCP server must not hold up the existing work catalog.
         let deadline = deadline.min(Instant::now() + Duration::from_millis(300));
         self.0
             .read_mcp_presence(deadline)
             .and_then(|bytes| serde_json::from_slice::<McpPresenceReport>(&bytes).ok())
             .filter(McpPresenceReport::is_valid)
-            .map_or(McpPresence::Unavailable, |report| McpPresence::Available {
-                report,
+            .map_or(Some(McpPresence::Unavailable), |report| {
+                Some(McpPresence::Available { report })
             })
     }
 }
@@ -89,5 +111,22 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn unconfigured_presence_selects_the_null_reader_without_effects() {
+        let reader = create_presence_reader(None).expect("null reader");
+        assert!(reader.read(Instant::now()).is_none());
+    }
+
+    #[test]
+    fn configured_presence_selects_the_http_reader() {
+        let config = McpPresenceConfig {
+            endpoint: "127.0.0.1:8791".parse().unwrap(),
+            token_file: "/nonexistent/forge-presence-reader-token".into(),
+        };
+        // The HTTP reader's creation reads the token, so a missing token
+        // refuses exactly like the recipe does.
+        assert!(create_presence_reader(Some(&config)).is_err());
     }
 }

@@ -122,20 +122,14 @@ impl Factory<WorkRelay> for WorkRelayFactory {
         Ok(WorkRelay {
             relay: transport(self.0.endpoint, self.0.token_file.clone()).create()?,
             grants: self.0.clone(),
-            presence: self
-                .0
-                .mcp_presence
-                .as_ref()
-                .map(crate::presence::PresenceReaderFactory::new)
-                .map(|f| f.create())
-                .transpose()?,
+            presence: crate::presence::create_presence_reader(self.0.mcp_presence.as_ref())?,
         })
     }
 }
 pub(crate) struct WorkRelay {
     relay: ChatRelay,
     grants: WorkConfig,
-    presence: Option<Box<dyn crate::presence::PresenceReader>>,
+    presence: Box<dyn crate::presence::PresenceReader>,
 }
 pub(crate) fn handles(destination: &str) -> bool {
     destination.starts_with("ide.work.")
@@ -242,7 +236,7 @@ impl WorkRelay {
         } = &mut reply.event
         {
             // Only the configured host reader may supply connection presence.
-            *mcp_presence = self.presence.as_ref().map(|reader| reader.read(deadline));
+            *mcp_presence = self.presence.read(deadline);
             projects.retain(|p| self.grants.allowed_projects.contains(&p.alias));
             profiles.retain(|p| self.grants.allowed_profiles.contains(&p.alias));
             for profile in profiles.iter_mut() {
