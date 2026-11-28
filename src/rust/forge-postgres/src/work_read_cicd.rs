@@ -48,17 +48,26 @@ fn sha256_hex(text: &str) -> String {
 /// (stage headers + excerpts, the v1 subset of Python's Jenkins
 /// event assembly). The byte window and digest cursor follow
 /// Python's stage-log paging.
+pub(crate) struct LogPage<'a> {
+    pub stage_id: &'a str,
+    pub view: &'a str,
+    pub cursor_token: Option<&'a str>,
+}
+
 pub(crate) fn cicd_stage_log(
     store: &PgWorkStore,
     project_alias: &str,
     task_id: Uuid,
     correlation_id: Uuid,
     action_id: Uuid,
-    stage_id: &str,
-    view: &str,
-    cursor_token: Option<&str>,
+    page: LogPage<'_>,
     delivery_enabled: bool,
 ) -> Result<forge_work::work_types::StageLogView, forge_work::WorkError> {
+    let LogPage {
+        stage_id,
+        view,
+        cursor_token,
+    } = page;
     let invalid = || forge_work::WorkError::rejected(400, "invalid_request");
     if stage_id.is_empty()
         || stage_id.len() > 64

@@ -62,11 +62,9 @@ pub(crate) fn resume(
             base_revision: col(row, "base_revision")?,
             workflow_id: col(row, "workflow_id")?,
             root_task_id: request.task_id,
-            repair_root_task_id: None,
-            title: String::new(),
-            correlation_id: col(row, "correlation_id")?,
             replay: None,
         };
+        let _: uuid::Uuid = col(row, "correlation_id")?;
         if !request.allowed_modes.iter().any(|mode| mode == &task.mode) {
             return Err(forge_work::WorkError::rejected(403, "denied"));
         }
@@ -250,9 +248,11 @@ pub(crate) fn resume(
             request.task_id,
             "resumed",
             event_payload,
-            &request.actor,
-            None,
-            false,
+            crate::work_rows::EventOptions {
+                actor: &request.actor,
+                cause: None,
+                first: false,
+            },
         )?;
         let insert_params: &[&(dyn ToSql + Sync)] = &[
             &store.owner,

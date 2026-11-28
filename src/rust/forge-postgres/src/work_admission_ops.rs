@@ -123,11 +123,9 @@ pub(crate) fn accept(
             base_revision: col(row, "base_revision")?,
             workflow_id: None,
             root_task_id: request.task_id,
-            repair_root_task_id: None,
-            title: String::new(),
-            correlation_id: col(row, "correlation_id")?,
             replay: None,
         };
+        let _: uuid::Uuid = col(row, "correlation_id")?;
         let receipt_params: &[&(dyn ToSql + Sync)] = &[
             &store.owner,
             &request.project_alias,
@@ -239,9 +237,11 @@ pub(crate) fn accept(
                 "revision": new_revision,
                 "review_note": request.review_note,
             }),
-            &request.actor,
-            None,
-            false,
+            crate::work_rows::EventOptions {
+                actor: &request.actor,
+                cause: None,
+                first: false,
+            },
         )?;
         let insert_params: &[&(dyn ToSql + Sync)] = &[
             &store.owner,

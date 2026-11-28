@@ -1172,7 +1172,7 @@ impl RunOnceHook for ExternalMaintenance {
 }
 
 struct ExternalPass {
-    store: Arc<ExternalWorkflowStore>,
+    store: Rc<ExternalWorkflowStore>,
 }
 
 impl ExternalWorkflowHook for ExternalPass {
@@ -1226,7 +1226,7 @@ impl WorkflowThreadStart {
 fn build_external_store(
     config: &WorkApiConfig,
     pg: &PgConfig,
-) -> Result<Option<Arc<ExternalWorkflowStore>>, WorkError> {
+) -> Result<Option<Rc<ExternalWorkflowStore>>, WorkError> {
     if config.external_workflows.is_empty() {
         return Ok(None);
     }
@@ -1250,7 +1250,7 @@ fn build_external_store(
         .collect();
     let policies: BTreeMap<String, ExternalWorkflowPolicy> =
         config.external_workflows.iter().cloned().collect();
-    Ok(Some(Arc::new(ExternalWorkflowStore::new(
+    Ok(Some(Rc::new(ExternalWorkflowStore::new(
         config.owner.clone(),
         policies,
         Arc::new(config.clone()),
@@ -1293,7 +1293,7 @@ fn workflow_thread_main(
     let external_workflow: Option<Box<dyn ExternalWorkflowHook>> =
         external_store.as_ref().map(|store| {
             Box::new(ExternalPass {
-                store: Arc::clone(store),
+                store: Rc::clone(store),
             }) as Box<dyn ExternalWorkflowHook>
         });
     let delivery_repair: Option<Box<dyn ExternalWorkflowHook>> =

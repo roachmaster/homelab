@@ -297,9 +297,11 @@ pub(crate) fn plan_decide(
                 request.task_id,
                 "checkpoint",
                 decision_payload,
-                &request.actor,
-                None,
-                false,
+                crate::work_rows::EventOptions {
+                    actor: &request.actor,
+                    cause: None,
+                    first: false,
+                },
             )?;
             insert_event(
                 tx,
@@ -313,9 +315,11 @@ pub(crate) fn plan_decide(
                     "decision_id": decision_id.to_string(),
                     "decision": decision,
                 }),
-                &request.actor,
-                Some(cause.as_str()),
-                false,
+                crate::work_rows::EventOptions {
+                    actor: &request.actor,
+                    cause: Some(cause.as_str()),
+                    first: false,
+                },
             )?;
         } else {
             insert_event(
@@ -325,9 +329,11 @@ pub(crate) fn plan_decide(
                 request.task_id,
                 "resumed",
                 decision_payload,
-                &request.actor,
-                None,
-                false,
+                crate::work_rows::EventOptions {
+                    actor: &request.actor,
+                    cause: None,
+                    first: false,
+                },
             )?;
             notify(tx)?;
         }

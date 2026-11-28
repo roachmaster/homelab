@@ -88,15 +88,14 @@ fn read_guarded_io(
         Mode::empty(),
     )
     .map_err(std::io::Error::from)?;
-    let mut file = std::fs::File::from(fd);
+    let file = std::fs::File::from(fd);
     let stat = file.metadata()?;
     let owner = owner.unwrap_or_else(|| nix::unistd::geteuid().into());
     if !stat.is_file()
         || stat.uid() != owner
         || stat.nlink() != 1
         || stat.mode() & mode_mask != 0
-        || stat.size() < 0
-        || stat.size() as usize > maximum
+        || stat.size() > maximum as u64
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,

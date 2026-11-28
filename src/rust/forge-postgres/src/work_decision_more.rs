@@ -149,12 +149,14 @@ fn review_decide_bound(
         let task = control_task(
             tx,
             store,
-            &request.project_alias,
-            request.task_id,
-            request.expected_revision,
-            &request.idempotency_key,
-            "review_decide",
-            &intent,
+            crate::work_control::ControlRequest {
+                project_alias: &request.project_alias,
+                task_id: request.task_id,
+                expected_revision: request.expected_revision,
+                key: &request.idempotency_key,
+                action: "review_decide",
+                intent: &intent,
+            },
         )?;
         if let Some(replay) = &task.replay {
             return Ok(replay.clone());
@@ -443,12 +445,14 @@ pub(crate) fn repair(
         let task = control_task(
             tx,
             store,
-            &request.project_alias,
-            request.task_id,
-            request.expected_revision,
-            &request.idempotency_key,
-            "repair",
-            &intent,
+            crate::work_control::ControlRequest {
+                project_alias: &request.project_alias,
+                task_id: request.task_id,
+                expected_revision: request.expected_revision,
+                key: &request.idempotency_key,
+                action: "repair",
+                intent: &intent,
+            },
         )?;
         if let Some(replay) = &task.replay {
             let revision = replay
@@ -793,12 +797,14 @@ pub(crate) fn publication_retry(
         let task = control_task(
             tx,
             store,
-            &request.project_alias,
-            request.task_id,
-            request.expected_revision,
-            &request.idempotency_key,
-            "publication_retry",
-            &intent,
+            crate::work_control::ControlRequest {
+                project_alias: &request.project_alias,
+                task_id: request.task_id,
+                expected_revision: request.expected_revision,
+                key: &request.idempotency_key,
+                action: "publication_retry",
+                intent: &intent,
+            },
         )?;
         if let Some(replay) = &task.replay {
             let revision = replay
@@ -979,9 +985,11 @@ pub(crate) fn handoff_author_full(
                 "workspace_digest": workspace_digest,
                 "reason": "provider_author_handoff",
             }),
-            &coordinator_actor(),
-            None,
-            false,
+            crate::work_rows::EventOptions {
+                actor: &coordinator_actor(),
+                cause: None,
+                first: false,
+            },
         )?;
         Ok(serde_json::json!({
             "project_alias": command.project_alias,
@@ -1114,9 +1122,11 @@ pub(crate) fn handoff_author(
                 "workspace_digest": request.workspace_digest,
                 "reason": "provider_author_handoff",
             }),
-            &coordinator_actor(),
-            None,
-            false,
+            crate::work_rows::EventOptions {
+                actor: &coordinator_actor(),
+                cause: None,
+                first: false,
+            },
         )?;
         outcome_for(
             tx,

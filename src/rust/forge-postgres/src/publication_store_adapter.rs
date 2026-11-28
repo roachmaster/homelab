@@ -453,19 +453,17 @@ impl forge_work_publication::publication::PublicationListenerPort for PgPublicat
     fn wait(&mut self, seconds: f64) -> bool {
         use std::time::{Duration, Instant};
         let deadline = Instant::now() + Duration::from_secs_f64(seconds.max(0.0));
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return false;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        match self.receiver.recv_timeout(remaining) {
+            Ok(()) => {
+                while self.receiver.try_recv().is_ok() {}
+                true
             }
-            match self.receiver.recv_timeout(remaining) {
-                Ok(()) => {
-                    while self.receiver.try_recv().is_ok() {}
-                    return true;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => return false,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return false,
-            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => false,
         }
     }
 }

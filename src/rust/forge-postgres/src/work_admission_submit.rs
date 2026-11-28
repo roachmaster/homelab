@@ -344,9 +344,11 @@ pub(crate) fn submit(
             task_id,
             "queued",
             receipt,
-            &request.actor,
-            None,
-            true,
+            crate::work_rows::EventOptions {
+                actor: &request.actor,
+                cause: None,
+                first: true,
+            },
         )?;
         notify(tx)?;
         outcome_for(tx, &store.owner, &request.project_alias, task_id, 1, false)

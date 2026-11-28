@@ -29,6 +29,34 @@ checks, immutable receipt/counter assertions, source-boundary checks and the
 /mnt/data/homelab-build/codex-proxy-runtime-20261128-evidence/.
 No remote publication or live database/service change was made here.
 
+## Bounded PostgreSQL adapter lint correction — 2026-11-28
+
+The isolated feature/codex correction based on e41d45df makes forge-postgres pass
+Rust 1.97.1 Clippy across all targets and features with warnings denied. Three
+private helper boundaries now group existing request fields; four frozen public
+SQL adapter boundaries retain their signatures with explicitly approved, local
+lint expectations. Unused stored control fields are removed while retaining the
+original typed row-decoding checks. The external workflow store uses Rc only
+inside its existing owning workflow thread; channel and global Send boundaries
+remain unchanged. Other changes preserve existing expressions and timeout behavior.
+
+A real context validation defect was exposed by the lint gate: shifting a signed
+i64 by 63 made the positive Jenkins counter range empty. Build and non-null queue
+IDs now accept positive i64 values and reject zero, negatives, floats, booleans,
+and JSON integers at or above 2^63. Existing missing-field and null queue handling
+is unchanged. The boundary regression covers 1, i64::MAX, -1, 0 and oversized JSON
+integers. All 508 SQL-bearing Rust string tokens match the base source exactly;
+SQL files, other crates, lockfiles, permissions and public signatures are untouched.
+
+All 36 unit tests and the actual disposable PostgreSQL 16 schema/grant smoke test
+pass with zero failures or ignored tests. The latter ran as UID 1000 with the
+PostgreSQL-disable variable unset and completed in 4.19 seconds. Selected package
+formatting and diff checks pass. Evidence logs are outside source under
+/mnt/data/homelab-build/cohort54-forward-20261128/postgres-*.log, with an owned
+external Cargo target directory. This is package qualification; full workspace CI
+and production operations remain with the orchestrator. No push, live SQL,
+service/config change or model call was performed.
+
 ## Jenkins and usage lint qualification — 2026-11-28
 
 The incoming Rust Jenkins/usage ports failed the unchanged warnings-as-errors

@@ -302,7 +302,7 @@ impl DisposablePostgresCluster {
 
     pub async fn admin_exec(&self, statements: &[&str], owner: bool) -> Result<(), String> {
         let mut client = self.connect("postgres").await?;
-        let mut tx = client
+        let tx = client
             .transaction()
             .await
             .map_err(|error| error.to_string())?;
@@ -365,7 +365,7 @@ impl DisposablePostgresCluster {
         worker_role: &str,
     ) -> Result<(), String> {
         let mut client = self.connect("postgres").await?;
-        let mut tx = client
+        let tx = client
             .transaction()
             .await
             .map_err(|error| error.to_string())?;

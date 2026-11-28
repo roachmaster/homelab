@@ -720,7 +720,7 @@ impl JenkinsStorePort for PgJenkinsStore {
             let attempt_count: i64 = row.get("attempt_count");
             let max_attempts: i64 = row.get("max_attempts");
             if retryable && attempt_count < max_attempts {
-                let exponent = (attempt_count - 1).max(0).min(40);
+                let exponent = (attempt_count - 1).clamp(0, 40);
                 let delay =
                     ((base_backoff as i128) * (1i128 << exponent)).min(cap_backoff as i128) as i64;
                 db(tx.execute_count(

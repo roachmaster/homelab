@@ -93,6 +93,12 @@ where
 /// keys - and appends the coding_events row. `first` uses the
 /// sequence-1 admission form; otherwise the next sequence derives
 /// from the task's existing rows.
+pub(crate) struct EventOptions<'a> {
+    pub actor: &'a forge_work::Actor,
+    pub cause: Option<&'a str>,
+    pub first: bool,
+}
+
 pub(crate) fn insert_event(
     tx: &mut crate::tx::Tx<'_, '_>,
     owner: &str,
@@ -100,10 +106,13 @@ pub(crate) fn insert_event(
     task_id: Uuid,
     kind: &str,
     payload: Value,
-    actor: &forge_work::Actor,
-    cause: Option<&str>,
-    first: bool,
+    options: EventOptions<'_>,
 ) -> Result<(), forge_work::WorkError> {
+    let EventOptions {
+        actor,
+        cause,
+        first,
+    } = options;
     let mut merged = payload;
     if let Some(object) = merged.as_object_mut() {
         object.insert("actor".to_string(), actor_json(actor));

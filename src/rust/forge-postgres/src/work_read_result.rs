@@ -120,7 +120,7 @@ pub(crate) fn result(
         if bytes[local] & 0xC0 == 0x80 {
             return Err(invalid());
         }
-        let take = ((limit_bytes as usize).min(bytes.len() - local)) as usize;
+        let take = (limit_bytes as usize).min(bytes.len() - local);
         let slice = &bytes[local..local + take];
         let mut content = match std::str::from_utf8(slice) {
             Ok(text) => text.to_string(),

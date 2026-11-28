@@ -44,6 +44,10 @@ fn review_failure() -> ReviewContextFailure {
 // Peer context (work_peer_context)
 // ---------------------------------------------------------------------------
 
+fn valid_jenkins_counter(value: &Value) -> bool {
+    forge_work::validation::is_int(value) && value.as_i64().is_some_and(|number| number > 0)
+}
+
 pub struct PeerContextProvider {
     api: WorkerApi,
     source_provider: Option<PeerCandidateSource>,
@@ -782,17 +786,8 @@ impl BuildContextProvider {
                         .all(|key| object.contains_key(*key))
                     && object["provider"].as_str() == Some("jenkins")
                     && object["job"].as_str() == Some("forge-native-candidate")
-                    && forge_work::validation::is_int(&object["build_number"])
-                    && object["build_number"]
-                        .as_i64()
-                        .map(|n| (1..(1i64 << 63)).contains(&n))
-                        .unwrap_or(false)
-                    && (object["queue_id"].is_null()
-                        || (forge_work::validation::is_int(&object["queue_id"])
-                            && object["queue_id"]
-                                .as_i64()
-                                .map(|n| (1..(1i64 << 63)).contains(&n))
-                                .unwrap_or(false)))
+                    && valid_jenkins_counter(&object["build_number"])
+                    && (object["queue_id"].is_null() || valid_jenkins_counter(&object["queue_id"]))
             })
             .ok_or_else(|| invalid("Invalid Jenkins build reference"))?
             .clone();
@@ -1191,5 +1186,22 @@ mod tests {
         lease.feedback_id = Some(u(7));
         let error = validate_review_context(&lease, &workspace(), None, &mut NullGit).unwrap_err();
         assert_eq!(error, WorkerError::protocol(REVIEW_MESSAGE));
+    }
+    #[test]
+    fn jenkins_counters_keep_positive_i64_bounds() {
+        for value in [serde_json::json!(1), serde_json::json!(i64::MAX)] {
+            assert!(valid_jenkins_counter(&value));
+        }
+        for value in [
+            serde_json::json!(-1),
+            serde_json::json!(0),
+            serde_json::json!(1_u64 << 63),
+            serde_json::json!(u64::MAX),
+            serde_json::json!(1.0),
+            serde_json::json!(true),
+            Value::Null,
+        ] {
+            assert!(!valid_jenkins_counter(&value));
+        }
     }
 }
