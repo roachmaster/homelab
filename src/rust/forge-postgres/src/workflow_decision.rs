@@ -88,6 +88,14 @@ impl WorkflowDecisionPort for PgWorkflowDecisions {
         crate::work_decision_more::review_decide_owner(&self.store, request, authority)
     }
 
+    fn review_decide_postfix(
+        &self,
+        request: &ReviewDecideRequest,
+        authority: &forge_work::native_ci_postfix::BoundPostfixVerificationAuthority,
+    ) -> Result<Value, WorkError> {
+        crate::work_decision_more::review_decide_postfix(&self.store, request, authority)
+    }
+
     fn resume_corrected(
         &self,
         request: &ResumeRequest,

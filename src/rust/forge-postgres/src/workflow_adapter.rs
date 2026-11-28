@@ -1306,6 +1306,10 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
                 let tasks_wait = "EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$1 AND(status IN('queued','running','cancelled','cancel_requested') OR cancelled_at IS NOT NULL))";
                 vec![tasks_wait, actions, attempts]
             }
+            BusyCheck::NativeCiRecovery => {
+                let attempts_live = "EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=$1 AND(a.phase<>'stopped' OR a.reservation_active OR a.lease_expires_at IS NOT NULL))";
+                vec![tasks_broad, attempts_live, actions, reviews, pubs_checking]
+            }
         };
         let sql = format!("SELECT {} AS busy", parts.join(" OR "));
         let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
@@ -2037,6 +2041,21 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
                  OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$6 AND status IN('queued','running','cancel_requested')) \
                  OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON t.id=p.task_id WHERE t.workflow_id=$7 AND p.status IN('pending','checking','publishing')) \
                  OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$8 AND source_key LIKE $9) AS busy",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn cancel_receipt_exists(
+        &mut self,
+        project: &str,
+        task_ids: &[Uuid],
+    ) -> Result<bool, WorkError> {
+        let ids: Vec<Uuid> = task_ids.to_vec();
+        let params: &[&(dyn ToSql + Sync)] = &[&self.owner, &project, &ids];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_control_receipts WHERE owner_id=$1 AND project_alias=$2 AND task_id=ANY($3::uuid[]) AND action='cancel') AS cancelled",
                 params,
             )
             .map_err(work_err)

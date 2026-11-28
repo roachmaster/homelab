@@ -47,6 +47,13 @@ pub enum BusyCheck {
     /// cancelled_at set, actions pending/leased, live
     /// attempts.
     QuotaWait,
+    /// The native-CI recoveries' quiescence gate (postfix +
+    /// reprepare, verbatim in both Python modules): the
+    /// broad task set, attempts not stopped or still
+    /// reserved/leased, actions pending/leased, reviews
+    /// pending/checking, publications
+    /// pending/checking/publishing.
+    NativeCiRecovery,
 }
 
 pub trait WorkflowTx: RetryEvents {
@@ -793,6 +800,16 @@ pub trait WorkflowTx: RetryEvents {
         workflow_id: Uuid,
         task_id: Uuid,
         attempt_id: Uuid,
+    ) -> Result<bool, WorkError>;
+
+    // -- Native CI recovery probes (S2 postfix catch-up) -------
+
+    /// A 'cancel' control receipt exists for any of the given
+    /// tasks (the recoveries' operator-cancel fence).
+    fn cancel_receipt_exists(
+        &mut self,
+        project: &str,
+        task_ids: &[Uuid],
     ) -> Result<bool, WorkError>;
 }
 

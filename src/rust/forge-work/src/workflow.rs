@@ -256,6 +256,18 @@ pub trait WorkflowDecisionPort {
         request: &ReviewDecideRequest,
         authority: &crate::owner_reverification::BoundOwnerVerificationAuthority,
     ) -> Result<Value, WorkError>;
+    /// WorkStore.review_decide under a
+    /// BoundPostfixVerificationAuthority (the M38 native-CI
+    /// post-fix exception): the adapter re-validates the
+    /// authority and runs its validate_append inside the
+    /// decision transaction; the automatic cap is skipped for
+    /// this manual authority (the policy row must still
+    /// exist). Returns the Python result document.
+    fn review_decide_postfix(
+        &self,
+        request: &ReviewDecideRequest,
+        authority: &crate::native_ci_postfix::BoundPostfixVerificationAuthority,
+    ) -> Result<Value, WorkError>;
     fn handoff_author(
         &self,
         command: &crate::operator_dtos::AuthorHandoff,
@@ -2737,6 +2749,7 @@ mod tests {
         unused!(continuation_busy, Uuid => Result<bool, WorkError>);
         unused!(plan_source_present, => Result<bool, WorkError>);
         unused!(plan_lineage_busy, Uuid, Uuid, Uuid => Result<bool, WorkError>);
+        unused!(cancel_receipt_exists, &str, &[Uuid] => Result<bool, WorkError>);
     }
 
     fn rows() -> (Value, Value, Value, Value, Value) {

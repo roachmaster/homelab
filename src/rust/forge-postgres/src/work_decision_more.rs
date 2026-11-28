@@ -88,6 +88,7 @@ pub(crate) fn append_review_retry(
 enum BoundAuthority<'a> {
     Preparation(&'a forge_work::workflow_ingress::BoundPreparationRetryAuthority),
     Owner(&'a forge_work::owner_reverification::BoundOwnerVerificationAuthority),
+    Postfix(&'a forge_work::native_ci_postfix::BoundPostfixVerificationAuthority),
 }
 
 /// WorkStore.review_decide with a bound authority (the owner
@@ -124,6 +125,11 @@ fn review_decide_bound(
     }
     if let BoundAuthority::Owner(owner) = &authority {
         if store.owner != owner.owner_id() {
+            return Err(forge_work::WorkError::rejected(403, "denied"));
+        }
+    }
+    if let BoundAuthority::Postfix(postfix) = &authority {
+        if store.owner != postfix.owner_id() {
             return Err(forge_work::WorkError::rejected(403, "denied"));
         }
     }
@@ -169,6 +175,10 @@ fn review_decide_bound(
                 bound.validate(&task_value, "code")?;
             }
             BoundAuthority::Owner(bound) => {
+                bound.validate_review_decision(request.decision, request.review_id)?;
+                bound.validate(&task_value, "code")?;
+            }
+            BoundAuthority::Postfix(bound) => {
                 bound.validate_review_decision(request.decision, request.review_id)?;
                 bound.validate(&task_value, "code")?;
             }
@@ -270,6 +280,42 @@ fn review_decide_bound(
                 )?;
                 insert_review_retry(tx, store, &task, review, &request.note)?
             }
+            BoundAuthority::Postfix(bound) => {
+                // The M38 manual authority mirrors the owner
+                // path (policy row must exist, automatic cap
+                // skipped); its validate_append has no
+                // failed-CI witness or attempt probe - the
+                // bound review's checks never ran.
+                let _max = retry_policy_max(tx, store, &task)?;
+                let doc_params: &[&(dyn ToSql + Sync)] = &[&request.review_id];
+                let docs = tx
+                    .query_rows(
+                        "SELECT to_jsonb(t) AS doc FROM (SELECT * FROM forge_agent.coding_reviews WHERE review_id=$1) t",
+                        doc_params,
+                    )
+                    .map_err(work_err)?;
+                let review_value: Value = docs
+                    .first()
+                    .and_then(|row| row.get::<usize, Option<Value>>(0))
+                    .ok_or_else(not_reviewable)?;
+                let max_params: &[&(dyn ToSql + Sync)] = &[
+                    &store.owner,
+                    &request.project_alias,
+                    &request.task_id,
+                ];
+                let max_rows = tx
+                    .query_rows(
+                        "SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3",
+                        max_params,
+                    )
+                    .map_err(work_err)?;
+                let max_review_no: Option<i64> = max_rows
+                    .first()
+                    .and_then(|row| row.try_get("latest").ok())
+                    .flatten();
+                bound.validate_append_rows(&task_value, &review_value, max_review_no)?;
+                insert_review_retry(tx, store, &task, review, &request.note)?
+            }
         };
         result["review_id"] = Value::String(new_review_id.to_string());
         control_record(
@@ -303,6 +349,15 @@ pub(crate) fn review_decide_owner(
     authority: &forge_work::owner_reverification::BoundOwnerVerificationAuthority,
 ) -> Result<Value, forge_work::WorkError> {
     review_decide_bound(store, request, BoundAuthority::Owner(authority))
+}
+
+/// WorkflowDecisionPort::review_decide_postfix (S2 catch-up).
+pub(crate) fn review_decide_postfix(
+    store: &PgWorkStore,
+    request: &forge_work::decision_requests::ReviewDecideRequest,
+    authority: &forge_work::native_ci_postfix::BoundPostfixVerificationAuthority,
+) -> Result<Value, forge_work::WorkError> {
+    review_decide_bound(store, request, BoundAuthority::Postfix(authority))
 }
 
 fn findings_empty(value: &Value) -> bool {

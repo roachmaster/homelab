@@ -239,6 +239,13 @@ mod tests {
         ) -> Result<Value, WorkError> {
             Ok(json!({}))
         }
+        fn review_decide_postfix(
+            &self,
+            _request: &ReviewDecideRequest,
+            _authority: &crate::native_ci_postfix::BoundPostfixVerificationAuthority,
+        ) -> Result<Value, WorkError> {
+            Ok(json!({}))
+        }
         fn handoff_author(
             &self,
             _command: &crate::operator_dtos::AuthorHandoff,
