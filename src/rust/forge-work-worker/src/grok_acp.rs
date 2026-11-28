@@ -366,7 +366,7 @@ fn descriptor_path(raw: Option<&Value>, allowed_notes: &[String]) -> Option<Stri
     if raw.is_empty() || raw.chars().count() > 4096 || raw.contains('\0') {
         return None;
     }
-    if posix_parts(raw).iter().any(|part| *part == "..") {
+    if posix_parts(raw).contains(&"..") {
         return None;
     }
     let absolute = if raw.starts_with('/') {
