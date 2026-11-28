@@ -9,10 +9,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 use crate::config::JenkinsConfig;
-use crate::consumer::{
-    default_handler_factories, HandlerFactory, JenkinsConsumerFactory, JenkinsEventConsumer,
-    StoreFactory,
-};
+use crate::consumer::{HandlerFactory, JenkinsConsumerFactory, JenkinsEventConsumer, StoreFactory};
 use crate::events::{coerce_event_kind, JenkinsEventEmit, JenkinsEventEmitParams};
 use crate::store::{JenkinsStoreError, JenkinsStorePort};
 
@@ -436,18 +433,18 @@ impl crate::emitter::JenkinsEmitService for JenkinsService {
 }
 
 pub struct JenkinsServiceFactory {
-    pub config: Option<JenkinsConfig>,
+    pub config: JenkinsConfig,
     store_factory: StoreFactory,
-    handler_factories: Option<BTreeMap<String, HandlerFactory>>,
+    handler_factories: BTreeMap<String, HandlerFactory>,
     worker_id: String,
     with_consumers: bool,
 }
 
 impl JenkinsServiceFactory {
     pub fn new(
-        config: Option<JenkinsConfig>,
+        config: JenkinsConfig,
         store_factory: StoreFactory,
-        handler_factories: Option<BTreeMap<String, HandlerFactory>>,
+        handler_factories: BTreeMap<String, HandlerFactory>,
         worker_id: &str,
         with_consumers: bool,
     ) -> Self {
@@ -460,10 +457,8 @@ impl JenkinsServiceFactory {
         }
     }
 
-    pub fn create(self) -> Result<Option<JenkinsService>, JenkinsStoreError> {
-        let Some(config) = self.config else {
-            return Ok(None);
-        };
+    pub fn create(self) -> Result<JenkinsService, JenkinsStoreError> {
+        let config = self.config;
         let consumer_worker = if self.with_consumers {
             let factory = JenkinsConsumerFactory::new(
                 config.clone(),
@@ -480,24 +475,20 @@ impl JenkinsServiceFactory {
         } else {
             None
         };
-        let store = (self.store_factory)();
-        Ok(Some(JenkinsService::new(config, store, consumer_worker)))
+        let store = self.store_factory.open();
+        Ok(JenkinsService::new(config, store, consumer_worker))
     }
 }
 
-/// create_jenkins_service(): build from explicit config, or None when
-/// Jenkins integration is not configured.
+/// create_jenkins_service(): build from explicit config. Whether
+/// Jenkins integration is configured at all is the caller's selection.
 pub fn create_jenkins_service(
-    config: Option<JenkinsConfig>,
+    config: JenkinsConfig,
     store_factory: StoreFactory,
-    handler_factories: Option<BTreeMap<String, HandlerFactory>>,
+    handler_factories: BTreeMap<String, HandlerFactory>,
     worker_id: &str,
     with_consumers: bool,
-) -> Result<Option<JenkinsService>, JenkinsStoreError> {
-    let handler_factories = match handler_factories {
-        Some(factories) => Some(factories),
-        None => Some(default_handler_factories()),
-    };
+) -> Result<JenkinsService, JenkinsStoreError> {
     JenkinsServiceFactory::new(
         config,
         store_factory,

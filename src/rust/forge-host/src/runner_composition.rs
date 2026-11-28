@@ -219,13 +219,13 @@ impl Factory<JenkinsParts> for JenkinsFactory {
             )) as Box<dyn forge_jenkins::store::JenkinsStorePort>
         });
         match forge_jenkins::api::create_jenkins_service(
-            Some((**config).clone()),
+            (**config).clone(),
             store_factory,
-            None,
+            forge_jenkins::consumer::default_handler_factories(),
             "jenkins-consumer",
             !api_only,
         ) {
-            Ok(Some(mut service)) => {
+            Ok(mut service) => {
                 let consumer = service.consumer_worker.take();
                 let background: Box<dyn Background> = match consumer {
                     Some(consumer) if !api_only => Box::new(ConsumerLoop(consumer)),
@@ -236,7 +236,6 @@ impl Factory<JenkinsParts> for JenkinsFactory {
                     background,
                 })
             }
-            Ok(None) => Ok(unavailable()),
             Err(error) => Err(format!("jenkins service failed: {error}")),
         }
     }

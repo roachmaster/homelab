@@ -457,14 +457,13 @@ fn jenkins_events(
     });
     let build_service = || -> FactoryResult<JenkinsService> {
         create_jenkins_service(
-            Some(selected.clone()),
+            selected.clone(),
             Arc::clone(&store_factory),
-            None,
+            forge_jenkins::consumer::default_handler_factories(),
             &config.worker.worker_id,
             false,
         )
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "Jenkins events configuration is unavailable".to_string())
+        .map_err(|error| error.to_string())
     };
     let lookup_service = Arc::new(Mutex::new(build_service()?));
     let emitter = Box::new(ServiceEmitter(InProcessJenkinsEmitter::new(

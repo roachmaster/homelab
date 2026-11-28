@@ -115,8 +115,37 @@ impl JenkinsEventHandler for ObservationJenkinsHandler {
     }
 }
 
-pub type HandlerFactory = Arc<dyn Fn() -> Box<dyn JenkinsEventHandler> + Send + Sync>;
-pub type StoreFactory = Arc<dyn Fn() -> Box<dyn JenkinsStorePort> + Send + Sync>;
+/// Creates one consumer handler.
+pub trait JenkinsHandlerProvider: Send + Sync {
+    fn handler(&self) -> Box<dyn JenkinsEventHandler>;
+}
+
+impl<F> JenkinsHandlerProvider for F
+where
+    F: Fn() -> Box<dyn JenkinsEventHandler> + Send + Sync,
+{
+    fn handler(&self) -> Box<dyn JenkinsEventHandler> {
+        self()
+    }
+}
+
+/// Opens a Jenkins store session (the service, the consumer and each
+/// heartbeat renewal take their own).
+pub trait JenkinsStoreProvider: Send + Sync {
+    fn open(&self) -> Box<dyn JenkinsStorePort>;
+}
+
+impl<F> JenkinsStoreProvider for F
+where
+    F: Fn() -> Box<dyn JenkinsStorePort> + Send + Sync,
+{
+    fn open(&self) -> Box<dyn JenkinsStorePort> {
+        self()
+    }
+}
+
+pub type HandlerFactory = Arc<dyn JenkinsHandlerProvider>;
+pub type StoreFactory = Arc<dyn JenkinsStoreProvider>;
 
 pub fn default_handler_factories() -> BTreeMap<String, HandlerFactory> {
     let mut factories: BTreeMap<String, HandlerFactory> = BTreeMap::new();
@@ -158,7 +187,7 @@ impl JenkinsEventConsumer {
         store_factory: StoreFactory,
         handlers: BTreeMap<String, Box<dyn JenkinsEventHandler>>,
         worker_id: &str,
-        stop: Option<Arc<AtomicBool>>,
+        stop: Arc<AtomicBool>,
         owned_handlers: bool,
     ) -> Result<Self, ConsumerError> {
         let enabled_names: Vec<&str> = config
@@ -183,7 +212,7 @@ impl JenkinsEventConsumer {
             handlers,
             consumer_names,
             worker_id: worker_id.to_string(),
-            stop: stop.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
+            stop,
             owned_handlers,
             shared: Arc::new(Mutex::new(Shared {
                 heartbeats: Vec::new(),
@@ -210,7 +239,7 @@ impl JenkinsEventConsumer {
         let lease_seconds = self.config.lease_seconds;
         let row_id = delivery.delivery_row_id.clone();
         let token = delivery.lease_token.clone().unwrap_or_default();
-        let mut renew_store = (self.store_factory)();
+        let mut renew_store = self.store_factory.open();
         let heartbeat = std::thread::spawn(move || loop {
             match done_rx.recv_timeout(renew_interval) {
                 Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
@@ -434,10 +463,10 @@ impl JenkinsConsumerFactory {
     pub fn new(
         config: JenkinsConfig,
         store_factory: StoreFactory,
-        handler_factories: Option<BTreeMap<String, HandlerFactory>>,
+        handler_factories: BTreeMap<String, HandlerFactory>,
         worker_id: &str,
     ) -> Result<Self, ConsumerError> {
-        let selected = handler_factories.unwrap_or_else(default_handler_factories);
+        let selected = handler_factories;
         for consumer in &config.consumers {
             if consumer.enabled && !selected.contains_key(&consumer.handler) {
                 return Err(ConsumerError::Message(format!(
@@ -458,18 +487,18 @@ impl JenkinsConsumerFactory {
         let mut handlers: BTreeMap<String, Box<dyn JenkinsEventHandler>> = BTreeMap::new();
         for consumer in &self.config.consumers {
             if consumer.enabled {
-                let handler = self.handler_factories[&consumer.handler]();
+                let handler = self.handler_factories[&consumer.handler].handler();
                 handlers.insert(consumer.name.clone(), handler);
             }
         }
-        let store = (self.store_factory)();
+        let store = self.store_factory.open();
         JenkinsEventConsumer::new(
             self.config,
             store,
             self.store_factory,
             handlers,
             &self.worker_id,
-            None,
+            Arc::new(AtomicBool::new(false)),
             true,
         )
     }
@@ -682,16 +711,89 @@ mod tests {
         let factory: StoreFactory = Arc::new(move || {
             Box::new(SharedStore(store_ref_clone.clone())) as Box<dyn JenkinsStorePort>
         });
-        let mut consumer = JenkinsConsumerFactory::new(config(), factory, None, "jenkins-consumer")
-            .expect("factory")
-            .create()
-            .expect("consumer");
+        let mut consumer = JenkinsConsumerFactory::new(
+            config(),
+            factory,
+            default_handler_factories(),
+            "jenkins-consumer",
+        )
+        .expect("factory")
+        .create()
+        .expect("consumer");
         assert!(consumer.run_once().expect("run_once"));
         assert!(!consumer.run_once().expect("run_once"));
         let store = store_ref.lock().expect("lock");
         assert_eq!(store.upserts, 1);
         assert_eq!(store.completed.len(), 1);
         assert!(store.failed.is_empty());
+    }
+
+    /// A store provider that counts the sessions it opens.
+    struct CountingStores {
+        opened: Arc<Mutex<usize>>,
+    }
+
+    impl JenkinsStoreProvider for CountingStores {
+        fn open(&self) -> Box<dyn JenkinsStorePort> {
+            *self.opened.lock().expect("lock") += 1;
+            Box::new(FakeStore::default())
+        }
+    }
+
+    fn counting() -> (StoreFactory, Arc<Mutex<usize>>) {
+        let opened = Arc::new(Mutex::new(0));
+        let stores: StoreFactory = Arc::new(CountingStores {
+            opened: opened.clone(),
+        });
+        (stores, opened)
+    }
+
+    #[test]
+    fn consumer_factory_refuses_an_unregistered_handler() {
+        let (stores, opened) = counting();
+        let error =
+            JenkinsConsumerFactory::new(config(), stores, BTreeMap::new(), "jenkins-consumer")
+                .err()
+                .expect("refused");
+        assert_eq!(
+            error.to_string(),
+            "Unregistered Jenkins consumer handler: observation"
+        );
+        assert_eq!(*opened.lock().expect("lock"), 0);
+    }
+
+    #[test]
+    fn api_only_service_opens_one_store_and_has_no_consumer() {
+        let (stores, opened) = counting();
+        let factory = crate::api::JenkinsServiceFactory::new(
+            config(),
+            stores,
+            default_handler_factories(),
+            "jenkins-consumer",
+            false,
+        );
+        assert_eq!(*opened.lock().expect("lock"), 0, "staging opens nothing");
+        let service = factory.create().expect("service");
+        assert!(service.consumer_worker.is_none());
+        assert_eq!(*opened.lock().expect("lock"), 1);
+    }
+
+    #[test]
+    fn service_with_consumers_binds_a_running_consumer_with_its_own_store() {
+        let (stores, opened) = counting();
+        let service = crate::api::JenkinsServiceFactory::new(
+            config(),
+            stores,
+            default_handler_factories(),
+            "jenkins-consumer",
+            true,
+        )
+        .create()
+        .expect("service");
+        let consumer = service.consumer_worker.as_ref().expect("consumer");
+        assert_eq!(consumer.handler_names(), vec!["observer".to_string()]);
+        assert!(!consumer.stop.load(Ordering::Relaxed));
+        assert_eq!(*opened.lock().expect("lock"), 2);
     }
 
     struct SharedStore(Arc<Mutex<FakeStore>>);
