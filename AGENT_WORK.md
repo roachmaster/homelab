@@ -26,6 +26,23 @@ The full tracked-source artifact audit still flags four synthetic Rust test
 literals; the web helper owns their separate eligibility correction. No claim
 of a clean complete candidate or full-main qualification is made here.
 
+## Permanent main source-preparation rejection — 2026-11-28
+
+PostMergeWorker previously retried a typed permanent SourceArtifactRejected as
+an unavailable observation before submission. It now terminates only the exact
+unsubmitted main preparation: candidate commit, candidate tree and prepared tree
+must match the leased main identity. The existing bounded structured rejection
+receipt retains paths/codes and process_started=false. No Jenkins request, CI
+result, cleanup claim, public DTO or schema is invented. Transient errors and
+already-checkpointed requests retain their existing reconciliation behavior.
+
+A real owned Git fixture tracks __pycache__/cache.pyc and exercises the normal
+PostMergeVerificationProvider through PostMergeWorker. Original e7 source fails
+the new terminal assertion (pending); the correction passes without a binding,
+spool submission, remote mutation or subsequent claim. Negative cases cover all
+three source identities, lost lease/start permission, cancellation, saved request
+and the existing 65KiB receipt bound. No production action or source push occurred.
+
 ## Grok ACP progress and permission separation — 2026-11-28
 
 This correction is based exactly on reviewed main f5e057c1. The new automatic

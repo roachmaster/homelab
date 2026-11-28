@@ -13,6 +13,7 @@ from uuid import UUID, uuid5
 
 from work_ci_contract import SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory
 from work_publication_clients import PublicationError
+from work_external_delivery import SourceArtifactRejected
 from work_verification import diagnostic_text
 
 LOG = logging.getLogger('forge-post-merge')
@@ -217,7 +218,22 @@ class PostMergeWorker:
                 return
             if request is None:
                 require_start_lease()
-                prepared = self.provider.prepare(job, require_start_lease)
+                try:
+                    prepared = self.provider.prepare(job, require_start_lease)
+                except SourceArtifactRejected as error:
+                    # No request/checkpoint or Jenkins submission exists yet.
+                    if (error.candidate_commit != job['merge_commit']
+                            or error.candidate_tree != job['merge_tree']
+                            or error.prepared_tree != job['merge_tree']):
+                        raise ValueError('Source rejection does not match main preparation') from error
+                    rejected = error.result()
+                    receipt = {**rejected['receipt'], 'process_started': False}
+                    if len(json.dumps(receipt, allow_nan=False).encode()) > 65536:
+                        raise ValueError('Oversized main source rejection receipt')
+                    finish('failed', receipt,
+                        'Main source preparation rejected private or generated artifacts; '
+                        'the original failed main verification is retained. Publish a corrected source successor.')
+                    return
                 if prepared.get('status') == 'superseded':
                     observed = prepared.get('observed_main')
                     if not isinstance(observed, str) or not HEX40.fullmatch(observed) or observed == job['merge_commit']:
