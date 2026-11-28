@@ -1,3 +1,26 @@
+## Runtime and rollout boundary — 2026-11-28
+
+The production runtime remains the Python API, native workers and publisher,
+with a matched portal host/assets/WASM/actor release. The Rust ports are compiled
+and tested source components; their presence on main does not activate a Rust
+worker or authorize a PostgreSQL proxy cutover. Persistent feature-branch
+ownership and independent Plan/code review still apply to every implementation.
+
+Migration54 is additive proxy preparation. Its new roles, fixed entry points,
+read grants and preparation authentication preserve the existing direct callers.
+Deploy this phase with database proxy transport disabled. Migration55 remains a
+separate guarded cutover; all seven unmigrated caller groups still block it.
+The deferred digest-column drop also retains its separate owner-review boundary.
+Never rewrite applied migrations, historical results, receipts or retry budgets.
+
+Normal delivery must distinguish source preparation from Jenkins execution.
+Permanent, exact source rejection ends verification with actionable paths;
+transient observations retain their reconciliation path. Defect discovery and
+retry/claim adapters use closed owner/project-scoped queries and existing atomic
+operations, retaining direct predecessor behavior and spent retry history.
+Runtime selectors and durable deployment receipts, rather than source presence,
+determine what is live. Preserve the operational evidence for each transition.
+
 ## Closed proxy adapters for coordinator reads and claim — 2026-11-28
 
 The actual PostgreSQL proxy tests exposed unwired Python coordinator paths:
