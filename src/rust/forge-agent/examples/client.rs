@@ -2,7 +2,7 @@
 //! does, with a caller-owned stop flag. `--help` and `inspect --help` need no
 //! config, project or network access.
 //!
-//! `cargo run -p forge-agent --example client`
+//! `cargo run -p forge-agent --example forge-agent-client`
 
 use std::{
     ffi::OsString,

@@ -2,7 +2,7 @@
 //! (frozen registrars, default features) and list the admitted commands via
 //! the discovery command. Read-only; nothing is dispatched to node or disk.
 //!
-//! `cargo run -p forge-local --example client`
+//! `cargo run -p forge-local --example forge-local-client`
 
 use forge_local::{Application, LocalConfig};
 

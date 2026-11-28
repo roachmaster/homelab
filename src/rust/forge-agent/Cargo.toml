@@ -26,3 +26,7 @@ nix = { version = "0.31", features = ["signal", "process"] }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "forge-agent-client"
+path = "examples/client.rs"

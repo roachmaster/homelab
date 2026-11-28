@@ -17,3 +17,7 @@ forge-system = { path = "../forge-system", default-features = false, features = 
 
 [lints]
 workspace = true
+
+[[example]]
+name = "forge-local-client"
+path = "examples/client.rs"
