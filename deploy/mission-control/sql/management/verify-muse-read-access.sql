@@ -24,6 +24,10 @@ BEGIN
     IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=41 AND name='agent_branch_and_cicd_stages') THEN
         allowed_tables:=allowed_tables||ARRAY['agent_branch_state','jenkins_stage_results','jenkins_stage_log_chunks'];
     END IF;
+    -- Migrations 0044 (identity catalog) and 0045 (deadline extensions)
+    -- deliberately REVOKE muse_events access on their tables, so those
+    -- tables are never admitted here: permitted stays false and the
+    -- upgrade path must show zero direct grants on them.
     IF current_database()<>'forge_agent' THEN
         RAISE EXCEPTION 'Muse reader contract requires forge_agent database';
     END IF;

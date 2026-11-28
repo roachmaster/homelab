@@ -1,0 +1,14 @@
+[package]
+name = "forge-services"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+
+[dependencies]
+nix = { version = "0.30", features = ["fs", "user"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml_ng = "=0.10.0"
+
+[lints]
+workspace = true

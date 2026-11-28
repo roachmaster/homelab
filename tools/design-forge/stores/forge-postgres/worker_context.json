@@ -1,0 +1,12 @@
+{
+ "collaborators": [],
+ "file": "worker_context.rs",
+ "glossary": [],
+ "id": "worker_context",
+ "idioms": "",
+ "invariants": [],
+ "kind": "module",
+ "responsibilities": [],
+ "signature": "impl WorkerApi: read_plan/read_feedback/read_workflow_feedback/read_review_target/read_external_review_context(&mut self, claim: &Claim) -> Result<Option<Value>, AdapterError>; read_native_delivery_context(&mut self, claim: &Claim) -> Result<Option<NativeDeliveryContext>, AdapterError>; project_revisions(&mut self) -> Result<Vec<(String, String)>, AdapterError>. NativeDeliveryContext::from_json(Value) -> Result<_, AdapterError>.",
+ "summary": "Execution-context reads on WorkerApi (S2 adapter increment, 2026-11-27): read_plan/read_feedback/read_workflow_feedback/read_review_target/read_external_review_context return the context documents as JSON (their schemas belong to the S3 plan/review contexts); read_native_delivery_context returns the typed NativeDeliveryContext (exact keys validated by the Python store); project_revisions returns (alias, head sha) pairs."
+}

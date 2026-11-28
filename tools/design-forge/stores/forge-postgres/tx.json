@@ -1,0 +1,30 @@
+{
+ "collaborators": [
+  "client",
+  "error"
+ ],
+ "file": "tx.rs",
+ "glossary": [
+  "owner",
+  "session"
+ ],
+ "id": "tx",
+ "idioms": "// tokio-postgres 0.7 (exact):\n//   Transaction<'_> has query_opt(sql, params) -> Result<Option<Row>, Error> and\n//   execute(sql, params) -> Result<u64, Error> (both async). There is NO begin,\n//   commit or rollback method used on Tx: the boundary belongs to in_tx.\n//   row.get::<usize, T>(0) -> T where T: for<'a> FromSql<'a>.\n// tokio::runtime::Handle::block_on(&self, future) drives a future to completion\n// from synchronous code; it is legal here ONLY because PgSession::in_tx runs the\n// closure inside tokio::task::block_in_place on a multi-thread runtime.",
+ "invariants": [
+  "Tx is created ONLY by PgSession::in_tx (the constructor is pub(crate)) and is valid only inside that closure; its methods block on the runtime handle and would panic if called from async context.",
+  "Tx never issues BEGIN, COMMIT, ROLLBACK or set_config: in_tx opens the transaction and sets the owner config before the closure runs; dropping the transaction uncommitted rolls back.",
+  "Errors from tokio-postgres map through the From<tokio_postgres::Error> impl in error.rs (the ? operator) - never map them by hand.",
+  "The Transaction and the Handle stay in private fields; no tokio or tokio-postgres type appears in a public signature (params use &(dyn ToSql + Sync), exactly as PgSession's call_* do).",
+  "This module has NO #[cfg(test)] module: it contains no pure logic, and unit tests must never touch a live database.",
+  "Two lifetimes, never one: Tx<'t, 'c> borrows the Transaction for 't while the Transaction itself borrows the Client for 'c. Collapsing them into a single lifetime makes the borrow outlive the closure scope and in_tx cannot commit (E0505/E0597 - hit and fixed during the build)."
+ ],
+ "kind": "struct",
+ "pattern": "// Exact shape:\n//   pub struct Tx<'t, 'c> {\n//       pg: &'t mut tokio_postgres::Transaction<'c>,\n//       handle: tokio::runtime::Handle,\n//   }\n//   impl<'t, 'c> Tx<'t, 'c> {\n//       pub(crate) fn new(pg: &'t mut tokio_postgres::Transaction<'c>,\n//                         handle: tokio::runtime::Handle) -> Tx<'a> {\n//           Tx { pg, handle }\n//       }\n//       // call_* methods below\n//   }\n// call_scalar body (verbatim pattern - the borrow split into handle/pg\n// locals BEFORE block_on is required, do not restructure it):\n//   pub fn call_scalar<T>(&mut self, select: &str,\n//           params: &[&(dyn ToSql + Sync)]) -> Result<Option<T>, AdapterError>\n//       where T: for<'b> tokio_postgres::types::FromSql<'b> {\n//       let handle = self.handle.clone();\n//       let pg = &mut *self.pg;\n//       let row = handle.block_on(async move { pg.query_opt(select, params).await })?;\n//       Ok(row.map(|row| row.get(0)))\n//   }\n// call_void: same shape, body is\n//   let handle = self.handle.clone();\n//   let pg = &mut *self.pg;\n//   handle.block_on(async move { pg.execute(select, params).await })?;\n//   Ok(())\n// Wrappers delegate to call_scalar, exactly as PgSession's do:\n// call_json = call_scalar::<serde_json::Value>; call_text =\n// call_scalar::<String>; call_bool = call_scalar::<bool>?.unwrap_or(false).",
+ "responsibilities": [
+  "Hold the one open transaction plus the runtime handle for the duration of one PgSession::in_tx closure; all fields private.",
+  "Offer the same five call_* helpers as PgSession (call_scalar, call_void, call_json, call_bool, call_text) with identical signatures and row semantics, executed on the open transaction instead of a fresh one.",
+  "Map the optional row exactly as PgSession does: call_scalar returns row.get(0); call_bool unwraps to false when there is no row."
+ ],
+ "signature": "pub struct Tx<'t, 'c> {\n    // private: pg: &'t mut tokio_postgres::Transaction<'c>, handle: tokio::runtime::Handle\n}\n// impl<'a> Tx<'t, 'c>:\n//   pub(crate) fn new(pg: &'t mut tokio_postgres::Transaction<'c>, handle: tokio::runtime::Handle) -> Tx<'t, 'c>\n//   pub fn call_scalar<T>(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<Option<T>, crate::error::AdapterError>\n//       where T: for<'b> tokio_postgres::types::FromSql<'b>\n//   pub fn call_void(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<(), crate::error::AdapterError>\n//   pub fn call_json(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<Option<serde_json::Value>, crate::error::AdapterError>\n//   pub fn call_bool(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<bool, crate::error::AdapterError>\n//   pub fn call_text(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)])\n//       -> Result<Option<String>, crate::error::AdapterError>\n    pub fn query_rows(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<Vec<tokio_postgres::Row>, AdapterError>; // general row queries on the open transaction\n    pub fn execute_count(&mut self, select: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<u64, AdapterError>; // rowcount on the open transaction",
+ "summary": "The handle for one open owner-scoped transaction: PgSession's call_* surface, bound to the single transaction PgSession::in_tx opened."
+}

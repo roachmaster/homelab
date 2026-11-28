@@ -13,6 +13,7 @@ PostgreSQL regressions. These checks grant no approval, CI or admission authorit
 """
 
 import ast
+import hashlib
 from pathlib import Path
 import re
 import shlex
@@ -800,6 +801,15 @@ TASK_RECOVERY_GUARDS = frozenset({
 })
 
 
+# Accepted M36 legacy-progress grandfathering verifier bytes, as rebased onto
+# bf080e2c with the approved forge-pg-proxy (M50/M51) stage-aware checks.
+# The M36 grandfathering itself is unchanged; only the proxy's stage-aware
+# privilege/catalogue checks were added. This qualifies no applied migration
+# or other SQL authority.
+M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256 = {
+    'deploy/mission-control/sql/management/verify.sql': '66180f8e620d9bac45b5b4e5198b8b0c6b2f6eddcf782b50aa489f36be40f3b6',
+    'deploy/mission-control/sql/management/verify-task-events.sql': '153e806769fad9ad8bc471fbc5ca568c7d436e4e7e6edbb80f52c43fad996487',
+}
 # Already accepted on main57a0aca: exact M36 legacy-progress grandfathering
 # verifier bytes. This qualifies no applied migration or other SQL authority.
 M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_PATHS = frozenset({
@@ -846,6 +856,55 @@ NATIVE_CI_CONTEXT_RECOVERY_PATHS = frozenset({
 
 
 # Audited opt-in content identity source; no applied SQL or legacy authority change.
+CONTENT_IDENTITY_CONTEXT_SHA256 = {
+    'AGENT_WORK.md': '0618692a67377f33869343d611b3df69ad62baf0c48319d5dbacb7be8e378add',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'ec31e0762a1d6b274d0561d15008a8d5a5655aefe9c8b78ac0fc56214151087c',
+    'deploy/mission-control/agent-runner/test_external_content_identity.py': '23ccf8560f2f14c22cd4938f7ed778673e9b745021623a68cc68a629b675c3e4',
+    'deploy/mission-control/agent-runner/test_native_content_identity.py': '63d133ae4d6c3bed213ce00c48edd511c0a2a258f95a9b4b4c75457cff3d9d95',
+    'deploy/mission-control/agent-runner/test_work_artifact_identity.py': 'fe2066e23a7eb505c38de3d68da8846036ba55ada85710ab3477315784f77a99',
+    'deploy/mission-control/agent-runner/test_work_identity_store.py': '381b18cd7c9f519c0b16bb23a4848f0725f1b95515974871e6fe043ab58684e7',
+    'deploy/mission-control/agent-runner/work_artifact_identity.py': '14a920e680e229fce2a6f0a8dbdffde889e34f3b2c54d24df0ef10549978469d',
+    'deploy/mission-control/agent-runner/work_artifact_source.py': '3f900127a41b0c05c5054f78ba613e6f3b2b4de01b016811e935c4ba07c59dbc',
+    'deploy/mission-control/agent-runner/work_config.py': '8f473fd9ca45ca4bf00550c034ab142711de2ecbcb2a168858e7d945c4cc2bb1',
+    'deploy/mission-control/agent-runner/work_external_delivery.py': '266a368b115c76e9273c268368154baa2ebe399c682e96fc0e9e24fa86fa0eee',
+    'deploy/mission-control/agent-runner/work_external_identity.py': '1c423d47e4a949380789a3e73f147ccf9b61bd5cd3ee644c00e4f58075fddb2a',
+    'deploy/mission-control/agent-runner/work_external_review_context.py': '0c0ce4c96ec542843c202ebb29bd881680bee09c305f370828f27a75c44b2a95',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': '4d1ba74ebba8c9d4cad16932cfd72501d9ab27126436f32356e36eebf719da48',
+    'deploy/mission-control/agent-runner/work_identity_contract.py': 'f08b0d279e99efb4ffba41620813ce4475d213dfee44cd75094fa375aea86ee3',
+    'deploy/mission-control/agent-runner/work_identity_store.py': '2c7b18856d4e402477aa625ba04484053214eeda910ad82f099a0063fbc225b6',
+    'deploy/mission-control/agent-runner/work_native_identity.py': 'b8a31c18298e764c67b39e7857e558e140426a42258df5447206f7602e7f3c37',
+    'deploy/mission-control/agent-runner/work_native_jenkins.py': 'd735af4c9e2e376e71d0215731c21a7154f83b0b7d2f190054ed54b5f5902415',
+    'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
+    'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
+    'deploy/mission-control/agent-runner/work_review.py': 'b67bf946b42789e93f9ccd8027375674810ec5d3f015c9ae1e294407b2f5d57d',
+    'deploy/mission-control/agent-runner/work_worker.py': 'd2d3c638ec1ebc4dbd110313a04e2c906b93be0825cc570b5c87622805ac0090',
+    'docs/README.md': '32ef6f43905db47f366dc062d840e343dd1635eba9b7aa218fe467141ab6fe28',
+    'docs/architecture/README.md': '57aa514e18eb82a8e520d24fd41851e9070d536a39cc90641a9662e27781cbe1',
+    'docs/architecture/content-identity.md': '433979bcf86e54d9bdf6c32566168cf0c233257c53f9dd2a0cef8e32abe50419',
+    'docs/architecture/diagrams/mermaid/README.md': '422e1cffb92c7732ed87570884bdc0f693127a657b066ec4af2fe8775815277b',
+    'docs/architecture/diagrams/mermaid/content-identity-components.mmd': 'c7cadb78d6a61b9a01c76f6cfbfae4a8d38a3823d1deea655f7340698e56a9d2',
+    'docs/architecture/diagrams/mermaid/content-identity-data.mmd': '5cb75bd499e3f3e7ec0d6d1cad90becd53f6ab7e74c9e5001937bae924cfb1d2',
+    'docs/architecture/diagrams/mermaid/content-identity-external.mmd': '55d499bc85a15f2dd12ce2664c7578c17e22f2aa9297a8c03fcb1ba82cb3a4ed',
+    'docs/architecture/diagrams/mermaid/content-identity-native.mmd': 'ed112a4723e52f52981a5a36e4acf5ffc1430ce25b2abb376a2623f4c45c05be',
+    'docs/architecture/diagrams/mermaid/images/content-identity-components.svg': '8c511c92eba56bed33856256ee9b7226d4b4c5367838f682760cc81c032818b0',
+    'docs/architecture/diagrams/mermaid/images/content-identity-data.svg': '952c7f7353f4eb252baa419e8f1e4b02eb0b28d728538a5d4807057279707db8',
+    'docs/architecture/diagrams/mermaid/images/content-identity-external.svg': '60f45da2224c301246ee0f7ab8fca53ae52bb26e38a3f612b6d995094e2575dd',
+    'docs/architecture/diagrams/mermaid/images/content-identity-native.svg': '2f8d240fd63c7e47b79f45fdc01251ae358a6b5ced7bb41ff74aa0a3f6d95ca2',
+    'docs/architecture/diagrams/mermaid/render-manifest.json': 'fcb4bbd8ab3ad4cbdf2599b6d841bf8afd45a18661dc590e7e73b1ebd9476527',
+    'docs/architecture/diagrams/mermaid/render.py': '03b8519ab8d6349b22b1b151f6c6141c345b86a98fc55ea8498106865e8d6c05',
+    'docs/architecture/diagrams/mermaid/validate.mjs': 'f131ed6cf60a8a9a53e065ed10f860b816560d4b673ea0c158ef346acc0f3a52',
+    'docs/design/implementation-status.md': '2eb9cd05259c49404a404e9e329c1f7e4ff8e3e91fcdfacdbdeeb1f425e97ae3',
+    'src/rust/forge-ide-web-host/build.rs': '70cb9106edb7fa7ff95558df93e2b1d96a725bc530df6fe07a1efbb255939d59',
+    'src/rust/forge-ide-web-host/src/assets.rs': 'b3d80afdcc101943e87c8621416e21397b8dbff7e9a71a40a07fb423aa56f827',
+    'src/rust/forge-ide-web-host/src/design/content_identity.rs': '4420c267a346145dfbc673464bb7c61999a475faeee201973a0e9a544fd6b674',
+    'src/rust/forge-ide-web-host/src/design/landing.rs': 'a648264f98cab28ddac9a8e6c6885b62bb8f4145fd9088587fc7c56f2d70b0a5',
+    'src/rust/forge-ide-web-host/src/design/mod.rs': '675f2d6a69507e739cb1246efc221a68e14a2b3f61ba1f28de048b987f514ac8',
+    'src/rust/forge-ide-web-host/tests/consumer.rs': 'a3ce7244c32917a4cfe4b59708b42440fa0cd06054cc79be8280b4dbf8a66971',
+    'deploy/mission-control/agent-runner/work_owner_control.py': '38a3edda0caec8f079deb6533592f48786254038f3016423754b15ff652185a0',
+    'deploy/mission-control/agent-runner/work_owner_reverification.py': '28c6f3314a4f93ab007299cca3234452bc84f0de72022c9726506930b3bd11b6',
+    'deploy/mission-control/agent-runner/work_store.py': 'd2f67980e752df1bea503d718d9ea990011b841d4505f84afaa55076cbaffd84',
+    'deploy/mission-control/agent-runner/work_workflow.py': '25e61ab37af96be55572e9d1e1f2c2c5d1b16184f6c452fa3d4b1a899a8dc23d',
+}
 CONTENT_IDENTITY_CONTEXT_PATHS = frozenset({
     'AGENT_WORK.md',
     'deploy/mission-control/agent-runner/setup-runner.sh',
@@ -864,10 +923,14 @@ CONTENT_IDENTITY_CONTEXT_PATHS = frozenset({
     'deploy/mission-control/agent-runner/work_identity_store.py',
     'deploy/mission-control/agent-runner/work_native_identity.py',
     'deploy/mission-control/agent-runner/work_native_jenkins.py',
+    'deploy/mission-control/agent-runner/work_owner_control.py',
+    'deploy/mission-control/agent-runner/work_owner_reverification.py',
     'deploy/mission-control/agent-runner/work_publication.py',
     'deploy/mission-control/agent-runner/work_publication_config.py',
     'deploy/mission-control/agent-runner/work_review.py',
+    'deploy/mission-control/agent-runner/work_store.py',
     'deploy/mission-control/agent-runner/work_worker.py',
+    'deploy/mission-control/agent-runner/work_workflow.py',
     'docs/README.md',
     'docs/architecture/README.md',
     'docs/architecture/content-identity.md',
@@ -922,6 +985,29 @@ VERIFIER_POLICY_PARITY_CONTEXT_PATHS = frozenset({
 
 # Scoped terminal workflow/retry projection settlement (M39); preserves all
 # applied M01-M38 SQL, protected gate paths, and legacy authority AST pins.
+TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256 = {
+    'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '859d1dd8ecf43d6c8a28cae7ea966b311c5108fffb4a3107c8f5658a15f86197',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '1d17b9aff893ab2e96b36065440fc1713b94b94f5862fc52289991a95fa80243',
+    'deploy/mission-control/agent-runner/test_muse_read_access.py': 'ee7e18368a752192f94087d37252b8002c6c8358e66f37f609001b780cd6191a',
+    'deploy/mission-control/agent-runner/test_native_ci_postfix.py': 'a5f8a3de0c906663333bc773289164fb64631a105dfc1883e6545fab37e3fa01',
+    'deploy/mission-control/agent-runner/test_native_deadline_events.py': '3f597b988104a2af1c50748b4e8d45e3883c53d4e84aac5d2208c6049fe850ac',
+    'deploy/mission-control/agent-runner/test_superseding_review_schema.py': '7cc73d603f5a6cbc46ed4e14f4bfa0bf749ad2ff04277c7faf3a3131183488f9',
+    'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': '97348b5db6d9c5eac164bb54e5c6c134ba6a61116e108595fcc56f95a1a16535',
+    'deploy/mission-control/agent-runner/test_work_muse_intake.py': '9bab76f8af1038b81a8865c87b0d126ed8fcdd6be3d2c31103c6aa9b4ddc38aa',
+    'deploy/mission-control/agent-runner/test_work_owner_fence.py': '9fbaa747c41bbdfc81eb73ce9f9a2acdb8f08b4782ef8c008478dd43952d8d38',
+    'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': 'a428e1a9c4ec3cf31b4b04f6da2ae6c021de909441412dfe2b75846ef44427f6',
+    'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': 'f5889d3039dcad2658c5cc881c90e247cafe30e646a7acc2755e6aacc69bba8a',
+    'deploy/mission-control/agent-runner/work_external_workflow.py': '4d1ba74ebba8c9d4cad16932cfd72501d9ab27126436f32356e36eebf719da48',
+    'deploy/mission-control/agent-runner/work_retry_events.py': 'bbe50a0aaa71219786c51af7e5df644c465db07cf659d5e86d75408b1770acc7',
+    'deploy/mission-control/agent-runner/work_store.py': 'd2f67980e752df1bea503d718d9ea990011b841d4505f84afaa55076cbaffd84',
+    'deploy/mission-control/agent-runner/work_worker_store.py': '0ff93592cd17e29d63dbbef2c445fd394ee672d5d35fc9c9bd734631fe4427d4',
+    'deploy/mission-control/agent-runner/work_workflow.py': '25e61ab37af96be55572e9d1e1f2c2c5d1b16184f6c452fa3d4b1a899a8dc23d',
+    'deploy/mission-control/sql/apply.sql': '87aef2ca15880f36aa7c2b41af0c1796091c8ba52c09cc584aed4d47c95e9fed',
+    'deploy/mission-control/sql/management/grant-runner.sql': 'b3c42606e1d2717cfb0f8e08cf336483331087838ce92cc1268c7d0304f4163f',
+    'deploy/mission-control/sql/management/repair-stale-terminal-projections.sql': '306c2530b863b16fc62d3812f9cda1b447ea593510c2a524d0d5b4a8f05aa4d5',
+    'deploy/mission-control/sql/migrations/0039_terminal_retry_settlement.sql': 'a1707d8137a103a0fa351c71e1646334059ff16d00a1688380ecd6a4b77a00ee',
+    'src/rust/forge-ide-ui/src/model/agents/tests/workflow.rs': '07ec023ede7523109dd0b8572f7d73909f24f575eb8e3da130f371b68eb141d6',
+}
 TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_PATHS = frozenset({
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py',
     'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py',
@@ -1056,6 +1142,82 @@ CODEX_AUTHOR_HANDOFF_SQL_PATHS = frozenset(('deploy/mission-control/sql/apply.sq
  'deploy/mission-control/sql/management/verify-retry-events.sql',
  'deploy/mission-control/sql/management/verify.sql',
  'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql'))
+CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '0618692a67377f33869343d611b3df69ad62baf0c48319d5dbacb7be8e378add',
+ 'deploy/mission-control/agent-runner/README.md': 'b0e3da0d7761ae7ebf80d3b2fe115be89ca0eb4dec549b2eefbd4b74d4be5671',
+ 'deploy/mission-control/agent-runner/quota-handoff-config.example.json': 'f4c2a2841f0cea15b6739c6b965566a26b476242a7b4947ebf7e4a083b9172aa',
+ 'deploy/mission-control/agent-runner/setup-runner.sh': 'ec31e0762a1d6b274d0561d15008a8d5a5655aefe9c8b78ac0fc56214151087c',
+ 'deploy/mission-control/agent-runner/test_agent_handoff.py': 'b87380af8bc0829982948bd9f0399b185b265790518bcbcd48ccab03552210bd',
+ 'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '859d1dd8ecf43d6c8a28cae7ea966b311c5108fffb4a3107c8f5658a15f86197',
+ 'deploy/mission-control/agent-runner/test_author_handoff_schema.py': '2528ed0ec682cef1091683bc64b59381d9ff85d60beca8c78b30c927e42db549',
+ 'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '1d17b9aff893ab2e96b36065440fc1713b94b94f5862fc52289991a95fa80243',
+ 'deploy/mission-control/agent-runner/test_muse_read_access.py': 'ee7e18368a752192f94087d37252b8002c6c8358e66f37f609001b780cd6191a',
+ 'deploy/mission-control/agent-runner/test_quota_handoff_config.py': 'd0f2cf25353cf76d2a3f20ea4a166d82ae59e7ef2f1f591da0533d106248a643',
+ 'deploy/mission-control/agent-runner/test_superseding_review_schema.py': '7cc73d603f5a6cbc46ed4e14f4bfa0bf749ad2ff04277c7faf3a3131183488f9',
+ 'deploy/mission-control/agent-runner/test_work_author_handoff_context.py': '59eb04a7dc65b0ed1322c3bd3e24e2d1cae938bcb5c4b16cf4e5146cb7cc4ba7',
+ 'deploy/mission-control/agent-runner/test_work_muse_intake.py': '9bab76f8af1038b81a8865c87b0d126ed8fcdd6be3d2c31103c6aa9b4ddc38aa',
+ 'deploy/mission-control/agent-runner/test_work_owner_fence.py': '9fbaa747c41bbdfc81eb73ce9f9a2acdb8f08b4782ef8c008478dd43952d8d38',
+ 'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': 'a428e1a9c4ec3cf31b4b04f6da2ae6c021de909441412dfe2b75846ef44427f6',
+ 'deploy/mission-control/agent-runner/test_work_review_supersession_independent.py': 'f5889d3039dcad2658c5cc881c90e247cafe30e646a7acc2755e6aacc69bba8a',
+ 'deploy/mission-control/agent-runner/work_agent_handoff.py': 'd47d6f46ec0d7813c7a857da5e503d9663544dba6b31c3418f7fc0638986c0c7',
+ 'deploy/mission-control/agent-runner/work_author_handoff_context.py': '7f28a0865ca1c5685b27a7392a57d4e565102fafb2a9350c5424b8bffda0e21a',
+ 'deploy/mission-control/agent-runner/work_ci_contract.py': 'bc531c332daccea870549903528ae9319e17fb61a7afe1aa208e1af7437ad6f9',
+ 'deploy/mission-control/agent-runner/work_config.py': '8f473fd9ca45ca4bf00550c034ab142711de2ecbcb2a168858e7d945c4cc2bb1',
+ 'deploy/mission-control/agent-runner/work_context_recovery.py': 'bf6b7ad1418db1e2cedd1106b11bc76fc63e34ff4a53e0769e4851a9e8b4072b',
+ 'deploy/mission-control/agent-runner/work_identity_contract.py': 'f08b0d279e99efb4ffba41620813ce4475d213dfee44cd75094fa375aea86ee3',
+ 'deploy/mission-control/agent-runner/work_peer_context.py': 'e70b79c9f5779503fcfc6fee480eba33a700ce2d5d3978d3b845212879086e52',
+ 'deploy/mission-control/agent-runner/work_peer_feedback_recovery.py': 'f9beb01574406c84d5b96ce7a35d48ebe1d263903dfba076158138ae422456a2',
+ 'deploy/mission-control/agent-runner/work_provider_model_route.py': 'd26c3806bc04e7d56dd7bee55c21be8c55fc7fe25fb86e2a1bb96f0a00b3ca68',
+ 'deploy/mission-control/agent-runner/work_review_context.py': 'c64b9849130ea73e4abb064b71bc11da50f090bb6c232735a0689ac8254cd377',
+ 'deploy/mission-control/agent-runner/work_reviewer_correction.py': '73dfa3f73d6b6030a8e4b33a7f215b4591293de126a716053b3f2bd6172c7d5b',
+ 'deploy/mission-control/agent-runner/work_store.py': 'd2f67980e752df1bea503d718d9ea990011b841d4505f84afaa55076cbaffd84',
+ 'deploy/mission-control/agent-runner/work_superseding_review.py': '69f6ae31bd4f400bb400a64b135bce0981c4fc9c70e0586c4ffd6596609b2c31',
+ 'deploy/mission-control/agent-runner/work_workflow.py': '25e61ab37af96be55572e9d1e1f2c2c5d1b16184f6c452fa3d4b1a899a8dc23d',
+ 'deploy/mission-control/jenkins/verify-candidate.py': 'b1edb0d6ba10ac2cd9d198865d6941041915c81198348256f5ffafbcc62e379e',
+ 'deploy/mission-control/sql/apply.sql': '87aef2ca15880f36aa7c2b41af0c1796091c8ba52c09cc584aed4d47c95e9fed',
+ 'deploy/mission-control/sql/management/verify-agy-unattended.sql': 'f41755769362c0ec6197d03cd2a7d712f2045ea41f9cbc0a0435a0319fb146d0',
+ 'deploy/mission-control/sql/management/verify-author-handoff.sql': '431e163f102cfeea9aafd6c815b245dd4bd917d36ea5da25dc93ed592ef80ea8',
+ 'deploy/mission-control/sql/management/verify-autonomy.sql': '6c87cdd7841913add5e2e04ed6f0d6ce23b4411d2631c8d748c95feec7dae16f',
+ 'deploy/mission-control/sql/management/verify-feedback.sql': '31f9a4bac4b5824566c33d08e1345e8c94c3558be1b5d0fb231d733df972047c',
+ 'deploy/mission-control/sql/management/verify-retry-events.sql': '4e4bc6fdeeb20e4529dfe33287df98b8b9f95096994d3723e056a17ecead4dbe',
+ 'deploy/mission-control/sql/management/verify.sql': '66180f8e620d9bac45b5b4e5198b8b0c6b2f6eddcf782b50aa489f36be40f3b6',
+ 'deploy/mission-control/sql/migrations/0040_provider_author_handoff.sql': '0f884ee5db7f90be8ed2caefd20e8455fff4c106f3b87aaf1390848fdf40b6b8',
+ 'docs/architecture/agent-quota-handoff.md': 'a9d3d2ff414573be316f50e2b5fc5106832c2cf2ea4e1f55a2cae5adfb542ba2'}
+# M40 author-handoff main. The 34 historical qualification scopes above remain
+# as accepted on main; the files
+# below carry the proxy merge's reviewed deltas (migration renumber 0040/0041
+# -> 0042/0043 on feature/muse, then 0042/0043 -> 0050/0051 in the
+# backup/main merge, then 0050/0051 -> 0051/0052 in the 2026-11-26
+# backup/main merge (backup/main took 0050 for
+# delivery_receipt_source_key), then 0051/0052 -> 0052/0053 on
+# feature/muse for the merge with main (main took 0051 for
+# agent_feature_branches): stage gates, proxy coordinator reads and
+# owner-control guards),
+# so this context heads the qualification chain for exactly those files.
+PG_PROXY_CONTEXT_SHA256 = {
+    'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': '97348b5db6d9c5eac164bb54e5c6c134ba6a61116e108595fcc56f95a1a16535',
+    'deploy/mission-control/agent-runner/test_work_event_attribution.py': 'e04fac9c6f834da5b80b2c9b5bff89cee26a4ebb9c7054af7703a40153486f72',
+    'deploy/mission-control/agent-runner/work_owner_control.py': '38a3edda0caec8f079deb6533592f48786254038f3016423754b15ff652185a0',
+    'deploy/mission-control/agent-runner/work_owner_reverification.py': '28c6f3314a4f93ab007299cca3234452bc84f0de72022c9726506930b3bd11b6',
+    'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
+    'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
+    'deploy/mission-control/agent-runner/work_worker.py': 'd2d3c638ec1ebc4dbd110313a04e2c906b93be0825cc570b5c87622805ac0090',
+    'deploy/mission-control/agent-runner/work_worker_config.py': '9b35997fbd2e78ecfe0cddf15bbaec7dd4e2eb63453d780edba02cd3592db70e',
+    'deploy/mission-control/sql/management/grant-external-workflows.sql': '4dec068db6250819e1388ec4d2c6c60a2557d98ee36778156959e67eaf489a67',
+    'deploy/mission-control/sql/management/grant-runner.sql': 'b3c42606e1d2717cfb0f8e08cf336483331087838ce92cc1268c7d0304f4163f',
+    'deploy/mission-control/sql/management/verify-external-agent.sql': '18149b72731e222fb78953f8657f302d7669095785e5ad1eb6887b378dee66db',
+    'deploy/mission-control/sql/management/verify-external-workflows.sql': '2ef0c8e66bd26b9639e064302fa8b074e2f9e9f5790df971ca11f688e38b4144',
+    'deploy/mission-control/sql/management/verify-jenkins-events.sql': 'd04d4d8a26af204f5c8070c665bad3e0c28bf39f15faee01456510092258359a',
+    'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '7910216fd4c2adb94056b707dfd7a38122d2bdad1874ef3e4fe0b723f8632e2c',
+    'deploy/mission-control/sql/management/verify-task-events.sql': '153e806769fad9ad8bc471fbc5ca568c7d436e4e7e6edbb80f52c43fad996487',
+}
+PG_PROXY_GUARD_AST_SHA256 = {
+    'work_owner_control.py::_owner_source_history': 'f71a44834f5108ae24224c80f74f9f1d469b619356ef74618ff55e60657f5493',
+    'work_owner_control.py::NativeOwnerControl.review_decide': '876249058b642c33458c138406529b6f712817795425a40416d49b27c65a0338',
+    'work_store.py::WorkStore._append_review_retry': '5b54a9b5ee8997bd2a78d9fd3d752f5de2efe6e31804e2e3e8fb17da8f760e7a',
+    'work_workflow.py::WorkflowStore.retry_native_timeout': '4f260de8444a5467f762f02a94baa5949d50eee7350ff2df3edbab69ff422cf8',
+    'work_workflow.py::WorkflowStore.retry_peer_verdict': '909f97fd129487202654b7c131ff15f9f6944f95b54e5d0d45f8806b6902b5ec',
+    'work_workflow.py::WorkflowStore.retry_preparation': 'cc948756f1707d4f8393ab4eb2c5adc1c6d065e2e65d32304707dd456514c259',
+}
 CODEX_AUTHOR_HANDOFF_CONTEXT_PATHS = frozenset({
     'AGENT_WORK.md',
     'deploy/mission-control/agent-runner/README.md',
@@ -1175,6 +1337,22 @@ HISTORICAL_QUALIFICATION_MAP_NAMES = ('AGENT_WIDE_RETRY_CONTEXT_PATHS',
  'VERIFIER_POLICY_PARITY_CONTEXT_PATHS')
 
 
+def qualified_source(relative, expected):
+    # The PG_PROXY overlay heads the chain for proxy files. The other
+    # surviving byte-pinned contexts follow; the remaining historical
+    # contexts were retired to path scopes on backup/main, so files they
+    # covered fall through to the caller's expected value.
+    if relative in PG_PROXY_CONTEXT_SHA256:
+        return PG_PROXY_CONTEXT_SHA256[relative]
+    if relative in CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256:
+        return CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256[relative]
+    if relative in TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256:
+        return TERMINAL_PROJECTION_SETTLEMENT_CONTEXT_SHA256[relative]
+    if relative in CONTENT_IDENTITY_CONTEXT_SHA256:
+        return CONTENT_IDENTITY_CONTEXT_SHA256[relative]
+    if relative in M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256:
+        return M36_LEGACY_PROGRESS_VERIFIER_CONTEXT_SHA256[relative]
+    return expected
 
 STRICT_VERIFIER_FILES = {
     "verify-superseding-reviews.sql",
@@ -1541,10 +1719,14 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             'deploy/mission-control/agent-runner/work_identity_store.py',
             'deploy/mission-control/agent-runner/work_native_identity.py',
             'deploy/mission-control/agent-runner/work_native_jenkins.py',
+            'deploy/mission-control/agent-runner/work_owner_control.py',
+            'deploy/mission-control/agent-runner/work_owner_reverification.py',
             'deploy/mission-control/agent-runner/work_publication.py',
             'deploy/mission-control/agent-runner/work_publication_config.py',
             'deploy/mission-control/agent-runner/work_review.py',
+            'deploy/mission-control/agent-runner/work_store.py',
             'deploy/mission-control/agent-runner/work_worker.py',
+            'deploy/mission-control/agent-runner/work_workflow.py',
             'docs/README.md',
             'docs/architecture/README.md',
             'docs/architecture/content-identity.md',
@@ -1638,6 +1820,19 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
             with self.subTest(retired=relative):
                 self.assertFalse((REPO_ROOT / relative).exists())
+
+    def test_pg_proxy_merge_context_is_exact(self):
+        for relative, expected in PG_PROXY_CONTEXT_SHA256.items():
+            with self.subTest(pg_proxy_source=relative):
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(qualified_source(relative, 'historical-pin'), expected)
+        for identity, expected in PG_PROXY_GUARD_AST_SHA256.items():
+            filename, qualified = identity.split('::')
+            node = ast.parse((RUNNER / filename).read_text())
+            for name in qualified.split('.'):
+                node = next(child for child in node.body if getattr(child, 'name', None) == name)
+            with self.subTest(pg_proxy_guard=identity):
+                self.assertEqual(hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest(), expected)
 
     def test_legacy_owner_and_publication_guards_remain_defined(self):
         # Their behavior is exercised by the functional and PostgreSQL

@@ -1,0 +1,16 @@
+[package]
+name = "forge-work"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+description = "Typed work capability for Forge: a frozen catalog, the canonical coding_events vocabulary, a Bridge-fronted WorkService, the three driven WorkStore ports (read, admission, decision), and the pure v2 domain contracts (peer review, feedback, repair/retry policy, recovery, handoff). Adapters live in forge-postgres; this crate has no SQL and no I/O."
+
+[lints]
+workspace = true
+
+[dependencies]
+forge-core.workspace = true
+serde_json = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "v5"] }

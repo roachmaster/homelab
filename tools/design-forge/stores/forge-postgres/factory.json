@@ -1,0 +1,26 @@
+{
+ "collaborators": [
+  "config",
+  "client",
+  "error",
+  "forge_core_factory"
+ ],
+ "file": "factory.rs",
+ "glossary": [
+  "session",
+  "registrar"
+ ],
+ "id": "factory",
+ "idioms": "// forge_core::provider::Factory (exact):\n//   pub trait Factory<T> { type Error; fn create(&self) -> Result<T, Self::Error>; }",
+ "invariants": [
+  "The factory never connects at construction or staging time - only create() connects."
+ ],
+ "kind": "struct",
+ "responsibilities": [
+  "Hold one PgConfig (cloned per create, so one factory can create many sessions).",
+  "create() is exactly PgSession::connect with the staged config.",
+  "config() exposes the staged configuration for diagnostics."
+ ],
+ "signature": "pub struct PgSessionFactory {\n    // private: config: crate::config::PgConfig\n}\n// impl PgSessionFactory:\n//   pub fn new(config: crate::config::PgConfig) -> Self\n//   pub fn config(&self) -> &crate::config::PgConfig\n// impl forge_core::provider::Factory<crate::client::PgSession> for PgSessionFactory:\n//   type Error = crate::error::AdapterError;\n//   fn create(&self) -> Result<crate::client::PgSession, crate::error::AdapterError>",
+ "summary": "The forge-core Factory for adapter sessions: stages one PgConfig, connects on create(). Registration validates, create() effects."
+}

@@ -1,0 +1,21 @@
+{
+ "collaborators": [],
+ "file": "catalog.rs",
+ "glossary": [
+  "catalog",
+  "policy digest"
+ ],
+ "id": "catalog",
+ "invariants": [
+  "Catalog content is immutable after construction: lookups only, no mutation methods; a policy change is a new catalog (frozen-at-startup, resolved 2026-11-26).",
+  "Lookups are by exact name within one project; an unknown project or name is None, never a default."
+ ],
+ "kind": "types",
+ "pattern": "// Structs derive Debug, Clone, PartialEq (WorkflowPolicy's Value\n// prevents Eq). WorkCatalog derives Debug, Clone. Lookups are linear\n// scans with iterator find - the catalog is small and frozen.\n// Tests in-file: build a two-project catalog; profile/recipe/workflow\n// lookups hit and miss exactly.",
+ "responsibilities": [
+  "The typed catalog content: AgentProfile, Recipe, WorkflowPolicy, ProjectCatalog, and WorkCatalog with its lookup methods.",
+  "This is the Rust shape of what Python's WorkStore.catalog() produces from configuration."
+ ],
+ "signature": "pub struct AgentProfile {\n    pub name: String, pub backend: String, pub model: String,\n    pub transport: String, pub modes: Vec<String>,\n}\npub struct Recipe { pub id: String, pub digest: String }\npub struct WorkflowPolicy { pub digest: String, pub document: serde_json::Value }\npub struct ProjectCatalog {\n    pub alias: String, pub profiles: Vec<AgentProfile>,\n    pub recipes: Vec<Recipe>, pub workflow: Option<WorkflowPolicy>,\n}\npub struct WorkCatalog { /* private: projects: Vec<ProjectCatalog> */ }\nimpl WorkCatalog {\n    pub fn new(projects: Vec<ProjectCatalog>) -> WorkCatalog;\n    pub fn project(&self, alias: &str) -> Option<&ProjectCatalog>;\n    pub fn profile(&self, alias: &str, name: &str) -> Option<&AgentProfile>;\n    pub fn recipe(&self, alias: &str, id: &str) -> Option<&Recipe>;\n    pub fn workflow_digest(&self, alias: &str) -> Option<&str>;\n    pub fn projects(&self) -> &[ProjectCatalog];\n}",
+ "summary": "WorkCatalog: the frozen projects/profiles/recipes/workflow-policy reference data the admission path reads."
+}

@@ -7,6 +7,13 @@ After=forge-postgres-tunnel.service forge-llama.service
 ExecStart=/usr/bin/python3 -B %h/.local/lib/forge-gpu-worker/forge_gpu_worker.py
 Environment=PGPASSFILE=%h/.config/forge-postgres-worker/pgpass
 Environment=FORGE_WORKER_MODEL_TOKEN_FILE=%h/.config/forge-llama/token
+# Proxy transport (rollout step 2): point the worker at the proxy
+# instead of direct Postgres. FORGE_PG_PROXY_URL is the proxy as
+# reached from this host (via the tunnel that forwards the proxy
+# port from Mission Control); the token file is deployed with the
+# worker's credentials on this host.
+Environment=FORGE_PG_PROXY_URL=http://127.0.0.1:18087
+Environment=FORGE_PG_PROXY_TOKEN_FILE=%h/.config/forge-postgres-worker/proxy.token
 Restart=on-failure
 RestartSec=4s
 NoNewPrivileges=true

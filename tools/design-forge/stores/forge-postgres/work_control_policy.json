@@ -1,0 +1,26 @@
+{
+ "id": "work_control_policy",
+ "kind": "functions",
+ "file": "work_control_policy.rs",
+ "summary": "The review-policy side helpers of the control transactions, ported from WorkStore._ensure_review_policy / _publication_busy / _hosted_green. All functions are pub(crate) and run on the caller's open Tx.",
+ "signature": "pub(crate) fn ensure_review_policy(tx: &mut crate::tx::Tx<'_, '_>, store: &crate::work_store::PgWorkStore, project_alias: &str, root_task_id: uuid::Uuid) -> Result<(), forge_work::WorkError>;\npub(crate) fn publication_busy(tx: &mut crate::tx::Tx<'_, '_>, store: &crate::work_store::PgWorkStore, task: &crate::work_control::ControlTask) -> Result<bool, forge_work::WorkError>;\npub(crate) fn hosted_green(tx: &mut crate::tx::Tx<'_, '_>, store: &crate::work_store::PgWorkStore, task: &crate::work_control::ControlTask) -> Result<bool, forge_work::WorkError>;",
+ "responsibilities": [
+  "ensure_review_policy: upsert coding_review_policy from the store's repair_policy (INSERT ... ON CONFLICT(owner_id,project_alias) DO UPDATE SET all fields), then INSERT INTO forge_agent.coding_review_budget(owner_id,project_alias,root_task_id,policy) VALUES(...) ON CONFLICT DO NOTHING with the policy as a JSON object {version, max_rounds, max_stagnant_rounds, max_infrastructure_retries, required_hosted_checks}.",
+  "publication_busy: true when a publication row exists with status in (pending, checking, publishing); else, when the task is not awaiting_review or is not (review_required implement mode or an approved-plan implementation), false; else true when NO publication exists for the task's latest attempt with status in (published, failed). The approved-plan check: plan_decision_id non-null, mode implement, and a coding_plan_decisions row with decision resume for that decision_id.",
+  "hosted_green: the publication_required_green read query pinned in the pattern; returns its required_green bool (false when no row)."
+ ],
+ "invariants": [
+  "ensure_review_policy upserts from the store's repair_policy every time (the policy row is configuration, refreshed idempotently)."
+ ],
+ "pattern": "// hosted_green query (forge_pg_proxy publication_required_green, verbatim with $n params):\n// SELECT h.required_green FROM forge_agent.coding_publications p JOIN forge_agent.coding_reviews r ON r.review_id = p.review_id AND r.status = 'approved' JOIN LATERAL (SELECT x.required_green FROM forge_agent.coding_hosted_checks x WHERE x.publication_id = p.publication_id AND x.candidate_commit = p.commit_sha ORDER BY x.observed_at DESC, x.observation_id DESC LIMIT 1) h ON true WHERE p.owner_id = $1 AND p.project_alias = $2 AND p.task_id = $3 AND p.attempt_id = $4 AND p.status = 'published' AND p.commit_sha = r.candidate_commit ORDER BY p.created_at DESC LIMIT 1\n// params: owner, project_alias, task id, task.latest_attempt_id. No row or NULL latest_attempt_id -> false.",
+ "collaborators": [
+  "work_common",
+  "work_store",
+  "tx"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\"); uuid -> uuid::Uuid; jsonb -> serde_json::Value.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; execute_count(sql, params) -> Result<u64, AdapterError>. Map AdapterError with crate::work_common::work_err.",
+ "glossary": [
+  "receipt",
+  "revision"
+ ]
+}

@@ -13,18 +13,36 @@ class SqlCursor:
     def __init__(self, connection):
         self.connection = connection
         self.rows = []
+        self.description = None
 
     def execute(self, query, parameters=()):
         if "to_regclass('forge_agent.jenkins_stage_results')" in query:
             self.rows = [{'has_table': True}]
+            self.description = [('has_table',)]
             return
         # SQLite executes the production predicates; only PostgreSQL's array
         # parameter spelling and namespace differ in this owned fixture.
-        query = query.replace('forge_agent.', '').replace('= ANY(%s)',
-            'IN (SELECT value FROM json_each(%s))').replace('%s', '?')
-        values = [json.dumps([str(v) for v in value]) if isinstance(value, list)
-                  else str(value) if hasattr(value, 'hex') else value for value in parameters]
-        self.rows = [dict(row) for row in self.connection.execute(query, values)]
+        query = query.replace('forge_agent.', '')
+        if isinstance(parameters, dict):
+            # The proxy registry spelling: named parameters, bound by
+            # name; array parameters keep the ANY -> json_each form.
+            import re
+            query = re.sub(r'= ANY\(\%\((\w+)\)s::\w+\[\]\)',
+                r'IN (SELECT value FROM json_each(:\1))', query)
+            query = re.sub(r'\%\((\w+)\)s', r':\1', query)
+            values = {key: (json.dumps([str(v) for v in value])
+                            if isinstance(value, list)
+                            else str(value) if hasattr(value, 'hex') else value)
+                      for key, value in parameters.items()}
+            result = self.connection.execute(query, values)
+        else:
+            query = query.replace('= ANY(%s)',
+                'IN (SELECT value FROM json_each(%s))').replace('%s', '?')
+            values = [json.dumps([str(v) for v in value]) if isinstance(value, list)
+                      else str(value) if hasattr(value, 'hex') else value for value in parameters]
+            result = self.connection.execute(query, values)
+        self.description = result.description
+        self.rows = [dict(row) for row in result]
 
     def fetchone(self):
         return self.rows.pop(0) if self.rows else None

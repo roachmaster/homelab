@@ -10,6 +10,17 @@ Group=forge_agent
 ExecStart=/usr/bin/python3 -B /opt/homelab-forge/agent-runner/runner.py
 LoadCredential=runner.token:/etc/homelab-forge/agent-runner/token
 LoadCredential=forge.token:/etc/homelab-forge/web/llama.token
+# NO proxy transport yet: queue_store.connect() selects the proxy
+# for every coordinator store when FORGE_PG_PROXY_URL is set, but
+# the coordinator's decide/control flows still execute statements
+# the proxy cannot carry (SELECT ... FOR UPDATE and friends — see
+# UNMIGRATED_CALLERS in proxy-cutover.sh, measured exactly by
+# test_forge_pg_proxy.ProxyMigrationGuardTest). Setting the URL
+# here would switch the deployed runner onto paths that raise
+# UnsupportedStatement at runtime (round-6 finding 1). The runner
+# stays on direct Postgres until those flows migrate; switching
+# this unit is a deliberate deployment step taken only when
+# proxy-cutover.sh's caller-routing check can pass.
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true

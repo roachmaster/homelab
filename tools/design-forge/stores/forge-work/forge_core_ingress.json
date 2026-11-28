@@ -1,0 +1,18 @@
+{
+ "collaborators": [],
+ "file": "forge-core/src/ingress.rs (external - do not implement)",
+ "glossary": [
+  "destination",
+  "route"
+ ],
+ "id": "forge_core_ingress",
+ "invariants": [
+  "Never generate this file."
+ ],
+ "kind": "external API",
+ "responsibilities": [
+  "Exist as a collaborator signature only."
+ ],
+ "signature": "// forge-core::ingress (already exists - do not implement)\npub struct RouteKey { /* private: destination: String, version: u16 */ }\nimpl RouteKey {\n    pub fn new(destination: impl Into<String>, version: u16) -> Result<Self, HeaderError>;\n}\npub struct Header { /* private */ }\nimpl Header { pub fn route(&self) -> &RouteKey; pub fn request_id(&self) -> &str; }\npub trait Payload {\n    type Kind: Eq;\n    fn kind(&self) -> Self::Kind;\n}\npub struct AdmissionDenied;  // Display: \"admission denied\"\npub trait AdmissionPolicy<C> {\n    fn admit(&self, header: &Header, context: &C) -> Result<(), AdmissionDenied>;\n}\npub struct Envelope<P> { pub header: Header, pub payload: P }\npub struct Response<R> { pub header: ResponseHeader, pub payload: R }",
+ "summary": "forge-core's ingress vocabulary: RouteKey/Header at the edge, the Payload kind contract, and the host-injected AdmissionPolicy seam (header + context only - never the payload)."
+}

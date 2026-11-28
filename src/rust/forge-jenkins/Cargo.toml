@@ -8,14 +8,43 @@ rust-version = "1.89"
 [features]
 default = []
 http = ["dep:ureq"]
+provisioning = ["dep:ureq", "dep:nix", "dep:serde_yaml_ng"]
 
 [dependencies]
 forge-core.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 url = "2"
 base64 = "0.22"
 ureq = { version = "=3.5.2", default-features = false, features = ["rustls"], optional = true }
+nix = { version = "0.30", features = ["fs", "user", "process"], optional = true }
+serde_yaml_ng = { version = "=0.10.0", optional = true }
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "forge-ci-cache-clear"
+path = "src/bin/forge-ci-cache-clear.rs"
+required-features = ["provisioning"]
+
+[[bin]]
+name = "forge-jenkins-install"
+path = "src/bin/forge-jenkins-install.rs"
+required-features = ["provisioning"]
+
+[[bin]]
+name = "forge-jenkins-client-token"
+path = "src/bin/forge-jenkins-client-token.rs"
+required-features = ["provisioning"]
+
+[[bin]]
+name = "forge-jenkins-connect-github"
+path = "src/bin/forge-jenkins-connect-github.rs"
+required-features = ["provisioning"]
+
+[[bin]]
+name = "forge-jenkins-setup-ci"
+path = "src/bin/forge-jenkins-setup-ci.rs"
+required-features = ["provisioning"]

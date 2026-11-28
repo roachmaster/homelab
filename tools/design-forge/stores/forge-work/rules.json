@@ -1,0 +1,12 @@
+{
+ "rules": [
+  "Rust edition 2021. No unsafe code. Use only the dependencies in the crate manifest (forge-core, serde_json, uuid).",
+  "Pure domain types and synchronous traits only: no SQL, no tokio, no tokio-postgres, no I/O anywhere in this crate. Ports return Result<_, WorkError>.",
+  "Event kinds are NEVER regenerated from operation names: the 12 EventKind strings come from the card verbatim (the live coding_events vocabulary, verified 2026-11-26).",
+  "Every state-changing port method takes an Actor (and a Cause where the emitted event kind requires one): an event without a validated actor is a programming error, never a row.",
+  "Every public item carries a /// doc comment.",
+  "Unit tests go in a #[cfg(test)] mod tests at the bottom of the same file and test pure logic only.",
+  "No binary, no main function, no environment access anywhere in this crate. Registrars receive explicit values.",
+  "One file is one generation unit: at most ~90 lines. If a design needs more, it belongs in two cards (split into submodules at the design level) - never write a file longer than ~110 lines."
+ ]
+}

@@ -1,0 +1,26 @@
+{
+ "id": "work_read_list",
+ "kind": "functions",
+ "file": "work_read_list.rs",
+ "summary": "WorkReadPort::list_tasks (raw-status path): validation, the cursor anchor lookup, and the tasks_page keyset query, ported from WorkStore.list_tasks. Scope filters (active/attention/history/all) route to work_read_scope.",
+ "signature": "pub(crate) fn list_tasks(store: &crate::work_store::PgWorkStore, project_alias: &str, status_filter: Option<&str>, limit: i64, cursor_task_id: Option<uuid::Uuid>, delivery_visible: bool) -> Result<forge_work::TaskPage, forge_work::WorkError>;",
+ "responsibilities": [
+  "Validate: limit must be 1..=50 else rejected(400, invalid_request); a present status_filter must be one of the raw statuses {queued, running, cancel_requested, awaiting_review, completed, failed, cancelled, needs_reconcile, quota_blocked, blocked_permission} or a scope {active, attention, history, all}, else rejected(400, invalid_request). Scope filters delegate to work_read_scope::list_scope with the same arguments.",
+  "In one transaction: when cursor_task_id is present, SELECT created_at, id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3; no anchor row -> rejected(400, invalid_request). Keep the anchor's created_at.",
+  "Run the tasks_page query pinned in the pattern with limit+1 rows, exclude_external=false (the native v1 adapter has no external-workflow configuration), status_filter and cursor (created_at, id) bound as Option params.",
+  "Shape the first `limit` rows with work_rows::summary. next_cursor = the last page row's id when more rows were returned than limit, else None. delivery_visible is accepted and ignored in v1 (no delivery configuration)."
+ ],
+ "invariants": [
+  "Keyset paging is (created_at, id) ascending, exactly the Python order.",
+  "The external-workflow exclusion (is_internal) is off in v1: exclude_external binds false."
+ ],
+ "pattern": "// tasks_page (forge_pg_proxy READ_QUERIES, verbatim with $n params):\n// SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, t.mode, t.agent_profile, t.recipe_digest, t.status, t.revision, t.created_at, t.title, t.workflow_id, t.workflow_required, w.phase AS workflow_phase FROM forge_agent.coding_tasks t LEFT JOIN forge_agent.coding_workflows w ON (w.owner_id, w.project_alias, w.workflow_id) = (t.owner_id, t.project_alias, t.workflow_id) WHERE t.owner_id = $1 AND t.project_alias = $2 AND (NOT $3 OR NOT forge_external_workflow_api.is_internal(t.owner_id, t.project_alias, t.id)) AND ($4::text IS NULL OR t.status = $4::text) AND ($5::timestamptz IS NULL OR (t.created_at, t.id) > ($5::timestamptz, $6::uuid)) ORDER BY t.created_at ASC, t.id ASC LIMIT $7",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_read_scope",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\") for nullable/absent; uuid columns -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>; text[] -> Vec<String>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; call_json(sql, params) -> Result<Option<Value>, AdapterError>. PgSession: query_rows / in_tx(|tx| ...) with the same Tx surface. Map every AdapterError with crate::work_common::work_err.\n// Params are &[&(dyn tokio_postgres::types::ToSql + Sync)]: bind &String/&str for text, &Uuid, &Value for jsonb, &i64, &bool, and &(Option<T>) for nullable params (None binds NULL)."
+}

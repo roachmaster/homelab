@@ -1,6 +1,6 @@
 -- Strict M27 catalog and effective privilege checks; no repairs or authority grants.
 DO $jenkins_verify$
-DECLARE expected record;actual text;relation oid;runtime_privilege text;runtime_allowed text[];worker text;
+DECLARE expected record;actual text;expected_shape text;relation oid;runtime_privilege text;runtime_allowed text[];worker text;
 BEGIN
  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=27 AND name='jenkins_events') THEN
   RAISE EXCEPTION 'Missing Jenkins events migration27';END IF;
@@ -23,9 +23,13 @@ BEGIN
    'triggers',(SELECT jsonb_agg(jsonb_build_array(t.tgname,t.tgenabled,pg_get_triggerdef(t.oid,false)) ORDER BY t.tgname)
      FROM pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal)
   )::text INTO actual FROM pg_class c WHERE c.oid=relation;
-  IF actual IS DISTINCT FROM expected.shape THEN
+  expected_shape:=expected.shape;
+  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53 AND name='pg_proxy_cutover') THEN
+   expected_shape:=replace(replace(expected_shape,'"forge_agent=arw/forge_agent_owner"','"forge_agent=r/forge_agent_owner"'),'"forge_agent=ar/forge_agent_owner"','"forge_agent=r/forge_agent_owner"');
+  END IF;
+  IF actual IS DISTINCT FROM expected_shape THEN
    RAISE EXCEPTION 'Jenkins relation catalog drift: %',expected.name;END IF;
-  runtime_allowed:=CASE WHEN expected.name='jenkins_events' THEN ARRAY['SELECT','INSERT'] ELSE ARRAY['SELECT','INSERT','UPDATE'] END;
+  runtime_allowed:=CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53) THEN ARRAY['SELECT'] WHEN expected.name='jenkins_events' THEN ARRAY['SELECT','INSERT'] ELSE ARRAY['SELECT','INSERT','UPDATE'] END;
   FOREACH runtime_privilege IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
    IF has_table_privilege('forge_agent',relation,runtime_privilege) IS DISTINCT FROM(runtime_privilege=ANY(runtime_allowed))
     OR(runtime_privilege IN('SELECT','INSERT','UPDATE','REFERENCES') AND NOT runtime_privilege=ANY(runtime_allowed)

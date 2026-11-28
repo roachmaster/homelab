@@ -1,0 +1,24 @@
+{
+ "id": "work_read_events",
+ "kind": "functions",
+ "file": "work_read_events.rs",
+ "summary": "WorkReadPort::events: a task's event page from coding_events_after, with the correlation fence and actor/cause attribution lifted from each event payload, ported from WorkStore.events (the checkpoint progress projections are not re-shaped in v1; the raw payload is carried).",
+ "signature": "pub(crate) fn events(store: &crate::work_store::PgWorkStore, project_alias: &str, task_id: uuid::Uuid, after_sequence: i64, limit: i64) -> Result<forge_work::EventPage, forge_work::WorkError>;",
+ "responsibilities": [
+  "Validate: after_sequence must be 0..=MAX_REVISION and limit 1..=100, else rejected(400, invalid_request).",
+  "In one transaction: SELECT id, correlation_id, project_alias, revision, status FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3; no row -> not_found(task).",
+  "Run coding_events_after (pinned) with after_sequence and limit. For each row: correlation_id != the task's -> rejected(409, result_mismatch). Build EventView { sequence, kind: EventKind::parse(event_kind) - an unparseable kind is rejected(409, result_mismatch), actor: work_common::parse_actor(payload), cause: payload.cause as string, payload, created_at: format_ts }.",
+  "EventPage.next_after = the last item's sequence, or after_sequence when the page is empty."
+ ],
+ "invariants": [
+  "Event payloads are carried raw (v1); Python's public progress/failure re-shaping of checkpoint/failed payloads returns with the typed-projection increment."
+ ],
+ "pattern": "// coding_events_after (forge_pg_proxy READ_QUERIES, verbatim with $n params):\n// SELECT event_id, correlation_id, sequence, event_kind, created_at, payload FROM forge_agent.coding_events WHERE owner_id = $1 AND project_alias = $2 AND task_id = $3 AND sequence > $4 ORDER BY sequence ASC LIMIT $5",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\") for nullable/absent; uuid columns -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>; text[] -> Vec<String>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; call_json(sql, params) -> Result<Option<Value>, AdapterError>. PgSession: query_rows / in_tx(|tx| ...) with the same Tx surface. Map every AdapterError with crate::work_common::work_err.\n// Params are &[&(dyn tokio_postgres::types::ToSql + Sync)]: bind &String/&str for text, &Uuid, &Value for jsonb, &i64, &bool, and &(Option<T>) for nullable params (None binds NULL)."
+}

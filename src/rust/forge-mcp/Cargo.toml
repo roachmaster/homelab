@@ -1,0 +1,13 @@
+[package]
+name = "forge-mcp"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "MCP (Model Context Protocol) API for Mission Control: a typed, discoverable surface over the Forge runner dispatch API and read-only workflow state."
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

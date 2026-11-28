@@ -1,0 +1,37 @@
+{
+  "callers": {
+    "coordinator": {
+      "owner": "mission-control",
+      "token_file": "/etc/homelab-forge/forge-pg-proxy/tokens/coordinator.token"
+    },
+    "gpu": {
+      "owner": "mission-control",
+      "token_file": "/etc/homelab-forge/forge-pg-proxy/tokens/gpu.token"
+    },
+    "muse": {
+      "owner": "mission-control",
+      "token_file": "/etc/homelab-forge/forge-pg-proxy/tokens/muse.token"
+    },
+    "operator": {
+      "owner": "mission-control",
+      "token_file": "/etc/homelab-forge/forge-pg-proxy/tokens/operator.token"
+    },
+    "reconciler": {
+      "owner": "mission-control",
+      "token_file": "/etc/homelab-forge/forge-pg-proxy/tokens/reconciler.token"
+    },
+    "worker": {
+      "owner": "mission-control",
+      "token_file": "/etc/homelab-forge/forge-pg-proxy/tokens/worker.token"
+    }
+  },
+  "db": {
+    "dbname": "forge_agent",
+    "host": "/var/run/postgresql",
+    "port": 5432
+  },
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 18087
+  }
+}

@@ -1,0 +1,25 @@
+{
+ "collaborators": [
+  "work_actors"
+ ],
+ "file": "work_requests.rs",
+ "glossary": [
+  "control receipt",
+  "intent digest",
+  "revision"
+ ],
+ "id": "work_requests",
+ "invariants": [
+  "Every control request carries expected_revision + idempotency_key (the Python surface's contract); a request type without them is a design error.",
+  "Recipes arrive RESOLVED: recipe_digest is a string the caller took from the frozen catalog. No request carries a resolver callback (the Python resolve_recipe callable does not port).",
+  "Every control request carries the acting Actor - never an Option; Python's actor=None does not port."
+ ],
+ "kind": "types",
+ "pattern": "// Structs derive Debug, Clone, PartialEq, Eq; PlanDecision derives\n// Debug, Clone, Copy, PartialEq, Eq with as_str resume/revise/cancel.\n// Tests in-file: PlanDecision round-trips all three strings and\n// parse(\"approve\") is None (that word belongs to review decisions).",
+ "responsibilities": [
+  "The admission-side request values: SubmitRequest, CancelRequest, AcceptRequest, ResumeRequest.",
+  "PlanDecision: the plan_decide vocabulary {resume, revise, cancel} as an enum with as_str/parse round-trip."
+ ],
+ "signature": "pub struct SubmitRequest {\n    pub project_alias: String, pub base_revision: String,\n    pub mode: String, pub agent_profile: String,\n    pub recipe_digest: String, pub prompt: String,\n    pub acceptance_criteria: String, pub idempotency_key: String,\n    pub auto_repair: bool,\n    pub workflow_policy_digest: Option<String>,\n    pub actor: crate::work_actors::Actor,\n}\npub struct CancelRequest {\n    pub project_alias: String, pub task_id: uuid::Uuid,\n    pub expected_revision: i64, pub idempotency_key: String,\n    pub actor: crate::work_actors::Actor,\n    pub cause: Option<crate::work_actors::Cause>,\n}\npub struct AcceptRequest {\n    pub project_alias: String, pub task_id: uuid::Uuid,\n    pub expected_revision: i64, pub idempotency_key: String,\n    pub review_note: String, pub actor: crate::work_actors::Actor,\n}\npub struct ResumeRequest {\n    pub project_alias: String, pub task_id: uuid::Uuid,\n    pub expected_revision: i64, pub idempotency_key: String,\n    pub agent_profile: String,\n    pub reconciliation_receipt_id: uuid::Uuid,\n    pub note: String, pub allowed_modes: Vec<String>,\n    pub recipe_digest: String, pub actor: crate::work_actors::Actor,\n}\npub enum PlanDecision { Resume, Revise, Cancel }\nimpl PlanDecision { pub fn as_str(&self) -> &'static str; pub fn parse(s: &str) -> Option<PlanDecision>; }",
+ "summary": "Admission-side request values: submit/cancel/accept/resume intents, fully resolved and actor-carrying, plus the plan decision vocabulary."
+}

@@ -82,6 +82,20 @@ class DisposablePostgresCluster:
             "-d", "forge_agent", "-f", SQL_DIR / "management/verify-runner-privileges.sql",
         )
 
+    def apply_cutover(self):
+        """Apply ONLY migration 55 (pg_proxy_cutover) through
+        sql/apply-cutover.sql — apply.sql deliberately stops at
+        migration 52 (preparation) — then re-run grant-runner.sql,
+        whose stage-aware grants re-apply the cutover revocation,
+        the way setup-postgres.sh does after a cutover."""
+        psql = ("-h", self.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1")
+        self._run(
+            "psql", *psql, "-d", "forge_agent",
+            "-c", "SET ROLE forge_agent_owner",
+            "-f", SQL_DIR / "apply-cutover.sql",
+            "-f", SQL_DIR / "management/grant-runner.sql",
+        )
+
     def stop(self):
         try:
             if self.data is not None and (self.data / "postmaster.pid").exists():

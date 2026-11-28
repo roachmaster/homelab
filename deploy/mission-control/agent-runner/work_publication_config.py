@@ -7,7 +7,7 @@ import re
 from types import MappingProxyType
 
 from work_worker_config import (DatabaseConfig, WorkerConfig, absolute_path, identifier,
-                                load_config as load_worker)
+                                load_config as load_worker, parse_proxy)
 from work_verification import DEFAULT_REQUIRED_HOSTED_CHECKS
 from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory
 from work_agent_branch import (
@@ -248,7 +248,7 @@ def _parse_jenkins_events(raw, hosted_provider):
     instance = validate_jenkins_identifier(raw["instance"], "jenkins_instance")
     db = raw["database"]
     if not isinstance(db, dict) or not {"host", "port", "name", "user"} <= set(db) <= {
-            "host", "port", "name", "user", "passfile"}:
+            "host", "port", "name", "user", "passfile", "proxy"}:
         raise ValueError("Invalid Jenkins events database configuration")
     if type(db["port"]) is not int or not 1 <= db["port"] <= 65535:
         raise ValueError("Invalid Jenkins events database port")
@@ -256,6 +256,7 @@ def _parse_jenkins_events(raw, hosted_provider):
         absolute_path(db["host"]), db["port"], identifier(db["name"]), identifier(db["user"]),
         "forge_coding_reconciler",
         absolute_path(db["passfile"]) if db.get("passfile") is not None else None,
+        parse_proxy(db.get("proxy")),
     )
     return JenkinsEventsConfig(absolute_path(raw["config"]), instance, database)
 

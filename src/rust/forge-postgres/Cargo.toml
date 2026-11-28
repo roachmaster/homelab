@@ -1,0 +1,30 @@
+[package]
+name = "forge-postgres"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+description = "Dedicated Postgres adapter for Forge stores: a synchronous facade over tokio-postgres speaking the forge_coding_worker_api and forge_coding_reconciler_api SQL surfaces directly. Rust stores do not route through the forge-pg-proxy service."
+
+[lints]
+workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+forge-core.workspace = true
+forge-jenkins.workspace = true
+forge-work.workspace = true
+forge-work-publication.workspace = true
+forge-work-worker.workspace = true
+forge-usage.workspace = true
+chrono = "0.4"
+sha2 = "0.10"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "time"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-serde_json-1", "with-chrono-0_4"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", features = ["fs", "user"] }

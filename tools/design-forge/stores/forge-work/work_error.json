@@ -1,0 +1,20 @@
+{
+ "collaborators": [],
+ "file": "work_error.rs",
+ "glossary": [
+  "admission"
+ ],
+ "id": "work_error",
+ "invariants": [
+  "Rejected mirrors the Python surface's Rejected(status, code): status is the HTTP-style status, code is the stable machine string (e.g. invalid_request, result_mismatch). Never collapse a rejection into Store.",
+  "Store is for adapter/transport failures only and carries a message, never a SQLSTATE or a connection string."
+ ],
+ "kind": "error type",
+ "pattern": "// Derive Debug, Clone, PartialEq, Eq. Display: Rejected ->\n// \"rejected {status}: {code}\"; NotFound -> \"not found: {what}\";\n// Store -> \"store failure: {message}\". Tests in-file: constructors set\n// the fields; Display strings match exactly.",
+ "responsibilities": [
+  "WorkError: the one error type every forge-work port and handler returns.",
+  "Display + std::error::Error so hosts can surface it without downcasting."
+ ],
+ "signature": "pub enum WorkError {\n    Rejected { status: u16, code: String },\n    NotFound { what: String },\n    Store { message: String },\n}\nimpl WorkError {\n    pub fn rejected(status: u16, code: impl Into<String>) -> WorkError;\n    pub fn not_found(what: impl Into<String>) -> WorkError;\n    pub fn store(message: impl Into<String>) -> WorkError;\n}\nimpl std::fmt::Display for WorkError;\nimpl std::error::Error for WorkError;",
+ "summary": "The crate's single error type: domain rejections (status + stable code, mirroring Python's Rejected), missing objects, and adapter failures."
+}

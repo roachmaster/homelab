@@ -1,0 +1,26 @@
+{
+ "id": "work_admission_resume",
+ "kind": "functions",
+ "file": "work_admission_resume.rs",
+ "summary": "WorkAdmissionPort::resume: the reconciliation-gated requeue transaction ported from WorkStore.resume, minus the transition-authority gates (bound provider/binary authorities are host objects the port does not carry; the no-authority native_timeout/reviewer_correction paths are the port's contract).",
+ "signature": "pub(crate) fn resume(store: &crate::work_store::PgWorkStore, request: &forge_work::ResumeRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;",
+ "responsibilities": [
+  "Validate expected_revision in 1..=MAX_REVISION and note <= 2048 UTF-8 bytes else rejected(400, invalid_request). intent = intent_digest({action: \"resume\", project_alias, task_id, expected_revision, agent_profile, reconciliation_receipt_id (string), note}).",
+  "In one transaction: advisory_lock. SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id, review_required, workflow_required, workflow_id, workflow_review_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3 FOR UPDATE; no row -> not_found. mode not in request.allowed_modes -> rejected(403, denied). Receipt replay as in accept (action resume) -> outcome_for(receipt.revision, true).",
+  "Gates: revision != expected or expected >= MAX_REVISION -> rejected(409, revision_conflict). publication_busy -> rejected(409, reconcile_required). review_required AND mode == implement AND a coding_reviews row exists for (task, latest_attempt_id) -> rejected(409, not_reviewable). (mode == plan AND status == awaiting_review) OR status in {queued, running, cancel_requested, completed} OR latest_attempt_id null -> rejected(409, reconcile_required).",
+  "Reconciliation receipt: SELECT receipt_id, attempt_id, task_revision, workspace_digest FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND receipt_id=$4; missing -> rejected(409, reconcile_required); task_revision != task revision or attempt_id != latest_attempt_id -> rejected(409, stale_reconciliation). attempt_reservation query (pinned): reserved > 0 or not attempt_stopped -> rejected(409, reconcile_required). Pending cap as in submit -> rejected(503, queue_full).",
+  "Recipe document via pinned_recipe_for(request.recipe_digest); None -> rejected(503, unavailable). UPDATE (pinned) with review_required = (mode == \"implement\"); no row -> rejected(409, revision_conflict). receipt = {project_alias, task_id, base_revision: expected, revision: new, status: \"queued\", recipe_digest}. Event payload = {base_revision, revision, agent_profile, recipe_digest, reconciliation_receipt_id (string), workspace_digest} plus note when non-empty; insert_event(kind resumed). INSERT control receipt (action resume). notify. outcome_for(new_revision, false)."
+ ],
+ "invariants": [
+  "The resumed event kind is resumed; the task returns to queued with the reconciliation workspace digest pinned."
+ ],
+ "pattern": "// attempt_reservation (verbatim with $n params):\n// SELECT count(*) FILTER (WHERE reservation_active OR lease_expires_at IS NOT NULL) AS reserved, bool_or(attempt_id = $1 AND phase = 'stopped') AS attempt_stopped FROM forge_agent.coding_attempts WHERE owner_id = $2 AND project_alias = $3 AND task_id = $4\n// resume UPDATE:\n// UPDATE forge_agent.coding_tasks SET status='queued', revision=revision+1, agent_profile=$1, pinned_recipe=$2, recipe_digest=$3, resume_workspace_digest=$4, cancelled_at=NULL, legacy_resume_note=$5, review_required=$6, updated_at=clock_timestamp() WHERE owner_id=$7 AND project_alias=$8 AND id=$9 AND revision=$10 RETURNING revision",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_control",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\"); uuid -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; execute_count(sql, params) -> Result<u64, AdapterError>; call_json/call_scalar/call_bool/call_void likewise. Map AdapterError with crate::work_common::work_err. Control operations run inside session.in_tx(|tx| ...).\n// Receipts are serde_json::Value objects; build them with serde_json::json! and read fields with .get(\"key\") / .as_str() / .as_i64()."
+}

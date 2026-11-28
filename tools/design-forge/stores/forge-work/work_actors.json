@@ -1,0 +1,22 @@
+{
+ "collaborators": [
+  "work_events"
+ ],
+ "file": "work_actors.rs",
+ "glossary": [],
+ "id": "work_actors",
+ "invariants": [
+  "ActorKind has exactly the 6 frozen values of work_events.py ACTOR_KINDS; Cause has exactly the 14 values of the per-kind frozen sets (4 reconcile + 4 cancel + 6 failure, with budget_exhausted shared).",
+  "allowed_for is the ONLY cause validation: NeedsReconcile takes {LeaseLost, DeadlineExceeded, ScopeStopped, Interrupted}; Cancelled and CancelRequested take {OperatorRequest, WorkflowCancelled, BudgetExhausted, Superseded}; Failed takes the six failure causes; every other kind takes NO cause (allowed_for returns false for any cause).",
+  "Actor is a plain value: kind + id; constructing one never validates against a registry."
+ ],
+ "kind": "types",
+ "pattern": "// Derive Debug, Clone, Copy, PartialEq, Eq on both enums; Actor derives\n// Debug, Clone, PartialEq, Eq. Tests in-file: round-trip every string;\n// allowed_for matrix spot checks (LeaseLost allowed for NeedsReconcile\n// only; BudgetExhausted allowed for Cancelled + CancelRequested + Failed\n// is FALSE - budget_exhausted is not a failure cause; AgentFailed allowed\n// for Failed only; any cause for Queued is false).",
+ "responsibilities": [
+  "ActorKind and Actor: who acted, from the frozen 6-value vocabulary, with as_str/parse round-trip.",
+  "Cause: the union of the per-kind frozen cause sets as one enum, with as_str/parse round-trip.",
+  "Cause::allowed_for(kind): the per-kind set membership check producers must pass before emitting an event."
+ ],
+ "signature": "pub enum ActorKind { Operator, Coordinator, Worker, Agent, Service, System }\n// as_str: operator, coordinator, worker, agent, service, system\npub struct Actor { pub kind: ActorKind, pub id: String }\nimpl Actor { pub fn new(kind: ActorKind, id: impl Into<String>) -> Actor; }\npub enum Cause {\n    LeaseLost, DeadlineExceeded, ScopeStopped, Interrupted,\n    OperatorRequest, WorkflowCancelled, BudgetExhausted, Superseded,\n    MalformedOutput, PolicyUnavailable, ContextUnavailable, ResourceBound,\n    AgentInput, AgentFailed,\n}\n// Cause as_str: lease_lost, deadline_exceeded, scope_stopped, interrupted,\n//   operator_request, workflow_cancelled, budget_exhausted, superseded,\n//   malformed_output, policy_unavailable, context_unavailable,\n//   resource_bound, agent_input, agent_failed\nimpl ActorKind { pub fn as_str(&self) -> &'static str; pub fn parse(s: &str) -> Option<ActorKind>; }\nimpl Cause {\n    pub fn as_str(&self) -> &'static str;\n    pub fn parse(s: &str) -> Option<Cause>;\n    pub fn allowed_for(&self, kind: crate::work_events::EventKind) -> bool;\n}",
+ "summary": "The frozen actor/cause vocabulary of work_events.py as types: who acted, and which causes each negative event kind may carry."
+}

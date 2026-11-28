@@ -1,0 +1,23 @@
+{
+ "collaborators": [
+  "client",
+  "error"
+ ],
+ "file": "reconciler.rs",
+ "glossary": [
+  "reconciler",
+  "lease"
+ ],
+ "id": "reconciler",
+ "idioms": "// serde_json::Value (exact): v.get(\"key\") -> Option<&Value>; v.as_str() -> Option<&str>.\n//   Value and Option<Value> implement tokio_postgres::types::ToSql - pass by reference in params.",
+ "invariants": [
+  "A ReconcilerApi is never built on a worker-role session; the role separation is the host's wiring job, and this type assumes it."
+ ],
+ "kind": "struct",
+ "responsibilities": [
+  "Each method calls exactly the SQL function in the signature comments via PgSession's call_* helpers.",
+  "pending_reconciliations validates limit to 1..=64 before calling, returning Protocol otherwise."
+ ],
+ "signature": "pub struct ReconcilerApi {\n    // private: session: crate::client::PgSession\n}\n// impl ReconcilerApi (literal select strings; parameters always as &[&name, ...]):\n//   pub fn new(session: crate::client::PgSession) -> Self\n//   pub fn expire_leases(&mut self) -> Result<i32, crate::error::AdapterError>\n//       Ok(self.session.call_scalar::<i32>(\"SELECT forge_coding_reconciler_api.expire_leases()\", &[])?.unwrap_or(0))\n//   pub fn pending_reconciliations(&mut self, limit: i32)\n//       -> Result<Option<serde_json::Value>, crate::error::AdapterError>\n//       validate limit to 1..=64 first (Protocol otherwise), then\n//       self.session.call_json(\"SELECT forge_coding_reconciler_api.pending_reconciliations($1)\", &[&limit])\n//   pub fn post_merge_available(&mut self, owner: &str) -> Result<bool, crate::error::AdapterError>\n//       self.session.call_bool(\"SELECT forge_coding_reconciler_api.post_merge_available($1)\", &[&owner])\n//   pub fn retry_event_resolve_open_scope(&mut self, project: &str, scope_kind: &str, scope_id: uuid::Uuid)\n//       -> Result<i32, crate::error::AdapterError>\n//       Ok(self.session.call_scalar::<i32>(\"SELECT forge_coding_reconciler_api.retry_event_resolve_open_scope($1, $2, $3)\",\n//           &[&project, &scope_kind, &scope_id])?.unwrap_or(0))",
+ "summary": "The reconciler surface (TYPED SURFACE REVISION 2026-11-27): RecoveryLease (the 8 required keys of the Python _recovery check) and ReconcilerApi - pending_reconciliations now returns Vec<RecoveryLease> instead of a raw JSON value; expire_leases, post_merge_available, retry_event_resolve_open_scope unchanged."
+}

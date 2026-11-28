@@ -26,6 +26,12 @@ SOURCE = ('owner_id', 'project_alias', 'task_id', 'attempt_id', 'plan_decision_i
 _OWNER_ADMISSION = object()
 
 
+def _read_query(cursor, name, params):
+    """Run a named fixed read query on either transport (see proxy_client.run_read_query)."""
+    from proxy_client import run_read_query
+    return run_read_query(cursor, name, params)
+
+
 def source_key(workflow, review):
     return 'owner-verification-recovery-v2:' + str(workflow) + ':' + str(review)
 
@@ -152,9 +158,10 @@ class BoundOwnerVerificationAuthority(BoundPreparationRetryAuthority):
                 or review['infrastructure_retries'] != self.infrastructure_retries or not 0 <= self.infrastructure_retries < 32):
             raise Rejected(409, 'not_reviewable')
         failed_ci(review)
-        cursor.execute('SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s',
-                       (self.owner_id, self.project_alias, task['id']))
-        if cursor.fetchone()['latest'] != review['review_no']:
+        rows = _read_query(cursor, "max_review_no",
+                           {"owner_id": self.owner_id, "project_alias": self.project_alias,
+                            "task_id": task["id"]})
+        if rows[0]["latest"] != review["review_no"]:
             raise Rejected(409, 'not_reviewable')
         cursor.execute('SELECT phase,reservation_active,lease_expires_at,result_sha256 FROM forge_agent.coding_attempts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s',
                        (self.owner_id, self.project_alias, task['id'], self.attempt_id))
@@ -173,9 +180,11 @@ def _review_chain(cursor, task, workflow, latest, rec, owner):
         seen.add(q['review_id'])
         cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s', (q['previous_review_id'],))
         previous = cursor.fetchone()
-        cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s AND kind='decide' AND finish_receipt->'receipt'->>'review_id'=%s AND intent->>'policy'=ANY(%s)",
-                       (task['owner_id'], task['project_alias'], workflow['workflow_id'], str(q['review_id']), [V1, POLICY]))
-        actions = cursor.fetchall()
+        actions = _read_query(
+            cursor, "workflow_action_by_receipt_review",
+            {"owner_id": task["owner_id"], "project_alias": task["project_alias"],
+             "workflow_id": workflow["workflow_id"], "review_id": str(q["review_id"]),
+             "policies": [V1, POLICY]})
         if (not previous or len(actions) != 1 or tuple(previous[k] for k in SOURCE) != tuple(q[k] for k in SOURCE)
                 or q['source_revision'] != previous['source_revision'] + 1 or q['infrastructure_retries'] != previous['infrastructure_retries'] + 1):
             raise Rejected(409, 'result_mismatch')
@@ -313,8 +322,13 @@ def recover(flow, cursor, task, owner, command, request, digest):
             or plan['plan_sha256'] != oi.get('plan_sha256')
             or flow._artifact(cursor, plan['task_id'], plan['plan_attempt_id'])['result_sha256'] != plan['plan_sha256']):
         raise Rejected(409, 'result_mismatch')
-    cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested')) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s AND p.status IN('pending','checking','publishing')) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy", (w['workflow_id'],)*5)
-    if cursor.fetchone()['busy']:
+    rows = _read_query(cursor, "workflow_busy",
+                       {"workflow_id": w["workflow_id"],
+                        "owner_id": store.owner,
+                        "task_statuses": ["queued", "running", "cancel_requested"],
+                        "include_attempts": True,
+                        "publication_statuses": ["pending", "checking", "publishing"]})
+    if rows[0]["busy"]:
         raise Rejected(409, 'reconcile_required')
     cursor.execute('SELECT * FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
                    (store.owner, task['project_alias'], task['repair_root_task_id'] or task['id']))
@@ -328,8 +342,10 @@ def recover(flow, cursor, task, owner, command, request, digest):
         raise Rejected(403, 'denied')
     cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='checks',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s", (w['workflow_id'],))
     flow._grant(cursor, w, p['reviewer_profile'], 'review')
-    cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'", (store.owner, [x[0] for x in NATIVE_POLICIES.values()]))
-    if not _ready_for_recipe(cursor.fetchall(), task['project_alias'], p['reviewer_profile'], 'review', recipe_from_snapshot(p, 'reviewer_review')):
+    rows = _read_query(cursor, "worker_readiness_fresh",
+                       {"owner_id": store.owner,
+                        "policy_digests": [x[0] for x in NATIVE_POLICIES.values()]})
+    if not _ready_for_recipe(rows, task['project_alias'], p['reviewer_profile'], 'review', recipe_from_snapshot(p, 'reviewer_review')):
         raise Rejected(503, 'unavailable')
     authority = BoundOwnerVerificationAuthority(store, cursor, w['workflow_id'], task['id'], task['latest_attempt_id'], task['revision'], q['review_id'],
         store.owner, task['project_alias'], q['infrastructure_retries'], q['candidate_commit'], q['gate_manifest_sha256'],
@@ -338,10 +354,11 @@ def recover(flow, cursor, task, owner, command, request, digest):
     cursor.execute("UPDATE forge_agent.coding_reviews SET candidate_commit=NULL,gate_manifest_sha256=NULL,verification='{}'::jsonb,owner_decision=NULL WHERE review_id=%s AND status='pending' AND previous_review_id=%s", (receipt['review_id'], q['review_id']))
     if cursor.rowcount != 1:
         raise Rejected(409, 'reconcile_required')
-    cursor.execute("SELECT count(*) AS n FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE 'native-deadline-retry:%%'", (w['workflow_id'],))
-    deadline_recoveries = cursor.fetchone()['n']
-    cursor.execute("SELECT coalesce(sum(greatest(q.infrastructure_retries-previous.infrastructure_retries,0)),0)::integer AS n FROM forge_agent.coding_reviews q JOIN forge_agent.coding_reviews previous ON previous.review_id=q.previous_review_id JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.review_id<>%s", (w['workflow_id'], receipt['review_id']))
-    verification_retries = cursor.fetchone()['n']
+    rows = _read_query(cursor, "deadline_retry_count", {"workflow_id": w["workflow_id"], "owner_id": store.owner})
+    deadline_recoveries = rows[0]["n"]
+    rows = _read_query(cursor, "verification_retries_sum",
+                       {"workflow_id": w["workflow_id"], "owner_id": store.owner, "review_id": receipt["review_id"]})
+    verification_retries = rows[0]["n"]
     intent = dict(policy=POLICY, request=request, workflow_id=str(w['workflow_id']), policy_digest=w['policy_digest'],
         source_attempt_id=str(q['attempt_id']), source_result_sha256=q['parent_result_sha256'], source_review_id=str(q['review_id']),
         source_workspace_digest=q['workspace_digest'], candidate_commit=q['candidate_commit'], gate_manifest_sha256=q['gate_manifest_sha256'],

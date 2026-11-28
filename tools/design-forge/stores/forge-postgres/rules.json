@@ -1,0 +1,13 @@
+{
+ "rules": [
+  "Rust edition 2021. No unsafe code. Use only the dependencies in the crate manifest (forge-core, forge-work, chrono, serde_json, sha2, tokio, tokio-postgres, uuid).",
+  "The public surface is synchronous. Never expose tokio or tokio-postgres types in public signatures; they stay inside PgSession.",
+  "All SQL goes through PgSession/Tx helpers (call_* for the SQL-function surfaces; query_rows/execute_count for the work-store adapters' raw SQL). Never build SQL strings beyond the literal statements pinned in the card. Function names, argument order and result types come from the card exactly.",
+  "Leases are explicit values: nothing is cleaned up by Drop, and every fallible operation returns Result<_, AdapterError>.",
+  "Every public item carries a /// doc comment.",
+  "Unit tests go in a #[cfg(test)] mod tests at the bottom of the same file and test pure logic only - never a live database.",
+  "No binary, no main function, no environment access anywhere in this crate.",
+  "One file is one generation unit: at most ~90 lines. If a design needs more, it belongs in two cards (split into submodules at the design level) - never write a file longer than ~110 lines.",
+  "Work-adapter helpers that touch tokio_postgres::Row are pub(crate) only; the public adapter surface is PgWorkStore and the forge-work port traits."
+ ]
+}

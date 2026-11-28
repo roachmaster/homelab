@@ -39,6 +39,36 @@ def _object(value, required, optional=()):
     return value
 
 
+def parse_proxy(value):
+    """Parse an optional database.proxy section into a ProxyConfig.
+
+    The section selects the proxy transport for that database section
+    (``{"url": ..., "token_file": ...}``); absent means direct psycopg2.
+    """
+    if value is None:
+        return None
+    from urllib.parse import urlparse
+    raw = _object(value, {"url", "token_file"})
+    parsed = urlparse(raw["url"])
+    if (not isinstance(raw["url"], str) or parsed.scheme not in ("http", "https")
+            or not parsed.hostname):
+        raise ValueError("Invalid proxy URL")
+    return ProxyConfig(raw["url"], absolute_path(raw["token_file"]))
+
+
+@dataclass(frozen=True)
+class ProxyConfig:
+    """Proxy transport selection for a database section.
+
+    When present, the caller reaches Postgres only through forge-pg-proxy
+    at ``url``, authenticating with the bearer <redacted> in ``token_file``.
+    The caller identity derives from the section's effective database
+    role (see :func:`proxy_client.caller_for_role`).
+    """
+    url: str
+    token_file: Path
+
+
 @dataclass(frozen=True)
 class DatabaseConfig:
     host: Path
@@ -47,6 +77,7 @@ class DatabaseConfig:
     user: str
     reconciler_user: str = "forge_coding_reconciler"
     passfile: Path | None = None
+    proxy: ProxyConfig | None = None
 
     def connection_arguments(self, *, reconciler=False):
         result = {
@@ -58,6 +89,24 @@ class DatabaseConfig:
         if self.passfile is not None:
             result["passfile"] = str(self.passfile)
         return result
+
+    def connect_factory(self, *, reconciler=False):
+        """Zero-arg connection factory for this database section.
+
+        Returns a proxy factory when a ``proxy`` section is configured
+        (the caller derives from the effective role), else the direct
+        psycopg2 factory. The switch is reversible by removing the
+        ``proxy`` section from the config.
+        """
+        if self.proxy is None:
+            import psycopg2
+            return lambda: psycopg2.connect(
+                **self.connection_arguments(reconciler=reconciler))
+        from proxy_client import caller_for_role, connect_factory
+        user = self.reconciler_user if reconciler else self.user
+        return connect_factory(
+            self.proxy.url, caller_for_role(user),
+            token_file=str(self.proxy.token_file))
 
 
 @dataclass(frozen=True)
@@ -164,13 +213,15 @@ def parse_config(raw, *, source_path=None):
             or any(not 32 <= ord(character) < 127 for character in owner)):
         raise ValueError("Invalid coding worker owner")
     db = _object(raw["database"], {"host", "port", "name", "user"},
-                 {"reconciler_user", "passfile"})
+                 {"reconciler_user", "passfile", "proxy"})
     if type(db["port"]) is not int or not 1 <= db["port"] <= 65535:
         raise ValueError("Invalid coding worker database port")
+    proxy = parse_proxy(db.get("proxy"))
     database = DatabaseConfig(
         absolute_path(db["host"]), db["port"], identifier(db["name"]), identifier(db["user"]),
         identifier(db.get("reconciler_user", "forge_coding_reconciler")),
         absolute_path(db["passfile"]) if db.get("passfile") is not None else None,
+        proxy,
     )
     account = _object(raw["account"], {"user", "uid", "gid", "home"})
     if any(type(account[key]) is not int or not 1 <= account[key] <= 2**31 - 1 for key in ("uid", "gid")):

@@ -1,0 +1,27 @@
+{
+ "id": "work_admission_ops",
+ "kind": "functions",
+ "file": "work_admission_ops.rs",
+ "summary": "WorkAdmissionPort::cancel and ::accept. cancel delegates to the coding_workflow_cancel composite (which owns the advisory lock, the external scope, and retry settlement); accept is the inline transaction ported from WorkStore.accept.",
+ "signature": "pub(crate) fn cancel(store: &crate::work_store::PgWorkStore, request: &forge_work::CancelRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\npub(crate) fn accept(store: &crate::work_store::PgWorkStore, request: &forge_work::AcceptRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;",
+ "responsibilities": [
+  "cancel: validate expected_revision in 1..=MAX_REVISION else rejected(400, invalid_request). cause = request.cause or Cause::OperatorRequest (Python's require_cancel_cause default); a present cause must be allowed for Cancelled (forge_work::Cause::allowed_for) else rejected(400, invalid_request). In one transaction call the composite: SELECT forge_pg_proxy_api.coding_workflow_cancel($1,$2,$3,$4,$5,$6,$7) with (project_alias, task_id, expected_revision, idempotency_key, actor.kind.as_str(), actor.id, cause.as_str()) via call_json. None -> rejected(500, unavailable). When the result object has a non-null \"error\" string, map it: not_found -> 404, idempotency_conflict -> 409, revision_conflict -> 409, not_cancellable -> 409, invalid_request -> 400, anything else -> 409, as rejected(status, error). Success: replayed = whether a coding_control_receipts row for (task, key, action cancel) existed BEFORE the call (check first, in the same transaction); return outcome_for(tx, owner, project, task_id, result.revision, replayed) where result.revision is the receipt's revision field (fall back to expected_revision + 1).",
+  "accept: validate expected_revision in 1..=MAX_REVISION and review_note <= 2048 UTF-8 bytes else rejected(400, invalid_request). intent = intent_digest({action: \"accept\", project_alias, task_id (string), expected_revision, review_note}). In one transaction: SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id, review_required, workflow_required FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3 FOR UPDATE; no row -> not_found. Receipt replay: SELECT action, intent_digest, receipt_json FROM forge_agent.coding_control_receipts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND idempotency_key=$4; present: action != accept or intent mismatch -> rejected(409, idempotency_conflict); else return outcome_for(..., receipt.revision, true).",
+  "accept gates: mode == plan OR status != awaiting_review OR latest_attempt_id null -> rejected(409, not_reviewable). Attempt: SELECT phase, reservation_active, published_at, result_sha256 FROM forge_agent.coding_attempts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND attempt_id=$4; missing or phase != stopped or reservation_active or published_at null or result_sha256 null -> rejected(409, not_reviewable). workflow_required -> rejected(409, not_reviewable). revision != expected or expected >= MAX_REVISION -> rejected(409, revision_conflict). work_control_policy::publication_busy -> rejected(409, reconcile_required). mode == implement AND review_required AND NOT work_control_policy::hosted_green -> rejected(409, not_reviewable).",
+  "accept act: UPDATE forge_agent.coding_tasks SET status='completed', revision=revision+1, accepted_at=clock_timestamp(), review_note=$1, updated_at=clock_timestamp() WHERE owner_id=$2 AND project_alias=$3 AND id=$4 AND status='awaiting_review' AND revision=$5 RETURNING revision; no row -> rejected(409, revision_conflict). receipt = {project_alias, task_id, base_revision: expected, revision: new, status: \"completed\"}. insert_event(kind completed, payload {base_revision, revision, review_note}, actor). INSERT the control receipt (action accept). Return outcome_for(..., new_revision, false). (accept does not notify in Python.)"
+ ],
+ "invariants": [
+  "cancel's composite is the single writer for cancels - do not re-implement its internals.",
+  "accept emits the completed event (the design invariant), never a checkpoint."
+ ],
+ "pattern": "",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_control",
+  "tx",
+  "work_rows",
+  "work_control_policy"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\"); uuid -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; execute_count(sql, params) -> Result<u64, AdapterError>; call_json/call_scalar/call_bool/call_void likewise. Map AdapterError with crate::work_common::work_err. Control operations run inside session.in_tx(|tx| ...).\n// Receipts are serde_json::Value objects; build them with serde_json::json! and read fields with .get(\"key\") / .as_str() / .as_i64()."
+}

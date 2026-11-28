@@ -1,0 +1,75 @@
+pub mod branch;
+pub mod candidate_source;
+pub mod context_providers;
+/// This adapter provides a synchronous facade over tokio-postgres, dedicated to PostgreSQL operations.
+/// It uses explicit leases, which are values that expire server-side and are not cleaned up by Drop.
+/// The transport decision is handled by forge-postgres, and this crate does not route through forge-pg-proxy.
+/// The work_* modules implement forge-work's three driven ports (PgWorkStore)
+/// over the same session/transaction surface; their helpers stay crate-internal.
+#[cfg(feature = "test-support")]
+pub mod pg_fixture;
+pub mod client;
+pub mod config;
+pub mod error;
+pub mod delivery_repair_adapter;
+pub mod delivery_workers_adapter;
+pub mod external_adapter;
+pub mod external_delivery_adapter;
+pub mod external_context;
+pub mod factory;
+pub mod gpu_adapter;
+pub mod gpu_worker;
+pub mod jenkins_store_adapter;
+pub mod model_route_proofs;
+pub mod peer_validator;
+pub mod postfix_ledger;
+pub mod publication_store_adapter;
+pub mod reconciler;
+pub mod retry_evidence;
+pub mod review_store;
+pub mod registrar;
+pub mod tx;
+pub mod usage_store_adapter;
+pub mod work_admission;
+pub mod work_admission_ops;
+pub mod work_admission_resume;
+pub mod work_admission_submit;
+pub mod work_common;
+pub mod work_control;
+pub mod work_control_policy;
+pub mod work_decision;
+pub mod work_decision_more;
+pub mod work_decision_plan;
+pub mod work_decision_review;
+pub mod work_read;
+pub mod work_read_cicd;
+pub mod work_read_events;
+pub mod work_read_get;
+pub mod work_read_list;
+pub mod work_read_result;
+pub mod work_read_scope;
+pub mod work_rows;
+pub mod work_store;
+pub mod worker;
+pub mod publication_composition;
+pub mod runner_composition;
+pub mod worker_composition;
+pub mod worker_adapter;
+pub mod worker_adapter_reconciler;
+pub mod worker_context;
+pub mod workflow_adapter;
+pub mod workflow_decision;
+
+pub use branch::{AgentBranch, AgentBranchUpsert};
+pub use client::PgSession;
+pub use config::PgConfig;
+pub use error::AdapterError;
+pub use factory::PgSessionFactory;
+pub use reconciler::{ReconcilerApi, RecoveryLease};
+pub use tx::Tx;
+pub use work_store::{PgWorkStore, ReviewPolicy};
+pub use worker::{
+    AdvertisedProfile, AdvertisedProject, Claim, PublishReceipt, PublishResult, RenewDeadline,
+    RenewStatus, ResultManifest, StopProof, WorkerApi,
+};
+pub use worker_context::NativeDeliveryContext;

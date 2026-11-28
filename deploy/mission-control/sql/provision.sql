@@ -20,22 +20,32 @@ SELECT 'CREATE ROLE forge_coding_reconciler LOGIN NOINHERIT'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'forge_coding_reconciler')
 \gexec
 
+SELECT 'CREATE ROLE forge_pg_proxy LOGIN NOINHERIT'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'forge_pg_proxy')
+\gexec
+
+SELECT 'CREATE ROLE muse_proxy_writer LOGIN NOINHERIT'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'muse_proxy_writer')
+\gexec
+
 DO $check$
 BEGIN
     IF EXISTS (
         SELECT FROM pg_roles
         WHERE rolname IN (
             'forge_agent_owner', 'forge_agent', 'forge_gpu_worker',
-            'forge_coding_worker', 'forge_coding_reconciler'
+            'forge_coding_worker', 'forge_coding_reconciler',
+            'forge_pg_proxy', 'muse_proxy_writer'
         )
           AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls
                OR rolcanlogin <> (rolname <> 'forge_agent_owner')
-               OR (rolname IN ('forge_gpu_worker', 'forge_coding_worker', 'forge_coding_reconciler') AND rolinherit))
+               OR (rolname IN ('forge_gpu_worker', 'forge_coding_worker', 'forge_coding_reconciler', 'forge_pg_proxy', 'muse_proxy_writer') AND rolinherit))
     ) OR EXISTS (
         SELECT FROM pg_auth_members
         WHERE member IN (
             'forge_agent_owner'::regrole, 'forge_agent'::regrole, 'forge_gpu_worker'::regrole,
-            'forge_coding_worker'::regrole, 'forge_coding_reconciler'::regrole
+            'forge_coding_worker'::regrole, 'forge_coding_reconciler'::regrole,
+            'forge_pg_proxy'::regrole, 'muse_proxy_writer'::regrole
         )
     ) THEN
         RAISE EXCEPTION 'Existing Forge roles have unexpected privileges';
@@ -58,3 +68,5 @@ GRANT CONNECT ON DATABASE forge_agent TO forge_agent;
 GRANT CONNECT ON DATABASE forge_agent TO forge_gpu_worker;
 GRANT CONNECT ON DATABASE forge_agent TO forge_coding_worker;
 GRANT CONNECT ON DATABASE forge_agent TO forge_coding_reconciler;
+GRANT CONNECT ON DATABASE forge_agent TO forge_pg_proxy;
+GRANT CONNECT ON DATABASE forge_agent TO muse_proxy_writer;

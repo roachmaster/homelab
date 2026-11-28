@@ -1,0 +1,26 @@
+{
+ "id": "work_read_get",
+ "kind": "functions",
+ "file": "work_read_get.rs",
+ "summary": "WorkReadPort::get: one task's summary plus its v1 detail projection (task fields, latest attempt, published result basics), ported from WorkStore.get with the deep projection set (retry/delivery/workflow/cicd projections) left to the typed-projection increment.",
+ "signature": "pub(crate) fn get(store: &crate::work_store::PgWorkStore, project_alias: &str, task_id: uuid::Uuid) -> Result<forge_work::TaskView, forge_work::WorkError>;",
+ "responsibilities": [
+  "Run in one session transaction (session.in_tx). First the task SELECT pinned in the pattern; no row -> WorkError::not_found(\"task\").",
+  "Shape the summary with work_rows::summary.",
+  "Build the projection object: prompt, acceptance_criteria, latest_attempt_id, plan_decision_id, review_required, workflow_required, workflow_id, workflow_review_id from the task row (nulls stay null).",
+  "When latest_attempt_id is non-null AND status != queued, run the attempt SELECT pinned in the pattern; when a row exists add projection.attempt = {attempt_id (string), worker_id, phase, started_at (format_ts), finished_at (format_ts or null), summary, published_at (format_ts or null), result_sha256, result_byte_count, result_chunk_count} and, when published_at is non-null, projection.result = {result_sha256, result_byte_count, result_chunk_count}.",
+  "Return TaskView { summary, projection }."
+ ],
+ "invariants": [
+  "The v1 projection is a documented subset of Python's get() DTO: no retry, delivery, workflow-progress, review, or cicd projections (they return with the typed-projection increment that retires TaskView's Value debt).",
+  "Timestamps always pass through work_common::format_ts."
+ ],
+ "pattern": "// task SELECT:\n// SELECT id, correlation_id, project_alias, base_revision, mode, agent_profile, recipe_digest, status, revision, created_at, title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id, review_required, workflow_required, workflow_id, workflow_review_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3\n// attempt SELECT:\n// SELECT attempt_id, worker_id, phase, started_at, finished_at, summary, published_at, result_sha256, result_byte_count, result_chunk_count FROM forge_agent.coding_attempts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND attempt_id=$4",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\") for nullable/absent; uuid columns -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>; text[] -> Vec<String>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; call_json(sql, params) -> Result<Option<Value>, AdapterError>. PgSession: query_rows / in_tx(|tx| ...) with the same Tx surface. Map every AdapterError with crate::work_common::work_err.\n// Params are &[&(dyn tokio_postgres::types::ToSql + Sync)]: bind &String/&str for text, &Uuid, &Value for jsonb, &i64, &bool, and &(Option<T>) for nullable params (None binds NULL)."
+}

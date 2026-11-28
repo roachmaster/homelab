@@ -1,0 +1,26 @@
+{
+ "collaborators": [
+  "work_types",
+  "work_requests",
+  "work_error"
+ ],
+ "file": "port_admission.rs",
+ "glossary": [
+  "admission",
+  "control receipt",
+  "policy digest"
+ ],
+ "id": "port_admission",
+ "invariants": [
+  "submit/cancel/accept/resume are idempotent: the implementation writes ONE coding_control_receipts row per (operation, idempotency_key) and appends the operation's event in the SAME transaction as the coding_tasks change; a replay returns the receipt's original outcome with replayed = true.",
+  "accept appends the completed event (the design's pinned exception: completion is an admission-side act).",
+  "policy_identity pins a policy snapshot's digest; policy_drifted reports whether a workflow's pinned digest still matches the catalog's current one - neither mutates tasks."
+ ],
+ "kind": "trait",
+ "pattern": "// Trait only: no impls, no tests in this file. Each method carries a\n// /// doc comment naming the Python WorkStore method it ports and the\n// event it appends (submit -> queued, cancel -> cancel_requested,\n// accept -> completed, resume -> resumed).",
+ "responsibilities": [
+  "WorkAdmissionPort: the lifecycle writers of the Python WorkStore - submit, cancel, accept, resume - plus the policy-digest pair policy_identity / policy_drifted."
+ ],
+ "signature": "pub trait WorkAdmissionPort {\n    fn submit(&self, request: &crate::work_requests::SubmitRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn cancel(&self, request: &crate::work_requests::CancelRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn accept(&self, request: &crate::work_requests::AcceptRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn resume(&self, request: &crate::work_requests::ResumeRequest)\n        -> Result<crate::work_types::ControlOutcome, crate::work_error::WorkError>;\n    fn policy_identity(&self, project_alias: &str, kind: &str,\n        snapshot: &serde_json::Value)\n        -> Result<crate::work_types::PolicyIdentity, crate::work_error::WorkError>;\n    fn policy_drifted(&self, workflow_id: uuid::Uuid,\n        snapshot: &serde_json::Value)\n        -> Result<bool, crate::work_error::WorkError>;\n}",
+ "summary": "The admission port: idempotent lifecycle writers whose receipt, event, and task change commit in one transaction, plus the policy-digest pair."
+}

@@ -54,6 +54,9 @@ BEGIN
  END IF;
 END;
 $cicd_branch_reads$;
+-- No read grants for the migration 0044 identity catalog tables or the
+-- migration 0045 deadline-extension table: those migrations deliberately
+-- revoke muse_events access, and the reader must stay excluded.
 -- Match the pre-existing permission for future tables from this owner/schema.
 ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent
     GRANT SELECT ON TABLES TO muse_events;

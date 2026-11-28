@@ -1,0 +1,19 @@
+{
+ "collaborators": [],
+ "file": "work_events.rs",
+ "glossary": [],
+ "id": "work_events",
+ "invariants": [
+  "Exactly 12 variants with these exact strings - the live coding_events vocabulary (ddd.yaml domain_events, verified against the database 2026-11-26). Never add, rename or regenerate kinds from operation names.",
+  "parse is the exact inverse of as_str; an unknown string is None, never a fallback variant.",
+  "requires_cause is true for exactly the four negative kinds: NeedsReconcile, Cancelled, CancelRequested, Failed."
+ ],
+ "kind": "enum",
+ "pattern": "// Derive Debug, Clone, Copy, PartialEq, Eq on the enum. Tests in-file:\n// round-trip all 12 strings both ways; parse(\"bogus\") is None;\n// requires_cause is true for exactly NeedsReconcile, Cancelled,\n// CancelRequested, Failed and false for the other eight.",
+ "responsibilities": [
+  "EventKind: the canonical coding_events event vocabulary as a Rust enum with as_str/parse round-trip to the exact event_kind strings.",
+  "requires_cause(): classify the negative kinds that must carry a cause from the per-kind frozen sets."
+ ],
+ "signature": "pub enum EventKind {\n    Queued, Started, Checkpoint, AwaitingReview, Resumed, Cancelled,\n    CancelRequested, Completed, Failed, NeedsReconcile, QuotaBlocked,\n    BlockedPermission,\n}\n// as_str: Queued->\"queued\", Started->\"started\", Checkpoint->\"checkpoint\",\n//   AwaitingReview->\"awaiting_review\", Resumed->\"resumed\",\n//   Cancelled->\"cancelled\", CancelRequested->\"cancel_requested\",\n//   Completed->\"completed\", Failed->\"failed\",\n//   NeedsReconcile->\"needs_reconcile\", QuotaBlocked->\"quota_blocked\",\n//   BlockedPermission->\"blocked_permission\"\nimpl EventKind {\n    pub fn as_str(&self) -> &'static str;\n    pub fn parse(s: &str) -> Option<EventKind>;\n    pub fn requires_cause(&self) -> bool;\n}",
+ "summary": "The canonical coding_events vocabulary as a type: the 12 live event kinds with exact string round-trip and the negative-kind classification."
+}

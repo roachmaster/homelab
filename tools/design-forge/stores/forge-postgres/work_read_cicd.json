@@ -1,0 +1,27 @@
+{
+ "id": "work_read_cicd",
+ "kind": "functions",
+ "file": "work_read_cicd.rs",
+ "summary": "WorkReadPort::cicd_stage_log: one CI/CD stage's bounded log view (errors/tests/console) assembled from jenkins_stage_results over the task's correlation family, ported from WorkStore.cicd_stage_log.",
+ "signature": "pub(crate) fn cicd_stage_log(store: &crate::work_store::PgWorkStore, project_alias: &str, task_id: uuid::Uuid, correlation_id: uuid::Uuid, action_id: uuid::Uuid, stage_id: &str, view: &str, cursor_token: Option<&str>) -> Result<forge_work::StageLogView, forge_work::WorkError>;",
+ "responsibilities": [
+  "Validate: stage_id matches [A-Za-z0-9_.-]{1,64} and view is one of errors/tests/console, else rejected(400, invalid_request). The cursor token, when present, matches ^[0-9a-f]{64}\\.(0|[1-9][0-9]{0,7})$ and yields (digest, offset); the digest is accepted and not re-checked in v1 (Python binds it to the stage log digest it minted; the v1 view mints the same format).",
+  "In one read transaction: SELECT id, correlation_id, workflow_id, repair_root_task_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3; no row -> not_found(task); correlation mismatch -> rejected(403, denied). root = repair_root_task_id or id.",
+  "Run linked_family_tasks (pinned) and collect the family correlation ids plus the task's own. Check the table exists: SELECT to_regclass('forge_agent.jenkins_stage_results') IS NOT NULL; absent -> not_found(stage log).",
+  "Run stage_log_rows (pinned) with the family correlation ids; no rows -> not_found(stage log).",
+  "Assemble the full text by view: errors -> the rows' non-empty error_excerpt values joined with blank lines, truncated to 4096 UTF-8 bytes on a char boundary and right-trimmed; tests -> a JSON text of {passed, failed, skipped sums (null when no int values), cases: up to 64 {name (<=160 chars), status} from test_summary.cases}; console -> the concatenation over rows in order of \"## {label or logical_stage_id} [{status}]\" lines plus each row's error_excerpt when present (v1 console subset).",
+  "Apply the byte window: content = full text bytes [offset .. offset+32768] decoded as the longest valid UTF-8 prefix; StageLogView { stage_id, content, next_cursor: Some(format!(\"{digest}.{next}\")) when more bytes remain (digest = sha256 hex of the full text), else None }. The first page's digest is the sha256 of the full assembled text."
+ ],
+ "invariants": [
+  "The Python view assembly for console interleaves Jenkins event payloads; v1 assembles from stage rows only (documented subset).",
+  "Windows never split a UTF-8 codepoint."
+ ],
+ "pattern": "// linked_family_tasks (forge_pg_proxy READ_QUERIES, verbatim with $n params):\n// SELECT id, correlation_id FROM forge_agent.coding_tasks WHERE owner_id = $1 AND project_alias = $2 AND (correlation_id = $3 OR workflow_id = $4 OR id = $5 OR repair_root_task_id = $5) LIMIT 64\n// stage_log_rows (verbatim with $n params):\n// SELECT stage_index, phase_id, logical_stage_id, label, status, returncode, tests_passed, tests_failed, tests_skipped, test_summary, error_excerpt, log_sha256, log_byte_count, log_chunk_count FROM forge_agent.jenkins_stage_results WHERE owner_id = $1 AND project_alias = $2 AND action_id = $3 AND correlation_id = ANY($4::uuid[]) AND (logical_stage_id = $5 OR phase_id = $5) ORDER BY stage_index ASC",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\") for nullable/absent; uuid columns -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>; text[] -> Vec<String>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; call_json(sql, params) -> Result<Option<Value>, AdapterError>. PgSession: query_rows / in_tx(|tx| ...) with the same Tx surface. Map every AdapterError with crate::work_common::work_err.\n// Params are &[&(dyn tokio_postgres::types::ToSql + Sync)]: bind &String/&str for text, &Uuid, &Value for jsonb, &i64, &bool, and &(Option<T>) for nullable params (None binds NULL)."
+}

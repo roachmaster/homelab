@@ -1,0 +1,27 @@
+{
+ "collaborators": [
+  "work_payload",
+  "work_response",
+  "work_error",
+  "forge_core_bridge",
+  "forge_core_ingress"
+ ],
+ "file": "work_service.rs",
+ "glossary": [
+  "admission",
+  "destination"
+ ],
+ "id": "work_service",
+ "invariants": [
+  "Handlers are thin and live in the routes_* modules: this module owns only the policy, the bridge type, and assembly. No SQL, no transactions, no port calls here.",
+  "The AdmissionPolicy sees header + context only (the forge-core seam): it enforces readiness (admission_open). Payload-level invariants (intent digest, base_revision currency, digest pinning) are enforced by the handlers and ports, as in the Python surface - never pretend the policy can see the payload."
+ ],
+ "kind": "service",
+ "pattern": "// admit: if context.admission_open { Ok(()) } else\n// { Err(AdmissionDenied) } - header is unused beyond the seam\n// (name it _header).\n// work_bridge body:\n//   let mut builder = RegistryBuilder::new();\n//   crate::routes_read::register_reads(&mut builder)?;\n//   crate::routes_admission::register_admission(&mut builder)?;\n//   crate::routes_decision::register_decision(&mut builder)?;\n//   Ok(Bridge::new(builder.freeze(), WorkAdmissionPolicy))\n// Tests in-file: work_bridge() builds Ok; the policy admits an open\n// context and denies a closed one (construct a context over stub\n// ports - three tiny empty impls in the test module).",
+ "responsibilities": [
+  "WorkAdmissionPolicy: the bridge's AdmissionPolicy - admits only while the host has opened admission on the context.",
+  "work_bridge(): assemble the service - register all 15 routes via the three routes_* registrars, freeze, and wrap in a Bridge with the policy."
+ ],
+ "signature": "pub struct WorkAdmissionPolicy;\nimpl forge_core::ingress::AdmissionPolicy<crate::work_response::WorkContext<'_>>\n    for WorkAdmissionPolicy {\n    fn admit(&self, header: &forge_core::ingress::Header,\n        context: &crate::work_response::WorkContext<'_>)\n        -> Result<(), forge_core::ingress::AdmissionDenied>;\n}\npub type WorkBridge<'a> = forge_core::bridge::Bridge<'a,\n    crate::work_payload::WorkPayload, crate::work_response::WorkContext<'a>,\n    crate::work_response::WorkResponse, crate::work_error::WorkError,\n    WorkAdmissionPolicy>;\npub fn work_bridge<'a>() -> Result<WorkBridge<'a>, crate::work_error::WorkError>;",
+ "summary": "WorkService assembly: the readiness admission policy and the constructor that registers all 15 routes and freezes the bridge."
+}

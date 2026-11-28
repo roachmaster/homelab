@@ -1,0 +1,26 @@
+{
+ "collaborators": [
+  "catalog",
+  "work_error",
+  "forge_core_bootstrap",
+  "forge_core_factory"
+ ],
+ "file": "catalog_registrar.rs",
+ "glossary": [
+  "catalog",
+  "freeze"
+ ],
+ "id": "catalog_registrar",
+ "invariants": [
+  "The registrar receives explicit values and reads no environment (bootstrap-registrars rule).",
+  "The group is staged, not built: the factory creates the WorkCatalog only when the frozen registry is consumed."
+ ],
+ "kind": "registrar",
+ "pattern": "// Mirror forge-postgres's registrar shape exactly:\n//   Ok(PreparedGroup::new(\"forge.work.catalog\", &[\"work-catalog\"], &[],\n//       WorkCatalogFactory::new(projects))\n//       .expect(\"fixed work catalog group\"))\n// - except PreparedGroup::new's error is returned with ? here because\n// register_catalog's error type IS RegistrationError.\n// create() clones the staged projects into WorkCatalog::new.\n// Tests in-file: create() returns a catalog whose lookups find the\n// staged project; register_catalog yields a group (Ok).",
+ "responsibilities": [
+  "WorkCatalogFactory: creates the frozen WorkCatalog from the staged project values.",
+  "register_catalog: stage the catalog as a forge-core bootstrap PreparedGroup (id forge.work.catalog, provides work-catalog)."
+ ],
+ "signature": "pub struct WorkCatalogFactory { /* private: projects: Vec<crate::catalog::ProjectCatalog> */ }\nimpl WorkCatalogFactory {\n    pub fn new(projects: Vec<crate::catalog::ProjectCatalog>) -> WorkCatalogFactory;\n}\nimpl forge_core::provider::Factory<crate::catalog::WorkCatalog> for WorkCatalogFactory {\n    type Error = crate::work_error::WorkError;\n    fn create(&self) -> Result<crate::catalog::WorkCatalog, Self::Error>;\n}\npub fn register_catalog(projects: Vec<crate::catalog::ProjectCatalog>)\n    -> Result<forge_core::bootstrap::PreparedGroup<WorkCatalogFactory>,\n              forge_core::bootstrap::RegistrationError>;",
+ "summary": "The catalog's bootstrap wiring: a factory over staged project values and the registrar that stages it as a frozen group."
+}

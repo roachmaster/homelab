@@ -1,0 +1,29 @@
+{
+ "id": "work_control",
+ "kind": "functions",
+ "file": "work_control.rs",
+ "summary": "The shared control-transaction fence, ported from WorkStore._control_task / _control_record: receipt replay, revision fencing, and the checkpoint-event receipt record. All functions are pub(crate) and run on the caller's open Tx.",
+ "signature": "pub(crate) struct ControlTask {\n    pub row: tokio_postgres::Row,\n    pub replay: Option<serde_json::Value>,\n}\npub(crate) fn control_task(tx: &mut crate::tx::Tx<'_, '_>, store: &crate::work_store::PgWorkStore, project_alias: &str, task_id: uuid::Uuid, expected_revision: i64, key: &str, action: &str, intent: &str) -> Result<ControlTask, forge_work::WorkError>;\npub(crate) fn control_record(tx: &mut crate::tx::Tx<'_, '_>, store: &crate::work_store::PgWorkStore, task: &ControlTask, expected_revision: i64, key: &str, action: &str, intent: &str, receipt: serde_json::Value, actor: &forge_work::Actor) -> Result<(), forge_work::WorkError>;",
+ "responsibilities": [
+  "control_task: SELECT * FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3 FOR UPDATE; no row -> rejected(404, not_found). Then SELECT action,intent_digest,receipt_json FROM forge_agent.coding_control_receipts WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3 AND idempotency_key=$4; when a receipt exists: action or intent mismatch -> rejected(409, idempotency_conflict), else return it as replay. Then revision != expected_revision -> rejected(409, revision_conflict); status not in {awaiting_review, completed} -> rejected(409, not_reviewable). Returns the task row plus the optional replay receipt.",
+  "control_record: adds actor to the receipt object; UPDATE forge_agent.coding_tasks SET revision=$1, updated_at=clock_timestamp() WHERE owner_id=$2 AND project_alias=$3 AND id=$4 AND revision=$5 with $1 = expected+1 and $5 = expected; when the rowcount is not 1, re-read the revision and tolerate it only when it already equals expected+1 (a same-task repair may have advanced it), else rejected(409, revision_conflict). Then INSERT INTO forge_agent.coding_control_receipts(owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json) VALUES($1..$8); then insert_event kind checkpoint with the receipt as payload; then notify."
+ ],
+ "invariants": [
+  "control_task's status gate is exactly Python's: {awaiting_review, completed}; callers add their own mode/status checks after it.",
+  "The task row is returned whole (SELECT *) because callers read many columns by name.",
+  "control_record's emitted event kind is checkpoint and its payload is the receipt including the actor."
+ ],
+ "pattern": "",
+ "collaborators": [
+  "work_common",
+  "work_store",
+  "tx",
+  "work_rows"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\") -> T; row.try_get::<_, Option<T>>(\"col\") -> Result<Option<T>, _> for nullable or maybe-absent columns; row.get::<_, serde_json::Value>(\"payload\"); row.get::<_, uuid::Uuid>(\"id\"); row.get::<_, chrono::DateTime<chrono::Utc>>(\"created_at\")\n// params: &[&(dyn tokio_postgres::types::ToSql + Sync)] built as vec of &(value) bindings; text params bind &String or &str; uuid binds &Uuid; jsonb binds &serde_json::Value; Option<T> binds as NULL when None.\n// crate::tx::Tx methods: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; execute_count(sql, params) -> Result<u64, AdapterError>; call_json(sql, params) -> Result<Option<Value>, AdapterError>; call_scalar::<T>(sql, params) -> Result<Option<T>, AdapterError>.\n// crate::client::PgSession methods mirror Tx's, plus in_tx(|tx| ...) -> Result<T, AdapterError>.",
+ "glossary": [
+  "receipt",
+  "revision",
+  "idempotency"
+ ]
+}

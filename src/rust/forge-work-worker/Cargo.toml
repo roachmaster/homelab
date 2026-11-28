@@ -1,0 +1,20 @@
+[package]
+name = "forge-work-worker"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+description = "Native execution capability for Forge: the CodingWorker loop, provider CLI execution, workspace leases, and the WorkerDB role ports (worker store, reconciler, execution context, branch ownership). Adapters live in forge-postgres; this crate owns the port traits and domain types and performs no SQL."
+
+[lints]
+workspace = true
+
+[dependencies]
+forge-core.workspace = true
+forge-usage.workspace = true
+serde_json = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "v5"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", features = ["dir", "fs", "process", "signal", "user"] }

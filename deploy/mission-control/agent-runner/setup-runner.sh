@@ -102,6 +102,8 @@ publish "$directory/work_identity_store.py" "$target/work_identity_store.py"
 publish "$directory/work_native_identity.py" "$target/work_native_identity.py"
 publish "$directory/work_external_identity.py" "$target/work_external_identity.py"
 publish "$directory/work_store.py" "$target/work_store.py"
+publish "$directory/proxy_client.py" "$target/proxy_client.py"
+publish "$directory/proxy_statements.py" "$target/proxy_statements.py"
 publish "$directory/work_events.py" "$target/work_events.py"
 publish "$directory/work_failure_cause.py" "$target/work_failure_cause.py"
 publish "$directory/work_event_attribution.py" "$target/work_event_attribution.py"
@@ -207,3 +209,120 @@ for _ in range(40):
 else:
     sys.exit("Forge agent worker did not become ready")
 PY
+
+# --- forge-pg-proxy -------------------------------------------------------
+# Publish the proxy alongside the runner. The proxy is enabled
+# unconditionally but only started once the proxy HBA rules are
+# installed (preparation, migration 52, or cutover, migration 53);
+# before that it cannot reach Postgres and would only serve 503
+# on /health. Starting at preparation lets the operator run the
+# pre-cutover proxy verification sequence (proxy_verify.py) before
+# any caller is migrated or cutover is attempted.
+proxy_user=forge-pg-proxy
+proxy_config_directory=/etc/homelab-forge/forge-pg-proxy
+proxy_unit=/etc/systemd/system/forge-pg-proxy.service
+
+if ! getent passwd "$proxy_user" >/dev/null; then
+    useradd --system --user-group --no-create-home --home-dir /nonexistent \
+        --shell /usr/sbin/nologin "$proxy_user"
+fi
+# Both directories are group-traversable (0710: traverse, no list)
+# by the proxy group: the caller processes are members of it (below)
+# and must REACH their token files. At 0700 on the config directory
+# no group member could traverse it, so the runner and the workers
+# could not read the tokens this script creates for them (round-6
+# finding 3). The token files themselves are group-scoped per
+# caller (token_group_for), so traversal alone grants no read.
+install -d -o "$proxy_user" -g "$proxy_user" -m 0710 "$proxy_config_directory"
+install -d -o "$proxy_user" -g "$proxy_user" -m 0710 "$proxy_config_directory/tokens"
+# The agent-runner (forge_agent) and the coding/publication workers
+# (lrocha) join the proxy group for directory traversal only.
+if getent passwd forge_agent >/dev/null; then
+    usermod -a -G "$proxy_user" forge_agent
+fi
+if getent passwd lrocha >/dev/null; then
+    usermod -a -G "$proxy_user" lrocha
+fi
+# The OS group that may READ each caller's token file: the group of
+# the process that presents it. The coordinator token is read by
+# the runner (forge_agent), the worker/reconciler tokens by the
+# workers (lrocha); the gpu worker presents its own deployed copy,
+# and the muse/operator tokens are read only by the proxy side, so
+# those three stay in the proxy group.
+token_group_for() {
+    case "$1" in
+        coordinator) echo forge_agent ;;
+        worker|reconciler) echo lrocha ;;
+        *) echo "$proxy_user" ;;
+    esac
+}
+for caller in coordinator worker reconciler gpu muse operator; do
+    token_file="$proxy_config_directory/tokens/$caller.token"
+    if [[ ! -s "$token_file" ]]; then
+        temporary="$(mktemp "$proxy_config_directory/tokens/.token-XXXXXXXX")"
+        trap 'rm -f -- "$temporary"' EXIT
+        /usr/bin/python3 -c 'import secrets; print(secrets.token_hex(32))' > "$temporary"
+        install -o "$proxy_user" -g "$(token_group_for "$caller")" -m 0640 "$temporary" "$token_file"
+        rm -f -- "$temporary"
+        trap - EXIT
+    fi
+    # Re-apply group and mode unconditionally: installs made before
+    # the per-caller groups existed carry the proxy group on every
+    # token, which the readers are not members of for file access.
+    if getent group "$(token_group_for "$caller")" >/dev/null; then
+        chown "$proxy_user:$(token_group_for "$caller")" "$token_file"
+    fi
+    chmod 0640 "$token_file"
+done
+if [[ ! -s "$proxy_config_directory/config.json" ]]; then
+    install -o "$proxy_user" -g "$proxy_user" -m 0640 "$directory/forge-pg-proxy.json" "$proxy_config_directory/config.json"
+fi
+
+proxy_changed=false
+publish_proxy() {
+    if ! cmp -s "$1" "$2"; then
+        install -o root -g root -m 0644 "$1" "$2"
+        proxy_changed=true
+    fi
+}
+publish_proxy "$directory/forge_pg_proxy.py" "$target/forge_pg_proxy.py"
+publish_proxy "$directory/forge-pg-proxy.service" "$proxy_unit"
+systemctl daemon-reload
+systemctl enable forge-pg-proxy.service
+if grep -Eq 'map=forge-(pg-proxy|preparation)' /etc/postgresql/16/main/forge-worker-hba.conf 2>/dev/null; then
+    if [[ "$proxy_changed" == true ]] && systemctl is-active --quiet forge-pg-proxy.service; then
+        systemctl restart forge-pg-proxy.service
+    fi
+    systemctl start forge-pg-proxy.service
+
+    /usr/bin/python3 - <<'PY'
+import http.client
+import sys
+import time
+
+for _ in range(40):
+    connection = http.client.HTTPConnection("127.0.0.1", 18087, timeout=1)
+    try:
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        response.read()
+        if response.status == 200:
+            print("Forge Postgres proxy ready")
+            break
+    except (OSError, http.client.HTTPException):
+        pass
+    finally:
+        connection.close()
+    time.sleep(0.25)
+else:
+    sys.exit("Forge Postgres proxy did not become ready")
+PY
+    # Pre-cutover verification sequence (rollout steps 1-3): prove
+    # the proxy serves every caller and the proxy OS user is admitted
+    # as each caller role via peer auth, before any caller migrates.
+    # This runs at preparation as well as at cutover.
+    /usr/bin/python3 "$directory/proxy_verify.py" \
+        --config-dir "$proxy_config_directory"
+else
+    printf '%s\n' 'Forge Postgres proxy published but not started: proxy HBA rules are not installed (preparation, migration 52, not yet applied).'
+fi

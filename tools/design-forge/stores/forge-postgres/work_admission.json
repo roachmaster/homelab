@@ -1,0 +1,25 @@
+{
+ "id": "work_admission",
+ "kind": "trait impl",
+ "file": "work_admission.rs",
+ "summary": "The WorkAdmissionPort implementation for PgWorkStore: submit/cancel/accept/resume delegate to their transaction modules; policy_identity and policy_drifted are implemented here (the identity-catalog pair).",
+ "signature": "impl forge_work::WorkAdmissionPort for crate::work_store::PgWorkStore {\n    fn submit(&self, request: &forge_work::SubmitRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn cancel(&self, request: &forge_work::CancelRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn accept(&self, request: &forge_work::AcceptRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn resume(&self, request: &forge_work::ResumeRequest) -> Result<forge_work::ControlOutcome, forge_work::WorkError>;\n    fn policy_identity(&self, project_alias: &str, kind: &str, snapshot: &serde_json::Value) -> Result<forge_work::PolicyIdentity, forge_work::WorkError>;\n    fn policy_drifted(&self, workflow_id: uuid::Uuid, snapshot: &serde_json::Value) -> Result<bool, forge_work::WorkError>;\n}",
+ "responsibilities": [
+  "submit/cancel/accept/resume call require_project, then delegate: submit -> work_admission_submit::submit, cancel -> work_admission_ops::cancel, accept -> work_admission_ops::accept, resume -> work_admission_resume::resume.",
+  "policy_identity runs in one transaction: check readiness with SELECT to_regprocedure('forge_agent.coding_identity_register(text,text,text,text,jsonb,text)') IS NOT NULL AS ready; not ready -> rejected(503, identity_unavailable) (Python returns None pre-M44; the Rust port type has no None, documented divergence). Ready: document = the snapshot object minus its policy_digest key; call SELECT identity_id, generation FROM forge_agent.coding_identity_register($1,$2,$3,$4,$5,$6) with (owner, project_alias, kind, \"policy\", document, snapshot.policy_digest as text). Return PolicyIdentity { kind: kind.to_string(), digest: the snapshot's policy_digest } (the registration side effect is the operation's substance; identity_id/generation surface when the forge-work type grows). A snapshot without a policy_digest string -> rejected(400, invalid_request).",
+  "policy_drifted runs in one transaction: not ready -> Ok(false); run the workflow_policy_document query pinned in the pattern; no row -> Ok(false); else Ok(row.document != snapshot-minus-policy_digest). (Python returns None for the no-identity cases; the Rust bool maps None to false, documented.)"
+ ],
+ "invariants": [
+  "Delegation methods contain no SQL. The policy pair contains only the pinned SQL."
+ ],
+ "pattern": "// workflow_policy_document (forge_pg_proxy READ_QUERIES, verbatim with $n params):\n// SELECT c.document FROM forge_agent.coding_task_identities i JOIN forge_agent.coding_identity_catalog c ON c.identity_id = i.workflow_policy_id WHERE i.owner_id = $1 AND i.workflow_id = $2 ORDER BY i.created_at LIMIT 1",
+ "collaborators": [
+  "work_store",
+  "work_common",
+  "work_admission_submit",
+  "work_admission_ops",
+  "work_admission_resume",
+  "tx"
+ ],
+ "idioms": "// tokio_postgres::Row (exact): row.get::<_, T>(\"col\"); row.try_get::<_, Option<T>>(\"col\"); uuid -> uuid::Uuid; jsonb -> serde_json::Value; timestamptz -> chrono::DateTime<chrono::Utc>.\n// Tx: query_rows(sql, params) -> Result<Vec<Row>, AdapterError>; execute_count(sql, params) -> Result<u64, AdapterError>; call_json/call_scalar/call_bool/call_void likewise. Map AdapterError with crate::work_common::work_err. Control operations run inside session.in_tx(|tx| ...).\n// Receipts are serde_json::Value objects; build them with serde_json::json! and read fields with .get(\"key\") / .as_str() / .as_i64()."
+}

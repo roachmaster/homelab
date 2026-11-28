@@ -1,0 +1,1 @@
+{"collaborators":["name"],"file":"animal.rs","glossary":["dog","cat"],"id":"animal","invariants":[],"kind":"trait","responsibilities":["mark a type as an animal: named and printable"],"signature":"pub trait Animal: crate::name::Name + std::fmt::Debug {}","summary":"An animal is anything that has a name and can be debug-printed."}

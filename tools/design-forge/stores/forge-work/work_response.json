@@ -1,0 +1,24 @@
+{
+ "collaborators": [
+  "work_types",
+  "catalog",
+  "port_read",
+  "port_admission",
+  "port_decision"
+ ],
+ "file": "work_response.rs",
+ "glossary": [],
+ "id": "work_response",
+ "invariants": [
+  "The context carries trait OBJECTS (&dyn port): the host substitutes any implementation of the three ports without touching the service (the plug-and-play rule).",
+  "admission_open is host-controlled readiness: the host sets it true only after the registry froze and the ports are ready; the admission policy reads it, nothing else writes it."
+ ],
+ "kind": "types",
+ "pattern": "// WorkResponse derives Debug, Clone, PartialEq. WorkContext derives\n// nothing (it holds trait objects). No tests in this file: pure data\n// plus the constructor.",
+ "responsibilities": [
+  "WorkResponse: the response sum every handler returns - one variant per port return shape.",
+  "WorkContext: the per-dispatch context the host builds - the three ports, the frozen catalog, and the admission_open readiness flag."
+ ],
+ "signature": "pub enum WorkResponse {\n    Control(crate::work_types::ControlOutcome),\n    Task(crate::work_types::TaskView),\n    Tasks(crate::work_types::TaskPage),\n    Events(crate::work_types::EventPage),\n    Result(crate::work_types::ResultChunk),\n    StageLog(crate::work_types::StageLogView),\n}\npub struct WorkContext<'a> {\n    pub read: &'a dyn crate::port_read::WorkReadPort,\n    pub admission: &'a dyn crate::port_admission::WorkAdmissionPort,\n    pub decision: &'a dyn crate::port_decision::WorkDecisionPort,\n    pub catalog: &'a crate::catalog::WorkCatalog,\n    pub admission_open: bool,\n}\nimpl<'a> WorkContext<'a> {\n    pub fn new(read: &'a dyn crate::port_read::WorkReadPort,\n        admission: &'a dyn crate::port_admission::WorkAdmissionPort,\n        decision: &'a dyn crate::port_decision::WorkDecisionPort,\n        catalog: &'a crate::catalog::WorkCatalog,\n        admission_open: bool) -> WorkContext<'a>;\n}",
+ "summary": "The bridge's response sum and the host-built dispatch context (ports + frozen catalog + readiness)."
+}

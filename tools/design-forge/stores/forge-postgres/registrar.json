@@ -1,0 +1,28 @@
+{
+ "collaborators": [
+  "config",
+  "factory",
+  "error",
+  "forge_core_bootstrap"
+ ],
+ "file": "registrar.rs",
+ "glossary": [
+  "registrar",
+  "freeze",
+  "session"
+ ],
+ "id": "registrar",
+ "idioms": "// forge_core::bootstrap (exact):\n//   PreparedGroup::new(id: impl Into<String>, provides: &[&str], requires: &[&str], factories: F)\n//       -> Result<PreparedGroup<F>, RegistrationError>\n//   Identifiers allow [A-Za-z0-9._-]. With fixed literal id/provides the call cannot\n//   fail: use .expect(\"fixed ... group\") (the forge-jobs registrar convention).",
+ "invariants": [
+  "Neither function connects, reads the environment, or performs any I/O.",
+  "Each group provides exactly one binding and holds exactly one factory - nothing optional survives the freeze."
+ ],
+ "kind": "functions",
+ "responsibilities": [
+  "register_worker validates the config effect-free, then wraps PgSessionFactory in a PreparedGroup providing \"pg-worker-session\" and requiring nothing.",
+  "register_reconciler is the same shape, providing \"pg-reconciler-session\".",
+  "RegistrationError from PreparedGroup::new maps into AdapterError through the From impl in error.rs."
+ ],
+ "signature": "pub fn register_worker(config: crate::config::PgConfig)\n    -> Result<forge_core::bootstrap::PreparedGroup<crate::factory::PgSessionFactory>, crate::error::AdapterError>\npub fn register_reconciler(config: crate::config::PgConfig)\n    -> Result<forge_core::bootstrap::PreparedGroup<crate::factory::PgSessionFactory>, crate::error::AdapterError>\n// forge_core::bootstrap::PreparedGroup::new takes FOUR arguments, in this order:\n//   (id: impl Into<String>, provides: &[&str], requires: &[&str], factories: F)\n//   -> Result<PreparedGroup<F>, forge_core::bootstrap::RegistrationError>\n// register_worker body: config.validate()?; then\n//   Ok(PreparedGroup::new(\"forge.postgres.worker\", &[\"pg-worker-session\"], &[],\n//       PgSessionFactory::new(config)).expect(\"fixed postgres worker group\"))\n// register_reconciler body: config.validate()?; then\n//   Ok(PreparedGroup::new(\"forge.postgres.reconciler\", &[\"pg-reconciler-session\"], &[],\n//       PgSessionFactory::new(config)).expect(\"fixed postgres reconciler group\"))\n// The ids and provides are fixed literals, so PreparedGroup::new cannot fail;\n// the codebase convention (forge-jobs register_worker/register_store) is\n// .expect(\"fixed ... group\") rather than an error conversion.",
+ "summary": "The crate's staging entry points: one register function per role, each returning a PreparedGroup with exactly one session factory. No I/O at staging."
+}

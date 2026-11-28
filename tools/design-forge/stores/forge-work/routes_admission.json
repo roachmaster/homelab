@@ -1,0 +1,25 @@
+{
+ "collaborators": [
+  "work_payload",
+  "work_response",
+  "work_error",
+  "forge_core_bridge"
+ ],
+ "file": "routes_admission.rs",
+ "glossary": [
+  "destination",
+  "route"
+ ],
+ "id": "routes_admission",
+ "invariants": [
+  "The bridge verifies payload kind == the registered expected kind BEFORE the handler runs; the handler's fallback arm is therefore unreachable in correct operation and returns WorkError::rejected(500, \"payload_mismatch\") - it never panics.",
+  "Handlers are thin: match the one variant, call exactly one port method through the context, map the result into WorkResponse. No validation logic, no SQL."
+ ],
+ "kind": "routes",
+ "pattern": "// Four register calls (Submit, Cancel, Accept, Resume), each:\n//   builder.register(route_key(WorkKind::Submit)?, WorkKind::Submit,\n//     |payload, ctx| match payload {\n//         WorkPayload::Submit(request) =>\n//             ctx.admission.submit(&request).map(WorkResponse::Control),\n//         _ => Err(WorkError::rejected(500, \"payload_mismatch\")),\n//     }).map_err(|_| WorkError::rejected(500, \"duplicate_route\"))?;\n// Cancel/Accept/Resume call the same-named admission port methods\n// with their request values, all mapping to WorkResponse::Control.",
+ "responsibilities": [
+  "Register the four admission routes (submit, cancel, accept, resume) on the bridge builder."
+ ],
+ "signature": "pub fn register_admission<'a>(builder: &mut forge_core::bridge::RegistryBuilder<'a, crate::work_payload::WorkPayload, crate::work_response::WorkContext<'a>, crate::work_response::WorkResponse, crate::work_error::WorkError>) -> Result<(), crate::work_error::WorkError>;",
+ "summary": "Register the four admission routes (submit, cancel, accept, resume) on the bridge builder."
+}

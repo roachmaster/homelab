@@ -1,0 +1,15 @@
+{
+ "collaborators": [],
+ "file": "forge-core/src/provider.rs (external - do not implement)",
+ "glossary": [],
+ "id": "forge_core_factory",
+ "invariants": [
+  "Never generate this file."
+ ],
+ "kind": "external trait",
+ "responsibilities": [
+  "Exist as a collaborator signature only."
+ ],
+ "signature": "// forge-core::provider (already exists - do not implement)\npub trait Factory<T> {\n    type Error;\n    fn create(&self) -> Result<T, Self::Error>;\n}",
+ "summary": "forge-core's Factory trait. Already exists in forge-core; this card is its interface for packets that collaborate with it."
+}

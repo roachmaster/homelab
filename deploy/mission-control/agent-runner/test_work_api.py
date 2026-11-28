@@ -133,7 +133,12 @@ class WorkConfigAndFactoryTest(unittest.TestCase):
         installer = (root / "setup-runner.sh").read_text()
         required = set(re.findall(r'(?<!_)publish "\$directory/([^"/]+\.py)" "\$target/\1"', installer))
         optional = set(re.findall(r'publish_if_present "\$directory/([^"/]+\.py)" "\$target/\1"', installer))
-        published = required | {name for name in optional if (root / name).is_file()}
+        # publish_proxy installs its .py payloads into the same $target
+        # (forge_pg_proxy.py for the proxy service); the runner imports
+        # it transitively through proxy_statements, so it counts as
+        # published alongside the plain publish lines.
+        proxied = set(re.findall(r'publish_proxy "\$directory/([^"/]+\.py)" "\$target/\1"', installer))
+        published = required | proxied | {name for name in optional if (root / name).is_file()}
         self.assertIn("runner.py", required)
         self.assertIn("work_policy.py", required)
         self.assertIn("usage_store.py", required)
