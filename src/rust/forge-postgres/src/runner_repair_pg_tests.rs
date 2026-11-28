@@ -456,6 +456,9 @@ fn external_admission_and_context_share_task_transaction() {
                 let row=admin.query_one("SELECT c.content,c.sha256,w.state FROM forge_external_agent.assignments a JOIN forge_external_workflow.contexts c USING(assignment_id) JOIN forge_external_workflow.tasks l ON l.task_id=a.task_id JOIN forge_external_workflow.workflows w USING(workflow_id) WHERE a.task_id=$1",&[&task]).await.unwrap();
                 let content:String=row.get("content");
                 let context:Value=serde_json::from_str(&content).unwrap(); assert_eq!(context["stage"],"plan"); assert_eq!(context["request_prompt"],"owned external admission");
+                let instructions = context["instructions"].as_str().unwrap();
+                assert!(instructions.contains("feature/muse"));
+                assert!(!instructions.contains("feature/codex"));
                 assert_eq!(row.get::<_,String>("sha256"),forge_work::canonical::sha256_hex(content.as_bytes()));
                 assert_eq!(row.get::<_,Value>("state")["identity_protocol"],"content-v2");
             } else {

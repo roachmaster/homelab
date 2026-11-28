@@ -34,33 +34,51 @@ resolved executable identify the version actually deployed.
 
 | Tool | What it does |
 |---|---|
+| `get_task` | Look up the brief by task UUID. Request an assignment or metadata section on demand. |
 | `query` | Runs one `SELECT`, `WITH`, `VALUES`, `TABLE`, `EXPLAIN` (without ANALYZE) or `SHOW` statement and returns one page of rows. |
 | `list_tables` | Lists the tables and views the role can read, with an optional `schema` filter. Paginated the same way as `query`. |
 | `describe_table` | Lists the columns, types, nullability and defaults of one readable table. |
 
-### Pagination
+### Task handoffs and pagination
 
-`query` and `list_tables` return a page object (as text and `structuredContent`):
+Pass the task UUID in handoffs. Call `get_task` with `{"id":"<task-uuid>"}`
+for title, status, mode and assigned profile. Request `"section":"assignment"`
+for the prompt and acceptance criteria, or `"section":"metadata"` for project,
+source revision, workflow, task kind and revision. Use a narrow `query` for
+specific events. Long text follows the server cell limit. SQL `substring` can
+retrieve additional text by offset.
+
+Query and catalog tools return compact JSON in one MCP text block by default.
+Column names appear once. For example, one complete page looks like this.
 
 ```json
-{"columns": ["id", "status"], "rows": [{"id": 1, "status": "done"}], "row_count": 100,
- "offset": 0, "page_size": 100, "has_more": true, "next_cursor": "eyJ2Ijo…", "truncated": true}
+{"columns":["id","status"],"rows":[[1,"done"]]}
 ```
 
-- `page_size` defaults to 100 and is capped at `max_rows` (500).
-- When `has_more` is true, call the tool again with the **same arguments** plus `"cursor": "<next_cursor>"`. The last page has `next_cursor: null`.
+- Compact pages default to at most 10 rows and 8 KiB of serialized page data.
+- Pass `next_cursor` back with the same SQL or schema filter and page size.
+  A terminal page omits the cursor. A truncated page without a cursor has
+  reached a server bound. Narrow the request to continue.
+- `"view":"structured"` places the same compact data in `structuredContent`.
+- `"view":"full"` returns named rows, counts, offsets and cursor metadata in both
+  MCP representations. It uses the configured page size, normally 100. Explicit
+  page sizes in all views are capped by `max_rows`.
+
 - Add an `ORDER BY` on a unique key; without one PostgreSQL may return rows in a different order on each call.
 - `SELECT`/`WITH`/`VALUES`/`TABLE` statements page through the unmodified statement with a server-side `DECLARE` cursor: `MOVE` skips to the offset and `page_size + 1` rows are fetched. No SQL is built around your statement. `EXPLAIN` and `SHOW` return one page only.
 - Each page runs in its own read-only transaction, so pages reflect the data at the time of each call.
 - Cursors are HMAC-signed with a per-process key and bound to the tool, the token, the exact SQL (or schema filter) and the page size. A tampered cursor, a cursor sent with different arguments or by another token, or one older than one hour (`cursor_ttl_seconds`) is rejected. Cursors stop working when the service restarts; start again without a cursor.
 - If a page would exceed `max_response_bytes`, fewer rows are returned and `next_cursor` continues from the first row not returned. Offsets are capped at `max_offset` (1,000,000).
 
+The compact catalog lists schema and table names. Column descriptions show names
+and types. Request `view: full` for table type, nullability and defaults.
+
 ## Optional authenticated connection presence
 
 Presence is disabled by default. Enabling it adds `heartbeat` for mapped,
 authenticated `read` principals. Its annotations are **`readOnlyHint: false`**,
 `destructiveHint: false` and `idempotentHint: true`: it changes only a local
-last-seen timestamp. `query`, `list_tables` and `describe_table` remain read-only.
+last-seen timestamp. `get_task`, `query`, `list_tables` and `describe_table` are read-only.
 Presence never writes PostgreSQL, claims work or advertises execution readiness.
 
 Add this optional object to the root-managed server configuration, replacing the
@@ -93,12 +111,9 @@ A mapped client sends this actual call every 60 seconds while connected:
 {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"heartbeat","arguments":{}}}
 ```
 
-The empty arguments object cannot contain an identity, label or timestamp. A
-successful `structuredContent` is:
-
-```json
-{"agent_id":"dot","label":"Dot","state":"online","last_seen_at":"2026-11-27T12:00:00Z","heartbeat_interval_seconds":60,"freshness_seconds":180}
-```
+A compact heartbeat acknowledges `{"state":"online"}`. Request `"view":"full"`
+for agent ID, label, timestamp and freshness intervals. The authenticated
+principal determines the agent identity.
 
 Times come from the server. A real observation stays `online` for 180 seconds,
 then becomes `stale`; a mapped agent with no call is `never`. No background timer,

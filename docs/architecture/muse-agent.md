@@ -76,7 +76,7 @@ writable by the runner.
 SELECT forge_external_agent_api.capabilities();
 SELECT forge_external_agent_api.advertise('homelab', 'muse-db-primary', 'my-runner');
 LISTEN forge_external_agent_jobs;
-SELECT forge_external_agent_api.claim('homelab', 'muse-db-primary');
+SELECT forge_external_agent_api.claim('homelab', 'muse-db-primary') - 'external_context';
 ```
 
 Subscribe before scanning and rescan after reconnecting. Notifications are wake
@@ -148,11 +148,13 @@ JSON receives one same-source reviewer correction; a second invalid response is
 a recorded human exception. Ordinary revision verdicts return full feedback to
 Muse, with a maximum of three author revisions per stage.
 
-After Plan approval Muse receives an Implement assignment and a separate full
-execution context in the SQL claim response (`external_context`, canonical
-`external_context_json` and `external_context_sha256`). It preserves its feature
-branch and returns only this implementation manifest through the existing
-bounded `finish` operation:
+The claim query above omits the duplicate parsed context. The runner verifies the
+SHA-256 of the exact UTF-8 `external_context_json` against `external_context_sha256`
+before parsing it once. Pass the assignment and its verified working context to the
+model. Keep lease tokens, renewals and receipt metadata in the runner.
+
+After Plan approval, Muse implements on its assigned branch and returns the
+following manifest through the bounded `finish` operation.
 
 ```json
 {"version":1,"candidate_commit":"<40 lowercase hex>","candidate_tree":"<40 lowercase hex>","base_revision":"<supplied trusted base>","summary":"Implementation and verification report"}

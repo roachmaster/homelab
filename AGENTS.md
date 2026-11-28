@@ -1,29 +1,3 @@
-## Persistent agent branch and cache rules
-
-Keep one persistent named `feature/<agent>` branch per agent, never renamed or
-replaced: AGY uses `feature/agy`, Codex (including codex-author) `feature/codex`,
-Grok `feature/grok`, Muse (native and muse-db) `feature/muse`, Dot `feature/dot`.
-Configured aliases inherit their explicitly assigned agent ownership; do not
-invent another branch from an alias. Never create agent-owned per-task branches.
-Before each authorized push, rebase onto current main, rerun required tests, and
-push incrementally after green tests rather than one final dump. Manage your own
-local build cache outside source using provisioned paths; preserve other caches.
-
-This grants no publication permission: native task workers cannot commit or push;
-the authorized publisher owns publication. Plan/review retain read-only pinned
-snapshots. Stop on receipt-bound branch mismatches for receipt-preserving
-reconciliation; never rewrite frozen bindings or another owner's checkout.
-
-**Legacy machinery-owned publication exception:**
-`deploy/mission-control/agent-runner/work_publication_clients.py:branch_name()`
-retains `forge/task-<publication-id>` fallback refs for explicit
-`ephemeral-task-v1`, legacy identities, and jobs without persistent profile
-resolution. Historical `forge/agent/<profile-slug>` defaults are compatibility
-bindings, not author branch instructions. Preserve original workspaces and
-receipts; reconciling them requires a separately authorized transition. The
-publisher's compare-and-swap rebase handling does not authorize agent force-pushes.
-
-
 ## Agent branch ownership — user instruction, 2026-11-27
 
 All Homelab agents must develop, edit, commit and push only on their assigned
@@ -36,6 +10,10 @@ persistent feature branch:
 | Dot — separate ChatGPT agent | `feature/dot` |
 | Grok | `feature/grok` |
 | Muse | `feature/muse` |
+
+Configured aliases inherit their assigned agent branch. Use your provisioned build
+cache outside source and preserve other agents’ caches. Native workers rely on
+the publisher for commits and pushes. Preserve legacy machinery-owned ref bindings.
 
 Before editing, run `git status --short --branch` and `git branch --show-current`,
 then verify the current branch matches your identity above. Inspecting another
@@ -63,8 +41,12 @@ older `forge/agent/*` defaults), stop before editing or publishing and report th
 mismatch to Codex. Preserve its frozen identities, receipts and worktree rather
 than rewriting them to make the branch look compliant.
 
-Read this policy and `AGENT_WORK.md` before every new task. This records branch
-ownership; it does not grant new deployment, merge or paid-credit authority.
+Read the short `AGENT_WORK.md` at task start. Consult the checkpoint archive only
+for a specific incident. For connected agents, hand off the task UUID, the next action or blocker, and a
+one-line outcome. Use MCP `get_task` for the brief. Request `section: assignment`
+or `section: metadata` when needed. Query specific event or build fields on demand.
+Sandboxed workers use their admitted local artifacts. Keep logs and receipts out
+of routine messages.
 
 # Forge plug-and-play
 
