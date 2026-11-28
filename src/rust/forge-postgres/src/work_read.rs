@@ -28,6 +28,7 @@ impl forge_work::WorkReadPort for PgWorkStore {
         limit: i64,
         cursor_task_id: Option<Uuid>,
         delivery_visible: bool,
+        task_kind_filter: Option<&str>,
     ) -> Result<forge_work::work_types::TaskPage, forge_work::WorkError> {
         work_common::require_project(self, project_alias)?;
         work_read_list::list_tasks(
@@ -37,6 +38,7 @@ impl forge_work::WorkReadPort for PgWorkStore {
             limit,
             cursor_task_id,
             delivery_visible,
+            task_kind_filter,
         )
     }
 

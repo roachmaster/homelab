@@ -2,9 +2,9 @@ use chrono::{DateTime, Utc};
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
-use crate::work_common::{run_tx, work_err};
+use crate::work_common::{col, run_tx, work_err};
 use crate::work_read_scope::list_scope;
-use crate::work_rows::summary;
+use crate::work_rows::{filed_defects, summary};
 use crate::work_store::PgWorkStore;
 
 /// The raw statuses list_tasks accepts as a filter (Python's
@@ -39,14 +39,31 @@ pub(crate) fn list_tasks(
     limit: i64,
     cursor_task_id: Option<Uuid>,
     _delivery_visible: bool,
+    task_kind_filter: Option<&str>,
 ) -> Result<forge_work::work_types::TaskPage, forge_work::WorkError> {
     let invalid = || forge_work::WorkError::rejected(400, "invalid_request");
     if !(1..=50).contains(&limit) {
         return Err(invalid());
     }
+    if let Some(kind) = task_kind_filter {
+        if !matches!(kind, "feature" | "defect") {
+            return Err(forge_work::work_config::rejected_reason(
+                400,
+                "invalid_request",
+                "defect.task_kind_filter",
+            ));
+        }
+    }
     if let Some(filter) = status_filter {
         if SCOPES.contains(&filter) {
-            return list_scope(store, project_alias, filter, limit, cursor_task_id);
+            return list_scope(
+                store,
+                project_alias,
+                filter,
+                limit,
+                cursor_task_id,
+                task_kind_filter,
+            );
         }
         if !RAW_STATUSES.contains(&filter) {
             return Err(invalid());
@@ -78,17 +95,26 @@ pub(crate) fn list_tasks(
             &anchor_created,
             &cursor_task_id,
             &fetch,
+            &task_kind_filter,
         ];
         let rows = tx
             .query_rows(
-                "SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, t.mode, t.agent_profile, t.recipe_digest, t.status, t.revision, t.created_at, t.title, t.workflow_id, t.workflow_required, w.phase AS workflow_phase FROM forge_agent.coding_tasks t LEFT JOIN forge_agent.coding_workflows w ON (w.owner_id, w.project_alias, w.workflow_id) = (t.owner_id, t.project_alias, t.workflow_id) WHERE t.owner_id = $1 AND t.project_alias = $2 AND (NOT $3 OR NOT forge_external_workflow_api.is_internal(t.owner_id, t.project_alias, t.id)) AND ($4::text IS NULL OR t.status = $4::text) AND ($5::timestamptz IS NULL OR (t.created_at, t.id) > ($5::timestamptz, $6::uuid)) ORDER BY t.created_at ASC, t.id ASC LIMIT $7",
+                "SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, t.mode, t.agent_profile, t.recipe_digest, t.status, t.revision, t.created_at, t.title, t.workflow_id, t.workflow_required, t.task_kind, t.defect, w.phase AS workflow_phase FROM forge_agent.coding_tasks t LEFT JOIN forge_agent.coding_workflows w ON (w.owner_id, w.project_alias, w.workflow_id) = (t.owner_id, t.project_alias, t.workflow_id) WHERE t.owner_id = $1 AND t.project_alias = $2 AND (NOT $3 OR NOT forge_external_workflow_api.is_internal(t.owner_id, t.project_alias, t.id)) AND ($8::text IS NULL OR t.task_kind = $8::text) AND ($4::text IS NULL OR t.status = $4::text) AND ($5::timestamptz IS NULL OR (t.created_at, t.id) > ($5::timestamptz, $6::uuid)) ORDER BY t.created_at ASC, t.id ASC LIMIT $7",
                 params,
             )
             .map_err(work_err)?;
         let has_more = rows.len() > limit as usize;
         let mut items = Vec::new();
         for row in rows.iter().take(limit as usize) {
-            items.push(summary(row)?);
+            let mut item = summary(row)?;
+            item.filed_defects = filed_defects(
+                tx,
+                &store.owner,
+                project_alias,
+                item.task_id,
+                col::<Option<Uuid>>(row, "workflow_id")?,
+            )?;
+            items.push(item);
         }
         let next_cursor = if has_more {
             items.last().map(|item| item.task_id)

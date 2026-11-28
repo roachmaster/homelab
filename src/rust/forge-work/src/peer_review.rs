@@ -203,6 +203,17 @@ fn wrap<T>(scope: &str, result: PResult<T>) -> PResult<T> {
     })
 }
 
+/// The target minus the bound defect extension keys
+/// (work_defect's completely bound extension is validated
+/// separately by validate_defect_context).
+fn without_defect_keys(value: &Value) -> Value {
+    let mut object = value.as_object().cloned().unwrap_or_default();
+    for key in ["task_kind", "defect", "triage_instructions"] {
+        object.remove(key);
+    }
+    Value::Object(object)
+}
+
 fn exact_fields(value: &Value, fields: &[&str]) -> bool {
     value
         .as_object()
@@ -224,11 +235,13 @@ fn validate_target_inner(value: &Value) -> PResult<Value> {
         .as_object()
         .ok_or_else(|| PeerReviewError::new("target.fields"))?;
     require(
-        exact_fields(value, &TARGET_FIELDS)
+        exact_fields(&without_defect_keys(value), &TARGET_FIELDS)
             && is_int(&object["version"])
             && object["version"].as_i64() == Some(1),
         "target.fields",
     )?;
+    crate::defect::validate_defect_context(value)
+        .map_err(|_| PeerReviewError::new("target.defect_context"))?;
     for field in [
         "workflow_id",
         "workflow_review_id",

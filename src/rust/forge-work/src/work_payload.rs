@@ -97,6 +97,7 @@ pub enum WorkPayload {
         limit: i64,
         cursor_task_id: Option<Uuid>,
         delivery_visible: bool,
+        task_kind_filter: Option<String>,
     },
     Events {
         project_alias: String,

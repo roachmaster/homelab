@@ -109,12 +109,13 @@ pub fn scoped_main_checks() -> Vec<Vec<String>> {
     ])
 }
 
-pub const V2_PROTECTED_PATHS: [&str; 33] = [
+pub const V2_PROTECTED_PATHS: [&str; 34] = [
     "deploy/mission-control/agent-runner/work_delivery_ops.py",
     "deploy/mission-control/agent-runner/work_delivery_worker.py",
     "deploy/mission-control/agent-runner/work_delivery_repair.py",
     "deploy/mission-control/portal_release_actor.py",
     "deploy/mission-control/agent-runner/work_api.py",
+    "deploy/mission-control/agent-runner/work_defect.py",
     "deploy/mission-control/agent-runner/work_config.py",
     "deploy/mission-control/agent-runner/work_store.py",
     "deploy/mission-control/agent-runner/work_workflow.py",

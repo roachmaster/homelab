@@ -576,6 +576,8 @@ impl BinaryProofPort for PinnedBinaryProof {
             lease_expires_at: String::new(),
             deadline_at: String::new(),
             unit_name: String::new(),
+            task_kind: "feature".to_string(),
+            defect: None,
             resume_workspace_digest: None,
             resume_attempt_id: None,
             plan_decision_id: None,

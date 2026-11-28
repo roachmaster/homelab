@@ -669,18 +669,15 @@ impl ExternalWorkflowStore {
             .task_row(project, task_id, true)?
             .ok_or_else(|| WorkError::not_found("task"))?;
         let w = self.create(tx, &task)?;
-        self.enqueue_ext(
-            tx,
-            project,
-            task_id,
-            &json!({
-                "version": 2,
-                "workflow_id": uuid_of(&w, "workflow_id").to_string(),
-                "stage": "plan",
-                "request_prompt": task["prompt"],
-                "acceptance_criteria": task["acceptance_criteria"],
-            }),
-        )
+        let mut context = json!({
+            "version": 2,
+            "workflow_id": uuid_of(&w, "workflow_id").to_string(),
+            "stage": "plan",
+            "request_prompt": task["prompt"],
+            "acceptance_criteria": task["acceptance_criteria"],
+        });
+        crate::defect::merge_defect_context(&mut context, &task);
+        self.enqueue_ext(tx, project, task_id, &context)
     }
 
     /// discover: enroll fresh plan tasks for every managed

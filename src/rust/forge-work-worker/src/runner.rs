@@ -39,6 +39,11 @@ pub const CHUNK_BYTES: usize = 16_384;
 pub const MUSE_BINARY_SHA256: &str =
     "d752c45dce079ee29e118804b091d81ac2b1b89b67f317b4a162fa1af1206465";
 
+/// work_defect.TRIAGE, mirrored (forge-work-worker does not
+/// depend on forge-work; the canonical copy is
+/// forge_work::defect::TRIAGE).
+pub const DEFECT_TRIAGE: &str = "Defect Plan triage: reproduce the malfunction, identify the root cause or remaining uncertainty, and recommend fix or defer with reasons. Use the normal review and decision process; a defer recommendation does not cancel or bypass implementation authority.";
+
 /// The worker's stop signal, shared with the runner.
 #[derive(Debug, Clone)]
 pub struct StopFlag {
@@ -414,6 +419,15 @@ impl CommandRunnerProvider {
              MODE: {}\n\nASSIGNMENT:\n{}\n\nACCEPTANCE CRITERIA:\n{}",
             lease.mode, lease.prompt, lease.acceptance_criteria
         );
+        if lease.task_kind == "defect" {
+            prompt.push_str("\n\nDEFECT CONTEXT:\n");
+            prompt.push_str(
+                &serde_json::to_string(lease.defect.as_ref().unwrap_or(&serde_json::Value::Null))
+                    .unwrap_or_default(),
+            );
+            prompt.push_str("\n");
+            prompt.push_str(DEFECT_TRIAGE);
+        }
         prompt.push_str("\n\nAGENT BRANCH AND CACHE RULES: ");
         prompt.push_str(crate::agent_branch::AGENT_BRANCH_INSTRUCTIONS);
         if progress {

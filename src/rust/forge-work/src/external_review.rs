@@ -174,13 +174,18 @@ pub fn validate_target(raw: &str, digest: &str) -> Result<Value, String> {
     let object = value
         .as_object()
         .filter(|object| {
-            exact_keys(object, &TARGET_KEYS)
+            let mut reduced = (*object).clone();
+            for key in ["task_kind", "defect", "triage_instructions"] {
+                reduced.remove(key);
+            }
+            exact_keys(&reduced, &TARGET_KEYS)
                 && is_int(&object["version"])
                 && matches!(object["version"].as_i64(), Some(1) | Some(2))
                 && object["kind"].as_str() == Some("external_database_review")
                 && matches!(object["target_kind"].as_str(), Some("plan") | Some("code"))
         })
         .ok_or_else(|| err("Invalid external review target"))?;
+    crate::defect::validate_defect_context(&value)?;
     for key in [
         "workflow_id",
         "review_id",

@@ -16,6 +16,12 @@ pub struct SubmitRequest {
     pub workflow_policy_digest: Option<String>,
     pub workflow_snapshot: Option<serde_json::Value>,
     pub actor: crate::work_actors::Actor,
+    /// The first-class task kind (main delta 8b921df):
+    /// "feature" or "defect".
+    pub task_kind: String,
+    /// The validated defect document, present exactly when
+    /// task_kind is "defect".
+    pub defect: Option<serde_json::Value>,
 }
 
 /// A cancel intent for one task, carrying the cancellation cause

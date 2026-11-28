@@ -1129,6 +1129,8 @@ impl forge_work_publication::delivery_repair::RepairSubmitPort for RepairSubmit 
             auto_repair: submit.auto_repair,
             workflow_policy_digest: submit.workflow_policy_digest.clone(),
             workflow_policy_id: submit.workflow_policy_id,
+            task_kind: "feature".to_string(),
+            defect: None,
         };
         let correlation = Uuid::new_v4().to_string();
         let (_, body) = self.service.dispatch(

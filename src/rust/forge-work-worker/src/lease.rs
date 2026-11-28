@@ -21,6 +21,11 @@ pub struct Lease {
     pub lease_expires_at: String,
     pub deadline_at: String,
     pub unit_name: String,
+    /// The first-class task kind (main delta 8b921df):
+    /// "feature" or "defect".
+    pub task_kind: String,
+    /// The defect document for a defect task.
+    pub defect: Option<serde_json::Value>,
     pub resume_workspace_digest: Option<String>,
     pub resume_attempt_id: Option<String>,
     pub plan_decision_id: Option<String>,

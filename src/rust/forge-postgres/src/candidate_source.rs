@@ -327,6 +327,8 @@ mod tests {
             lease_expires_at: "2026-11-27T17:00:00Z".to_string(),
             deadline_at: "2026-11-27T18:00:00Z".to_string(),
             unit_name: "forge-coding-x".to_string(),
+            task_kind: "feature".to_string(),
+            defect: None,
             resume_workspace_digest: None,
             resume_attempt_id: None,
             plan_decision_id: None,

@@ -54,6 +54,11 @@ pub struct Claim {
     pub lease_expires_at: String,
     pub deadline_at: String,
     pub unit_name: String,
+    /// The task kind ("feature" unless the schema-53 read_defect
+    /// probe in claim() reports a defect task).
+    pub task_kind: String,
+    /// The defect document for a defect task.
+    pub defect: Option<serde_json::Value>,
     pub resume_workspace_digest: Option<String>,
     pub resume_attempt_id: Option<Uuid>,
     pub plan_decision_id: Option<Uuid>,
@@ -92,6 +97,8 @@ impl Claim {
             lease_expires_at: req_str(&payload, "lease_expires_at")?,
             deadline_at: req_str(&payload, "deadline_at")?,
             unit_name: req_str(&payload, "unit_name")?,
+            task_kind: "feature".to_string(),
+            defect: None,
             resume_workspace_digest: opt_str(&payload, "resume_workspace_digest"),
             resume_attempt_id: opt_uuid(&payload, "resume_attempt_id"),
             plan_decision_id: opt_uuid(&payload, "plan_decision_id"),
@@ -342,7 +349,33 @@ impl WorkerApi {
             "SELECT forge_coding_worker_api.claim($1, $2, $3)",
             &[&worker_id, &incarnation, &profiles],
         )?;
-        payload.map(Claim::from_json).transpose()
+        let Some(payload) = payload else {
+            return Ok(None);
+        };
+        let mut claim = Claim::from_json(payload)?;
+        // The defect metadata rides a separate schema-53 read
+        // (WorkStore claim does the same): probe for the function
+        // exactly as renew_status probes its typed form, and keep
+        // the feature/None defaults when it is absent.
+        let has_read_defect = self.session.call_bool(
+            "SELECT to_regprocedure($1) IS NOT NULL",
+            &[&"forge_coding_worker_api.read_defect(uuid,uuid)"],
+        )?;
+        if has_read_defect {
+            if let Some(metadata) = self.session.call_json(
+                "SELECT forge_coding_worker_api.read_defect($1, $2)",
+                &[&claim.attempt_id, &claim.attempt_token],
+            )? {
+                if let Some(kind) = metadata.get("task_kind").and_then(Value::as_str) {
+                    claim.task_kind = kind.to_string();
+                }
+                claim.defect = metadata
+                    .get("defect")
+                    .cloned()
+                    .filter(|value| !value.is_null());
+            }
+        }
+        Ok(Some(claim))
     }
 
     /// Renews the lease for the given claim.

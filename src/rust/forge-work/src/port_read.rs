@@ -15,6 +15,7 @@ pub trait WorkReadPort {
         limit: i64,
         cursor_task_id: Option<Uuid>,
         delivery_visible: bool,
+        task_kind_filter: Option<&str>,
     ) -> Result<TaskPage, WorkError>;
 
     /// events - Retrieve events for a task by project alias, task ID, after sequence, and limit.

@@ -49,7 +49,7 @@ use crate::work_requests::{
 use crate::work_response::{WorkContext, WorkResponse};
 use crate::work_types::{ControlOutcome, EventView, TaskSummary};
 
-pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
+pub const MAX_REQUEST_BYTES: usize = 32 * 1024;
 pub const MAX_PROMPT_BYTES: usize = 8192;
 pub const MAX_ACCEPTANCE_BYTES: usize = 2048;
 pub const MAX_NOTE_BYTES: usize = 2048;
@@ -319,6 +319,8 @@ pub fn failed(correlation: Option<&str>, error: &WorkError) -> (u16, Value) {
     let reason = reason.filter(|reason| {
         (code == "result_mismatch" && SUBMIT_MISMATCH_REASONS.contains(reason))
             || (code == "denied" && SUBMIT_DENIED_REASONS.contains(reason))
+            || (code == "invalid_request"
+                && crate::defect::FAILURE_REASONS.contains(reason))
     });
     let mut fields = Map::new();
     fields.insert("code".to_string(), json!(code));
@@ -613,6 +615,8 @@ pub struct WorkSubmit {
     pub auto_repair: bool,
     pub workflow_policy_digest: Option<String>,
     pub workflow_policy_id: Option<Uuid>,
+    pub task_kind: String,
+    pub defect: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -707,6 +711,7 @@ pub enum WorkCommand {
         status_filter: Option<String>,
         limit: i64,
         cursor: Option<Uuid>,
+        task_kind_filter: Option<String>,
     },
     Events {
         project_alias: String,
@@ -795,7 +800,13 @@ pub fn decode(
             ]);
             body.require_keys(
                 &required,
-                &["auto_repair", "workflow_policy_digest", "workflow_policy_id"],
+                &[
+                    "auto_repair",
+                    "workflow_policy_digest",
+                    "workflow_policy_id",
+                    "task_kind",
+                    "defect",
+                ],
             )?;
             let base_revision = body.text("base_revision", 40, false)?;
             if !is_hex(&base_revision, 40) {
@@ -819,6 +830,16 @@ pub fn decode(
                 None => None,
                 Some(_) => Some(body.uuid("workflow_policy_id")?),
             };
+            let task_kind = match body.get("task_kind") {
+                None => "feature".to_string(),
+                Some(value) => value
+                    .as_str()
+                    .ok_or_else(|| {
+                        WorkError::rejected(400, "invalid_request:defect.task_kind")
+                    })?
+                    .to_string(),
+            };
+            let defect = crate::defect::validate_defect(&task_kind, body.get("defect"))?;
             Ok(WorkCommand::Submit(WorkSubmit {
                 project_alias: body.identifier("project_alias")?,
                 base_revision,
@@ -834,6 +855,8 @@ pub fn decode(
                 auto_repair: body.boolean("auto_repair")?,
                 workflow_policy_digest,
                 workflow_policy_id,
+                task_kind,
+                defect,
             }))
         }
         WorkDestination::Get => {
@@ -847,7 +870,10 @@ pub fn decode(
             })
         }
         WorkDestination::List => {
-            body.require_keys(&BASE_KEYS, &["status_filter", "limit", "cursor"])?;
+            body.require_keys(
+                &BASE_KEYS,
+                &["status_filter", "limit", "cursor", "task_kind_filter"],
+            )?;
             let status_filter = match body.get("status_filter") {
                 None => None,
                 Some(value) => {
@@ -866,11 +892,27 @@ pub fn decode(
                 None | Some(Value::Null) => None,
                 Some(_) => Some(body.uuid("cursor")?),
             };
+            let task_kind_filter = match body.get("task_kind_filter") {
+                None | Some(Value::Null) => None,
+                Some(value) => {
+                    let text = value.as_str().ok_or_else(|| {
+                        WorkError::rejected(400, "invalid_request:defect.task_kind_filter")
+                    })?;
+                    if !matches!(text, "feature" | "defect") {
+                        return Err(WorkError::rejected(
+                            400,
+                            "invalid_request:defect.task_kind_filter",
+                        ));
+                    }
+                    Some(text.to_string())
+                }
+            };
             Ok(WorkCommand::List {
                 project_alias: body.identifier("project_alias")?,
                 status_filter,
                 limit,
                 cursor,
+                task_kind_filter,
             })
         }
         WorkDestination::Events => {
@@ -1433,6 +1475,7 @@ impl WorkApiService {
                     status_filter,
                     limit,
                     cursor,
+                    task_kind_filter,
                 },
             ) => {
                 self.require_project(&project_alias)?;
@@ -1449,6 +1492,7 @@ impl WorkApiService {
                         limit,
                         cursor_task_id: cursor,
                         delivery_visible,
+                        task_kind_filter,
                     },
                 )? {
                     WorkResponse::Tasks(page) => {
@@ -1786,6 +1830,8 @@ impl WorkApiService {
                 workflow_policy_digest: command.workflow_policy_digest.clone(),
                 workflow_snapshot: snapshot,
                 actor,
+                task_kind: command.task_kind.clone(),
+                defect: command.defect.clone(),
             }),
         )? {
             WorkResponse::Control(outcome) => {
@@ -2003,6 +2049,9 @@ fn summary_dict(summary: &TaskSummary) -> Value {
     map.insert("status".to_string(), json!(summary.status));
     map.insert("revision".to_string(), json!(summary.revision));
     map.insert("created_at".to_string(), json!(summary.created_at));
+    map.insert("task_kind".to_string(), json!(summary.task_kind));
+    map.insert("defect".to_string(), json!(summary.defect));
+    map.insert("filed_defects".to_string(), json!(summary.filed_defects));
     if let Some(title) = &summary.title {
         map.insert("title".to_string(), json!(title));
     }
@@ -2084,6 +2133,9 @@ mod tests {
             revision: 1,
             created_at: "2026-11-27T00:00:00Z".to_string(),
             title: None,
+            task_kind: "feature".to_string(),
+            defect: None,
+            filed_defects: Vec::new(),
             workflow_required: None,
             workflow_phase: None,
         }
@@ -2105,6 +2157,7 @@ mod tests {
             _limit: i64,
             _cursor_task_id: Option<Uuid>,
             _delivery_visible: bool,
+            _task_kind_filter: Option<&str>,
         ) -> Result<TaskPage, WorkError> {
             Ok(TaskPage {
                 items: vec![summary()],

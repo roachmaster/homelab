@@ -28,6 +28,17 @@ pub struct TaskSummary {
     pub created_at: String,
     /// The task's display title, when one has been recorded.
     pub title: Option<String>,
+    /// The first-class task kind (main delta 8b921df): the
+    /// row's task_kind, or "feature" when the projection does
+    /// not carry the column.
+    pub task_kind: String,
+    /// The defect document for a defect task, when the
+    /// projection carries it.
+    pub defect: Option<Value>,
+    /// Defects filed against this task or its workflow
+    /// ({task_id, title, severity} rows, newest query order,
+    /// capped at 50 by the store query).
+    pub filed_defects: Vec<Value>,
     /// Whether the task belongs to a workflow, when the projection
     /// carries it.
     pub workflow_required: Option<bool>,

@@ -4,7 +4,7 @@ use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
 use crate::work_common::{col, format_ts, run_tx, work_err};
-use crate::work_rows::summary;
+use crate::work_rows::{filed_defects, summary};
 use crate::work_store::PgWorkStore;
 
 /// WorkReadPort::get: the task summary plus a projection object -
@@ -22,14 +22,21 @@ pub(crate) fn get(
         let params: &[&(dyn ToSql + Sync)] = &[&store.owner, &project_alias, &task_id];
         let rows = tx
             .query_rows(
-                "SELECT id, correlation_id, project_alias, base_revision, mode, agent_profile, recipe_digest, status, revision, created_at, title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id, review_required, workflow_required, workflow_id, workflow_review_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3",
+                "SELECT id, correlation_id, project_alias, base_revision, mode, agent_profile, recipe_digest, status, revision, created_at, task_kind, defect, title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id, review_required, workflow_required, workflow_id, workflow_review_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3",
                 params,
             )
             .map_err(work_err)?;
         let row = rows
             .first()
             .ok_or_else(|| forge_work::WorkError::not_found("task"))?;
-        let task = summary(row)?;
+        let mut task = summary(row)?;
+        task.filed_defects = filed_defects(
+            tx,
+            &store.owner,
+            project_alias,
+            task_id,
+            col::<Option<Uuid>>(row, "workflow_id")?,
+        )?;
         let mut projection = serde_json::json!({
             "prompt": col::<String>(row, "prompt")?,
             "acceptance_criteria": col::<String>(row, "acceptance_criteria")?,

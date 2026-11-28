@@ -10,10 +10,12 @@ use crate::work_rows::{insert_event, outcome_for, pinned_recipe_for};
 use crate::work_store::PgWorkStore;
 
 /// The submit intent object (Python's _submit_intent_digest field
-/// set): the core fields, auto_repair only when true, and the
-/// workflow digest only when present.
+/// set): the core fields, task_kind/defect only for a defect task,
+/// auto_repair only when true, and the workflow digest only when
+/// present.
 fn submit_intent(
     request: &forge_work::work_requests::SubmitRequest,
+    defect: &Option<Value>,
     include_workflow: bool,
 ) -> Value {
     let mut intent = serde_json::json!({
@@ -24,6 +26,10 @@ fn submit_intent(
         "prompt": request.prompt,
         "acceptance_criteria": request.acceptance_criteria,
     });
+    if request.task_kind == "defect" {
+        intent["task_kind"] = Value::String(request.task_kind.clone());
+        intent["defect"] = defect.clone().unwrap_or(Value::Null);
+    }
     if request.auto_repair {
         intent["auto_repair"] = Value::Bool(true);
     }
@@ -92,8 +98,12 @@ pub(crate) fn submit(
     store: &PgWorkStore,
     request: &forge_work::work_requests::SubmitRequest,
 ) -> Result<forge_work::ControlOutcome, forge_work::WorkError> {
+    // WorkStore.submit validates the defect document first,
+    // before any store work.
+    let defect =
+        forge_work::defect::validate_defect(&request.task_kind, request.defect.as_ref())?;
     let title = prepare_title(&request.prompt)?;
-    let intent = intent_digest(&submit_intent(request, true));
+    let intent = intent_digest(&submit_intent(request, &defect, true));
     run_tx(store, |tx| {
         advisory_lock(tx, &store.owner, &request.project_alias)?;
         let receipt_params: &[&(dyn ToSql + Sync)] = &[
@@ -109,7 +119,7 @@ pub(crate) fn submit(
             .map_err(work_err)?;
         if let Some(receipt) = receipts.first() {
             let stored_intent: String = col(receipt, "intent_digest")?;
-            let variant = intent_digest(&submit_intent(request, false));
+            let variant = intent_digest(&submit_intent(request, &defect, false));
             if stored_intent != intent && stored_intent != variant {
                 return Err(forge_work::WorkError::rejected(409, "idempotency_conflict"));
             }
@@ -162,6 +172,46 @@ pub(crate) fn submit(
             &request.recipe_digest,
         )?
         .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
+        // A defect's discovering references must resolve before
+        // the task is created (WorkStore.submit). Python also
+        // falls back to the external workflow table for a workflow
+        // id; this adapter carries no external-workflow
+        // configuration, so that fallback is the recorded v1
+        // boundary (shared with _filed_defects).
+        if let Some(defect) = &defect {
+            for (field, table, column) in [
+                ("discovering_task_id", "coding_tasks", "id"),
+                ("discovering_workflow_id", "coding_workflows", "workflow_id"),
+            ] {
+                let Some(reference) = defect.get(field).and_then(Value::as_str) else {
+                    continue;
+                };
+                let reference_id: Uuid = reference.parse().map_err(|_| {
+                    forge_work::work_config::rejected_reason(
+                        400,
+                        "invalid_request",
+                        &format!("defect.{field}"),
+                    )
+                })?;
+                let check_params: &[&(dyn ToSql + Sync)] =
+                    &[&store.owner, &request.project_alias, &reference_id];
+                let found = tx
+                    .query_rows(
+                        &format!(
+                            "SELECT 1 AS found FROM forge_agent.{table} WHERE owner_id=$1 AND project_alias=$2 AND {column}=$3 FOR SHARE"
+                        ),
+                        check_params,
+                    )
+                    .map_err(work_err)?;
+                if found.is_empty() {
+                    return Err(forge_work::work_config::rejected_reason(
+                        400,
+                        "invalid_request",
+                        &format!("defect.{field}"),
+                    ));
+                }
+            }
+        }
         let task_id = Uuid::new_v4();
         let effective_auto_repair = request.auto_repair || has_workflow;
         let review_required = request.mode == "implement";
@@ -187,6 +237,20 @@ pub(crate) fn submit(
             insert_params,
         )
         .map_err(work_err)?;
+        if request.task_kind == "defect" {
+            let defect_params: &[&(dyn ToSql + Sync)] = &[
+                &request.task_kind,
+                &defect,
+                &store.owner,
+                &request.project_alias,
+                &task_id,
+            ];
+            tx.execute_count(
+                "UPDATE forge_agent.coding_tasks SET task_kind=$1, defect=$2 WHERE owner_id=$3 AND project_alias=$4 AND id=$5",
+                defect_params,
+            )
+            .map_err(work_err)?;
+        }
         ensure_review_policy(tx, store, &request.project_alias, task_id)?;
         let mut workflow_id: Option<Uuid> = None;
         let mut effective_snapshot: Option<Value> = None;

@@ -1469,6 +1469,7 @@ impl WorkflowStore {
             "verification": Value::Null,
             "approved_plan": Value::Null,
         });
+        crate::defect::merge_defect_context(&mut target, &assignment);
         if text(review, "target_kind") == "code" {
             let local = tx
                 .review_row(uuid_of(review, "source_review_id"), true)?

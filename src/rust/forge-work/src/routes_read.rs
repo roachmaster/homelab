@@ -37,6 +37,7 @@ pub fn register_reads(
                     limit,
                     cursor_task_id,
                     delivery_visible,
+                    task_kind_filter,
                 } => ctx
                     .read
                     .list_tasks(
@@ -45,6 +46,7 @@ pub fn register_reads(
                         limit,
                         cursor_task_id,
                         delivery_visible,
+                        task_kind_filter.as_deref(),
                     )
                     .map(WorkResponse::Tasks),
                 _ => Err(WorkError::rejected(500, "payload_mismatch")),

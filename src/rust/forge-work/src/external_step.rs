@@ -902,7 +902,7 @@ impl ExternalWorkflowStore {
                 .unwrap_or_default(),
             None => Vec::new(),
         };
-        let target = json!({
+        let mut target = json!({
             "version": if candidate.is_some()
                 && w["state"]["identity_protocol"].as_str() == Some("content-v2") {
                 2
@@ -932,6 +932,7 @@ impl ExternalWorkflowStore {
             "candidate": candidate,
             "required_attestations": attestations,
         });
+        crate::defect::merge_defect_context(&mut target, &root);
         let raw = canonical_json(&target);
         let digest = sha256_hex(raw.as_bytes());
         validate_target(&raw, &digest).map_err(WorkError::store)?;
@@ -956,6 +957,13 @@ impl ExternalWorkflowStore {
             text(&target, "review_base_revision"),
             "reviewer",
         )?;
+        if root["task_kind"].as_str() == Some("defect") {
+            tx.update_task_row(
+                text(w, "project_alias"),
+                task_id,
+                &json!({"task_kind": "defect", "defect": root["defect"]}),
+            )?;
+        }
         tx.insert_review_row(&json!({
             "review_id": review_id.to_string(),
             "workflow_id": uuid_of(w, "workflow_id").to_string(),
@@ -1527,6 +1535,13 @@ impl ExternalWorkflowStore {
             &base,
             "author",
         )?;
+        if root["task_kind"].as_str() == Some("defect") {
+            tx.update_task_row(
+                text(w, "project_alias"),
+                task_id,
+                &json!({"task_kind": "defect", "defect": root["defect"]}),
+            )?;
+        }
         let default_summary = format!(
             "{} {} queued from the reviewed artifact.",
             text(w, "author_profile"),
@@ -1544,7 +1559,7 @@ impl ExternalWorkflowStore {
             Some(task_id),
             None,
         )?;
-        let context = json!({
+        let mut context = json!({
             "version": 2,
             "workflow_id": uuid_of(w, "workflow_id").to_string(),
             "stage": mode,
@@ -1571,6 +1586,7 @@ impl ExternalWorkflowStore {
                 json!("Full revised plan text")
             },
         });
+        crate::defect::merge_defect_context(&mut context, &root);
         let assignment = self.enqueue_ext(tx, text(w, "project_alias"), task_id, &context)?;
         state_pop(w, "active_review_id");
         state_pop(w, "candidate");

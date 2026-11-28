@@ -68,6 +68,7 @@ mod tests {
             _limit: i64,
             _cursor_task_id: Option<Uuid>,
             _delivery_visible: bool,
+            _task_kind_filter: Option<&str>,
         ) -> Result<TaskPage, WorkError> {
             Err(WorkError::store("stub"))
         }

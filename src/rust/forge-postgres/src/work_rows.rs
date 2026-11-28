@@ -26,9 +26,49 @@ pub(crate) fn summary(
         revision: row.try_get("revision").map_err(store)?,
         created_at: format_ts(created_at),
         title: optional_column(row, "title")?,
+        task_kind: optional_column::<String>(row, "task_kind")?
+            .unwrap_or_else(|| "feature".to_string()),
+        defect: optional_column(row, "defect")?,
+        filed_defects: Vec::new(),
         workflow_required: optional_column(row, "workflow_required")?,
         workflow_phase: optional_column(row, "workflow_phase")?,
     })
+}
+
+/// WorkStore._filed_defects (native form): the defect tasks that
+/// name this task - directly, through its workflow, or through a
+/// workflow member - as their discovering task or workflow.
+/// Python's external-workflow fallback (the
+/// forge_external_workflow.tasks link and membership) is not
+/// available to this adapter, which carries no external-workflow
+/// configuration: the recorded v1 boundary, shared with the
+/// submit-side discovering checks.
+pub(crate) fn filed_defects(
+    tx: &mut crate::tx::Tx<'_, '_>,
+    owner: &str,
+    project_alias: &str,
+    task_id: Uuid,
+    workflow_id: Option<Uuid>,
+) -> Result<Vec<Value>, forge_work::WorkError> {
+    let task_key = task_id.to_string();
+    let workflow_key = workflow_id.map(|id| id.to_string());
+    let params: &[&(dyn ToSql + Sync)] = &[&owner, &project_alias, &task_key, &workflow_key];
+    let rows = tx
+        .query_rows(
+            "SELECT id AS task_id, title, defect->>'severity' AS severity FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND task_kind='defect' AND (defect->>'discovering_task_id'=$3 OR ($4::text IS NOT NULL AND defect->>'discovering_workflow_id'=$4) OR EXISTS (SELECT 1 FROM forge_agent.coding_tasks member WHERE member.owner_id=coding_tasks.owner_id AND member.project_alias=coding_tasks.project_alias AND member.id=(coding_tasks.defect->>'discovering_task_id')::uuid AND member.workflow_id=$4::uuid)) AND parent_task_id IS NULL ORDER BY created_at, id LIMIT 50",
+            params,
+        )
+        .map_err(work_err)?;
+    let mut items = Vec::new();
+    for row in &rows {
+        let store = |e: tokio_postgres::Error| forge_work::WorkError::store(e.to_string());
+        items.push(serde_json::json!({
+            "task_id": row.try_get::<_, Uuid>("task_id").map_err(store)?.to_string(),
+            "title": row.try_get::<_, Option<String>>("title").map_err(store)?,
+            "severity": row.try_get::<_, Option<String>>("severity").map_err(store)?,
+        }));
+    }
+    Ok(items)
 }
 
 /// Reads a column that a given query may not have selected at all:
