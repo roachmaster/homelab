@@ -254,8 +254,13 @@ export async function exerciseAgentsTriage({ page, relay, check, screenshot, ori
     await page.locator('#agents-back').click();
     const defectId = relay.seedDefects(corpus.automatic);
     await page.locator('#agents-refresh').click();
+    // A click returns before the worker accepts its refresh. Require the new
+    // fixture row in the accepted list before issuing a different local intent;
+    // an old enabled select alone does not acknowledge the pending read.
+    await check(row(defectId)).toBeVisible();
     const kindFilter = page.locator('#agents-task-kind');
     await kindFilter.selectOption('defect');
+    await check(kindFilter).toHaveValue('defect');
     await check(rows).toHaveCount(1);
     await check(row(defectId)).toContainText('Defect');
     await check(row(defectId)).toContainText('high');
