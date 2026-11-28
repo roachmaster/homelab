@@ -87,6 +87,9 @@ impl WorkKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum WorkPayload {
     Submit(SubmitRequest),
+    /// Internal receipt lookup; shares the Submit admission policy and route.
+    /// No public JSON command selects this payload.
+    SubmitReplay(SubmitRequest),
     Get {
         project_alias: String,
         task_id: Uuid,
@@ -139,7 +142,7 @@ impl Payload for WorkPayload {
 
     fn kind(&self) -> WorkKind {
         match self {
-            WorkPayload::Submit(_) => WorkKind::Submit,
+            WorkPayload::Submit(_) | WorkPayload::SubmitReplay(_) => WorkKind::Submit,
             WorkPayload::Get { .. } => WorkKind::Get,
             WorkPayload::List { .. } => WorkKind::List,
             WorkPayload::Events { .. } => WorkKind::Events,

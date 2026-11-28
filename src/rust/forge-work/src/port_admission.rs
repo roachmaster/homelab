@@ -1,5 +1,14 @@
 /// The admission port: idempotent lifecycle writers whose receipt, event, and task change commit in one transaction, plus the policy-digest pair.
 pub trait WorkAdmissionPort {
+    /// Exact recorded submit intent lookup before catalog resolution. This may
+    /// acquire the normal project lock but must not admit or mutate work.
+    fn submit_replay(
+        &self,
+        _request: &crate::work_requests::SubmitRequest,
+    ) -> Result<Option<crate::work_types::ControlOutcome>, crate::work_error::WorkError> {
+        Ok(None)
+    }
+
     /// submit -> queued
     fn submit(
         &self,

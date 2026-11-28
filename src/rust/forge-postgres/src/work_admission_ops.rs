@@ -75,6 +75,7 @@ pub(crate) fn cancel(
             revision,
             replayed,
         )
+        .map(|outcome| outcome.with_recorded_receipt(result.clone()))
     })
 }
 
@@ -156,7 +157,8 @@ pub(crate) fn accept(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(receipt_json.clone()));
         }
         let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
         if task.mode == "plan" || task.status != "awaiting_review" {
@@ -266,5 +268,6 @@ pub(crate) fn accept(
             new_revision,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(receipt.clone()))
     })
 }

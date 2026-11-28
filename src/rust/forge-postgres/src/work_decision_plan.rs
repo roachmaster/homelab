@@ -108,7 +108,8 @@ pub(crate) fn plan_decide(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(receipt_json.clone()));
         }
         let status: String = col(row, "status")?;
         let mode: String = col(row, "mode")?;
@@ -341,5 +342,6 @@ pub(crate) fn plan_decide(
             new_revision,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(receipt.clone()))
     })
 }

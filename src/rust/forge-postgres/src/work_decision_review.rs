@@ -96,7 +96,8 @@ pub(crate) fn review_decide(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(replay.clone()));
         }
         let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
         if task.status != "awaiting_review" {
@@ -366,5 +367,6 @@ pub(crate) fn review_decide(
             request.expected_revision + 1,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(result.clone()))
     })
 }

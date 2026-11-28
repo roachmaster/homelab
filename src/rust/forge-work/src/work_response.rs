@@ -8,6 +8,7 @@ use crate::work_types::{ControlOutcome, EventPage, ResultChunk, StageLogView, Ta
 #[derive(Debug, Clone, PartialEq)]
 pub enum WorkResponse {
     Control(ControlOutcome),
+    Replay(Option<ControlOutcome>),
     Task(TaskView),
     Tasks(TaskPage),
     Events(EventPage),

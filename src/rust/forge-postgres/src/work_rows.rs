@@ -221,6 +221,7 @@ pub(crate) fn outcome_for(
         receipt_id,
         task,
         replayed,
+        recorded_receipt: None,
     })
 }
 

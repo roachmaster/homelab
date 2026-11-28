@@ -17,6 +17,14 @@ const IDENTITY_READY: &str =
 /// the project, then delegate to their work_admission_* targets;
 /// the policy pair lives here.
 impl forge_work::WorkAdmissionPort for PgWorkStore {
+    fn submit_replay(
+        &self,
+        request: &forge_work::work_requests::SubmitRequest,
+    ) -> Result<Option<forge_work::ControlOutcome>, forge_work::WorkError> {
+        require_project(self, &request.project_alias)?;
+        work_admission_submit::submit_replay(self, request)
+    }
+
     fn submit(
         &self,
         request: &forge_work::work_requests::SubmitRequest,

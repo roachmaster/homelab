@@ -186,6 +186,16 @@ pub struct ControlOutcome {
     /// True when this outcome replays an earlier identical intent
     /// instead of acting again.
     pub replayed: bool,
+    /// Immutable private receipt, projected per operation at the API boundary.
+    /// This is never serialized wholesale; actor/audit fields remain private.
+    pub recorded_receipt: Option<Value>,
+}
+
+impl ControlOutcome {
+    pub fn with_recorded_receipt(mut self, receipt: Value) -> Self {
+        self.recorded_receipt = Some(receipt);
+        self
+    }
 }
 
 /// A pinned policy identity: the kind of policy and its digest.

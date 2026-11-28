@@ -190,4 +190,69 @@ pub(super) fn exercise(
         .1;
     assert_eq!(listed["event"]["scope_counts"]["all"], 1);
     assert_eq!(listed["event"]["tasks"][0]["task_kind"], "defect");
+    // A real normal cancellation advances the task/workflow; submit replay must
+    // still return its immutable initial receipt and never requeue work.
+    let cancel=forge_work::work_api::decode(WorkDestination::Cancel,"list-fixture",&json!({"kind":"work_cancel","request_id":"list-fixture","project_alias":"homelab","task_id":defect.to_string(),"expected_revision":1,"idempotency_key":"owned-native-defect-cancel"})).unwrap();
+    let cancelled = service
+        .dispatch(WorkDestination::Cancel, "list-fixture", cancel, Some(1))
+        .unwrap()
+        .1;
+    assert_eq!(cancelled["event"]["status"], "cancelled");
+    assert_eq!(cancelled["event"].as_object().unwrap().len(), 7); // envelope kind/request + strict five fields
+    let command =
+        forge_work::work_api::decode(WorkDestination::Submit, "list-fixture", &body).unwrap();
+    assert_eq!(
+        service
+            .dispatch(WorkDestination::Submit, "list-fixture", command, Some(1))
+            .unwrap()
+            .1,
+        submitted
+    );
+    let mut drift = config.clone();
+    for profile in &mut drift.profiles {
+        if profile.alias == "grok-primary" {
+            profile.execution_enabled = false;
+        } else if profile.alias == "codex-primary" {
+            profile.model = "different-current-reviewer".into();
+        }
+    }
+    let drifted = create_work_service(&drift, &pg).unwrap().service;
+    let command =
+        forge_work::work_api::decode(WorkDestination::Submit, "list-fixture", &body).unwrap();
+    assert_eq!(
+        drifted
+            .dispatch(WorkDestination::Submit, "list-fixture", command, Some(1))
+            .unwrap()
+            .1,
+        submitted
+    );
+    let mut changed = body.clone();
+    changed["prompt"] = json!("Different admitted intent");
+    let command =
+        forge_work::work_api::decode(WorkDestination::Submit, "list-fixture", &changed).unwrap();
+    assert!(matches!(
+        drifted.dispatch(WorkDestination::Submit, "list-fixture", command, Some(1)),
+        Err(WorkError::Rejected { status: 409, .. })
+    ));
+    changed["idempotency_key"] = json!("owned-disabled-new-task");
+    let command =
+        forge_work::work_api::decode(WorkDestination::Submit, "list-fixture", &changed).unwrap();
+    assert!(matches!(
+        drifted.dispatch(WorkDestination::Submit, "list-fixture", command, Some(1)),
+        Err(WorkError::Rejected { status: 403, .. })
+    ));
+    runtime.block_on(async {
+        let row = cluster
+            .connect("postgres")
+            .await
+            .unwrap()
+            .query_one(
+                "SELECT status,revision FROM forge_agent.coding_tasks WHERE id=$1",
+                &[&defect],
+            )
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, String>(0), "cancelled");
+        assert_eq!(row.get::<_, i64>(1), 2);
+    });
 }

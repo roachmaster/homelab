@@ -465,7 +465,8 @@ pub(crate) fn repair(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(replay.clone()));
         }
         let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
         if task.workflow_required || task.status != "completed" || task.mode != "implement" {
@@ -622,7 +623,8 @@ pub(crate) fn repair(
                 request.task_id,
                 request.expected_revision + 1,
                 false,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(result.clone()));
         }
         // Source-review path: no usable review for the candidate.
         let findings = if !findings_empty(&request.findings) {
@@ -770,6 +772,7 @@ pub(crate) fn repair(
             request.expected_revision + 1,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(result.clone()))
     })
 }
 
@@ -817,7 +820,8 @@ pub(crate) fn publication_retry(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(replay.clone()));
         }
         let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
         if task.workflow_required {
@@ -883,6 +887,7 @@ pub(crate) fn publication_retry(
             request.expected_revision + 1,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(result.clone()))
     })
 }
 

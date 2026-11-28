@@ -3479,3 +3479,30 @@ Strict all-target/all-feature Clippy for PostgreSQL/work and selected formatting
 passed. The BDD bridge test constructor gains only absent scope-count metadata.
 Stale catalog replay/immutable receipt preservation and final integrated HTTP/UI
 qualification remain required before whole-runtime cutover.
+
+### 2026-11-28 — Rust immutable receipts and catalog-independent submit replay
+
+Successful controls retain their exact recorded receipt privately in the typed
+outcome, including stored operation IDs and Plan mode. Public API replies copy
+only their operation's permitted fields; actor/source/audit fields remain in the
+durable record. Replaying Submit after the task advances returns the original
+queued revision/status/recipe, not the current task row. Review replies now carry
+the existing required review ID; repair/publication replies preserve their
+recorded IDs. Native resume/review replies receive the same bounded projection.
+
+An internal SubmitReplay payload shares the ordinary Submit bridge route and
+admission policy. Its default-compatible port performs only the existing
+advisory-locked exact intent/frozen-policy receipt lookup before current recipe
+or workflow resolution. Current project/profile/mode grants still apply. First
+admission retains its original atomic transaction, leased repair authority,
+queue/main/branch fences and receipt recheck; no JSON route or database authority
+was added. The original intent encoding and frozen variant rules are unchanged.
+
+Validation: 44 PostgreSQL and 146 work library tests passed, zero ignored,
+including real normal defect cancellation followed by identical queued Submit
+replay, disabled author plus changed current reviewer replay, changed-intent409,
+new disabled-admission403, unchanged cancelled row, and private-audit/binding
+negative checks. Strict all-target/all-feature Clippy for both crates and selected
+formatting passed. Logs `/mnt/data/homelab-build/rust-replay-{tests1,clippy1}.log`.
+Other decision recipe guards still need the analogous exact receipt-first lookup;
+Result-page DTO completion and integrated HTTP/UI proof remain separate work.

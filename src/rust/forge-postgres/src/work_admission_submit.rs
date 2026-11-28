@@ -88,6 +88,77 @@ fn identity_ready(tx: &mut crate::tx::Tx<'_, '_>) -> Result<bool, forge_work::Wo
         .unwrap_or(false))
 }
 
+fn recorded_submit(
+    tx: &mut crate::tx::Tx<'_, '_>,
+    store: &PgWorkStore,
+    request: &forge_work::work_requests::SubmitRequest,
+    defect: &Option<Value>,
+    intent: &str,
+) -> Result<Option<forge_work::ControlOutcome>, forge_work::WorkError> {
+    let receipt_params: &[&(dyn ToSql + Sync)] = &[
+        &store.owner,
+        &request.project_alias,
+        &request.idempotency_key,
+    ];
+    let receipts = tx
+            .query_rows(
+                "SELECT t.intent_digest, e.payload AS receipt_json FROM forge_agent.coding_tasks t JOIN forge_agent.coding_events e ON (e.owner_id, e.project_alias, e.task_id) = (t.owner_id, t.project_alias, t.id) AND e.sequence = 1 WHERE t.owner_id = $1 AND t.project_alias = $2 AND t.idempotency_key = $3",
+                receipt_params,
+            )
+            .map_err(work_err)?;
+    if let Some(receipt) = receipts.first() {
+        let stored_intent: String = col(receipt, "intent_digest")?;
+        if stored_intent != intent {
+            // Fences are submission preconditions, not a different task.
+            // Tolerate only the presented/absent/frozen native policy forms.
+            let frozen = tx.query_rows("SELECT w.policy_digest,i.workflow_policy_id FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id LEFT JOIN forge_agent.coding_task_identities i ON (i.owner_id,i.project_alias,i.task_id)=(t.owner_id,t.project_alias,t.id) WHERE t.owner_id=$1 AND t.project_alias=$2 AND t.idempotency_key=$3",receipt_params).map_err(work_err)?;
+            let mut digests = vec![None, request.workflow_policy_digest.clone()];
+            let mut ids = vec![None, request.workflow_policy_id];
+            if let Some(frozen) = frozen.first() {
+                digests.push(Some(col::<String>(frozen, "policy_digest")?));
+                ids.push(col::<Option<Uuid>>(frozen, "workflow_policy_id")?);
+            }
+            let replay = digests.iter().any(|digest| {
+                ids.iter().any(|id| {
+                    stored_intent
+                        == intent_digest(&submit_intent(request, defect, digest.as_deref(), *id))
+                })
+            });
+            if !replay {
+                return Err(forge_work::WorkError::rejected(409, "idempotency_conflict"));
+            }
+        }
+        let receipt_json: Value = col(receipt, "receipt_json")?;
+        let task_id: Uuid = receipt_json
+            .get("task_id")
+            .and_then(Value::as_str)
+            .and_then(|text| text.parse().ok())
+            .ok_or_else(|| forge_work::WorkError::store("submit receipt missing task_id"))?;
+        return outcome_for(tx, &store.owner, &request.project_alias, task_id, 1, true)
+            .map(|outcome| Some(outcome.with_recorded_receipt(receipt_json.clone())));
+    }
+
+    Ok(None)
+}
+
+pub(crate) fn submit_replay(
+    store: &PgWorkStore,
+    request: &forge_work::work_requests::SubmitRequest,
+) -> Result<Option<forge_work::ControlOutcome>, forge_work::WorkError> {
+    let defect = forge_work::defect::validate_defect(&request.task_kind, request.defect.as_ref())?;
+    prepare_title(&request.prompt)?;
+    let intent = intent_digest(&submit_intent(
+        request,
+        &defect,
+        request.workflow_policy_digest.as_deref(),
+        request.workflow_policy_id,
+    ));
+    run_tx(store, |tx| {
+        advisory_lock(tx, &store.owner, &request.project_alias)?;
+        recorded_submit(tx, store, request, &defect, &intent)
+    })
+}
+
 /// WorkAdmissionPort::submit, ported from WorkStore.submit's core
 /// transaction: advisory lock, first-event receipt replay (with the
 /// digest-variant tolerance for the workflow fence switch), the
@@ -111,51 +182,8 @@ pub(crate) fn submit(
     ));
     run_tx(store, |tx| {
         advisory_lock(tx, &store.owner, &request.project_alias)?;
-        let receipt_params: &[&(dyn ToSql + Sync)] = &[
-            &store.owner,
-            &request.project_alias,
-            &request.idempotency_key,
-        ];
-        let receipts = tx
-            .query_rows(
-                "SELECT t.intent_digest, e.payload AS receipt_json FROM forge_agent.coding_tasks t JOIN forge_agent.coding_events e ON (e.owner_id, e.project_alias, e.task_id) = (t.owner_id, t.project_alias, t.id) AND e.sequence = 1 WHERE t.owner_id = $1 AND t.project_alias = $2 AND t.idempotency_key = $3",
-                receipt_params,
-            )
-            .map_err(work_err)?;
-        if let Some(receipt) = receipts.first() {
-            let stored_intent: String = col(receipt, "intent_digest")?;
-            if stored_intent != intent {
-                // Fences are submission preconditions, not a different task.
-                // Tolerate only the presented/absent/frozen native policy forms.
-                let frozen = tx.query_rows("SELECT w.policy_digest,i.workflow_policy_id FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id LEFT JOIN forge_agent.coding_task_identities i ON (i.owner_id,i.project_alias,i.task_id)=(t.owner_id,t.project_alias,t.id) WHERE t.owner_id=$1 AND t.project_alias=$2 AND t.idempotency_key=$3",receipt_params).map_err(work_err)?;
-                let mut digests = vec![None, request.workflow_policy_digest.clone()];
-                let mut ids = vec![None, request.workflow_policy_id];
-                if let Some(frozen) = frozen.first() {
-                    digests.push(Some(col::<String>(frozen, "policy_digest")?));
-                    ids.push(col::<Option<Uuid>>(frozen, "workflow_policy_id")?);
-                }
-                let replay = digests.iter().any(|digest| {
-                    ids.iter().any(|id| {
-                        stored_intent
-                            == intent_digest(&submit_intent(
-                                request,
-                                &defect,
-                                digest.as_deref(),
-                                *id,
-                            ))
-                    })
-                });
-                if !replay {
-                    return Err(forge_work::WorkError::rejected(409, "idempotency_conflict"));
-                }
-            }
-            let receipt_json: Value = col(receipt, "receipt_json")?;
-            let task_id: Uuid = receipt_json
-                .get("task_id")
-                .and_then(Value::as_str)
-                .and_then(|text| text.parse().ok())
-                .ok_or_else(|| forge_work::WorkError::store("submit receipt missing task_id"))?;
-            return outcome_for(tx, &store.owner, &request.project_alias, task_id, 1, true);
+        if let Some(outcome) = recorded_submit(tx, store, request, &defect, &intent)? {
+            return Ok(outcome);
         }
         let count_params: &[&(dyn ToSql + Sync)] = &[&store.owner, &request.project_alias];
         let counts = tx
@@ -461,5 +489,6 @@ pub(crate) fn submit(
         }
         notify(tx)?;
         outcome_for(tx, &store.owner, &request.project_alias, task_id, 1, false)
+            .map(|outcome| outcome.with_recorded_receipt(receipt.clone()))
     })
 }

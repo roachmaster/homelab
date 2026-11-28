@@ -7,10 +7,9 @@
 //! control first-dibs), and the response envelopes.
 //!
 //! Recorded v1 boundaries (forge-ops-design.yaml h7e):
-//! - Recipe resolution is eager here (Python resolves lazily
-//!   inside the store transaction), so an idempotent replay after
-//!   catalog drift or profile disabling can fail 503/403 where
-//!   Python replays the receipt.
+//! - Submit first probes the exact recorded intent under the normal project
+//!   lock before resolving the current catalog. Other decision recipe guards
+//!   remain eager until their exact stored control receipts are checked.
 //! - Decision receipts carry the common projection
 //!   (project/task/base_revision/revision/status) from the
 //!   ControlOutcome; Python's per-operation extras (repair's
@@ -1637,7 +1636,7 @@ impl WorkApiService {
                         envelope(
                             "work_cancel_recorded",
                             correlation,
-                            receipt_dict(&outcome, command.expected_revision, false),
+                            receipt_dict(&outcome, command.expected_revision, false)?,
                         ),
                     )),
                     _ => Err(unavailable()),
@@ -1701,7 +1700,7 @@ impl WorkApiService {
                         envelope(
                             "work_accepted",
                             correlation,
-                            receipt_dict(&outcome, command.expected_revision, false),
+                            receipt_dict(&outcome, command.expected_revision, false)?,
                         ),
                     )),
                     _ => Err(unavailable()),
@@ -1745,7 +1744,11 @@ impl WorkApiService {
                         envelope(
                             "work_repair_submitted",
                             correlation,
-                            receipt_dict(&outcome, command.expected_revision, false),
+                            receipt_with_extras(
+                                &outcome,
+                                command.expected_revision,
+                                &["repair_task_id", "review_id"],
+                            )?,
                         ),
                     )),
                     _ => Err(unavailable()),
@@ -1768,11 +1771,17 @@ impl WorkApiService {
                 )? {
                     WorkResponse::Control(outcome) => Ok((
                         202,
-                        envelope(
-                            "work_publication_retry_queued",
-                            correlation,
-                            receipt_dict(&outcome, command.expected_revision, false),
-                        ),
+                        envelope("work_publication_retry_queued", correlation, {
+                            let mut value = receipt_with_extras(
+                                &outcome,
+                                command.expected_revision,
+                                &["publication_id"],
+                            )?;
+                            if value.get("publication_id").is_none() {
+                                value["publication_id"] = json!(command.publication_id.to_string());
+                            }
+                            value
+                        }),
                     )),
                     _ => Err(unavailable()),
                 }
@@ -1834,6 +1843,36 @@ impl WorkApiService {
         if self.config.profile(&command.agent_profile).is_none() {
             return Err(rejected_reason(403, "denied", "profile_not_granted"));
         }
+        let actor = if command.auto_repair {
+            Actor::new(ActorKind::Coordinator, "forge-coordinator")
+        } else {
+            self.operator()
+        };
+        let mut request = SubmitRequest {
+            workflow_policy_id: command.workflow_policy_id,
+            delivery_admission: command.delivery_admission.clone(),
+            project_alias: command.project_alias.clone(),
+            base_revision: command.base_revision.clone(),
+            mode: command.mode.clone(),
+            agent_profile: command.agent_profile.clone(),
+            recipe_digest: String::new(),
+            prompt: command.prompt.clone(),
+            acceptance_criteria: command.acceptance_criteria.clone(),
+            idempotency_key: command.idempotency_key.clone(),
+            auto_repair: command.auto_repair,
+            workflow_policy_digest: command.workflow_policy_digest.clone(),
+            workflow_snapshot: None,
+            actor,
+            task_kind: command.task_kind.clone(),
+            defect: command.defect.clone(),
+        };
+        match self.call(correlation, WorkPayload::SubmitReplay(request.clone()))? {
+            WorkResponse::Replay(Some(outcome)) => {
+                return submitted_response(correlation, &outcome)
+            }
+            WorkResponse::Replay(None) => {}
+            _ => return Err(unavailable()),
+        }
         let recipe = self.resolve_for_submit(command)?;
         let repair_config = command
             .delivery_admission
@@ -1858,49 +1897,10 @@ impl WorkApiService {
                     .policy_identity(project, kind, snapshot)
             },
         )?;
-        let actor = if command.auto_repair {
-            Actor::new(ActorKind::Coordinator, "forge-coordinator")
-        } else {
-            self.operator()
-        };
-        match self.call(
-            correlation,
-            WorkPayload::Submit(SubmitRequest {
-                workflow_policy_id: command.workflow_policy_id,
-                delivery_admission: command.delivery_admission.clone(),
-                project_alias: command.project_alias.clone(),
-                base_revision: command.base_revision.clone(),
-                mode: command.mode.clone(),
-                agent_profile: command.agent_profile.clone(),
-                recipe_digest: recipe.digest,
-                prompt: command.prompt.clone(),
-                acceptance_criteria: command.acceptance_criteria.clone(),
-                idempotency_key: command.idempotency_key.clone(),
-                auto_repair: command.auto_repair,
-                workflow_policy_digest: command.workflow_policy_digest.clone(),
-                workflow_snapshot: snapshot,
-                actor,
-                task_kind: command.task_kind.clone(),
-                defect: command.defect.clone(),
-            }),
-        )? {
-            WorkResponse::Control(outcome) => {
-                let task = &outcome.task;
-                Ok((
-                    202,
-                    envelope(
-                        "work_submitted",
-                        correlation,
-                        json!({
-                            "task_id": task.task_id.to_string(),
-                            "project_alias": task.project_alias,
-                            "revision": task.revision,
-                            "status": task.status,
-                            "recipe_digest": task.recipe_digest,
-                        }),
-                    ),
-                ))
-            }
+        request.recipe_digest = recipe.digest;
+        request.workflow_snapshot = snapshot;
+        match self.call(correlation, WorkPayload::Submit(request))? {
+            WorkResponse::Control(outcome) => submitted_response(correlation, &outcome),
             _ => Err(unavailable()),
         }
     }
@@ -1910,7 +1910,19 @@ impl WorkApiService {
         self.external_guard(&command.project_alias, command.task_id)?;
         if let Some(native) = &self.native_control {
             if let Some(receipt) = native.resume(command)? {
-                return Ok((202, envelope("work_resumed", correlation, receipt)));
+                return Ok((
+                    202,
+                    envelope(
+                        "work_resumed",
+                        correlation,
+                        recorded_receipt(
+                            &receipt,
+                            (&command.project_alias, command.task_id),
+                            Some(command.expected_revision),
+                            true,
+                        )?,
+                    ),
+                ));
             }
         }
         if self.config.profile(&command.agent_profile).is_none() {
@@ -1945,7 +1957,7 @@ impl WorkApiService {
                 envelope(
                     "work_resumed",
                     correlation,
-                    receipt_dict(&outcome, command.expected_revision, true),
+                    receipt_dict(&outcome, command.expected_revision, true)?,
                 ),
             )),
             _ => Err(unavailable()),
@@ -2006,11 +2018,19 @@ impl WorkApiService {
                 } else {
                     202
                 };
-                let mut fields = receipt_dict(&outcome, command.expected_revision, false)
+                let mut fields = receipt_dict(&outcome, command.expected_revision, false)?
                     .as_object()
                     .cloned()
                     .unwrap_or_default();
-                fields.insert("mode".to_string(), json!(outcome.task.mode));
+                fields.insert(
+                    "mode".to_string(),
+                    outcome
+                        .recorded_receipt
+                        .as_ref()
+                        .and_then(|r| r.get("mode"))
+                        .cloned()
+                        .unwrap_or_else(|| json!(outcome.task.mode)),
+                );
                 Ok((
                     status,
                     envelope("work_plan_decided", correlation, Value::Object(fields)),
@@ -2029,7 +2049,17 @@ impl WorkApiService {
         self.external_guard(&command.project_alias, command.task_id)?;
         if let Some(native) = &self.native_control {
             if let Some(receipt) = native.review_decide(command)? {
-                return Ok((202, envelope("work_review_decided", correlation, receipt)));
+                let mut value = recorded_receipt(
+                    &receipt,
+                    (&command.project_alias, command.task_id),
+                    Some(command.expected_revision),
+                    false,
+                )?;
+                append_receipt_extras(&mut value, &receipt, &["review_id", "repair_task_id"])?;
+                if value["review_id"].as_str().is_none() {
+                    return Err(unavailable());
+                }
+                return Ok((202, envelope("work_review_decided", correlation, value)));
             }
         }
         let decision = match command.decision.as_str() {
@@ -2068,15 +2098,34 @@ impl WorkApiService {
         )? {
             WorkResponse::Control(outcome) => Ok((
                 202,
-                envelope(
-                    "work_review_decided",
-                    correlation,
-                    receipt_dict(&outcome, command.expected_revision, false),
-                ),
+                envelope("work_review_decided", correlation, {
+                    let mut value = receipt_with_extras(
+                        &outcome,
+                        command.expected_revision,
+                        &["review_id", "repair_task_id"],
+                    )?;
+                    if value.get("review_id").is_none() {
+                        value["review_id"] = json!(command.review_id.to_string());
+                    }
+                    value
+                }),
             )),
             _ => Err(unavailable()),
         }
     }
+}
+
+fn submitted_response(
+    correlation: &str,
+    outcome: &ControlOutcome,
+) -> Result<(u16, Value), WorkError> {
+    let task = &outcome.task;
+    let receipt = if let Some(receipt) = &outcome.recorded_receipt {
+        recorded_receipt(receipt, (&task.project_alias, task.task_id), None, true)?
+    } else {
+        json!({"task_id":task.task_id.to_string(),"project_alias":task.project_alias,"revision":task.revision,"status":task.status,"recipe_digest":task.recipe_digest})
+    };
+    Ok((202, envelope("work_submitted", correlation, receipt)))
 }
 
 fn list_summary_dict(summary: &TaskSummary) -> Value {
@@ -2147,7 +2196,96 @@ fn event_dict(event: &EventView) -> Value {
 
 /// The common decision-receipt projection: Python's receipts name
 /// the caller's expected revision "base_revision".
-fn receipt_dict(outcome: &ControlOutcome, expected_revision: i64, with_recipe: bool) -> Value {
+fn recorded_receipt(
+    receipt: &Value,
+    identity: (&str, Uuid),
+    expected: Option<i64>,
+    with_recipe: bool,
+) -> Result<Value, WorkError> {
+    let valid = receipt["project_alias"].as_str() == Some(identity.0)
+        && receipt["task_id"].as_str() == Some(identity.1.to_string().as_str())
+        && receipt["revision"]
+            .as_i64()
+            .is_some_and(|n| (1..=MAX_REVISION).contains(&n))
+        && receipt["status"].as_str().is_some_and(|status| {
+            matches!(
+                status,
+                "queued"
+                    | "running"
+                    | "cancel_requested"
+                    | "awaiting_review"
+                    | "completed"
+                    | "failed"
+                    | "cancelled"
+                    | "needs_reconcile"
+                    | "quota_blocked"
+                    | "blocked_auth"
+                    | "blocked_permission"
+            )
+        })
+        && expected.is_none_or(|expected| receipt["base_revision"].as_i64() == Some(expected))
+        && (!with_recipe
+            || receipt["recipe_digest"]
+                .as_str()
+                .is_some_and(|digest| is_hex(digest, 64)));
+    if !valid {
+        return Err(unavailable());
+    }
+    let mut keys = vec!["project_alias", "task_id", "revision", "status"];
+    if expected.is_some() {
+        keys.push("base_revision");
+    }
+    if with_recipe {
+        keys.push("recipe_digest");
+    }
+    Ok(restrict_receipt(receipt, &keys))
+}
+
+fn append_receipt_extras(
+    result: &mut Value,
+    receipt: &Value,
+    extras: &[&str],
+) -> Result<(), WorkError> {
+    for key in extras {
+        if let Some(value) = receipt.get(*key) {
+            if !value.is_null()
+                && !value
+                    .as_str()
+                    .is_some_and(|s| Uuid::parse_str(s).is_ok_and(|id| id.to_string() == s))
+            {
+                return Err(unavailable());
+            }
+            result[*key] = value.clone();
+        }
+    }
+    Ok(())
+}
+
+fn receipt_with_extras(
+    outcome: &ControlOutcome,
+    expected: i64,
+    extras: &[&str],
+) -> Result<Value, WorkError> {
+    let mut result = receipt_dict(outcome, expected, false)?;
+    if let Some(receipt) = &outcome.recorded_receipt {
+        append_receipt_extras(&mut result, receipt, extras)?;
+    }
+    Ok(result)
+}
+
+fn receipt_dict(
+    outcome: &ControlOutcome,
+    expected_revision: i64,
+    with_recipe: bool,
+) -> Result<Value, WorkError> {
+    if let Some(receipt) = &outcome.recorded_receipt {
+        return recorded_receipt(
+            receipt,
+            (&outcome.task.project_alias, outcome.task.task_id),
+            Some(expected_revision),
+            with_recipe,
+        );
+    }
     let task = &outcome.task;
     let mut map = Map::new();
     map.insert("project_alias".to_string(), json!(task.project_alias));
@@ -2158,7 +2296,7 @@ fn receipt_dict(outcome: &ControlOutcome, expected_revision: i64, with_recipe: b
     if with_recipe {
         map.insert("recipe_digest".to_string(), json!(task.recipe_digest));
     }
-    Value::Object(map)
+    Ok(Value::Object(map))
 }
 
 fn restrict_receipt(receipt: &Value, keys: &[&str]) -> Value {
@@ -2232,6 +2370,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn durable_receipt_projection_preserves_original_values_and_private_audit() {
+        let mut outcome = ControlOutcome {
+            receipt_id: Uuid::new_v4(),
+            task: summary(),
+            replayed: true,
+            recorded_receipt: None,
+        };
+        outcome.task.status = "completed".into();
+        outcome.task.revision = 8;
+        let receipt = json!({"project_alias":"homelab","task_id":outcome.task.task_id.to_string(),"base_revision":1,"revision":2,"status":"queued","recipe_digest":"b".repeat(64),"review_id":Uuid::new_v4().to_string(),"actor":{"kind":"operator","id":"private"},"source_proof":{"private":"retained"}});
+        outcome.recorded_receipt = Some(receipt.clone());
+        let projected = receipt_dict(&outcome, 1, true).unwrap();
+        assert_eq!(projected["revision"], 2);
+        assert_eq!(projected["status"], "queued");
+        for private in ["actor", "source_proof", "review_id"] {
+            assert!(projected.get(private).is_none());
+        }
+        let reviewed = receipt_with_extras(&outcome, 1, &["review_id"]).unwrap();
+        assert_eq!(reviewed["review_id"], receipt["review_id"]);
+        for key in [
+            "task_id",
+            "project_alias",
+            "base_revision",
+            "revision",
+            "status",
+            "recipe_digest",
+        ] {
+            let mut altered = receipt.clone();
+            altered[key] = json!("invalid-bound-field");
+            outcome.recorded_receipt = Some(altered);
+            assert!(receipt_dict(&outcome, 1, true).is_err(), "{key}");
+        }
+    }
+
     struct StubPorts;
 
     impl WorkReadPort for StubPorts {
@@ -2300,6 +2473,7 @@ mod tests {
                 receipt_id: Uuid::from_u128(9),
                 task: summary(),
                 replayed: false,
+                recorded_receipt: None,
             })
         }
         fn cancel(&self, _request: &CancelRequest) -> Result<ControlOutcome, WorkError> {
