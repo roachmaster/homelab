@@ -31,6 +31,34 @@ pub fn valid_work_hex(value: &str, len: usize) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
+fn valid_gate_reference(value: &str) -> bool {
+    if valid_work_hex(value, 64) {
+        return true;
+    }
+    let Some((profile, scope)) = value.split_once(':') else {
+        return false;
+    };
+    if !matches!(
+        profile,
+        "forge-sdlc-jenkins-v1"
+            | "forge-sdlc-jenkins-v2"
+            | "forge-sdlc-jenkins-v3"
+            | "forge-sdlc-jenkins-v4"
+    ) {
+        return false;
+    }
+    if matches!(scope, "main" | "detached") {
+        return true;
+    }
+    let Some(slug) = scope.strip_prefix("branch/") else {
+        return false;
+    };
+    let alnum = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    (1..=58).contains(&slug.len())
+        && slug.bytes().next().is_some_and(alnum)
+        && slug.bytes().next_back().is_some_and(alnum)
+        && slug.bytes().all(|b| alnum(b) || b"._-".contains(&b))
+}
 pub fn valid_work_label(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.len() <= max && !value.chars().any(char::is_control)
 }
@@ -456,7 +484,7 @@ impl WorkReviewSummary {
             && self
                 .gate_manifest_sha256
                 .as_deref()
-                .is_none_or(|v| valid_work_hex(v, 64))
+                .is_none_or(valid_gate_reference)
             && self
                 .latest_check_status
                 .as_deref()
