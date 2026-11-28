@@ -22,7 +22,7 @@ ALLOWED = {
     "forge-core": set(),
     "forge-foundation": {("forge-core", "normal")},
     "forge-scene": {("forge-template", "normal")} | {(name, "dev") for name in
-                    ("forge-core", "forge-foundation", "forge-jobs", "forge-mcp", "forge-mcp-host", "forge-work-worker", "forge-work", "forge-work-publication")},
+                    ("forge-core", "forge-foundation", "forge-jobs", "forge-local", "forge-mcp", "forge-mcp-host", "forge-system", "forge-work-worker", "forge-work", "forge-work-publication")},
     "forge-agent": {(name,"normal") for name in ("forge-core","forge-system","forge-ide","forge-remote","forge-remote-https")},
     "forge-remote": {("forge-core", "normal")},
     "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-core", "forge-ide")} | {("forge-system", "dev"), ("forge-core", "dev")},
