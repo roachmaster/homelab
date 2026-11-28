@@ -2392,35 +2392,65 @@ pub struct WorkflowCoordinator {
     pub store: Arc<WorkflowStore>,
     pub worker_id: String,
     pub interval_seconds: u64,
-    external_maintenance: RefCell<Option<Box<dyn RunOnceHook>>>,
-    external_workflow: RefCell<Option<Box<dyn ExternalWorkflowHook>>>,
-    delivery_repair: RefCell<Option<Box<dyn ExternalWorkflowHook>>>,
+    external_maintenance: Box<dyn RunOnceHook>,
+    external_workflow: Box<dyn ExternalWorkflowHook>,
+    delivery_repair: Box<dyn ExternalWorkflowHook>,
     next_external: RefCell<f64>,
 }
 
+/// The coordinator loop's optional passes, bound at construction.
+/// `CoordinatorHooks::default()` selects none of them.
+pub struct CoordinatorHooks {
+    pub external_maintenance: Box<dyn RunOnceHook>,
+    pub external_workflow: Box<dyn ExternalWorkflowHook>,
+    pub delivery_repair: Box<dyn ExternalWorkflowHook>,
+}
+
+impl Default for CoordinatorHooks {
+    fn default() -> Self {
+        CoordinatorHooks {
+            external_maintenance: Box::new(NoMaintenance),
+            external_workflow: Box::new(NoExternalPass),
+            delivery_repair: Box::new(NoExternalPass),
+        }
+    }
+}
+
+/// Null-object maintenance pass: nothing to maintain.
+pub struct NoMaintenance;
+
+impl RunOnceHook for NoMaintenance {
+    fn run_once(&self) -> Result<(), WorkError> {
+        Ok(())
+    }
+}
+
+/// Null-object external pass: never changes anything, exactly the
+/// unselected external workflow / delivery repair pass.
+pub struct NoExternalPass;
+
+impl ExternalWorkflowHook for NoExternalPass {
+    fn run_once(&self) -> Result<bool, WorkError> {
+        Ok(false)
+    }
+}
+
 impl WorkflowCoordinator {
-    pub fn new(store: Arc<WorkflowStore>, worker_id: &str, interval_seconds: u64) -> Self {
+    pub fn new(
+        store: Arc<WorkflowStore>,
+        worker_id: &str,
+        interval_seconds: u64,
+        hooks: CoordinatorHooks,
+    ) -> Self {
         WorkflowCoordinator {
             store,
             worker_id: worker_id.to_string(),
             interval_seconds,
-            external_maintenance: RefCell::new(None),
-            external_workflow: RefCell::new(None),
-            delivery_repair: RefCell::new(None),
+            external_maintenance: hooks.external_maintenance,
+            external_workflow: hooks.external_workflow,
+            delivery_repair: hooks.delivery_repair,
             next_external: RefCell::new(f64::NEG_INFINITY),
         }
-    }
-
-    pub fn set_external_maintenance(&self, hook: Box<dyn RunOnceHook>) {
-        *self.external_maintenance.borrow_mut() = Some(hook);
-    }
-
-    pub fn set_external_workflow(&self, hook: Box<dyn ExternalWorkflowHook>) {
-        *self.external_workflow.borrow_mut() = Some(hook);
-    }
-
-    pub fn set_delivery_repair(&self, hook: Box<dyn ExternalWorkflowHook>) {
-        *self.delivery_repair.borrow_mut() = Some(hook);
     }
 
     /// run_once: external maintenance on its 30s cadence, the
@@ -2428,24 +2458,16 @@ impl WorkflowCoordinator {
     /// repair. Returns whether anything changed. `now` is the
     /// caller's monotonic clock (seconds).
     pub fn run_once(&self, now: f64) -> Result<bool, WorkError> {
-        if let Some(hook) = self.external_maintenance.borrow().as_ref() {
-            if now >= *self.next_external.borrow() {
-                *self.next_external.borrow_mut() = now + 30.0;
-                hook.run_once()?;
-            }
+        if now >= *self.next_external.borrow() {
+            *self.next_external.borrow_mut() = now + 30.0;
+            self.external_maintenance.run_once()?;
         }
-        let external_changed = match self.external_workflow.borrow().as_ref() {
-            Some(hook) => hook.run_once()?,
-            None => false,
-        };
+        let external_changed = self.external_workflow.run_once()?;
         let job = self.store.claim(&self.worker_id)?;
         if let Some(job) = &job {
             self.store.process(job)?;
         }
-        let repaired = match self.delivery_repair.borrow().as_ref() {
-            Some(hook) => hook.run_once()?,
-            None => false,
-        };
+        let repaired = self.delivery_repair.run_once()?;
         Ok(job.is_some() || external_changed || repaired)
     }
 

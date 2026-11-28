@@ -17,7 +17,7 @@ use crate::context_recovery::{FeedbackRecoveryProvider, PeerFeedbackRecoveryProv
 use crate::reviewer_correction::ReviewerCorrectionProvider;
 use crate::superseding_review::SupersedingReviewProvider;
 use crate::workflow::{
-    CoordinatorConfig, ExecutionPolicyHook, ExternalWorkflowHook, RunOnceHook,
+    CoordinatorConfig, CoordinatorHooks, ExecutionPolicyHook, ExternalWorkflowHook, RunOnceHook,
     WorkflowCoordinator, WorkflowDecisionPort, WorkflowStore,
 };
 use crate::workflow_policy::WorkflowCatalog;
@@ -53,18 +53,14 @@ impl WorkflowStoreFactory {
             self.native_policy_matches,
             self.retry_events_enabled,
         ));
-        store.set_reviewer_correction(Box::new(ReviewerCorrectionProvider::new(
-            Arc::clone(&store),
-        )));
-        store.set_feedback_recovery(Box::new(FeedbackRecoveryProvider::new(Arc::clone(
+        store.set_reviewer_correction(Box::new(ReviewerCorrectionProvider::new(Arc::clone(
             &store,
         ))));
-        store.set_peer_feedback_recovery(Box::new(PeerFeedbackRecoveryProvider::new(
-            Arc::clone(&store),
-        )));
-        store.set_superseding_review(Box::new(SupersedingReviewProvider::new(Arc::clone(
+        store.set_feedback_recovery(Box::new(FeedbackRecoveryProvider::new(Arc::clone(&store))));
+        store.set_peer_feedback_recovery(Box::new(PeerFeedbackRecoveryProvider::new(Arc::clone(
             &store,
         ))));
+        store.set_superseding_review(Box::new(SupersedingReviewProvider::new(Arc::clone(&store))));
         if let Some(hook) = self.execution_policy {
             store.set_execution_policy(hook);
         }
@@ -74,7 +70,8 @@ impl WorkflowStoreFactory {
 
 /// Builds the WorkflowCoordinator around a composed store
 /// (WorkflowCoordinatorFactory): the external maintenance, external
-/// workflow and delivery repair hooks are installed when supplied.
+/// workflow and delivery repair hooks are bound when supplied and
+/// otherwise resolve to their null objects at create().
 pub struct WorkflowCoordinatorFactory {
     pub store: Arc<WorkflowStore>,
     pub worker_id: String,
@@ -86,17 +83,16 @@ pub struct WorkflowCoordinatorFactory {
 
 impl WorkflowCoordinatorFactory {
     pub fn create(self) -> WorkflowCoordinator {
-        let coordinator = WorkflowCoordinator::new(self.store, &self.worker_id, self.interval_seconds);
-        if let Some(hook) = self.external_maintenance {
-            coordinator.set_external_maintenance(hook);
-        }
-        if let Some(hook) = self.external_workflow {
-            coordinator.set_external_workflow(hook);
-        }
-        if let Some(hook) = self.delivery_repair {
-            coordinator.set_delivery_repair(hook);
-        }
-        coordinator
+        // Unselected passes resolve to their null objects.
+        let defaults = CoordinatorHooks::default();
+        let hooks = CoordinatorHooks {
+            external_maintenance: self
+                .external_maintenance
+                .unwrap_or(defaults.external_maintenance),
+            external_workflow: self.external_workflow.unwrap_or(defaults.external_workflow),
+            delivery_repair: self.delivery_repair.unwrap_or(defaults.delivery_repair),
+        };
+        WorkflowCoordinator::new(self.store, &self.worker_id, self.interval_seconds, hooks)
     }
 }
 
@@ -109,7 +105,7 @@ mod tests {
     use crate::work_requests::ResumeRequest;
     use crate::workflow_policy::CatalogProfile;
     use crate::workflow_tx::WorkflowTx;
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
     use uuid::Uuid;
 
     struct NoCatalog;
@@ -294,5 +290,64 @@ mod tests {
         .create();
         assert_eq!(coordinator.worker_id, "worker-1");
         assert_eq!(coordinator.interval_seconds, 5);
+    }
+
+    struct CountingPass(std::rc::Rc<std::cell::Cell<usize>>);
+    impl RunOnceHook for CountingPass {
+        fn run_once(&self) -> Result<(), WorkError> {
+            self.0.set(self.0.get() + 1);
+            Ok(())
+        }
+    }
+
+    fn store() -> Arc<WorkflowStore> {
+        WorkflowStoreFactory {
+            config: config(),
+            catalog: Box::new(NoCatalog),
+            tx_factory: Box::new(NoTx),
+            decisions: Box::new(NoDecisions),
+            native_policy_matches: Box::new(|_, _, _| false),
+            retry_events_enabled: true,
+            execution_policy: None,
+        }
+        .create()
+    }
+
+    #[test]
+    fn unselected_passes_resolve_to_null_objects() {
+        assert!(crate::workflow::NoMaintenance.run_once().is_ok());
+        assert!(!crate::workflow::NoExternalPass.run_once().unwrap());
+        let coordinator = WorkflowCoordinatorFactory {
+            store: store(),
+            worker_id: "worker-1".to_string(),
+            interval_seconds: 5,
+            external_maintenance: None,
+            external_workflow: None,
+            delivery_repair: None,
+        }
+        .create();
+        assert!(
+            !coordinator.run_once(0.0).unwrap(),
+            "nothing selected, nothing changed"
+        );
+    }
+
+    #[test]
+    fn a_bound_maintenance_pass_keeps_its_thirty_second_cadence() {
+        let runs = std::rc::Rc::new(std::cell::Cell::new(0));
+        let coordinator = WorkflowCoordinatorFactory {
+            store: store(),
+            worker_id: "worker-1".to_string(),
+            interval_seconds: 5,
+            external_maintenance: Some(Box::new(CountingPass(std::rc::Rc::clone(&runs)))),
+            external_workflow: None,
+            delivery_repair: None,
+        }
+        .create();
+        coordinator.run_once(100.0).unwrap();
+        coordinator.run_once(110.0).unwrap();
+        assert_eq!(runs.get(), 1, "second pass inside 30s is skipped");
+        coordinator.run_once(130.0).unwrap();
+        assert_eq!(runs.get(), 2);
     }
 }
