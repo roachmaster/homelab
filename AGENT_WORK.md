@@ -56,6 +56,34 @@ before selection. The Rust runtime does not yet implement this new Python-only
 selector and must not be selected with it. This isolated commit is not pushed or
 deployed; the orchestrator owns incoming-main reconciliation and qualification.
 
+## Bounded eager release turns — 2026-11-28
+
+A pending release requeues after five seconds. The publisher's required yield
+followed by its idle five-second wait can repeatedly choose the same oldest
+unresolved release before newer verified work. A ready release-only adapter now
+runs at most eight sequential normal release turns before yielding; it stops
+on idle or cancellation and propagates errors. Each ordinary worker turn ends
+before the next lease is acquired. Source observation and its idle policy are
+unchanged; release-disabled publication constructs no release adapter/provider.
+
+A shared factory-owned stop event covers the selected worker, adapter and host.
+No claim/finish, actor, cleanup, journal, retry budget, scope or SQL contract is
+changed. Historical unresolved rollback remains pending; no terminal cleanup
+or supersession is invented. The eight-turn bound handles the measured one
+poison/three stale/fresh queue, including stale turns longer than five seconds;
+it is not a global fairness guarantee for an arbitrarily large poison backlog.
+The independent unstarted-supersession SQL-port test does not claim the existing
+ReleaseWorker skips Root reconciliation for those rows. That remains separate.
+
+Tests include deterministic old starvation versus new bounded progress, normal
+ReleaseWorker plus memory store, real disposable PostgreSQL claim/finish ports,
+shared cancellation, idle/exception bounds and ready factory selection. Only
+the current reviewed publication-context SHA is renewed for this composition;
+historical literal maps and authority AST pins remain unchanged. Evidence:
+/mnt/data/homelab-build/codex-release-fairness-20261128-evidence/.
+Private four-row release isolation remains a separately reviewed operator;
+no live service, claim, journal, SQL or publication action was executed here.
+
 ## Disposable database scope — 2026-11-28
 
 All disposable PostgreSQL tests must honor the shared `PG16_AVAILABLE` selection,

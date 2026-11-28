@@ -1202,7 +1202,7 @@ PG_PROXY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_work_event_attribution.py': 'e04fac9c6f834da5b80b2c9b5bff89cee26a4ebb9c7054af7703a40153486f72',
     'deploy/mission-control/agent-runner/work_owner_control.py': '38a3edda0caec8f079deb6533592f48786254038f3016423754b15ff652185a0',
     'deploy/mission-control/agent-runner/work_owner_reverification.py': '28c6f3314a4f93ab007299cca3234452bc84f0de72022c9726506930b3bd11b6',
-    'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
+    'deploy/mission-control/agent-runner/work_publication.py': 'a4a860ff776c5b10de883be2e496c13fc0231057cc5024db58cdc928238a4f55',
     'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
     'deploy/mission-control/agent-runner/work_worker.py': 'd2d3c638ec1ebc4dbd110313a04e2c906b93be0825cc570b5c87622805ac0090',
     'deploy/mission-control/agent-runner/work_worker_config.py': '9b35997fbd2e78ecfe0cddf15bbaec7dd4e2eb63453d780edba02cd3592db70e',
