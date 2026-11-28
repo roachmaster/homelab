@@ -232,6 +232,29 @@ pub struct PublicationWorker {
     pub checks: Box<dyn ChecksPort>,
     pub pull_requests: GitHubPullRequestClient,
     pub candidates: ReviewedCandidateProvider,
+    reviewer: Option<ReviewWorker>,
+    merger: Option<MergeWorker>,
+    native_ci: Option<SharedNativeCi>,
+    listener: Option<Box<dyn PublicationListenerPort>>,
+    post_merge: Option<PostMergeWorker>,
+    source_observer: Option<SourceObserver>,
+    release: Option<ReleaseWorker>,
+    jenkins_drain: Option<IntentDrain>,
+    branch_provider: Box<dyn BranchProviderObject>,
+    pub stop: Arc<AtomicBool>,
+    automation: Vec<&'static str>,
+    automation_index: usize,
+    yield_post_merge: bool,
+}
+
+/// The publication worker's collaborators, all bound at construction.
+///
+/// The optional sub-workers are capability selections: each is present
+/// only when its config flag enables it, and the worker's automation
+/// rotation is derived from which are present, so they stay `Option`.
+/// The branch port is never absent: `SharedAgentBranches` stands in
+/// for the shared branch policy.
+pub struct PublicationCollaborators {
     pub reviewer: Option<ReviewWorker>,
     pub merger: Option<MergeWorker>,
     pub native_ci: Option<SharedNativeCi>,
@@ -240,12 +263,27 @@ pub struct PublicationWorker {
     pub source_observer: Option<SourceObserver>,
     pub release: Option<ReleaseWorker>,
     pub jenkins_drain: Option<IntentDrain>,
-    /// `SharedAgentBranches` unless persistent branches are selected.
     pub branch_provider: Box<dyn BranchProviderObject>,
     pub stop: Arc<AtomicBool>,
-    automation: Vec<&'static str>,
-    automation_index: usize,
-    yield_post_merge: bool,
+}
+
+impl Default for PublicationCollaborators {
+    /// Nothing selected: no sub-workers, shared branches, a fresh stop
+    /// flag (what `PublicationWorker::new` used to start from).
+    fn default() -> Self {
+        PublicationCollaborators {
+            reviewer: None,
+            merger: None,
+            native_ci: None,
+            listener: None,
+            post_merge: None,
+            source_observer: None,
+            release: None,
+            jenkins_drain: None,
+            branch_provider: Box::new(crate::native_jenkins::SharedAgentBranches),
+            stop: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 impl PublicationWorker {
@@ -258,8 +296,9 @@ impl PublicationWorker {
         checks: Box<dyn ChecksPort>,
         pull_requests: GitHubPullRequestClient,
         candidates: ReviewedCandidateProvider,
+        collaborators: PublicationCollaborators,
     ) -> Self {
-        PublicationWorker {
+        let mut worker = PublicationWorker {
             config,
             store,
             snapshots,
@@ -267,23 +306,25 @@ impl PublicationWorker {
             checks,
             pull_requests,
             candidates,
-            reviewer: None,
-            merger: None,
-            native_ci: None,
-            listener: None,
-            post_merge: None,
-            source_observer: None,
-            release: None,
-            jenkins_drain: None,
-            branch_provider: Box::new(crate::native_jenkins::SharedAgentBranches),
-            stop: Arc::new(AtomicBool::new(false)),
+            reviewer: collaborators.reviewer,
+            merger: collaborators.merger,
+            native_ci: collaborators.native_ci,
+            listener: collaborators.listener,
+            post_merge: collaborators.post_merge,
+            source_observer: collaborators.source_observer,
+            release: collaborators.release,
+            jenkins_drain: collaborators.jenkins_drain,
+            branch_provider: collaborators.branch_provider,
+            stop: collaborators.stop,
             automation: Vec::new(),
             automation_index: 0,
             yield_post_merge: false,
-        }
+        };
+        worker.refresh_automation();
+        worker
     }
 
-    pub fn refresh_automation(&mut self) {
+    fn refresh_automation(&mut self) {
         let mut automation = Vec::new();
         if self.post_merge.is_some() {
             automation.push("post_merge");

@@ -65,7 +65,7 @@ use forge_work_publication::native_jenkins::{
 use forge_work_publication::native_repair::BranchFirstRepairProvider;
 use forge_work_publication::post_merge::PostMergeWorker;
 use forge_work_publication::post_merge_provider::PostMergeProviderFactory;
-use forge_work_publication::publication::PublicationWorker;
+use forge_work_publication::publication::{PublicationCollaborators, PublicationWorker};
 use forge_work_publication::publication_checks::IsolatedCheckRunner;
 use forge_work_publication::publication_clients::ProviderError;
 use forge_work_publication::publication_clients::{
@@ -777,27 +777,31 @@ pub fn create_publication_worker(
         release = Some(worker);
     }
 
-    let mut worker = PublicationWorker::new(
+    // Same fallible order as before: candidates, then the branch
+    // provider (which opens a session), then the listener.
+    let candidates = make_candidates(config)?;
+    let collaborators = PublicationCollaborators {
+        reviewer: Some(reviewer),
+        merger,
+        native_ci: native_shared,
+        post_merge,
+        source_observer,
+        release,
+        jenkins_drain,
+        branch_provider: select_branch_provider(config, &pg)?,
+        stop,
+        listener: Some(Box::new(RetryingPublicationListener::new(pg))),
+    };
+    Ok(PublicationWorker::new(
         config.clone(),
         store,
         Box::new(snapshots),
         git,
         worker_checks,
         pulls,
-        make_candidates(config)?,
-    );
-    worker.reviewer = Some(reviewer);
-    worker.merger = merger;
-    worker.native_ci = native_shared;
-    worker.post_merge = post_merge;
-    worker.source_observer = source_observer;
-    worker.release = release;
-    worker.jenkins_drain = jenkins_drain;
-    worker.branch_provider = select_branch_provider(config, &pg)?;
-    worker.stop = stop;
-    worker.listener = Some(Box::new(RetryingPublicationListener::new(pg)));
-    worker.refresh_automation();
-    Ok(worker)
+        candidates,
+        collaborators,
+    ))
 }
 
 /// The publication host's config loader (work_publication_config's
