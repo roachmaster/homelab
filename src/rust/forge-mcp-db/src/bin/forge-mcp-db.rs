@@ -9,7 +9,7 @@ use forge_mcp_db::auth::{BearerTokenAuth, FailureLimiter};
 use forge_mcp_db::backend::Backend;
 use forge_mcp_db::config::load_config;
 use forge_mcp_db::oauth::{DualAuth, OAuthServer};
-use forge_mcp_db::presence::create_provider;
+use forge_mcp_db::presence::{create_provider, NoPresence, PresencePort};
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -44,8 +44,9 @@ fn main() {
         }
     };
     // build_app()
-    let presence = match create_provider(&config.presence) {
-        Ok(presence) => presence.map(Arc::new),
+    let presence: Arc<dyn PresencePort> = match create_provider(&config.presence) {
+        Ok(Some(presence)) => Arc::new(presence),
+        Ok(None) => Arc::new(NoPresence),
         Err(error) => {
             eprintln!("presence unavailable: {error}");
             std::process::exit(2);
@@ -81,11 +82,15 @@ fn main() {
         rate.lockout_seconds,
         rate.global_failures_per_minute,
     ));
-    let backend = Backend::new(config.dsn.clone(), config.statement_timeout_ms);
-    let mut app = McpApp::new(config.clone(), auth, backend, limiter);
-    app.presence = presence;
-    app.oauth = oauth;
-    let app = Arc::new(app);
+    let backend = Arc::new(Backend::new(config.dsn.clone(), config.statement_timeout_ms));
+    let app = Arc::new(McpApp::new(
+        config.clone(),
+        auth,
+        backend,
+        limiter,
+        presence,
+        oauth,
+    ));
     if let Some(error) = app.auth.error() {
         eprintln!("token file problem: {error}");
         if check_config {

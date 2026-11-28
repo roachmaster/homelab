@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::auth::{FailureLimiter, Principal};
-use crate::backend::{Backend, Cell, Param, ToolError};
+use crate::backend::{Cell, Param, QueryBackend, ToolError};
 use crate::config::Config;
 use crate::sql_guard::{check_read_only, first_word, strip_literals, GuardError};
 use crate::util::{epoch_now, hmac_sha256, sha256_hex};
@@ -256,13 +256,13 @@ fn is_falsy(value: &Value) -> bool {
 pub struct McpApp {
     pub config: Arc<Config>,
     pub auth: Arc<dyn Authenticator>,
-    pub backend: Backend,
+    pub backend: Arc<dyn QueryBackend>,
     pub limiter: Arc<FailureLimiter>,
     pub login_limiter: Arc<FailureLimiter>,
     slots: Slots,
     cursor_key: [u8; 32],
-    /// Presence provider; wired in the presence increment.
-    pub presence: Option<Arc<crate::presence::PresenceProvider>>,
+    /// Connection presence; `NoPresence` when presence is disabled.
+    pub presence: Arc<dyn crate::presence::PresencePort>,
     /// OAuth server; None when OAuth is disabled or failed to open.
     pub oauth: Option<Arc<crate::oauth::OAuthServer>>,
 }
@@ -272,8 +272,10 @@ impl McpApp {
     pub fn new(
         config: Arc<Config>,
         auth: Arc<dyn Authenticator>,
-        backend: Backend,
+        backend: Arc<dyn QueryBackend>,
         limiter: Arc<FailureLimiter>,
+        presence: Arc<dyn crate::presence::PresencePort>,
+        oauth: Option<Arc<crate::oauth::OAuthServer>>,
     ) -> Self {
         let login = &config.oauth.login_rate_limit;
         McpApp {
@@ -289,8 +291,8 @@ impl McpApp {
             auth,
             backend,
             limiter,
-            presence: None,
-            oauth: None,
+            presence,
+            oauth,
         }
     }
 
@@ -352,11 +354,7 @@ impl McpApp {
             "ping" => Some(result_response(request_id, json!({}))),
             "tools/list" => {
                 let mut tools = tools_json();
-                if self
-                    .presence
-                    .as_ref()
-                    .is_some_and(|presence| presence.is_mapped(Some(principal)))
-                {
+                if self.presence.offers_heartbeat(principal) {
                     tools
                         .as_array_mut()
                         .unwrap()
@@ -445,10 +443,7 @@ impl McpApp {
         if arguments.as_object().is_some_and(|object| !object.is_empty()) {
             return Err("heartbeat accepts only an empty arguments object".to_string());
         }
-        let Some(presence) = &self.presence else {
-            return Err("connection presence is not enabled".to_string());
-        };
-        let result = presence.heartbeat(principal).map_err(|error| error.0)?;
+        let result = self.presence.heartbeat(principal)?;
         Ok(json!({
             "content": [{"type": "text", "text": serde_json::to_string(&result).unwrap()}],
             "structuredContent": result,

@@ -305,32 +305,12 @@ impl Conn {
             self.send_json(400, Some(&json!({"error": "unexpected_query"})), &[]);
             return;
         }
-        let Some(presence) = &self.app.presence else {
-            self.send_json(503, Some(&json!({"error": "presence_unavailable"})), &[]);
-            return;
-        };
-        let key = format!("presence-reader:{}", self.peer.ip());
-        let wait = self.app.limiter.retry_after(&key);
-        if wait > 0 {
-            self.send_json(
-                429,
-                Some(&json!({"error": "too_many_failed_attempts"})),
-                &[("Retry-After", wait.to_string())],
-            );
-            return;
-        }
-        if !presence.reader.authenticate(&self.headers) {
-            self.app.limiter.record_failure(&key);
-            self.send_json(401, Some(&json!({"error": "invalid_reader_token"})), &[]);
-            return;
-        }
-        self.app.limiter.record_success(&key);
-        match presence.snapshot() {
-            Ok(result) => self.send_json(200, Some(&result), &[]),
-            Err(_) => {
-                self.send_json(503, Some(&json!({"error": "presence_unavailable"})), &[])
-            }
-        }
+        let reply = self
+            .app
+            .presence
+            .read(&self.headers, &self.app.limiter, self.peer.ip());
+        let headers: Vec<(&str, String)> = reply.headers.clone();
+        self.send_json(reply.status, Some(&reply.body), &headers);
     }
 
     fn dispatch(&mut self) {
