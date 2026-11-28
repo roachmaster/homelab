@@ -260,6 +260,8 @@ exploration in the QA skill. [Pinned sources, changes and licenses](docs/design/
 explain the adaptation to Forge's coding philosophy. No upstream suite, launcher,
 hook, MCP server or dependency is installed by these repository-local skills.
 
+See the [repository mantra](docs/MANTRA.md) for Forge's coding mottos.
+
 Examples: `Use $model-forge-module to explain the DSL and model a notifications capability.`
 
 `Use $design-forge-front-door to review a new destination or input adapter without adding per-task endpoints.`
