@@ -51,6 +51,7 @@ pub mod work_rows;
 pub mod work_store;
 pub mod worker;
 pub mod publication_composition;
+pub mod runner_composition;
 pub mod worker_composition;
 pub mod worker_adapter;
 pub mod worker_adapter_reconciler;
