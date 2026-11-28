@@ -1,3 +1,11 @@
+## Disposable database scope — 2026-11-28
+
+All disposable PostgreSQL tests must honor the shared `PG16_AVAILABLE` selection,
+including tests that create their own clusters. Branch backend checks set
+`FORGE_DISABLE_DISPOSABLE_POSTGRES=1` and must never start PostgreSQL. Main checks
+reject that disabled selection and require the complete database inventory with
+zero skips. Owning a private fixture does not exempt it from this scope contract.
+
 ## Runtime and rollout boundary — 2026-11-28
 
 The production runtime remains the Python API, native workers and publisher,
