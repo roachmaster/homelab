@@ -64,6 +64,7 @@ class DefectContractTest(unittest.TestCase):
         self.assertNotEqual(_submit_intent_digest(**args),_submit_intent_digest(**args,task_kind='defect',defect=defect()))
 
 
+@unittest.skipUnless(store_tests.PG16_AVAILABLE, 'disposable PostgreSQL unavailable or excluded')
 class DefectPersistenceTest(unittest.TestCase):
     setUpClass = classmethod(store_tests.WorkStorePostgresTest.setUpClass.__func__)
     setUp = store_tests.WorkStorePostgresTest.setUp

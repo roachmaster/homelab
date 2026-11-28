@@ -3075,3 +3075,9 @@ transport, production polling, database scope and CI gates are unchanged.
 Jenkins153 is superseded through its normal cancellation/cleanup port; its
 partial results do not qualify this successor. Evidence is retained privately
 under /mnt/data/homelab-build/codex-j153-latency-20261128/.
+
+The defect persistence fixture now uses the same PG16_AVAILABLE selection as
+the PostgreSQL setup it borrows. Branch selection passes five memory cases and
+excludes the one database case; normal main selection runs that real database
+case successfully. Jenkins154 was cancelled through its normal trusted cleanup
+port before qualifying the corrected successor. No database test is removed.
