@@ -1,3 +1,17 @@
+## Reviewed proxy context pin renewal — 2026-11-28
+
+Jenkins146 reproduced the exact PG proxy context test failure after the reviewed
+47938954 migration-stage correction. Seven management SQL files now use54/55
+instead of the stale52/53 proxy stage numbers. Their context pins now name the
+exact SQL bytes already reviewed and exercised by the20 real PostgreSQL checks.
+A Git-object comparison binds every renewed value directly to47938954. The
+context path set, historical migration pins and authority AST assertions retain
+their prior scope. All35 boundary tests and264 ci-preflight tests pass with
+zero skips using the validated incoming-lock Cargo cache and pinnedRust1.97.1.
+An AST comparison proves the boundary module changes only those seven literal
+values; all existing test methods and other pin maps remain identical. Private
+proof: /mnt/data/homelab-build/codex-proxy-pins-20261128-evidence/.
+
 ## Incoming Rust formatting checkpoint — 2026-11-28
 
 PR32 advanced main during the qualified ABI19/schema53 rollout. Its new Rust
