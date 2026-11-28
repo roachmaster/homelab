@@ -11,7 +11,7 @@
 //! `run()` and drives shutdown through the shared stop flag plus
 //! `close()`'s quiescence checks.
 
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

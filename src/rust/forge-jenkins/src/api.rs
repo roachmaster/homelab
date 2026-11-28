@@ -78,7 +78,13 @@ pub struct JenkinsDeliveriesList {
     pub limit: i64,
 }
 
+// Emit owns the event already validated under MAX_REQUEST_BYTES; keep the
+// existing public command constructors and payload ownership at this boundary.
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Preserve public owned validated command variants without boxing their payloads"
+)]
 pub enum JenkinsCommand {
     Emit(JenkinsEventEmit),
     List(JenkinsEventsList),
@@ -97,9 +103,7 @@ fn bad_request() -> JenkinsStoreError {
     rejected(400, "invalid_request")
 }
 
-fn require_object<'a>(
-    body: &'a Value,
-) -> Result<&'a serde_json::Map<String, Value>, JenkinsStoreError> {
+fn require_object(body: &Value) -> Result<&serde_json::Map<String, Value>, JenkinsStoreError> {
     body.as_object().ok_or_else(bad_request)
 }
 
@@ -539,18 +543,6 @@ pub fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::parse_jenkins_config;
-
-    fn config() -> JenkinsConfig {
-        parse_jenkins_config(&json!({
-            "owner": "leonardo",
-            "allowed_projects": ["homelab"],
-            "allowed_instances": {"primary": {"origin": "https://jenkins.example.com"}},
-            "allowed_jobs": {"homelab": ["forge-native-candidate"]}
-        }))
-        .expect("config")
-    }
-
     #[test]
     fn decode_emit_builds_a_validated_event() {
         let command = decode(

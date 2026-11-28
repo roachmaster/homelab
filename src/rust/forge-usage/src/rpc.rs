@@ -206,7 +206,6 @@ impl MetadataProcessConfig {
 /// rejected (the Python object_pairs_hook / parse_constant pair).
 pub fn parse_strict_json(bytes: &[u8]) -> Option<Value> {
     use serde::de::{Error as _, MapAccess, SeqAccess, Visitor};
-    use serde::Deserializer as _;
 
     struct StrictValue(Value);
 

@@ -3,7 +3,6 @@
 //! default execute (requires --execute), --native-only,
 //! --agent-restart-deferral-only.
 
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 

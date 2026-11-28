@@ -9,7 +9,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::provider::{UsageProvider, UsageProviderFactory};
-use crate::rpc::ProviderFailure;
 use crate::types::{
     exact, identifier, is_uuid36, validate_snapshot, InvalidUsage, UsageResult, MAX_PROVIDERS,
 };
@@ -327,8 +326,8 @@ impl UsageCollectorFactory {
             .clone()
             .ok_or_else(|| "Usage collector requires provider factories and store".to_string())?;
         let mut providers: Vec<Box<dyn UsageProvider>> = Vec::new();
-        let mut acquire = |factory: &UsageProviderFactory,
-                           providers: &mut Vec<Box<dyn UsageProvider>>|
+        let acquire = |factory: &UsageProviderFactory,
+                       providers: &mut Vec<Box<dyn UsageProvider>>|
          -> Result<(), String> {
             let provider = factory.create()?;
             if provider.config().alias != factory.config().alias {
@@ -403,6 +402,7 @@ pub fn read_hmac_key(path: &Path, euid: u32) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
     use crate::provider::{system_clock, UsageProviderConfig};
+    use crate::rpc::ProviderFailure;
     use serde_json::json;
     use std::sync::Mutex;
 

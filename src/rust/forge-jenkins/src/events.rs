@@ -338,9 +338,7 @@ fn parse_origin_parts(url: &str) -> Result<OriginParts, String> {
     if scheme != "https" && scheme != "http" {
         return Err("Jenkins URL must use HTTPS or explicit loopback HTTP".to_string());
     }
-    let authority_end = rest
-        .find(|ch| matches!(ch, '/' | '?' | '#'))
-        .unwrap_or(rest.len());
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..authority_end];
     if authority.contains('@') {
         return Err("Jenkins URL must not contain userinfo".to_string());
@@ -405,9 +403,7 @@ pub fn validate_origin(value: &str) -> Result<String, String> {
     let after_authority = value
         .split_once("://")
         .map(|(_, rest)| {
-            let end = rest
-                .find(|ch| matches!(ch, '/' | '?' | '#'))
-                .unwrap_or(rest.len());
+            let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
             &rest[end..]
         })
         .unwrap_or("");
@@ -500,7 +496,9 @@ fn parse_iso_epoch(value: &str) -> Option<(i64, u32)> {
     }
     let (time, offset_seconds) = if let Some(stripped) = time.strip_suffix('Z') {
         (stripped, 0i64)
-    } else if let Some(index) = time.rfind(['+', '-']) {
+    } else {
+        // Explicit offsets are required; a missing one remains rejected.
+        let index = time.rfind(['+', '-'])?;
         if index == 0 {
             return None;
         }
@@ -524,10 +522,6 @@ fn parse_iso_epoch(value: &str) -> Option<(i64, u32)> {
             }
         };
         (&time[..index], sign * (hours * 3600 + minutes * 60))
-    } else {
-        // No offset: Python's fromisoformat yields a naive
-        // datetime, which the caller rejects.
-        return None;
     };
     let (time_main, micros) = match time.split_once('.') {
         Some((main, fraction)) => {

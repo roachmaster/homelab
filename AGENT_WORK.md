@@ -1,3 +1,25 @@
+## Jenkins and usage lint qualification — 2026-11-28
+
+The incoming Rust Jenkins/usage ports failed the unchanged warnings-as-errors
+gate. Narrow corrections use equivalent character/Option/vector idioms, named
+factory/HTTP response/test-record aliases and test-scoped imports. The private
+usage snapshot helper groups its source/version provenance without changing any
+public provider call or snapshot field. Jenkins' private relay error removes an
+unused detail payload while retaining the same redacted invalid-request output.
+An unused test setup helper is removed; all test cases and assertions remain.
+
+The public owned JenkinsCommand variants retain their existing constructors and
+payload types. The coordinating agent reviewed the one declaration-scoped
+large_enum_variant expectation at that bounded decode boundary. No global lint
+allowance, threshold change, dependency, lockfile, SQL or other crate edit is
+included. Both packages pass full-feature/all-target Clippy with warnings denied
+and selected formatting. All86 full-feature unit/integration/documentation tests
+pass with zero ignored cases using the pinnedRust1.97.1 toolchain and the validated
+incoming-lock registry. The owned target cache is outside source; the warm source
+cache was copied without sharing writable files. Private evidence is under
+/mnt/data/homelab-build/codex-clippy-services-20261128-evidence/.
+Source publication and live operations remain with the orchestrator.
+
 ## Reviewed proxy context pin renewal — 2026-11-28
 
 Jenkins146 reproduced the exact PG proxy context test failure after the reviewed

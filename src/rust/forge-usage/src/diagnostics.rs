@@ -103,9 +103,7 @@ fn reset_parts(text: &str) -> Option<Vec<(i64, u8)>> {
     let mut search = 0;
     while search < bytes.len() {
         // Find the next "reset" at a word boundary.
-        let Some(found) = text[search..].find("reset") else {
-            return None;
-        };
+        let found = text[search..].find("reset")?;
         let start = search + found;
         search = start + 1;
         if start > 0 && is_word_char(bytes[start - 1]) {
@@ -115,7 +113,7 @@ fn reset_parts(text: &str) -> Option<Vec<(i64, u8)>> {
         if index < bytes.len() && bytes[index] == b's' {
             index += 1;
         }
-        let mut whitespace = |index: &mut usize| {
+        let whitespace = |index: &mut usize| {
             let begin = *index;
             while *index < bytes.len() && (bytes[*index] as char).is_whitespace() {
                 *index += 1;

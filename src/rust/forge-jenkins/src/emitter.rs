@@ -389,9 +389,11 @@ mod tests {
         .expect("event")
     }
 
+    type DispatchRequests = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+
     struct StubConnection {
         response: (i64, Vec<u8>),
-        seen: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+        seen: DispatchRequests,
     }
 
     impl DispatchConnection for StubConnection {

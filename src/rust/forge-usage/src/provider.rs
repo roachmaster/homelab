@@ -72,11 +72,15 @@ fn empty_allowance(state: &str, reason: Option<&str>) -> Value {
     Value::Object(object)
 }
 
+struct SnapshotProvenance<'a> {
+    source: &'a str,
+    version: &'a str,
+}
+
 fn snapshot(
     snapshot_state: &str,
     observed_at: Option<String>,
-    source: &str,
-    version: &str,
+    provenance: SnapshotProvenance<'_>,
     last_error: Option<&str>,
     allowance: Value,
     activity: Value,
@@ -91,8 +95,14 @@ fn snapshot(
         "observed_at".into(),
         observed_at.map_or(Value::Null, Value::String),
     );
-    object.insert("source".into(), Value::String(source.to_string()));
-    object.insert("version".into(), Value::String(version.to_string()));
+    object.insert(
+        "source".into(),
+        Value::String(provenance.source.to_string()),
+    );
+    object.insert(
+        "version".into(),
+        Value::String(provenance.version.to_string()),
+    );
     object.insert(
         "last_error".into(),
         last_error.map_or(Value::Null, |value| Value::String(value.to_string())),
@@ -185,8 +195,10 @@ impl UsageProvider for AntigravityUsageProvider {
         snapshot(
             "unknown",
             Some((self.clock)()),
-            "agy-headless/allowance-capability",
-            "unknown",
+            SnapshotProvenance {
+                source: "agy-headless/allowance-capability",
+                version: "unknown",
+            },
             None,
             empty_allowance("unsupported", Some("unsupported_headless")),
             unknown_activity("unknown"),
@@ -215,8 +227,10 @@ impl UsageProvider for GrokUsageProvider {
         snapshot(
             "unknown",
             Some((self.clock)()),
-            "grok-headless/allowance-capability",
-            &self.version,
+            SnapshotProvenance {
+                source: "grok-headless/allowance-capability",
+                version: &self.version,
+            },
             None,
             empty_allowance("unsupported", Some("unsupported_headless")),
             unknown_activity("unknown"),
@@ -280,8 +294,10 @@ impl UsageProvider for MuseUsageProvider {
         snapshot(
             "fresh",
             Some((self.clock)()),
-            "muse-cli/usage-json-v1",
-            &self.version,
+            SnapshotProvenance {
+                source: "muse-cli/usage-json-v1",
+                version: &self.version,
+            },
             Some("setup_required"),
             empty_allowance("unsupported", Some("no_allowance")),
             unknown_activity("unknown"),
@@ -578,8 +594,10 @@ impl UsageProvider for CodexUsageProvider {
             return snapshot(
                 "unknown",
                 Some((self.clock)()),
-                "codex-app-server/account-metadata",
-                &self.version,
+                SnapshotProvenance {
+                    source: "codex-app-server/account-metadata",
+                    version: &self.version,
+                },
                 None,
                 empty_allowance("unsupported", Some("unsupported_auth_mode")),
                 unknown_activity("unknown"),
@@ -614,8 +632,10 @@ impl UsageProvider for CodexUsageProvider {
         snapshot(
             "fresh",
             Some((self.clock)()),
-            "codex-app-server/account-metadata",
-            &self.version,
+            SnapshotProvenance {
+                source: "codex-app-server/account-metadata",
+                version: &self.version,
+            },
             None,
             normalized,
             activity,

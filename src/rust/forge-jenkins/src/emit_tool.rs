@@ -124,7 +124,7 @@ fn strip_bytes(data: &[u8]) -> &[u8] {
 fn resolve_target(args: &Args) -> Result<(String, String, String, Option<String>), ToolError> {
     if let Some(config_path) = &args.config {
         let config = load_jenkins_config(Some(config_path.as_str()))
-            .map_err(|message| ToolError::InvalidRequest(message))?
+            .map_err(|_| ToolError::InvalidRequest)?
             .expect("a config path yields a config");
         let project = args.project.clone().expect("required");
         if !config.allowed_projects.contains(&project) {
@@ -191,7 +191,7 @@ fn resolve_hmac_secret(
 enum ToolError {
     Codec(JenkinsCodecError),
     Emitter(JenkinsEmitterError),
-    InvalidRequest(String),
+    InvalidRequest,
 }
 
 fn run_inner(args: &Args, getenv: &dyn Fn(&str) -> Option<String>) -> Result<Value, ToolError> {
@@ -236,15 +236,14 @@ fn run_inner(args: &Args, getenv: &dyn Fn(&str) -> Option<String>) -> Result<Val
         .ok_or_else(|| ToolError::Emitter(JenkinsEmitterError::new("token_file_required")))?;
     let token_bytes = read_bounded(&token_file, MAX_SECRET_BYTES, "token_file_unavailable")
         .map_err(ToolError::Codec)?;
-    let token = String::from_utf8(token_bytes)
-        .map_err(|error| ToolError::InvalidRequest(error.to_string()))?;
+    let token = String::from_utf8(token_bytes).map_err(|_| ToolError::InvalidRequest)?;
     let token = token.trim().to_string();
     let port = u16::try_from(args.runner_port)
         .ok()
         .filter(|port| *port > 0)
-        .ok_or_else(|| ToolError::InvalidRequest("runner port out of range".to_string()))?;
-    let mut emitter = HttpDispatchJenkinsEmitter::new(&token, &args.runner_host, port, 10.0)
-        .map_err(ToolError::InvalidRequest)?;
+        .ok_or(ToolError::InvalidRequest)?;
+    let emitter = HttpDispatchJenkinsEmitter::new(&token, &args.runner_host, port, 10.0)
+        .map_err(|_| ToolError::InvalidRequest)?;
     let receipt = emitter
         .emit(&event, args.request_id.as_deref())
         .map_err(ToolError::Emitter)?;
@@ -289,7 +288,7 @@ pub fn execute(argv: &[String], getenv: &dyn Fn(&str) -> Option<String>) -> (i32
                 format!("{}\n", serde_json::to_string(&payload).expect("serializes")),
             )
         }
-        Err(ToolError::InvalidRequest(_)) => (
+        Err(ToolError::InvalidRequest) => (
             2,
             String::new(),
             format!(

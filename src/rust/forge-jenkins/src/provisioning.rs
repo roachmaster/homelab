@@ -242,6 +242,9 @@ pub fn directory(path: &Path, owner: u32, group: u32, mode: u32) -> Result<(), S
     Ok(())
 }
 
+/// Status, headers and bytes from a bounded Jenkins response.
+pub type JenkinsHttpResponse = (u32, Vec<(String, String)>, Vec<u8>);
+
 /// Minimal Jenkins HTTP client over ureq: Basic auth, optional form
 /// body, no redirects, bounded response.
 pub struct JenkinsHttp {
@@ -259,7 +262,7 @@ impl JenkinsHttp {
         }
     }
 
-    pub fn get(&self, path: &str) -> Result<(u32, Vec<(String, String)>, Vec<u8>), String> {
+    pub fn get(&self, path: &str) -> Result<JenkinsHttpResponse, String> {
         self.send("GET", path, None, &[])
     }
 
@@ -268,7 +271,7 @@ impl JenkinsHttp {
         path: &str,
         form: &[(&str, String)],
         extra_headers: &[(String, String)],
-    ) -> Result<(u32, Vec<(String, String)>, Vec<u8>), String> {
+    ) -> Result<JenkinsHttpResponse, String> {
         let body = form
             .iter()
             .map(|(key, value)| format!("{}={}", urlencoding(key), urlencoding(value)))
@@ -283,7 +286,7 @@ impl JenkinsHttp {
         path: &str,
         body: Option<Vec<u8>>,
         extra_headers: &[(String, String)],
-    ) -> Result<(u32, Vec<(String, String)>, Vec<u8>), String> {
+    ) -> Result<JenkinsHttpResponse, String> {
         let agent = ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
                 .http_status_as_error(false)

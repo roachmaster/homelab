@@ -271,27 +271,27 @@ impl UsageService {
                 return Err(InvalidUsage("invalid usage refresh receipt"));
             }
             let mut out = object.clone();
-            out.insert(
-                "profiles".into(),
-                Value::Array(profiles.iter().map(|item| item.clone()).collect()),
-            );
+            out.insert("profiles".into(), Value::Array(profiles.to_vec()));
             Ok(Value::Object(out))
         })();
         verified.map_err(|_| UsageStoreError::Rejected(RejectedError::new(503, "unavailable")))
     }
 }
 
+/// Selected, thread-safe acquisition of the usage read store.
+pub type UsageStoreFactory = Arc<dyn Fn(&UsageConfig) -> Arc<dyn UsageReadStore> + Send + Sync>;
+
 /// Stages config and a selected store factory without opening
 /// resources (UsageServiceFactory in usage_api.py).
 pub struct UsageServiceFactory {
     config: Option<UsageConfig>,
-    store_factory: Option<Arc<dyn Fn(&UsageConfig) -> Arc<dyn UsageReadStore> + Send + Sync>>,
+    store_factory: Option<UsageStoreFactory>,
 }
 
 impl UsageServiceFactory {
     pub fn new(
         config: Option<UsageConfig>,
-        store_factory: Option<Arc<dyn Fn(&UsageConfig) -> Arc<dyn UsageReadStore> + Send + Sync>>,
+        store_factory: Option<UsageStoreFactory>,
     ) -> Result<UsageServiceFactory, String> {
         if config.is_some() && store_factory.is_none() {
             return Err("UsageServiceFactory requires an injected store factory".to_string());
