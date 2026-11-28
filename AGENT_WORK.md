@@ -41,7 +41,11 @@ PostMergeVerificationProvider through PostMergeWorker. Original e7 source fails
 the new terminal assertion (pending); the correction passes without a binding,
 spool submission, remote mutation or subsequent claim. Negative cases cover all
 three source identities, lost lease/start permission, cancellation, saved request
-and the existing 65KiB receipt bound. No production action or source push occurred.
+and the existing 65KiB worker receipt bound, measured as Unicode UTF8 rather
+than ASCII escape spelling. All 32 maximum-size legal Unicode paths remain
+terminal; genuinely oversized mutated receipts fail closed. SQL has a separate
+262144-byte jsonb bound. All55 focused post-merge/provider/delivery tests pass.
+No production action or source push occurred.
 
 ## Grok ACP progress and permission separation — 2026-11-28
 

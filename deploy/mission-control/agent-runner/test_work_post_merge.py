@@ -222,11 +222,23 @@ class PostMergeWorkerTest(unittest.TestCase):
                     self.assertNotIn('reason', store.outcomes[-1][2])
                 self.assertEqual((provider.verifications, provider.cancellations), ([], []))
 
-    def test_source_rejection_retains_the_existing_receipt_size_bound(self):
+    def test_full_legal_unicode_source_rejection_remains_terminal(self):
         with TemporaryDirectory() as temporary:
             config, store, provider, _ = self.fixture(Path(temporary))
             error = self.rejection(store.job,
                 rejections=[('😀' * 250, 'private_or_generated_artifact')] * 32, rejected_count=32)
+            provider.prepare = Mock(side_effect=error)
+            PostMergeWorker(config, store, provider).run_once()
+            self.assertEqual(store.status, 'failed')
+            self.assertEqual(store.outcomes[-1][2]['rejections'], error.result()['receipt']['rejections'])
+            self.assertIsNone(store.job['request'])
+            self.assertEqual(provider.verifications, [])
+
+    def test_genuinely_oversized_mutated_source_rejection_fails_closed(self):
+        with TemporaryDirectory() as temporary:
+            config, store, provider, _ = self.fixture(Path(temporary))
+            error = self.rejection(store.job)
+            error.result = Mock(return_value={'receipt': {'unexpected': 'x' * 65536}})
             provider.prepare = Mock(side_effect=error)
             PostMergeWorker(config, store, provider).run_once()
             self.assertEqual(store.status, 'pending')

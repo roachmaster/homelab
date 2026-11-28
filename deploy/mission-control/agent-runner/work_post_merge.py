@@ -228,7 +228,7 @@ class PostMergeWorker:
                         raise ValueError('Source rejection does not match main preparation') from error
                     rejected = error.result()
                     receipt = {**rejected['receipt'], 'process_started': False}
-                    if len(json.dumps(receipt, allow_nan=False).encode()) > 65536:
+                    if len(json.dumps(receipt, ensure_ascii=False, allow_nan=False).encode()) > 65536:
                         raise ValueError('Oversized main source rejection receipt')
                     finish('failed', receipt,
                         'Main source preparation rejected private or generated artifacts; '
