@@ -216,7 +216,8 @@ pub struct PublicationWorker {
     pub source_observer: Option<SourceObserver>,
     pub release: Option<ReleaseWorker>,
     pub jenkins_drain: Option<IntentDrain>,
-    pub branch_provider: Option<Box<dyn BranchProviderObject>>,
+    /// `SharedAgentBranches` unless persistent branches are selected.
+    pub branch_provider: Box<dyn BranchProviderObject>,
     pub stop: Arc<AtomicBool>,
     automation: Vec<&'static str>,
     automation_index: usize,
@@ -250,7 +251,7 @@ impl PublicationWorker {
             source_observer: None,
             release: None,
             jenkins_drain: None,
-            branch_provider: None,
+            branch_provider: Box::new(crate::native_jenkins::SharedAgentBranches),
             stop: Arc::new(AtomicBool::new(false)),
             automation: Vec::new(),
             automation_index: 0,
@@ -363,20 +364,18 @@ impl PublicationWorker {
                             Some(url)
                         })();
                         if let Some(url) = reconciled {
-                            if let Some(provider) = &mut self.branch_provider {
-                                if provider.persistent_enabled() {
-                                    if let Ok(Some(reservation)) = provider.acquire(
-                                        &job,
-                                        None,
+                            if self.branch_provider.persistent_enabled() {
+                                if let Ok(Some(reservation)) = self.branch_provider.acquire(
+                                    &job,
+                                    None,
+                                    Some(text(&job, "publication_id")),
+                                ) {
+                                    let _ = self.branch_provider.record_publication(
+                                        &reservation,
+                                        head.as_deref(),
+                                        Some(&url),
                                         Some(text(&job, "publication_id")),
-                                    ) {
-                                        let _ = provider.record_publication(
-                                            &reservation,
-                                            head.as_deref(),
-                                            Some(&url),
-                                            Some(text(&job, "publication_id")),
-                                        );
-                                    }
+                                    );
                                 }
                             }
                             let _ = self.store.publication_finish(
@@ -464,23 +463,21 @@ impl PublicationWorker {
                 .map_err(|error| failure(error.code()))?;
         }
         let mut reservation: Option<BranchReservation> = None;
-        if let Some(provider) = &mut self.branch_provider {
-            if provider.persistent_enabled() {
-                reservation = provider
-                    .acquire(&job, None, Some(text(&job, "publication_id")))
-                    .map_err(|error| match error {
-                        forge_work_worker::agent_branch::BranchError::Conflict(conflict) => {
-                            ProcessFailure {
-                                code: conflict.code.clone(),
-                                conflict: true,
-                            }
+        if self.branch_provider.persistent_enabled() {
+            reservation = self.branch_provider
+                .acquire(&job, None, Some(text(&job, "publication_id")))
+                .map_err(|error| match error {
+                    forge_work_worker::agent_branch::BranchError::Conflict(conflict) => {
+                        ProcessFailure {
+                            code: conflict.code.clone(),
+                            conflict: true,
                         }
-                        other => failure(&other.to_string()),
-                    })?;
-                if let Some(reservation) = &reservation {
-                    job["agent_profile"] = json!(reservation.agent_profile);
-                    job["branch_name"] = json!(reservation.branch_name);
-                }
+                    }
+                    other => failure(&other.to_string()),
+                })?;
+            if let Some(reservation) = &reservation {
+                job["agent_profile"] = json!(reservation.agent_profile);
+                job["branch_name"] = json!(reservation.branch_name);
             }
         }
         self.require_lease(&job, local_stop)?;
@@ -615,16 +612,14 @@ impl PublicationWorker {
                 if self.git.remote_head(job).map_err(provider_failure)?.as_deref() != Some(head) {
                     return Err(failure("remote_branch_identity_changed"));
                 }
-                if let Some(provider) = &mut self.branch_provider {
-                    provider
-                        .record_publication(
-                            reservation,
-                            Some(head),
-                            None,
-                            Some(text(job, "publication_id")),
-                        )
-                        .map_err(|error| failure(&error.to_string()))?;
-                }
+                self.branch_provider
+                    .record_publication(
+                        reservation,
+                        Some(head),
+                        None,
+                        Some(text(job, "publication_id")),
+                    )
+                    .map_err(|error| failure(&error.to_string()))?;
             }
             self.require_lease(job, local_stop)?;
             if prior_url.is_some() || expected_pr_url.is_some() {
@@ -664,16 +659,14 @@ impl PublicationWorker {
             }
         }
         let url = url.expect("checked");
-        if let Some(provider) = &mut self.branch_provider {
-            provider
-                .record_publication(
-                    reservation,
-                    Some(head),
-                    Some(&url),
-                    Some(text(job, "publication_id")),
-                )
-                .map_err(|error| failure(&error.to_string()))?;
-        }
+        self.branch_provider
+            .record_publication(
+                reservation,
+                Some(head),
+                Some(&url),
+                Some(text(job, "publication_id")),
+            )
+            .map_err(|error| failure(&error.to_string()))?;
         Ok(url)
     }
 
@@ -762,14 +755,12 @@ impl PublicationWorker {
         if let Some(native_ci) = &self.native_ci {
             native_ci.reconcile_once(16)?;
         }
-        if let Some(provider) = &mut self.branch_provider {
-            if provider.persistent_enabled() {
-                let repositories: HashSet<String> =
-                    self.config.repositories.keys().cloned().collect();
-                provider
-                    .reconcile_reservations(&mut self.pull_requests, &repositories)
-                    .map_err(|error| PublicationError::new(&error.to_string()))?;
-            }
+        if self.branch_provider.persistent_enabled() {
+            let repositories: HashSet<String> =
+                self.config.repositories.keys().cloned().collect();
+            self.branch_provider
+                .reconcile_reservations(&mut self.pull_requests, &repositories)
+                .map_err(|error| PublicationError::new(&error.to_string()))?;
         }
         if !self.automation.is_empty() {
             // A slow observation can outlast the DB polling
@@ -808,11 +799,7 @@ impl PublicationWorker {
                 }
             }
         }
-        let use_branch_claim = self
-            .branch_provider
-            .as_ref()
-            .map(|provider| provider.persistent_enabled())
-            .unwrap_or(false);
+        let use_branch_claim = self.branch_provider.persistent_enabled();
         let worker_id: String = self.config.worker.worker_id.chars().take(54).collect();
         if let Some(reviewer) = &mut self.reviewer {
             let review = if use_branch_claim {

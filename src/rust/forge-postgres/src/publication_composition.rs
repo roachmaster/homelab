@@ -59,8 +59,8 @@ use forge_work_publication::native_identity_provider::{
     NativeVerificationIdentityFactory, NativeVerificationIdentityProvider,
 };
 use forge_work_publication::native_jenkins::{
-    create_native_jenkins, BranchProviderObject, NativeJenkinsOptions, SharedEventLookup,
-    SharedNativeCi,
+    create_native_jenkins, BranchProviderObject, NativeJenkinsOptions, SharedAgentBranches,
+    SharedEventLookup, SharedNativeCi,
 };
 use forge_work_publication::native_repair::BranchFirstRepairProvider;
 use forge_work_publication::post_merge::PostMergeWorker;
@@ -280,6 +280,19 @@ fn make_branch_provider(
         policy,
         PgBranchProvider::new(session),
     )))
+}
+
+/// The publication/native-CI branch port: the persistent agent-branch
+/// provider when the policy selects it, otherwise the shared-branch
+/// null object.
+fn select_branch_provider(
+    config: &PublicationConfig,
+    pg: &PgConfig,
+) -> FactoryResult<Box<dyn BranchProviderObject>> {
+    Ok(match make_branch_provider(config, pg)? {
+        Some(provider) => Box::new(provider),
+        None => Box::new(SharedAgentBranches),
+    })
 }
 
 /// The factory constructor's frozen-selection checks
@@ -556,8 +569,7 @@ pub fn create_publication_worker(
             event_lookup,
             jenkins_instance: instance,
             identity_provider: make_identity_provider(config)?,
-            branch_provider: make_branch_provider(config, &pg)?
-                .map(|provider| Box::new(provider) as Box<dyn BranchProviderObject>),
+            branch_provider: select_branch_provider(config, &pg)?,
             observer,
             jenkins_execute: executor(),
             execute: executor(),
@@ -773,8 +785,7 @@ pub fn create_publication_worker(
     worker.source_observer = source_observer;
     worker.release = release;
     worker.jenkins_drain = jenkins_drain;
-    worker.branch_provider = make_branch_provider(config, &pg)?
-        .map(|provider| Box::new(provider) as Box<dyn BranchProviderObject>);
+    worker.branch_provider = select_branch_provider(config, &pg)?;
     worker.stop = stop;
     worker.listener = Some(Box::new(RetryingPublicationListener::new(pg)));
     worker.refresh_automation();

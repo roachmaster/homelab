@@ -236,7 +236,8 @@ pub struct NativeJenkinsVerification {
     pub supervisor: Box<dyn SupervisorPort + Send>,
     pub client: Option<GitHubPullRequestClient>,
     pub identities: Option<NativeVerificationIdentityProvider>,
-    pub branch_provider: Option<Box<dyn BranchProviderObject>>,
+    /// `SharedAgentBranches` unless persistent branches are selected.
+    pub branch_provider: Box<dyn BranchProviderObject>,
     pub emitter: Option<Emitter>,
     pub event_lookup: Option<Arc<SharedEventLookup>>,
     pub jenkins_instance: Option<String>,
@@ -275,7 +276,7 @@ impl NativeJenkinsVerification {
             supervisor,
             client: None,
             identities: None,
-            branch_provider: None,
+            branch_provider: Box::new(SharedAgentBranches),
             emitter: None,
             event_lookup: None,
             jenkins_instance: None,
@@ -866,6 +867,63 @@ pub trait BranchProviderObject: Send {
     ) -> Result<Value, BranchError>;
 }
 
+/// Null-object branch provider: the shared (non-persistent) branch
+/// policy. Every caller consults `persistent_enabled()` first or holds
+/// a reservation only `acquire` can produce, so this answers exactly
+/// like the old absent provider: nothing is reserved or recorded.
+pub struct SharedAgentBranches;
+
+impl BranchProviderObject for SharedAgentBranches {
+    fn persistent_enabled(&self) -> bool {
+        false
+    }
+    fn acquire(
+        &mut self,
+        _job: &Value,
+        _review_id: Option<&str>,
+        _publication_id: Option<&str>,
+    ) -> Result<Option<BranchReservation>, BranchError> {
+        Ok(None)
+    }
+    fn resolve_scope_for_job(&mut self, _job: &Value) -> Result<Option<Value>, BranchError> {
+        Ok(None)
+    }
+    fn branch_for_profile(
+        &self,
+        _project_alias: &str,
+        _agent_profile: &str,
+    ) -> Result<String, BranchError> {
+        Err(BranchError::Value("persistent branches are not selected".to_string()))
+    }
+    fn record_cache_sync(
+        &mut self,
+        _project_alias: &str,
+        _agent_profile: &str,
+        _branch_name: &str,
+        _cache_status: &str,
+        _last_task_id: Option<&str>,
+        _last_correlation_id: Option<&str>,
+    ) -> Result<Value, BranchError> {
+        Ok(Value::Null)
+    }
+    fn record_publication(
+        &mut self,
+        _reservation: &BranchReservation,
+        _candidate_commit: Option<&str>,
+        _pr_url: Option<&str>,
+        _publication_id: Option<&str>,
+    ) -> Result<Value, BranchError> {
+        Ok(Value::Null)
+    }
+    fn reconcile_reservations(
+        &mut self,
+        _pull_requests: &mut GitHubPullRequestClient,
+        _repositories: &std::collections::HashSet<String>,
+    ) -> Result<Value, BranchError> {
+        Ok(Value::Null)
+    }
+}
+
 struct ClientPullRequests<'a>(&'a mut GitHubPullRequestClient);
 
 impl forge_work_worker::agent_branch::PullRequestsPort for ClientPullRequests<'_> {
@@ -1138,20 +1196,18 @@ impl NativeJenkinsVerification {
             .join(format!("{}.json", scope["review_id"].as_str().unwrap_or_default()));
         let existing = path.exists();
         let mut reservation: Option<BranchReservation> = None;
-        if let Some(provider) = &mut self.branch_provider {
-            if provider.persistent_enabled() {
-                let mut acquire_job = job.clone();
-                acquire_job["workflow_id"] = scope["workflow_id"].clone();
-                acquire_job["correlation_id"] = scope["correlation_id"].clone();
-                reservation = provider
-                    .acquire(&acquire_job, scope.get("review_id").and_then(Value::as_str), None)
-                    .map_err(|error| match error {
-                        BranchError::Conflict(conflict) => PublicationError::new(&conflict.code),
-                        BranchError::Value(message) | BranchError::Store(message) => {
-                            PublicationError::new(&message)
-                        }
-                    })?;
-            }
+        if self.branch_provider.persistent_enabled() {
+            let mut acquire_job = job.clone();
+            acquire_job["workflow_id"] = scope["workflow_id"].clone();
+            acquire_job["correlation_id"] = scope["correlation_id"].clone();
+            reservation = self.branch_provider
+                .acquire(&acquire_job, scope.get("review_id").and_then(Value::as_str), None)
+                .map_err(|error| match error {
+                    BranchError::Conflict(conflict) => PublicationError::new(&conflict.code),
+                    BranchError::Value(message) | BranchError::Store(message) => {
+                        PublicationError::new(&message)
+                    }
+                })?;
         }
         let (selected, receipt, event) = if let Some(reservation) = &reservation {
             let mut selected = job.clone();
@@ -1786,20 +1842,18 @@ impl NativeJenkinsVerification {
             publication = Some(receipt);
         }
         let mut persistent_branch: Option<String> = None;
-        if let Some(provider) = &mut self.branch_provider {
-            if provider.persistent_enabled() {
-                if let Some(info) = provider.resolve_scope_for_job(job).map_err(|error| {
-                    PublicationError::new(&error.to_string())
-                })? {
-                    persistent_branch = Some(
-                        provider
-                            .branch_for_profile(
-                                text_map(&scope, "project_alias"),
-                                text(&info, "agent_profile"),
-                            )
-                            .map_err(|error| PublicationError::new(&error.to_string()))?,
-                    );
-                }
+        if self.branch_provider.persistent_enabled() {
+            if let Some(info) = self.branch_provider.resolve_scope_for_job(job).map_err(|error| {
+                PublicationError::new(&error.to_string())
+            })? {
+                persistent_branch = Some(
+                    self.branch_provider
+                        .branch_for_profile(
+                            text_map(&scope, "project_alias"),
+                            text(&info, "agent_profile"),
+                        )
+                        .map_err(|error| PublicationError::new(&error.to_string()))?,
+                );
             }
         }
         let scoped_profile =
@@ -2260,50 +2314,48 @@ impl NativeJenkinsVerification {
             Some(value) if value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()) => value,
             _ => sha256_hex(&canonical_bytes(&full_receipt)),
         };
-        if let Some(provider) = &mut self.branch_provider {
-            if provider.persistent_enabled() {
-                if let Some(cache) = full_receipt.get("cache").filter(|value| value.is_object()) {
-                    let raw_status = cache
-                        .get("restore_status")
+        if self.branch_provider.persistent_enabled() {
+            if let Some(cache) = full_receipt.get("cache").filter(|value| value.is_object()) {
+                let raw_status = cache
+                    .get("restore_status")
+                    .and_then(Value::as_str)
+                    .or_else(|| cache.get("status").and_then(Value::as_str))
+                    .unwrap_or_default();
+                let status = if raw_status == "hit_main_seed" { "hit_main" } else { raw_status };
+                if ["hit_branch", "hit_main", "miss", "disabled"].contains(&status) {
+                    let source_pub = binding.get("source_publication");
+                    let profile = source_pub
+                        .and_then(|value| value.get("agent_profile"))
                         .and_then(Value::as_str)
-                        .or_else(|| cache.get("status").and_then(Value::as_str))
-                        .unwrap_or_default();
-                    let status = if raw_status == "hit_main_seed" { "hit_main" } else { raw_status };
-                    if ["hit_branch", "hit_main", "miss", "disabled"].contains(&status) {
-                        let source_pub = binding.get("source_publication");
-                        let profile = source_pub
-                            .and_then(|value| value.get("agent_profile"))
-                            .and_then(Value::as_str)
-                            .map(|value| value.to_string());
-                        let branch = source_pub
-                            .and_then(|value| value.get("branch"))
-                            .and_then(Value::as_str)
-                            .map(|value| value.to_string())
-                            .or_else(|| request.get("source_branch").and_then(Value::as_str).map(|value| value.to_string()));
-                        let profile = match profile {
-                            Some(profile) => Some(profile),
-                            None => self
-                                .store
-                                .task_branch_scope(text(scope, "project_alias"), text(scope, "task_id"))
-                                .ok()
-                                .flatten()
-                                .and_then(|info| {
-                                    info.get("agent_profile")
-                                        .and_then(Value::as_str)
-                                        .map(|value| value.to_string())
-                                }),
-                        };
-                        if let (Some(profile), Some(branch)) = (profile, branch) {
-                            if branch != "main" {
-                                let _ = provider.record_cache_sync(
-                                    text(scope, "project_alias"),
-                                    &profile,
-                                    &branch,
-                                    status,
-                                    scope.get("task_id").and_then(Value::as_str),
-                                    scope.get("correlation_id").and_then(Value::as_str),
-                                );
-                            }
+                        .map(|value| value.to_string());
+                    let branch = source_pub
+                        .and_then(|value| value.get("branch"))
+                        .and_then(Value::as_str)
+                        .map(|value| value.to_string())
+                        .or_else(|| request.get("source_branch").and_then(Value::as_str).map(|value| value.to_string()));
+                    let profile = match profile {
+                        Some(profile) => Some(profile),
+                        None => self
+                            .store
+                            .task_branch_scope(text(scope, "project_alias"), text(scope, "task_id"))
+                            .ok()
+                            .flatten()
+                            .and_then(|info| {
+                                info.get("agent_profile")
+                                    .and_then(Value::as_str)
+                                    .map(|value| value.to_string())
+                            }),
+                    };
+                    if let (Some(profile), Some(branch)) = (profile, branch) {
+                        if branch != "main" {
+                            let _ = self.branch_provider.record_cache_sync(
+                                text(scope, "project_alias"),
+                                &profile,
+                                &branch,
+                                status,
+                                scope.get("task_id").and_then(Value::as_str),
+                                scope.get("correlation_id").and_then(Value::as_str),
+                            );
                         }
                     }
                 }
@@ -2950,7 +3002,8 @@ pub struct NativeJenkinsOptions {
     pub event_lookup: Option<Arc<SharedEventLookup>>,
     pub jenkins_instance: Option<String>,
     pub identity_provider: Option<NativeVerificationIdentityProvider>,
-    pub branch_provider: Option<Box<dyn BranchProviderObject>>,
+    /// `SharedAgentBranches` unless persistent branches are selected.
+    pub branch_provider: Box<dyn BranchProviderObject>,
     pub observer: Option<Box<dyn crate::trusted_delivery::JenkinsObserverPort>>,
     pub jenkins_execute: Box<dyn crate::publication_clients::CommandExecutor>,
     pub execute: Box<dyn crate::publication_clients::CommandExecutor>,
@@ -3278,5 +3331,25 @@ mod tests {
         assert_eq!(binding_version(LEGACY_PROFILE).unwrap(), VERSION);
         assert_eq!(binding_version(SCOPED_PROFILE).unwrap(), SCOPED_VERSION);
         assert_eq!(binding_version(EVENT_PROFILE).unwrap(), "forge-native-jenkins-v3");
+    }
+}
+
+#[cfg(test)]
+mod shared_branch_tests {
+    use super::*;
+
+    #[test]
+    fn shared_agent_branches_reserve_and_record_nothing() {
+        let mut branches = SharedAgentBranches;
+        assert!(!branches.persistent_enabled());
+        assert!(branches.acquire(&json!({}), None, None).unwrap().is_none());
+        assert!(branches.resolve_scope_for_job(&json!({})).unwrap().is_none());
+        assert!(branches.branch_for_profile("homelab", "codex").is_err());
+        assert_eq!(
+            branches
+                .record_cache_sync("homelab", "codex", "b", "hit", None, None)
+                .unwrap(),
+            Value::Null
+        );
     }
 }
