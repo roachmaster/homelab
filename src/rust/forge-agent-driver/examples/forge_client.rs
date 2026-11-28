@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use forge_agent_driver::benchmark::{Case, ForgeClient, ForgeError};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// Answers the runtime and chat endpoints the benchmark uses.
 struct LocalRuntime {
