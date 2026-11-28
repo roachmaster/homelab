@@ -1,3 +1,16 @@
+## Native deployment cutover in qualification — 2026-11-28
+
+Codex's integration branch removes all 367 deployment Python sources from
+reviewed main, including the former standalone Jenkins verifier. The Rust
+verifier crate builds two fixed Jenkins entry points and a private isolated
+build helper. Historical receipt validation remains scoped to its recorded
+profile. Candidate, pipeline, and protected-file changes still require review.
+
+The matched runtime, cache, stage events, database receipt extension and
+independent main qualification are in progress. The currently selected services
+and Jenkins still use the previously qualified release. The database proxy and
+the separate digest-column drop have their own cutovers.
+
 ## Rust publisher parity for deployment-source cutoff — 2026-11-28
 
 The Rust main-verification path retains typed permanent source rejection through
