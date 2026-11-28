@@ -139,3 +139,142 @@ pub trait PeerReviewValidatorPort: Send + Sync {
         verdict_text: &str,
     ) -> Result<(), VerdictCheckFailure>;
 }
+
+// ---------------------------------------------------------------
+// Null-object defaults for the coding worker's optional
+// collaborators. The factory binds these when the host selects no
+// implementation, so the worker never checks for a missing port.
+// Each answers exactly what the worker did when the port was
+// absent.
+// ---------------------------------------------------------------
+
+/// No usage telemetry: missing telemetry never changes a result.
+pub struct NullUsageNormalizer;
+
+impl UsageNormalizerPort for NullUsageNormalizer {
+    fn normalize(&self, _backend: &str, _usage: &Value, _fresh_session: bool) -> Option<Value> {
+        None
+    }
+}
+
+/// No agent-metadata collector: each collection pass does nothing.
+pub struct NullUsageCollector;
+
+impl UsageCollectorPort for NullUsageCollector {
+    fn run_once(&mut self) -> Result<(), WorkerError> {
+        Ok(())
+    }
+}
+
+/// No review-context provider: a lease that needs review feedback
+/// fails its integrity check, as it did with no provider.
+pub struct UnavailableReviewContexts;
+
+impl ReviewContextPort for UnavailableReviewContexts {
+    fn acquire(
+        &mut self,
+        _lease: &Lease,
+        _workspace: &WorkspaceLease,
+    ) -> Result<Option<ReviewContext>, ReviewContextFailure> {
+        Err(ReviewContextFailure::Other(WorkerError::protocol(
+            "review context provider unavailable",
+        )))
+    }
+}
+
+/// No peer-context provider: peer review work cannot be verified.
+pub struct UnavailablePeerContexts;
+
+impl UnavailablePeerContexts {
+    fn unavailable() -> WorkerError {
+        WorkerError::protocol("peer context provider unavailable")
+    }
+}
+
+impl PeerContextPort for UnavailablePeerContexts {
+    fn prepare_source(&mut self, _lease: &Lease) -> Result<(), WorkerError> {
+        Err(Self::unavailable())
+    }
+    fn acquire(
+        &mut self,
+        _lease: &Lease,
+        _workspace: &WorkspaceLease,
+    ) -> Result<PeerReviewContext, WorkerError> {
+        Err(Self::unavailable())
+    }
+    fn acquire_feedback(
+        &mut self,
+        _lease: &Lease,
+        _plan_context: Option<&Value>,
+        _feedback_context: Option<&ReviewContext>,
+    ) -> Result<WorkflowFeedbackContext, WorkerError> {
+        Err(Self::unavailable())
+    }
+}
+
+/// No external-review provider: reviews run without external context.
+pub struct NoExternalContexts;
+
+impl ExternalContextPort for NoExternalContexts {
+    fn acquire(
+        &mut self,
+        _lease: &Lease,
+        _workspace: &WorkspaceLease,
+    ) -> Result<Option<ExternalReviewContext>, WorkerError> {
+        Ok(None)
+    }
+}
+
+/// No verdict self-check: no target is checkable, so a reviewer's
+/// verdict is returned as produced.
+pub struct NullVerdictValidator;
+
+impl PeerReviewValidatorPort for NullVerdictValidator {
+    fn target_valid(&self, _target_content: &[u8], _target_sha256: &str) -> bool {
+        false
+    }
+    fn check(
+        &self,
+        _target_content: &[u8],
+        _target_sha256: &str,
+        _verdict_text: &str,
+    ) -> Result<(), VerdictCheckFailure> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod null_object_tests {
+    //! Each unbound default answers what the worker did when the
+    //! collaborator was absent.
+
+    use super::*;
+
+    #[test]
+    fn no_usage_telemetry_normalizes_nothing() {
+        let usage = serde_json::json!({"input_tokens": 3});
+        assert_eq!(NullUsageNormalizer.normalize("codex", &usage, true), None);
+    }
+
+    #[test]
+    fn no_collector_collects_quietly() {
+        assert!(NullUsageCollector.run_once().is_ok());
+    }
+
+    #[test]
+    fn no_verdict_validator_checks_no_target() {
+        assert!(!NullVerdictValidator.target_valid(b"target", "sha"));
+        assert!(NullVerdictValidator
+            .check(b"target", "sha", "verdict")
+            .is_ok());
+    }
+
+    #[test]
+    fn a_missing_peer_provider_reports_it_is_unavailable() {
+        let error = UnavailablePeerContexts::unavailable();
+        assert_eq!(
+            error.to_string(),
+            WorkerError::protocol("peer context provider unavailable").to_string()
+        );
+    }
+}
