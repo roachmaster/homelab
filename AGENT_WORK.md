@@ -1,3 +1,31 @@
+## Proxy migration renumbering correction — 2026-11-28
+
+PR32 added proxy preparation/cutover as migrations 54/55, after the already
+applied continuation-lineage 52 and defect-task 53. Its management stage guards
+still tested 52/53: isolated preparation failed strict verification, and the
+real cutover entry point silently skipped 55 because defect migration 53 existed.
+This correction changes only those proxy stage references and related fixture
+stages/documentation; all migration file bytes are preserved. Two missing
+END IF terminators in the merged feedback verifier are restored so the M51/M53
+normalizations remain independent of the M55 ACL branch. Proxy tests now
+use the actual apply-cutover.sql instead of a copied guard. The production
+UNMIGRATED_CALLERS refusal remains intact: this does not authorize cutover.
+
+The accidentally tracked test bytecode is removed without relaxing source
+artifact admission. Disposable PostgreSQL results and source review follow below;
+no live SQL, provisioning, service change, push or historical receipt rewrite.
+
+Twenty focused checks pass on disposable PostgreSQL16: strict verification at
+53, default apply/replay stopping at 54, runtime privilege checks at 54/55,
+actual explicit cutover/replay preserving the existing 53 record and 55 timestamp,
+negative write/catalog checks, preparation HBA/peer/TCP behavior, and the unchanged
+unmigrated-caller guard inventory. The peer fixture restores its ident file after
+its own temporary mappings. Logs are private under
+/mnt/data/homelab-build/grok-permission-matcher-20261128/proxy-renumber-*.log.
+The full tracked-source artifact audit still flags four synthetic Rust test
+literals; the web helper owns their separate eligibility correction. No claim
+of a clean complete candidate or full-main qualification is made here.
+
 ## Grok ACP progress and permission separation — 2026-11-28
 
 This correction is based exactly on reviewed main f5e057c1. The new automatic
