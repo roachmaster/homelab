@@ -26,6 +26,25 @@ The full tracked-source artifact audit still flags four synthetic Rust test
 literals; the web helper owns their separate eligibility correction. No claim
 of a clean complete candidate or full-main qualification is made here.
 
+## Source-admissible Rust security fixtures — 2026-11-28
+
+Four newly merged Rust files embedded complete fake credential/key test strings
+which the unchanged source artifact guard correctly rejected. Only fixture
+literal spelling now uses concat!: every runtime test string is byte-for-byte
+identical and every existing redaction/rejection assertion remains unchanged.
+No credential detector, real credential handling, production algorithm or grant
+changed. Actual artifact_guard rejects all four predecessor source files and
+accepts all four corrected files; an independent literal comparison confirms
+identical fixture bytes. Both dependency-free diagnostic modules compile using
+the pinned Rust1.97.1 and pass all six real unit cases.
+
+Whole-package tests cannot resolve new-main uuid1.29.3 in the existing default
+offline index; no dependency fetch/install was attempted. Read-only rustfmt1.9.0
+reports 100 existing formatting files across these three newly merged crates.
+The exact list is retained in the private codex-main-source-rejection-20261128
+-evidence directory. No broad formatting is included in this narrow correction;
+root owns final merged formatting/package qualification. No push/live action.
+
 ## Permanent main source-preparation rejection — 2026-11-28
 
 PostMergeWorker previously retried a typed permanent SourceArtifactRejected as

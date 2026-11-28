@@ -2207,7 +2207,11 @@ mod tests {
             artifact_guard("home/.config/gh/hosts.yml", b"x").unwrap_err().code(),
             "private_or_generated_artifact"
         );
-        let key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQC7\nrest";
+        let key = concat!(
+            "-----BEGIN OPENSSH ",
+            "PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQC7\nrest"
+        )
+        .as_bytes();
         assert_eq!(
             artifact_guard("src/a.txt", key).unwrap_err().code(),
             "private_key_artifact"

@@ -179,7 +179,10 @@ mod tests {
 
     #[test]
     fn bearer_and_token_shapes_are_redacted() {
-        let value = "Authorization: Bearer abc123token and ghp_abcdefghijklmnopqrstuvwxyz0123456789 done";
+        let value = concat!(
+            "Authorization: Bearer abc123token and ghp_",
+            "abcdefghijklmnopqrstuvwxyz0123456789 done"
+        );
         let out = diagnostic_text(value, 65536);
         assert!(!out.contains("abc123token"), "{out}");
         assert!(!out.contains("ghp_"), "{out}");

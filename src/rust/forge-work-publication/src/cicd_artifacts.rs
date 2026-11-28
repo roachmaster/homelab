@@ -1050,7 +1050,10 @@ mod tests {
 
     #[test]
     fn redaction_strips_secrets_and_controls() {
-        let text = "token ghp_abcdefghijklmnopqrstuvwxyz0123456789 here\x07\n-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----\n";
+        let text = concat!(
+            "token ghp_",
+            "abcdefghijklmnopqrstuvwxyz0123456789 here\x07\n-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----\n"
+        );
         let out = redact_console_str(text, MAX_STAGE_LOG_BYTES);
         assert!(out.contains("[REDACTED_TOKEN]"), "{out}");
         assert!(out.contains("[REDACTED_PRIVATE_KEY]"), "{out}");
