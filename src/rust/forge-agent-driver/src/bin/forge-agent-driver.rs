@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use forge_agent_driver::benchmark::{
-    DRIVER, LOCK_PATH, MODELS, RESULTS_PATH, check_fixtures, load_cases, run_benchmark,
+    DRIVER, LOCK_PATH, MODELS, RESULTS_PATH, TOKEN_PATH, TokenFileConnector, check_fixtures,
+    load_cases, run_benchmark,
 };
 use nix::fcntl::{Flock, FlockArg};
 
@@ -103,7 +104,14 @@ fn main() -> ExitCode {
                 selected.push(model);
             }
         }
-        run_benchmark(&selected, &results, &cases, &fixtures, identity)
+        run_benchmark(
+            &TokenFileConnector::new(TOKEN_PATH),
+            &selected,
+            &results,
+            &cases,
+            &fixtures,
+            identity,
+        )
             .map_err(|error| error.0)
     })();
     let _ = std::fs::remove_dir_all(&fixtures);

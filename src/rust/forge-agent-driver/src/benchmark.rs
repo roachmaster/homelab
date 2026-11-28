@@ -50,6 +50,64 @@ fn forge_error(message: String) -> ForgeError {
     ForgeError(message)
 }
 
+/// The Forge runtime API the benchmark drives. `request` is the
+/// transport; runtime selection, restore and generation are built on
+/// it, so a test double only answers requests.
+pub trait ForgeClient {
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        payload: Option<&Value>,
+    ) -> Result<Value, ForgeError>;
+
+    fn select(&self, model: &str) -> Result<(), ForgeError> {
+        select_model(self, model)
+    }
+
+    fn restore(&self, original: &Value) -> Result<Value, ForgeError> {
+        restore_runtime(self, original)
+    }
+
+    fn generate(
+        &self,
+        model: &str,
+        case: &Case,
+    ) -> Result<(Option<String>, Option<String>, Value), ForgeError> {
+        generate_command(self, model, case)
+    }
+}
+
+/// Creates the Forge client when a comparison starts.
+pub trait ForgeConnector {
+    fn connect(&self) -> Result<Box<dyn ForgeClient>, ForgeError>;
+}
+
+/// Production connector: reads the bearer token from a file (the
+/// binary passes `TOKEN_PATH`) and connects over local HTTP.
+pub struct TokenFileConnector {
+    path: PathBuf,
+}
+
+impl TokenFileConnector {
+    pub fn new(path: impl Into<PathBuf>) -> TokenFileConnector {
+        TokenFileConnector { path: path.into() }
+    }
+}
+
+impl ForgeConnector for TokenFileConnector {
+    fn connect(&self) -> Result<Box<dyn ForgeClient>, ForgeError> {
+        let token = std::fs::read_to_string(&self.path)
+            .map_err(|error| forge_error(error.to_string()))?
+            .trim()
+            .to_string();
+        if token.is_empty() {
+            return Err(forge_error("The local Forge token is empty".to_string()));
+        }
+        Ok(Box::new(Forge::with_token(token)))
+    }
+}
+
 /// The local Forge HTTP client (127.0.0.1:18082) over a plain
 /// TcpStream, mirroring the http.client calls upstream.
 pub struct Forge {
@@ -57,18 +115,13 @@ pub struct Forge {
 }
 
 impl Forge {
-    pub fn new() -> Result<Forge, ForgeError> {
-        let token = std::fs::read_to_string(TOKEN_PATH)
-            .map_err(|error| forge_error(error.to_string()))?
-            .trim()
-            .to_string();
-        if token.is_empty() {
-            return Err(forge_error("The local Forge token is empty".to_string()));
-        }
-        Ok(Forge { token })
+    pub fn with_token(token: String) -> Forge {
+        Forge { token }
     }
+}
 
-    pub fn request(
+impl ForgeClient for Forge {
+    fn request(
         &self,
         method: &str,
         path: &str,
@@ -123,89 +176,92 @@ impl Forge {
         }
         serde_json::from_slice(data).map_err(|_| failed("ValueError"))
     }
+}
 
-    pub fn select(&self, model: &str) -> Result<(), ForgeError> {
-        let runtime = self.request("GET", "/v1/runtime", None)?;
-        if runtime.get("state").and_then(Value::as_str) == Some("ready")
-            && runtime.get("model").and_then(Value::as_str) == Some(model)
-        {
-            return Ok(());
-        }
-        self.request("PUT", "/v1/runtime", Some(&json!({"model": model})))?;
-        let runtime = self.request("GET", "/v1/runtime", None)?;
-        if runtime.get("state").and_then(Value::as_str) != Some("ready")
-            || runtime.get("model").and_then(Value::as_str) != Some(model)
-        {
-            return Err(forge_error(format!(
-                "Forge did not become ready with {model}"
-            )));
-        }
-        Ok(())
+fn select_model<F: ForgeClient + ?Sized>(forge: &F, model: &str) -> Result<(), ForgeError> {
+    let runtime = forge.request("GET", "/v1/runtime", None)?;
+    if runtime.get("state").and_then(Value::as_str) == Some("ready")
+        && runtime.get("model").and_then(Value::as_str) == Some(model)
+    {
+        return Ok(());
     }
+    forge.request("PUT", "/v1/runtime", Some(&json!({"model": model})))?;
+    let runtime = forge.request("GET", "/v1/runtime", None)?;
+    if runtime.get("state").and_then(Value::as_str) != Some("ready")
+        || runtime.get("model").and_then(Value::as_str) != Some(model)
+    {
+        return Err(forge_error(format!(
+            "Forge did not become ready with {model}"
+        )));
+    }
+    Ok(())
+}
 
-    pub fn restore(&self, original: &Value) -> Result<Value, ForgeError> {
-        if original.get("state").and_then(Value::as_str) == Some("ready") {
-            if let Some(model) = original.get("model").and_then(Value::as_str) {
-                self.select(model)?;
-            }
-        } else if self.request("GET", "/v1/runtime", None)?.get("state").and_then(Value::as_str)
-            != Some("stopped")
-        {
-            self.request("DELETE", "/v1/runtime", None)?;
+fn restore_runtime<F: ForgeClient + ?Sized>(
+    forge: &F,
+    original: &Value,
+) -> Result<Value, ForgeError> {
+    if original.get("state").and_then(Value::as_str) == Some("ready") {
+        if let Some(model) = original.get("model").and_then(Value::as_str) {
+            forge.select(model)?;
         }
-        let restored = self.request("GET", "/v1/runtime", None)?;
-        if restored.get("state") != original.get("state") {
-            return Err(forge_error(
-                "Forge did not return to the initial state".to_string(),
-            ));
-        }
-        Ok(restored)
+    } else if forge.request("GET", "/v1/runtime", None)?.get("state").and_then(Value::as_str)
+        != Some("stopped")
+    {
+        forge.request("DELETE", "/v1/runtime", None)?;
     }
+    let restored = forge.request("GET", "/v1/runtime", None)?;
+    if restored.get("state") != original.get("state") {
+        return Err(forge_error(
+            "Forge did not return to the initial state".to_string(),
+        ));
+    }
+    Ok(restored)
+}
 
-    pub fn generate(
-        &self,
-        model: &str,
-        case: &Case,
-    ) -> Result<(Option<String>, Option<String>, Value), ForgeError> {
-        let filenames = case
-            .files
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ");
-        let response = self.request(
-            "POST",
-            "/v1/chat/completions",
-            Some(&json!({
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM},
-                    {"role": "user", "content": format!("{} Available files: {filenames}.", case.task)},
-                ],
-                "temperature": 0.0,
-                "max_tokens": 512,
-                "stream": false,
-            })),
-        )?;
-        let choice = response
-            .get("choices")
-            .and_then(|choices| choices.get(0))
-            .ok_or_else(|| forge_error("Forge returned an invalid chat response".to_string()))?;
-        let content = choice
-            .get("message")
-            .and_then(|message| message.get("content"))
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let finish = choice
-            .get("finish_reason")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        Ok((
-            content,
-            finish,
-            response.get("usage").cloned().unwrap_or(Value::Null),
-        ))
-    }
+fn generate_command<F: ForgeClient + ?Sized>(
+    forge: &F,
+    model: &str,
+    case: &Case,
+) -> Result<(Option<String>, Option<String>, Value), ForgeError> {
+    let filenames = case
+        .files
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let response = forge.request(
+        "POST",
+        "/v1/chat/completions",
+        Some(&json!({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": format!("{} Available files: {filenames}.", case.task)},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 512,
+            "stream": false,
+        })),
+    )?;
+    let choice = response
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .ok_or_else(|| forge_error("Forge returned an invalid chat response".to_string()))?;
+    let content = choice
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let finish = choice
+        .get("finish_reason")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok((
+        content,
+        finish,
+        response.get("usage").cloned().unwrap_or(Value::Null),
+    ))
 }
 
 fn valid_name(value: &str) -> bool {
@@ -265,7 +321,7 @@ fn seconds(started: Instant) -> f64 {
 }
 
 pub fn score(
-    forge: &Forge,
+    forge: &dyn ForgeClient,
     model: &str,
     case: &Case,
     directory: &Path,
@@ -374,13 +430,14 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 pub fn run_benchmark(
+    connector: &dyn ForgeConnector,
     models: &[String],
     destination: &Path,
     cases: &[Case],
     fixtures: &Path,
     identity: (u32, u32),
 ) -> Result<i32, ForgeError> {
-    let forge = Forge::new()?;
+    let forge = connector.connect()?;
     let original = forge.request("GET", "/v1/runtime", None)?;
     if !matches!(
         original.get("state").and_then(Value::as_str),
@@ -442,7 +499,7 @@ pub fn run_benchmark(
             forge.select(model)?;
             let mut counts: BTreeMap<String, i64> = BTreeMap::new();
             for case in cases {
-                let row = score(&forge, model, case, fixtures, identity);
+                let row = score(forge.as_ref(), model, case, fixtures, identity);
                 let result = row
                     .get("result")
                     .and_then(Value::as_str)
@@ -538,5 +595,155 @@ mod tests {
         let stamp = utc_stamp();
         assert_eq!(stamp.len(), 16);
         assert!(stamp.ends_with('Z'));
+    }
+}
+
+#[cfg(test)]
+mod client_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// Test-env Forge: a scripted runtime that records every request.
+    struct FakeForge {
+        runtime: RefCell<Value>,
+        becomes_ready: bool,
+        models: Vec<String>,
+        log: RefCell<Vec<String>>,
+    }
+
+    impl FakeForge {
+        fn new(runtime: Value, models: &[&str]) -> FakeForge {
+            FakeForge {
+                runtime: RefCell::new(runtime),
+                becomes_ready: true,
+                models: models.iter().map(|model| model.to_string()).collect(),
+                log: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl ForgeClient for FakeForge {
+        fn request(
+            &self,
+            method: &str,
+            path: &str,
+            payload: Option<&Value>,
+        ) -> Result<Value, ForgeError> {
+            self.log.borrow_mut().push(format!("{method} {path}"));
+            match (method, path) {
+                ("GET", "/v1/runtime") => Ok(self.runtime.borrow().clone()),
+                ("GET", "/v1/models") => Ok(json!({
+                    "data": self.models.iter().map(|id| json!({"id": id})).collect::<Vec<_>>(),
+                })),
+                ("PUT", "/v1/runtime") => {
+                    let state = if self.becomes_ready { "ready" } else { "loading" };
+                    let model = payload.and_then(|body| body.get("model")).cloned();
+                    *self.runtime.borrow_mut() = json!({"state": state, "model": model});
+                    Ok(Value::Null)
+                }
+                ("DELETE", "/v1/runtime") => {
+                    *self.runtime.borrow_mut() = json!({"state": "stopped"});
+                    Ok(Value::Null)
+                }
+                _ => Err(ForgeError(format!("{method} {path} returned HTTP 404"))),
+            }
+        }
+    }
+
+    struct FakeConnector {
+        runtime: Value,
+        models: Vec<&'static str>,
+    }
+
+    impl ForgeConnector for FakeConnector {
+        fn connect(&self) -> Result<Box<dyn ForgeClient>, ForgeError> {
+            Ok(Box::new(FakeForge::new(self.runtime.clone(), &self.models)))
+        }
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("forge-agent-driver-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn the_token_connector_reads_and_checks_the_configured_file() {
+        let missing = temp("missing-token");
+        assert!(TokenFileConnector::new(&missing).connect().is_err());
+        let empty = temp("empty-token");
+        std::fs::write(&empty, " \n").unwrap();
+        let error = TokenFileConnector::new(&empty).connect().err().unwrap();
+        assert_eq!(error.0, "The local Forge token is empty");
+        let token = temp("token");
+        std::fs::write(&token, "secret\n").unwrap();
+        assert!(TokenFileConnector::new(&token).connect().is_ok());
+        let _ = std::fs::remove_file(empty);
+        let _ = std::fs::remove_file(token);
+    }
+
+    #[test]
+    fn select_skips_a_runtime_already_ready_with_the_model() {
+        let forge = FakeForge::new(json!({"state": "ready", "model": "m"}), &[]);
+        forge.select("m").unwrap();
+        assert_eq!(*forge.log.borrow(), vec!["GET /v1/runtime"]);
+    }
+
+    #[test]
+    fn select_switches_models_and_requires_readiness() {
+        let forge = FakeForge::new(json!({"state": "stopped"}), &[]);
+        forge.select("m").unwrap();
+        assert_eq!(
+            *forge.log.borrow(),
+            vec!["GET /v1/runtime", "PUT /v1/runtime", "GET /v1/runtime"]
+        );
+        let mut stuck = FakeForge::new(json!({"state": "stopped"}), &[]);
+        stuck.becomes_ready = false;
+        assert_eq!(
+            stuck.select("m").unwrap_err().0,
+            "Forge did not become ready with m"
+        );
+    }
+
+    #[test]
+    fn restore_stops_a_runtime_that_started_stopped() {
+        let forge = FakeForge::new(json!({"state": "ready", "model": "m"}), &[]);
+        let restored = forge.restore(&json!({"state": "stopped"})).unwrap();
+        assert_eq!(restored["state"], json!("stopped"));
+        assert!(forge.log.borrow().contains(&"DELETE /v1/runtime".to_string()));
+    }
+
+    #[test]
+    fn a_comparison_refuses_a_busy_runtime_or_missing_models() {
+        let destination = temp("results");
+        let busy = FakeConnector {
+            runtime: json!({"state": "loading"}),
+            models: vec!["a"],
+        };
+        let models = vec!["b".to_string(), "a".to_string(), "c".to_string()];
+        let error = run_benchmark(&busy, &models, &destination, &[], &destination, (1, 1));
+        assert_eq!(
+            error.unwrap_err().0,
+            "Forge must be ready or stopped before starting a comparison"
+        );
+        let missing = FakeConnector {
+            runtime: json!({"state": "stopped"}),
+            models: vec!["a"],
+        };
+        let error = run_benchmark(&missing, &models, &destination, &[], &destination, (1, 1));
+        assert_eq!(error.unwrap_err().0, "Unavailable models: b, c");
+        assert!(!destination.exists(), "nothing is written before the checks");
+    }
+
+    #[test]
+    fn a_failed_connection_stops_the_comparison_first() {
+        struct Refused;
+        impl ForgeConnector for Refused {
+            fn connect(&self) -> Result<Box<dyn ForgeClient>, ForgeError> {
+                Err(ForgeError("The local Forge token is empty".to_string()))
+            }
+        }
+        let destination = temp("refused");
+        let error = run_benchmark(&Refused, &[], &destination, &[], &destination, (1, 1));
+        assert_eq!(error.unwrap_err().0, "The local Forge token is empty");
+        assert!(!destination.exists());
     }
 }
