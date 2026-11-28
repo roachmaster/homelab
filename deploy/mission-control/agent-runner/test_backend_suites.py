@@ -19,6 +19,16 @@ spec.loader.exec_module(backend_suites)
 
 
 class BackendSuitesTests(unittest.TestCase):
+    def test_borrowed_defect_database_fixture_is_a_declared_branch_exclusion(self):
+        env = dict(os.environ, FORGE_DISABLE_DISPOSABLE_POSTGRES='1')
+        code = backend_suites.BRANCH_RUNNER_CODE.replace(
+            '__PATTERN__', repr('test_work_defect.py'))
+        result = subprocess.run(
+            [sys.executable, '-B', '-c', code], cwd=Path(__file__).parent,
+            env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('MEMORY_SUMMARY executed=5 db_not_run=1 unexpected_skips=0', result.stdout)
+
     def test_workspace_database_fixture_obeys_the_selected_scope(self):
         code = '''
 import unittest
@@ -44,6 +54,62 @@ if not EXPECT_DATABASE:
                 env['FORGE_DISABLE_DISPOSABLE_POSTGRES'] = '1'
             with self.subTest(database=database):
                 subprocess.run([sys.executable, '-B', '-c', code.replace('EXPECT_DATABASE', repr(database))],
+                               cwd=Path(__file__).parent, env=env, check=True, timeout=15)
+
+    def test_proxy_database_fixture_obeys_scope_before_any_cluster_effect(self):
+        code = r'''
+import unittest
+from unittest.mock import patch
+with patch('os.geteuid', return_value=1000), patch('pathlib.Path.is_file', return_value=True):
+    import test_forge_pg_proxy_db as proxy_db
+assert proxy_db.PG16_AVAILABLE is EXPECT_DATABASE
+suite = unittest.defaultTestLoader.loadTestsFromModule(proxy_db)
+def cases(group):
+    for item in group:
+        if isinstance(item, unittest.TestSuite): yield from cases(item)
+        else: yield item
+inventory = list(cases(suite))
+assert len(inventory) == 80
+assert all(bool(getattr(type(test), '__unittest_skip__', False)) is not EXPECT_DATABASE
+           for test in inventory)
+# Pure SQL-source parsers remain usable even when database execution is disabled.
+assert proxy_db._parse_apply_sql()[-1][0] == 54
+assert proxy_db._parse_cutover_sql()[0] == 55
+if not EXPECT_DATABASE:
+    with patch.object(proxy_db.ScratchCluster, '__init__', side_effect=AssertionError('Branch constructed cluster')) as construct, \
+         patch.object(proxy_db.ScratchCluster, 'start', side_effect=AssertionError('Branch started cluster')) as start, \
+         patch.object(proxy_db.subprocess, 'run', side_effect=AssertionError('Branch invoked initdb')) as run:
+        result = unittest.TestResult()
+        suite.run(result)
+        assert result.testsRun == len(inventory) == len(result.skipped)
+        assert not result.errors and not result.failures
+        construct.assert_not_called()
+        start.assert_not_called()
+        run.assert_not_called()
+        from contextlib import redirect_stdout, redirect_stderr
+        from io import StringIO
+        output = StringIO()
+        with redirect_stdout(output), redirect_stderr(output):
+            try:
+                exec(BRANCH_CODE, {})
+            except SystemExit as stopped:
+                assert stopped.code == 0
+        assert ' db_not_run=80 unexpected_skips=0' in output.getvalue()
+        assert 'MEMORY_SUMMARY executed=0 ' not in output.getvalue()
+        construct.assert_not_called()
+        start.assert_not_called()
+        run.assert_not_called()
+'''
+        branch_code = backend_suites.BRANCH_RUNNER_CODE.replace(
+            '__PATTERN__', repr('test_forge_pg_proxy*.py'))
+        for database in (False, True):
+            env = dict(os.environ)
+            env.pop('FORGE_DISABLE_DISPOSABLE_POSTGRES', None)
+            if not database:
+                env['FORGE_DISABLE_DISPOSABLE_POSTGRES'] = '1'
+            with self.subTest(database=database):
+                selected = code.replace('EXPECT_DATABASE', repr(database)).replace('BRANCH_CODE', repr(branch_code))
+                subprocess.run([sys.executable, '-B', '-c', selected],
                                cwd=Path(__file__).parent, env=env, check=True, timeout=15)
 
     def test_suite_list(self):

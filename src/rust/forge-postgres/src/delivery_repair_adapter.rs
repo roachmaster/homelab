@@ -38,12 +38,8 @@ fn work_err(error: AdapterError) -> WorkError {
 /// The (operation_id, generation, lease_token) lease triple.
 fn lease(job: &Value) -> Result<(Uuid, i64, Uuid), WorkError> {
     let parse = |key: &str| -> Result<Uuid, WorkError> {
-        let text = job
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        Uuid::parse_str(text)
-            .map_err(|_| WorkError::store(format!("Invalid repair lease {key}")))
+        let text = job.get(key).and_then(Value::as_str).unwrap_or_default();
+        Uuid::parse_str(text).map_err(|_| WorkError::store(format!("Invalid repair lease {key}")))
     };
     let generation = job
         .get("generation")
@@ -56,7 +52,10 @@ impl DeliveryRepairStorePort for PgDeliveryRepairStore {
     fn claim(&mut self, worker_id: &str) -> Result<Option<Value>, WorkError> {
         let params: &[&(dyn ToSql + Sync)] = &[&worker_id];
         self.session
-            .call_json("SELECT forge_agent.delivery_repair_claim($1) AS value", params)
+            .call_json(
+                "SELECT forge_agent.delivery_repair_claim($1) AS value",
+                params,
+            )
             .map_err(work_err)
     }
 
@@ -94,14 +93,8 @@ impl DeliveryRepairStorePort for PgDeliveryRepairStore {
         let (operation, generation, token) = lease(job)?;
         let generation = generation as i32;
         let summary = bounded(summary, 2048);
-        let params: &[&(dyn ToSql + Sync)] = &[
-            &operation,
-            &generation,
-            &token,
-            &status,
-            receipt,
-            &summary,
-        ];
+        let params: &[&(dyn ToSql + Sync)] =
+            &[&operation, &generation, &token, &status, receipt, &summary];
         self.session
             .call_bool(
                 "SELECT forge_agent.delivery_repair_finish($1,$2,$3,$4,$5,$6) AS value",

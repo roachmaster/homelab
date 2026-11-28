@@ -20,9 +20,7 @@ use forge_work_worker::contexts::{
 use forge_work_worker::error::WorkerError;
 use forge_work_worker::lease::Lease;
 use forge_work_worker::ports_runtime::GitRunner;
-use forge_work_worker::ports_worker::{
-    PeerContextPort, ReviewContextFailure, ReviewContextPort,
-};
+use forge_work_worker::ports_worker::{PeerContextPort, ReviewContextFailure, ReviewContextPort};
 use forge_work_worker::workspace::WorkspaceLease;
 
 use crate::candidate_source::{
@@ -45,6 +43,10 @@ fn review_failure() -> ReviewContextFailure {
 // ---------------------------------------------------------------------------
 // Peer context (work_peer_context)
 // ---------------------------------------------------------------------------
+
+fn valid_jenkins_counter(value: &Value) -> bool {
+    forge_work::validation::is_int(value) && value.as_i64().is_some_and(|number| number > 0)
+}
 
 pub struct PeerContextProvider {
     api: WorkerApi,
@@ -85,7 +87,9 @@ impl PeerContextProvider {
         ) else {
             return Err(peer_check("peer.context_error"));
         };
-        if !crate::candidate_source::is_canonical_uuid_str(workflow_id) || !crate::candidate_source::is_canonical_uuid_str(review_id) {
+        if !crate::candidate_source::is_canonical_uuid_str(workflow_id)
+            || !crate::candidate_source::is_canonical_uuid_str(review_id)
+        {
             return Err(peer_check("peer.context_error"));
         }
         let expected = lease.review_target_sha256.as_deref().unwrap_or_default();
@@ -180,10 +184,7 @@ impl PeerContextPort for PeerContextProvider {
             return Err(peer_check("feedback.lease_binding"));
         }
         let claim = lease_to_claim(lease)?;
-        let envelope = self
-            .api
-            .read_workflow_feedback(&claim)
-            .map_err(map_err)?;
+        let envelope = self.api.read_workflow_feedback(&claim).map_err(map_err)?;
         validate_workflow_feedback(lease, envelope, plan_context, feedback_context)
     }
 }
@@ -225,21 +226,24 @@ fn validate_feedback_inner(
         .as_object()
         .filter(|object| {
             (object.len() == 4 || object.len() == 5)
-                && ["target_json", "target_sha256", "verdict_json", "verdict_sha256"]
-                    .iter()
-                    .all(|key| object.contains_key(*key))
-                && object
-                    .keys()
-                    .all(|key| {
-                        [
-                            "target_json",
-                            "target_sha256",
-                            "verdict_json",
-                            "verdict_sha256",
-                            "author_handoff",
-                        ]
-                        .contains(&key.as_str())
-                    })
+                && [
+                    "target_json",
+                    "target_sha256",
+                    "verdict_json",
+                    "verdict_sha256",
+                ]
+                .iter()
+                .all(|key| object.contains_key(*key))
+                && object.keys().all(|key| {
+                    [
+                        "target_json",
+                        "target_sha256",
+                        "verdict_json",
+                        "verdict_sha256",
+                        "author_handoff",
+                    ]
+                    .contains(&key.as_str())
+                })
         })
         .ok_or_else(|| peer_check("feedback.envelope"))?;
     if lease.workflow_review_id.is_some()
@@ -249,7 +253,10 @@ fn validate_feedback_inner(
         return Err(peer_check("feedback.envelope"));
     }
     let target = parse_review_target(
-        object["target_json"].as_str().unwrap_or_default().as_bytes(),
+        object["target_json"]
+            .as_str()
+            .unwrap_or_default()
+            .as_bytes(),
         object["target_sha256"].as_str().unwrap_or_default(),
     )
     .map_err(|error| peer_check(error.check.as_deref().unwrap_or("target.parse_error")))?;
@@ -299,7 +306,10 @@ fn validate_feedback_inner(
             || (target["base_revision"].as_str() != Some(lease.base_revision.as_str())
                 && !linked_candidate_input(lease, None))
             || !matches!(
-                (lease.mode.as_str(), verdict["decision"].as_str().unwrap_or_default()),
+                (
+                    lease.mode.as_str(),
+                    verdict["decision"].as_str().unwrap_or_default()
+                ),
                 ("plan", "revise") | ("implement", "approve")
             )
         {
@@ -445,21 +455,24 @@ fn validate_review_context(
                 && ["feedback", "feedback_json", "legacy_resume_note"]
                     .iter()
                     .all(|key| object.contains_key(*key))
-                && object
-                    .keys()
-                    .all(|key| {
-                        ["feedback", "feedback_json", "legacy_resume_note", "author_handoff"]
-                            .contains(&key.as_str())
-                    })
+                && object.keys().all(|key| {
+                    [
+                        "feedback",
+                        "feedback_json",
+                        "legacy_resume_note",
+                        "author_handoff",
+                    ]
+                    .contains(&key.as_str())
+                })
         })
         .ok_or_else(invalid)?;
     let note = object["legacy_resume_note"]
         .as_str()
         .filter(|note| {
             note.len() <= 2048
-                && !note.chars().any(|c| {
-                    c.is_control() && !matches!(c, '\r' | '\n' | '\t')
-                })
+                && !note
+                    .chars()
+                    .any(|c| c.is_control() && !matches!(c, '\r' | '\n' | '\t'))
                 && !forge_work::validation::contains_secret(note)
         })
         .ok_or_else(invalid)?
@@ -469,18 +482,14 @@ fn validate_review_context(
         if object.contains_key("author_handoff") {
             return Err(invalid());
         }
-        if !object["feedback_json"].is_null()
-            || expected_id.is_some()
-            || expected_digest.is_some()
+        if !object["feedback_json"].is_null() || expected_id.is_some() || expected_digest.is_some()
         {
             return Err(invalid());
         }
         if note.is_empty() {
             return Ok(None);
         }
-        let content = forge_work::canonical::loose_json(
-            &json!({"legacy_resume_note": note}),
-        );
+        let content = forge_work::canonical::loose_json(&json!({"legacy_resume_note": note}));
         let sha = forge_work::canonical::sha256_hex(content.as_bytes());
         return Ok(Some(ReviewContext {
             content: content.into_bytes(),
@@ -498,9 +507,7 @@ fn validate_review_context(
     let expected_digest = expected_digest
         .filter(|digest| forge_work::validation::is_digest(&json!(digest)))
         .ok_or_else(invalid)?;
-    let raw = object["feedback_json"]
-        .as_str()
-        .ok_or_else(invalid)?;
+    let raw = object["feedback_json"].as_str().ok_or_else(invalid)?;
     let encoded = raw.as_bytes();
     if encoded.is_empty()
         || encoded.len() > 65536
@@ -554,10 +561,7 @@ fn validate_review_context(
         }
     }
     let digest_kind = typed["workspace_digest_kind"].as_str();
-    let candidate_input = linked_candidate_input(
-        lease,
-        typed["candidate_commit"].as_str(),
-    );
+    let candidate_input = linked_candidate_input(lease, typed["candidate_commit"].as_str());
     let actual_digest = match digest_kind {
         Some("candidate_tree") => {
             if !candidate_input {
@@ -604,8 +608,7 @@ fn validate_review_context(
             _ => {
                 let note_ok = typed["workspace_digest"].as_str()
                     == lease.resume_workspace_digest.as_deref()
-                    && (typed["parent_attempt_id"].as_str()
-                        == lease.resume_attempt_id.as_deref()
+                    && (typed["parent_attempt_id"].as_str() == lease.resume_attempt_id.as_deref()
                         || validate_recovery_note(
                             &note,
                             &lease_as_value(lease),
@@ -693,8 +696,8 @@ impl BuildContextProvider {
         lease: &Lease,
         feedback: &ReviewContext,
     ) -> Result<Option<BuildContext>, BuildFailure> {
-        let claim = lease_to_claim(lease)
-            .map_err(|error| BuildFailure::Invalid(error.to_string()))?;
+        let claim =
+            lease_to_claim(lease).map_err(|error| BuildFailure::Invalid(error.to_string()))?;
         let envelope = self
             .api
             .read_native_delivery_context(&claim)
@@ -709,7 +712,9 @@ impl BuildContextProvider {
         if envelope_feedback_id != feedback.feedback_id.as_deref().unwrap_or_default()
             || envelope.feedback_sha256 != feedback.sha256
         {
-            return Err(invalid("Build inspection source does not match repair feedback"));
+            return Err(invalid(
+                "Build inspection source does not match repair feedback",
+            ));
         }
         let parsed: Value = serde_json::from_slice(&feedback.content)
             .map_err(|_| invalid("Build inspection source changed"))?;
@@ -727,14 +732,17 @@ impl BuildContextProvider {
             65536,
         )
         .map_err(BuildFailure::Io)?;
-        let manifest: Value =
-            serde_json::from_slice(&manifest_raw).map_err(|_| invalid("Build inspection manifest changed"))?;
+        let manifest: Value = serde_json::from_slice(&manifest_raw)
+            .map_err(|_| invalid("Build inspection manifest changed"))?;
         let expected = [
             ("review_id", review.as_str()),
             ("task_id", envelope_source_task_id.as_str()),
             ("attempt_id", envelope_source_attempt_id.as_str()),
             ("candidate_commit", envelope.candidate_commit.as_str()),
-            ("gate_manifest_sha256", envelope.gate_manifest_sha256.as_str()),
+            (
+                "gate_manifest_sha256",
+                envelope.gate_manifest_sha256.as_str(),
+            ),
         ];
         if expected
             .iter()
@@ -748,9 +756,15 @@ impl BuildContextProvider {
             .as_object()
             .map(|object| {
                 object.len() == 5
-                    && ["version", "tested_candidate", "current_main", "build", "conflict_paths"]
-                        .iter()
-                        .all(|key| object.contains_key(*key))
+                    && [
+                        "version",
+                        "tested_candidate",
+                        "current_main",
+                        "build",
+                        "conflict_paths",
+                    ]
+                    .iter()
+                    .all(|key| object.contains_key(*key))
                     && forge_work::validation::is_int(&object["version"])
                     && object["version"].as_i64() == Some(1)
             })
@@ -772,17 +786,8 @@ impl BuildContextProvider {
                         .all(|key| object.contains_key(*key))
                     && object["provider"].as_str() == Some("jenkins")
                     && object["job"].as_str() == Some("forge-native-candidate")
-                    && forge_work::validation::is_int(&object["build_number"])
-                    && object["build_number"]
-                        .as_i64()
-                        .map(|n| (1..(1i64 << 63)).contains(&n))
-                        .unwrap_or(false)
-                    && (object["queue_id"].is_null()
-                        || (forge_work::validation::is_int(&object["queue_id"])
-                            && object["queue_id"]
-                                .as_i64()
-                                .map(|n| (1..(1i64 << 63)).contains(&n))
-                                .unwrap_or(false)))
+                    && valid_jenkins_counter(&object["build_number"])
+                    && (object["queue_id"].is_null() || valid_jenkins_counter(&object["queue_id"]))
             })
             .ok_or_else(|| invalid("Invalid Jenkins build reference"))?
             .clone();
@@ -791,13 +796,14 @@ impl BuildContextProvider {
             .filter(|id| crate::candidate_source::is_canonical_uuid_str(id))
             .ok_or_else(|| invalid("Invalid build identity"))?
             .to_string();
-        let action_root = self
-            .publication
-            .join("native-ci/actions")
-            .join(&action);
+        let action_root = self.publication.join("native-ci/actions").join(&action);
         let binding: Value = serde_json::from_slice(
-            &read_regular(&action_root.join("native-binding.json"), current_uid(), 65536)
-                .map_err(BuildFailure::Io)?,
+            &read_regular(
+                &action_root.join("native-binding.json"),
+                current_uid(),
+                65536,
+            )
+            .map_err(BuildFailure::Io)?,
         )
         .map_err(|_| invalid("Jenkins observation is not this build"))?;
         let observation: Value = serde_json::from_slice(
@@ -966,21 +972,22 @@ impl forge_work_worker::workspace_provider::SourceRevisionPort for SourceRevisio
 
 /// The default workspace factory with both delegated providers
 /// wired (the E6 factory default leaves them None).
-pub fn workspace_factory(
-    connect: ConnectFn,
-) -> forge_work_worker::worker::WorkspaceFactory {
+pub fn workspace_factory(connect: ConnectFn) -> forge_work_worker::worker::WorkspaceFactory {
     Box::new(move |config: &WorkerConfig| {
         let api = (connect)()?;
         let candidate = ReviewCandidateSource {
             state_root: config.state_root.clone(),
             git: Box::new(forge_work_worker::ports_runtime::CommandGitRunner::default()),
         };
-        Ok(Box::new(forge_work_worker::workspace_provider::WorkspaceProvider::new(
-            config.clone(),
-            Box::new(forge_work_worker::ports_runtime::CommandGitRunner::default()),
-            Some(Box::new(CandidateSources(candidate))),
-            Some(Box::new(SourceRevisions(api))),
-        )) as Box<dyn forge_work_worker::ports_runtime::WorkspacePort>)
+        Ok(Box::new(
+            forge_work_worker::workspace_provider::WorkspaceProvider::new(
+                config.clone(),
+                Box::new(forge_work_worker::ports_runtime::CommandGitRunner::default()),
+                Some(Box::new(CandidateSources(candidate))),
+                Some(Box::new(SourceRevisions(api))),
+            ),
+        )
+            as Box<dyn forge_work_worker::ports_runtime::WorkspacePort>)
     })
 }
 
@@ -1106,8 +1113,7 @@ mod tests {
     fn workflow_feedback_plan_binding_accepts() {
         let (lease, envelope, plan_context) = feedback_fixture();
         let context =
-            validate_workflow_feedback(&lease, Some(envelope), Some(&plan_context), None)
-                .unwrap();
+            validate_workflow_feedback(&lease, Some(envelope), Some(&plan_context), None).unwrap();
         assert_eq!(context.target_kind, "plan");
         assert_eq!(context.workflow_review_id, u(2));
         assert_eq!(
@@ -1120,9 +1126,8 @@ mod tests {
     fn workflow_feedback_verdict_digest_mismatch_is_named() {
         let (lease, mut envelope, plan_context) = feedback_fixture();
         envelope["verdict_json"] = json!("tampered");
-        let error =
-            validate_workflow_feedback(&lease, Some(envelope), Some(&plan_context), None)
-                .unwrap_err();
+        let error = validate_workflow_feedback(&lease, Some(envelope), Some(&plan_context), None)
+            .unwrap_err();
         assert_eq!(error, peer_check("feedback.verdict_sha256"));
     }
 
@@ -1130,9 +1135,8 @@ mod tests {
     fn workflow_feedback_wrong_mode_is_a_plan_binding_failure() {
         let (mut lease, envelope, plan_context) = feedback_fixture();
         lease.mode = "implement".to_string();
-        let error =
-            validate_workflow_feedback(&lease, Some(envelope), Some(&plan_context), None)
-                .unwrap_err();
+        let error = validate_workflow_feedback(&lease, Some(envelope), Some(&plan_context), None)
+            .unwrap_err();
         assert_eq!(error, peer_check("feedback.plan_binding"));
     }
 
@@ -1165,10 +1169,9 @@ mod tests {
             "feedback_json": null,
             "legacy_resume_note": "resume from the checkpoint",
         });
-        let context =
-            validate_review_context(&lease, &workspace(), Some(envelope), &mut NullGit)
-                .unwrap()
-                .unwrap();
+        let context = validate_review_context(&lease, &workspace(), Some(envelope), &mut NullGit)
+            .unwrap()
+            .unwrap();
         assert!(context.feedback_id.is_none());
         assert_eq!(context.legacy_resume_note, "resume from the checkpoint");
         assert_eq!(
@@ -1181,8 +1184,24 @@ mod tests {
     fn review_context_missing_envelope_with_feedback_binding_fails() {
         let mut lease = lease();
         lease.feedback_id = Some(u(7));
-        let error = validate_review_context(&lease, &workspace(), None, &mut NullGit)
-            .unwrap_err();
+        let error = validate_review_context(&lease, &workspace(), None, &mut NullGit).unwrap_err();
         assert_eq!(error, WorkerError::protocol(REVIEW_MESSAGE));
+    }
+    #[test]
+    fn jenkins_counters_keep_positive_i64_bounds() {
+        for value in [serde_json::json!(1), serde_json::json!(i64::MAX)] {
+            assert!(valid_jenkins_counter(&value));
+        }
+        for value in [
+            serde_json::json!(-1),
+            serde_json::json!(0),
+            serde_json::json!(1_u64 << 63),
+            serde_json::json!(u64::MAX),
+            serde_json::json!(1.0),
+            serde_json::json!(true),
+            Value::Null,
+        ] {
+            assert!(!valid_jenkins_counter(&value));
+        }
     }
 }

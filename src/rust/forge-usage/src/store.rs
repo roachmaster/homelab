@@ -119,14 +119,15 @@ pub fn validate_decimal_counter(value: &Value, label: &str) -> Result<Option<Str
     }
 }
 
-pub fn validate_bounded_text(value: &Value, max_bytes: usize, label: &str) -> Result<String, String> {
+pub fn validate_bounded_text(
+    value: &Value,
+    max_bytes: usize,
+    label: &str,
+) -> Result<String, String> {
     let Some(value) = value.as_str() else {
         return Err(format!("Invalid {label}"));
     };
-    if value.trim().is_empty()
-        || value.len() > max_bytes
-        || value.chars().any(|c| c.is_control())
-    {
+    if value.trim().is_empty() || value.len() > max_bytes || value.chars().any(|c| c.is_control()) {
         return Err(format!("Invalid {label}"));
     }
     Ok(value.to_string())
@@ -136,9 +137,9 @@ pub fn validate_safe_error_code(value: &Value) -> Result<String, String> {
     let valid = value.as_str().is_some_and(|value| {
         !value.is_empty()
             && value.len() <= 64
-            && value
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b'-'))
+            && value.bytes().all(|b| {
+                b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b'-')
+            })
     });
     if valid {
         Ok(value.as_str().unwrap_or_default().to_string())
@@ -164,19 +165,32 @@ pub fn validate_attempt_usage(usage: &Value) -> Result<Value, String> {
         return Err("Attempt usage must contain exact 7 contract keys".to_string());
     };
     if object.len() != ATTEMPT_USAGE_KEYS.len()
-        || !ATTEMPT_USAGE_KEYS.iter().all(|key| object.contains_key(*key))
+        || !ATTEMPT_USAGE_KEYS
+            .iter()
+            .all(|key| object.contains_key(*key))
     {
         return Err("Attempt usage must contain exact 7 contract keys".to_string());
     }
     let mut sanitized = Map::new();
-    for key in ["input_tokens", "output_tokens", "cached_input_tokens", "total_tokens"] {
+    for key in [
+        "input_tokens",
+        "output_tokens",
+        "cached_input_tokens",
+        "total_tokens",
+    ] {
         let counter = validate_decimal_counter(&object[key], key)?;
         sanitized.insert(key.into(), counter.map_or(Value::Null, Value::String));
     }
     for (key, valid, message) in [
         (
             "source",
-            ["codex-exec-turn-v1", "agy-result-v1", "grok-headless-end-v1", "muse-run-usage-v1"].as_slice(),
+            [
+                "codex-exec-turn-v1",
+                "agy-result-v1",
+                "grok-headless-end-v1",
+                "muse-run-usage-v1",
+            ]
+            .as_slice(),
             "Invalid attempt usage source",
         ),
         (
@@ -261,13 +275,25 @@ pub fn validate_provider_snapshot(snapshot: &Value) -> Result<Value, String> {
         return Err("Invalid allowance object".to_string());
     }
     let a_state = raw_allowance["state"].as_str().unwrap_or_default();
-    if !["available", "unsupported", "unknown", "auth_required", "unavailable"].contains(&a_state) {
+    if ![
+        "available",
+        "unsupported",
+        "unknown",
+        "auth_required",
+        "unavailable",
+    ]
+    .contains(&a_state)
+    {
         return Err("Invalid allowance.state".to_string());
     }
     let a_reason = if raw_allowance["reason"].is_null() {
         None
     } else {
-        Some(validate_bounded_text(&raw_allowance["reason"], 128, "allowance.reason")?)
+        Some(validate_bounded_text(
+            &raw_allowance["reason"],
+            128,
+            "allowance.reason",
+        )?)
     };
     let ordinary = &raw_allowance["ordinary_usage_allowed"];
     if !ordinary.is_null() && !ordinary.is_boolean() {
@@ -285,9 +311,15 @@ pub fn validate_provider_snapshot(snapshot: &Value) -> Result<Value, String> {
             .as_object()
             .ok_or_else(|| "Invalid allowance bucket entry".to_string())?;
         if bucket.len() != 5
-            || !["key", "label", "used_percent", "window_minutes", "resets_at"]
-                .iter()
-                .all(|key| bucket.contains_key(*key))
+            || ![
+                "key",
+                "label",
+                "used_percent",
+                "window_minutes",
+                "resets_at",
+            ]
+            .iter()
+            .all(|key| bucket.contains_key(*key))
         {
             return Err("Invalid allowance bucket entry".to_string());
         }
@@ -307,9 +339,7 @@ pub fn validate_provider_snapshot(snapshot: &Value) -> Result<Value, String> {
             }
         }
         let win_min = &bucket["window_minutes"];
-        if !win_min.is_null()
-            && !crate::types::int_in_range(win_min, 1, (1i64 << 53) - 1)
-        {
+        if !win_min.is_null() && !crate::types::int_in_range(win_min, 1, (1i64 << 53) - 1) {
             return Err("Invalid bucket window_minutes".to_string());
         }
         let resets_at = if bucket["resets_at"].is_null() {
@@ -325,7 +355,10 @@ pub fn validate_provider_snapshot(snapshot: &Value) -> Result<Value, String> {
         entry.insert("label".into(), Value::String(b_label));
         entry.insert("used_percent".into(), used_pct.clone());
         entry.insert("window_minutes".into(), win_min.clone());
-        entry.insert("resets_at".into(), resets_at.map_or(Value::Null, Value::String));
+        entry.insert(
+            "resets_at".into(),
+            resets_at.map_or(Value::Null, Value::String),
+        );
         buckets.push(Value::Object(entry));
     }
     let raw_activity = object["account_activity"]
@@ -393,7 +426,10 @@ pub fn validate_provider_snapshot(snapshot: &Value) -> Result<Value, String> {
     );
     result.insert("source".into(), Value::String(source));
     result.insert("version".into(), Value::String(version));
-    result.insert("last_error".into(), last_error.map_or(Value::Null, Value::String));
+    result.insert(
+        "last_error".into(),
+        last_error.map_or(Value::Null, Value::String),
+    );
     result.insert("allowance".into(), Value::Object(allowance));
     result.insert("account_activity".into(), Value::Object(activity));
     result.insert(
@@ -617,7 +653,12 @@ impl UsageStore {
     }
 
     fn require_project(&self, project_alias: &str) -> StoreResult<()> {
-        if self.config.allowed_projects.iter().any(|p| p == project_alias) {
+        if self
+            .config
+            .allowed_projects
+            .iter()
+            .any(|p| p == project_alias)
+        {
             Ok(())
         } else {
             Err(RejectedError::new(403, "denied").into())
@@ -733,13 +774,22 @@ impl UsageReadStore for UsageStore {
                 let delta_ms = (((finished - started) * 1000.0) as i64).max(0);
                 bucket.elapsed_ms = Some(bucket.elapsed_ms.unwrap_or(0) + delta_ms);
             }
-            let counted = row.usage_json.as_ref().and_then(Value::as_object).filter(|usage| {
-                usage.get("session_provenance").and_then(Value::as_str) == Some("fresh_session")
-                    && matches!(
-                        usage.get("coverage").and_then(Value::as_str),
-                        Some("complete" | "partial")
-                    )
-                    && ["input_tokens", "output_tokens", "cached_input_tokens", "total_tokens"]
+            let counted = row
+                .usage_json
+                .as_ref()
+                .and_then(Value::as_object)
+                .filter(|usage| {
+                    usage.get("session_provenance").and_then(Value::as_str) == Some("fresh_session")
+                        && matches!(
+                            usage.get("coverage").and_then(Value::as_str),
+                            Some("complete" | "partial")
+                        )
+                        && [
+                            "input_tokens",
+                            "output_tokens",
+                            "cached_input_tokens",
+                            "total_tokens",
+                        ]
                         .iter()
                         .any(|key| {
                             usage
@@ -747,7 +797,7 @@ impl UsageReadStore for UsageStore {
                                 .and_then(Value::as_str)
                                 .is_some_and(is_counter_str)
                         })
-            });
+                });
             if let Some(usage) = counted {
                 bucket.known += 1;
                 for (key, slot) in [
@@ -836,10 +886,8 @@ impl UsageReadStore for UsageStore {
             jobs.insert("unknown_attempts".into(), Value::from(rollup.unknown));
             jobs.insert(
                 "elapsed_ms".into(),
-                format_wide_counter(
-                    &rollup.elapsed_ms.map(|value| value.to_string()),
-                )?
-                .map_or(Value::Null, Value::String),
+                format_wide_counter(&rollup.elapsed_ms.map(|value| value.to_string()))?
+                    .map_or(Value::Null, Value::String),
             );
             let mut provider = Map::new();
             provider.insert("alias".into(), Value::String(alias.clone()));
@@ -976,7 +1024,10 @@ mod tests {
             "account_identity": null,
         });
         let sanitized = validate_provider_snapshot(&snapshot).unwrap();
-        assert_eq!(sanitized["allowance"]["buckets"][0]["key"], json!("codex.primary"));
+        assert_eq!(
+            sanitized["allowance"]["buckets"][0]["key"],
+            json!("codex.primary")
+        );
         let mut bad = snapshot.clone();
         bad["account_activity"]["daily"][0]["tokens"] = json!("05");
         assert!(validate_provider_snapshot(&bad).is_err());
@@ -1050,7 +1101,10 @@ mod tests {
 
     #[test]
     fn timestamp_formatting() {
-        assert_eq!(format_timestamp(1_764_000_000.0), iso_from_epoch(1_764_000_000));
+        assert_eq!(
+            format_timestamp(1_764_000_000.0),
+            iso_from_epoch(1_764_000_000)
+        );
         assert!(format_timestamp(1_764_000_000.5).ends_with(".500000Z"));
     }
 }

@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::app::{
-    error_response, McpApp, MCP_PATH, MAX_BODY_BYTES, PRESENCE_PATH, PROTOCOL_VERSIONS,
+    error_response, McpApp, MAX_BODY_BYTES, MCP_PATH, PRESENCE_PATH, PROTOCOL_VERSIONS,
 };
 use crate::auth::{header_get, header_get_all, Principal};
 
@@ -50,7 +50,9 @@ fn handle_connection(stream: TcpStream, app: Arc<McpApp>) {
     let Ok(writer) = stream.try_clone() else {
         return;
     };
-    let peer = stream.peer_addr().unwrap_or(SocketAddr::from(([127, 0, 0, 1], 0)));
+    let peer = stream
+        .peer_addr()
+        .unwrap_or(SocketAddr::from(([127, 0, 0, 1], 0)));
     let local_port = stream.local_addr().map(|addr| addr.port()).unwrap_or(0);
     let mut conn = Conn {
         reader: BufReader::new(stream),
@@ -105,7 +107,8 @@ impl Conn {
                 return false;
             }
             if let Some((name, value)) = header_line.split_once(':') {
-                self.headers.push((name.trim().to_string(), value.trim().to_string()));
+                self.headers
+                    .push((name.trim().to_string(), value.trim().to_string()));
             }
         }
         true
@@ -149,12 +152,7 @@ impl Conn {
         }
     }
 
-    fn send_json(
-        &mut self,
-        status: u16,
-        body: Option<&Value>,
-        extra: &[(&str, String)],
-    ) {
+    fn send_json(&mut self, status: u16, body: Option<&Value>, extra: &[(&str, String)]) {
         self.consume_body();
         let data = body
             .map(|value| serde_json::to_string(value).unwrap_or_default())
@@ -167,9 +165,7 @@ impl Conn {
         headers.push(("Cache-Control".into(), "no-store".into()));
         headers.push(("X-Content-Type-Options".into(), "nosniff".into()));
         for (key, value) in extra {
-            if key.eq_ignore_ascii_case("connection")
-                && value.eq_ignore_ascii_case("close")
-            {
+            if key.eq_ignore_ascii_case("connection") && value.eq_ignore_ascii_case("close") {
                 self.close_connection = true;
             }
             headers.push((key.to_string(), value.clone()));
@@ -263,8 +259,7 @@ impl Conn {
             let presented = header_get(&self.headers, "Authorization").is_some();
             let mut challenge = "Bearer realm=\"homelab-mcp\"".to_string();
             if let Some(oauth) = &self.app.oauth {
-                challenge +=
-                    &format!(", resource_metadata=\"{}\"", oauth.resource_metadata_url());
+                challenge += &format!(", resource_metadata=\"{}\"", oauth.resource_metadata_url());
             }
             if presented {
                 challenge += ", error=\"invalid_token\"";
@@ -327,9 +322,7 @@ impl Conn {
         self.app.limiter.record_success(&key);
         match presence.snapshot() {
             Ok(result) => self.send_json(200, Some(&result), &[]),
-            Err(_) => {
-                self.send_json(503, Some(&json!({"error": "presence_unavailable"})), &[])
-            }
+            Err(_) => self.send_json(503, Some(&json!({"error": "presence_unavailable"})), &[]),
         }
     }
 
@@ -368,16 +361,24 @@ impl Conn {
             && (route == "/.well-known/oauth-protected-resource"
                 || route == "/.well-known/oauth-protected-resource/mcp")
         {
-            let metadata = self.app.oauth.as_ref().unwrap().protected_resource_metadata();
+            let metadata = self
+                .app
+                .oauth
+                .as_ref()
+                .unwrap()
+                .protected_resource_metadata();
             self.send_json(
                 200,
                 Some(&metadata),
                 &[("Cache-Control", "max-age=300".to_string())],
             );
-        } else if self.app.oauth.is_some()
-            && route == "/.well-known/oauth-authorization-server"
-        {
-            let metadata = self.app.oauth.as_ref().unwrap().authorization_server_metadata();
+        } else if self.app.oauth.is_some() && route == "/.well-known/oauth-authorization-server" {
+            let metadata = self
+                .app
+                .oauth
+                .as_ref()
+                .unwrap()
+                .authorization_server_metadata();
             self.send_json(
                 200,
                 Some(&metadata),
@@ -435,11 +436,7 @@ impl Conn {
             .trim()
             .to_lowercase();
         if content_type != "application/json" {
-            let body = error_response(
-                Value::Null,
-                -32700,
-                "Content-Type must be application/json",
-            );
+            let body = error_response(Value::Null, -32700, "Content-Type must be application/json");
             self.send_json(415, Some(&body), &[]);
             return;
         }
@@ -463,11 +460,7 @@ impl Conn {
             }
         };
         if message.is_array() {
-            let body = error_response(
-                Value::Null,
-                -32600,
-                "JSON-RPC batches are not supported",
-            );
+            let body = error_response(Value::Null, -32600, "JSON-RPC batches are not supported");
             self.send_json(400, Some(&body), &[]);
             return;
         }
@@ -640,9 +633,7 @@ impl Conn {
             self.send_page(200, &page, &[("Set-Cookie", set_cookie)]);
             return;
         }
-        let clear = format!(
-            "{CSRF_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
-        );
+        let clear = format!("{CSRF_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0");
         let csrf_ok = match (&cookie, params.get("csrf")) {
             (Some(cookie), Some(supplied)) => crate::util::constant_time_eq(
                 supplied.as_bytes(),
@@ -689,11 +680,7 @@ impl Conn {
         self.app.login_limiter.record_success(&key);
         match oauth.code_redirect(&request) {
             Ok(location) => self.send_redirect(&location, &[("Set-Cookie", clear)]),
-            Err(_) => self.send_page(
-                500,
-                &error_page("Authorization is unavailable."),
-                &[],
-            ),
+            Err(_) => self.send_page(500, &error_page("Authorization is unavailable."), &[]),
         }
     }
 
@@ -775,8 +762,7 @@ impl Conn {
                 self.send_json(500, Some(&json!({"error": "server_error"})), no_cache);
             }
             Err(StoreError::OAuth(error)) => {
-                let mut extra: Vec<(&str, String)> =
-                    vec![("Pragma", "no-cache".to_string())];
+                let mut extra: Vec<(&str, String)> = vec![("Pragma", "no-cache".to_string())];
                 if error.error == "invalid_client" {
                     self.app.limiter.record_failure(&key);
                     if error.basic {

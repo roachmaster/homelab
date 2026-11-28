@@ -9,8 +9,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::provider::{UsageProvider, UsageProviderFactory};
-use crate::rpc::ProviderFailure;
-use crate::types::{InvalidUsage, MAX_PROVIDERS, UsageResult, exact, identifier, is_uuid36, validate_snapshot};
+use crate::types::{
+    exact, identifier, is_uuid36, validate_snapshot, InvalidUsage, UsageResult, MAX_PROVIDERS,
+};
 
 /// The collector's poll store (the usage surface of
 /// work_worker_store.py, ported with this slice).
@@ -114,8 +115,7 @@ impl UsageCollector {
         let mut seen = std::collections::HashSet::new();
         for provider in &providers {
             let alias = provider.config().alias.clone();
-            identifier(&Value::String(alias.clone()))
-                .map_err(|error| error.0.to_string())?;
+            identifier(&Value::String(alias.clone())).map_err(|error| error.0.to_string())?;
             if !seen.insert(alias) {
                 return Err("Usage collector requires selected providers and store".to_string());
             }
@@ -210,7 +210,11 @@ impl UsageCollector {
                     return Err(InvalidUsage("invalid metadata refresh identity"));
                 }
                 let alias = identifier(&object["profile_alias"])?;
-                poll_value(&alias, &object["generation"], &object["configuration_epoch"])
+                poll_value(
+                    &alias,
+                    &object["generation"],
+                    &object["configuration_epoch"],
+                )
             })();
             match parsed {
                 Ok(poll) => poll,
@@ -297,8 +301,7 @@ impl UsageCollectorFactory {
             let mut seen = std::collections::HashSet::new();
             for factory in factories {
                 let alias = factory.config().alias.clone();
-                identifier(&Value::String(alias.clone()))
-                    .map_err(|error| error.0.to_string())?;
+                identifier(&Value::String(alias.clone())).map_err(|error| error.0.to_string())?;
                 if !seen.insert(alias) {
                     return Err("Duplicate usage provider alias".to_string());
                 }
@@ -323,8 +326,8 @@ impl UsageCollectorFactory {
             .clone()
             .ok_or_else(|| "Usage collector requires provider factories and store".to_string())?;
         let mut providers: Vec<Box<dyn UsageProvider>> = Vec::new();
-        let mut acquire = |factory: &UsageProviderFactory,
-                           providers: &mut Vec<Box<dyn UsageProvider>>|
+        let acquire = |factory: &UsageProviderFactory,
+                       providers: &mut Vec<Box<dyn UsageProvider>>|
          -> Result<(), String> {
             let provider = factory.create()?;
             if provider.config().alias != factory.config().alias {
@@ -341,8 +344,14 @@ impl UsageCollectorFactory {
                 return Err(error);
             }
         }
-        UsageCollector::new(providers, store, self.interval, self.ttl, self.clock.clone())
-            .map(Some)
+        UsageCollector::new(
+            providers,
+            store,
+            self.interval,
+            self.ttl,
+            self.clock.clone(),
+        )
+        .map(Some)
     }
 }
 
@@ -375,9 +384,9 @@ pub fn read_hmac_key(path: &Path, euid: u32) -> Result<Vec<u8>, String> {
     let text = std::str::from_utf8(value).unwrap_or_default();
     let hex = text.strip_suffix('\n').unwrap_or(text);
     if hex.len() == 64
-        && hex
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) || (b'A'..=b'F').contains(&byte))
+        && hex.bytes().all(|byte| {
+            byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) || (b'A'..=b'F').contains(&byte)
+        })
     {
         let mut decoded = Vec::with_capacity(32);
         for pair in hex.as_bytes().chunks(2) {
@@ -392,7 +401,8 @@ pub fn read_hmac_key(path: &Path, euid: u32) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::{UsageProviderConfig, system_clock};
+    use crate::provider::{system_clock, UsageProviderConfig};
+    use crate::rpc::ProviderFailure;
     use serde_json::json;
     use std::sync::Mutex;
 
@@ -441,7 +451,10 @@ mod tests {
             _epoch: i64,
             _snapshot: &Value,
         ) -> Result<bool, String> {
-            self.recorded.lock().unwrap().push(profile_alias.to_string());
+            self.recorded
+                .lock()
+                .unwrap()
+                .push(profile_alias.to_string());
             Ok(true)
         }
 
@@ -507,9 +520,14 @@ mod tests {
             "profile_alias": "ghost-1", "generation": 1, "configuration_epoch": 1,
         }));
         let clock: CollectorClock = Arc::new(|| 0.0);
-        let mut collector =
-            UsageCollector::new(vec![provider("auto-1", false)], store.clone(), 60.0, 300.0, clock)
-                .unwrap();
+        let mut collector = UsageCollector::new(
+            vec![provider("auto-1", false)],
+            store.clone(),
+            60.0,
+            300.0,
+            clock,
+        )
+        .unwrap();
         assert!(collector.run_once());
         assert_eq!(
             store.failed.lock().unwrap().as_slice(),
@@ -519,23 +537,27 @@ mod tests {
 
     #[test]
     fn hmac_key_rules() {
-        let path = std::env::temp_dir().join(format!(
-            "forge-usage-key-test-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("forge-usage-key-test-{}", std::process::id()));
         std::fs::write(&path, "ab".repeat(32)).unwrap();
-        std::fs::set_permissions(
-            &path,
-            std::os::unix::fs::PermissionsExt::from_mode(0o600),
-        )
-        .unwrap();
-        let key = read_hmac_key(&path, 1000).unwrap();
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .unwrap();
+        let worker_uid = std::fs::metadata(&path).unwrap().uid();
+        let key = read_hmac_key(&path, worker_uid).unwrap();
         assert_eq!(key.len(), 32);
         assert_eq!(key[0], 0xab);
+        if worker_uid != 0 {
+            assert!(read_hmac_key(&path, worker_uid.wrapping_add(1)).is_err());
+        }
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o644))
+            .unwrap();
+        assert!(read_hmac_key(&path, worker_uid).is_err());
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .unwrap();
         std::fs::write(&path, vec![7u8; 32]).unwrap();
-        assert_eq!(read_hmac_key(&path, 1000).unwrap(), vec![7u8; 32]);
+        assert_eq!(read_hmac_key(&path, worker_uid).unwrap(), vec![7u8; 32]);
         std::fs::write(&path, b"short").unwrap();
-        assert!(read_hmac_key(&path, 1000).is_err());
+        assert!(read_hmac_key(&path, worker_uid).is_err());
         let _ = std::fs::remove_file(&path);
     }
 }

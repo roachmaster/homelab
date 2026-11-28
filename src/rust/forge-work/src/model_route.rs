@@ -27,6 +27,8 @@ use crate::execution_policy::{
 };
 use crate::pinned_recipe::PinnedRecipe;
 use crate::quota_diagnostics::parse_quota_summary;
+use crate::work_error::WorkError;
+use crate::work_requests::ResumeRequest;
 use crate::workflow::{
     coordinator_actor, denied, int_of, mismatch, operator_actor, present, ready_for_recipe, text,
     uuid_of, ExecutionPolicyHook, WorkflowStore, NATIVE_POLICY_DIGESTS,
@@ -34,8 +36,6 @@ use crate::workflow::{
 use crate::workflow_ingress::{parse_ts, workflow_in_project};
 use crate::workflow_policy::WorkflowCatalog;
 use crate::workflow_tx::{BusyCheck, WorkflowTx, WorkflowTxFactory};
-use crate::work_error::WorkError;
-use crate::work_requests::ResumeRequest;
 
 fn not_reviewable() -> WorkError {
     WorkError::rejected(409, "not_reviewable")
@@ -318,7 +318,7 @@ pub(crate) fn model_snapshot_from(
     rows: &[Value],
     workflow: &Value,
     catalog: &dyn WorkflowCatalog,
-    native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native: &crate::workflow_policy::NativePolicyMatcher<'_>,
     owner: &str,
 ) -> Result<Value, WorkError> {
     if rows.is_empty() {
@@ -344,8 +344,7 @@ pub(crate) fn model_snapshot_from(
         && intent["original_snapshot_sha256"] == workflow["policy_digest"]
         && intent["effective_snapshot"] == expected
         && source_attempt.is_some()
-        && text(row, "source_key")
-            == format!("{MODEL_ROUTE_PREFIX}{}", source_attempt.unwrap())
+        && text(row, "source_key") == format!("{MODEL_ROUTE_PREFIX}{}", source_attempt.unwrap())
         && finish["status"].as_str() == Some("provider_model_routed")
         && finish["intent_sha256"].as_str() == Some(&sha256_canonical(intent))
         && finish["receipt"]["status"].as_str() == Some("queued")
@@ -390,7 +389,10 @@ impl ExecutionPolicyProvider {
 fn swallow(result: Result<Value, WorkError>) -> Result<(), WorkError> {
     match result {
         Ok(_) => Ok(()),
-        Err(WorkError::Rejected { status, .. }) if matches!(status, 403 | 409 | 503) => Ok(()),
+        Err(WorkError::Rejected {
+            status: 403 | 409 | 503,
+            ..
+        }) => Ok(()),
         Err(error) => Err(error),
     }
 }
@@ -448,11 +450,7 @@ impl ExecutionPolicyHook for ExecutionPolicyProvider {
             if text(row, "model") == profile.model {
                 swallow(flow.recover_model_route(&command, &PublishedQuotaProof))?;
             } else if text(row, "model") == model {
-                swallow(flow.wait_or_resume_model_route(
-                    &command,
-                    false,
-                    &*self.author_handoff,
-                ))?;
+                swallow(flow.wait_or_resume_model_route(&command, false, &*self.author_handoff))?;
             }
         }
         self.author_handoff.run_once(flow)
@@ -511,11 +509,7 @@ impl WorkflowStore {
         )
     }
 
-    fn recipe(
-        &self,
-        snapshot: &Value,
-        key: &str,
-    ) -> Result<PinnedRecipe, WorkError> {
+    fn recipe(&self, snapshot: &Value, key: &str) -> Result<PinnedRecipe, WorkError> {
         PinnedRecipe::from_snapshot(snapshot, key, self.native()).map_err(WorkError::store)
     }
 
@@ -1303,7 +1297,7 @@ mod tests {
             &self,
             _alias: &str,
             _mode: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }
@@ -1313,7 +1307,7 @@ mod tests {
             _alias: &str,
             mode: &str,
             model: &str,
-            native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             let base = self
                 .bases
@@ -1594,8 +1588,7 @@ mod tests {
         );
         // A fully bound route yields the changed snapshot.
         let expected =
-            changed_snapshot(&workflow["snapshot"], &catalog(), "gemini-backup", &native)
-                .unwrap();
+            changed_snapshot(&workflow["snapshot"], &catalog(), "gemini-backup", &native).unwrap();
         let attempt_id = Uuid::new_v4();
         let task_id = Uuid::new_v4();
         let intent = json!({
@@ -1619,7 +1612,14 @@ mod tests {
             },
         });
         assert_eq!(
-            model_snapshot_from(&[row.clone()], &workflow, &catalog(), &native, "owner").unwrap(),
+            model_snapshot_from(
+                std::slice::from_ref(&row),
+                &workflow,
+                &catalog(),
+                &native,
+                "owner"
+            )
+            .unwrap(),
             expected
         );
         // A tampered finish digest breaks the binding.
@@ -1631,12 +1631,12 @@ mod tests {
         );
     }
 
-    use std::{cell::RefCell, rc::Rc};
+    use crate::decision_requests::{PlanDecideRequest, ReviewDecideRequest};
     use crate::retry_events::{RetryEvents, RetryScope};
     use crate::work_actors::Actor;
-    use crate::decision_requests::{PlanDecideRequest, ReviewDecideRequest};
     use crate::workflow::{CoordinatorConfig, WorkflowDecisionPort};
     use crate::workflow_policy::ProjectWorkflowPolicy;
+    use std::{cell::RefCell, rc::Rc};
 
     // -- Binary-pin recovery harness --------------------------------
     // A scripted WorkflowTx (the workflow.rs StubTx shape with the
@@ -1713,36 +1713,105 @@ mod tests {
         ) -> Result<Option<(bool, String)>, WorkError> {
             Ok(self.state.clone())
         }
-        fn project_lock(&mut self, _project: &str) -> Result<(), WorkError> { Ok(()) }
+        fn project_lock(&mut self, _project: &str) -> Result<(), WorkError> {
+            Ok(())
+        }
         unused!(savepoint, &str => Result<(), WorkError>);
         unused!(rollback_to_savepoint, &str => Result<(), WorkError>);
         unused!(release_savepoint, &str => Result<(), WorkError>);
-        fn notify_jobs(&mut self) -> Result<(), WorkError> { Ok(()) }
-        fn insert_event(&mut self, _project: &str, _task_id: Uuid, kind: &str, payload: Value, _actor: &Actor, _cause: Option<&str>, _cause_detail: Option<&str>, _first: bool) -> Result<(), WorkError> {
-            self.records.borrow_mut().events.push(json!({"kind": kind, "payload": payload}));
+        fn notify_jobs(&mut self) -> Result<(), WorkError> {
             Ok(())
         }
-        fn workflow(&mut self, _workflow_id: Uuid, _for_update: bool) -> Result<Option<Value>, WorkError> { Ok(self.workflow.clone()) }
-        fn task(&mut self, _task_id: Uuid, _for_update: bool) -> Result<Option<Value>, WorkError> { Ok(self.task.clone()) }
+        fn insert_event(
+            &mut self,
+            _project: &str,
+            _task_id: Uuid,
+            kind: &str,
+            payload: Value,
+            _actor: &Actor,
+            _cause: Option<&str>,
+            _cause_detail: Option<&str>,
+            _first: bool,
+        ) -> Result<(), WorkError> {
+            self.records
+                .borrow_mut()
+                .events
+                .push(json!({"kind": kind, "payload": payload}));
+            Ok(())
+        }
+        fn workflow(
+            &mut self,
+            _workflow_id: Uuid,
+            _for_update: bool,
+        ) -> Result<Option<Value>, WorkError> {
+            Ok(self.workflow.clone())
+        }
+        fn task(&mut self, _task_id: Uuid, _for_update: bool) -> Result<Option<Value>, WorkError> {
+            Ok(self.task.clone())
+        }
         unused!(task_in_project, &str, Uuid, bool => Result<Option<Value>, WorkError>);
         unused!(tasks_of_workflow, Uuid => Result<Vec<Value>, WorkError>);
         unused!(lock_workflow_tasks, Uuid => Result<(), WorkError>);
         unused!(workflow_review, Uuid, bool => Result<Option<Value>, WorkError>);
         unused!(action, Uuid, bool => Result<Option<Value>, WorkError>);
-        fn action_by_source(&mut self, _workflow_id: Uuid, _kind: &str, _source_key: &str) -> Result<Option<Value>, WorkError> { Ok(self.previous_action.clone()) }
-        fn actions_by_source_prefix(&mut self, _workflow_id: Uuid, _kind: Option<&str>, _prefix: &str) -> Result<Vec<Value>, WorkError> { Ok(self.prefix_actions.clone()) }
+        fn action_by_source(
+            &mut self,
+            _workflow_id: Uuid,
+            _kind: &str,
+            _source_key: &str,
+        ) -> Result<Option<Value>, WorkError> {
+            Ok(self.previous_action.clone())
+        }
+        fn actions_by_source_prefix(
+            &mut self,
+            _workflow_id: Uuid,
+            _kind: Option<&str>,
+            _prefix: &str,
+        ) -> Result<Vec<Value>, WorkError> {
+            Ok(self.prefix_actions.clone())
+        }
         unused!(count_actions_by_source_prefix, Uuid, Option<&str>, &str => Result<i64, WorkError>);
-        fn attempt(&mut self, _task_id: Uuid, _attempt_id: Uuid) -> Result<Option<Value>, WorkError> { Ok(self.attempt.clone()) }
+        fn attempt(
+            &mut self,
+            _task_id: Uuid,
+            _attempt_id: Uuid,
+        ) -> Result<Option<Value>, WorkError> {
+            Ok(self.attempt.clone())
+        }
         unused!(attempts_of_task, Uuid => Result<Vec<Value>, WorkError>);
-        fn receipt_by_id(&mut self, _task_id: Uuid, _receipt_id: Uuid) -> Result<Option<Value>, WorkError> { Ok(self.receipt.clone()) }
+        fn receipt_by_id(
+            &mut self,
+            _task_id: Uuid,
+            _receipt_id: Uuid,
+        ) -> Result<Option<Value>, WorkError> {
+            Ok(self.receipt.clone())
+        }
         unused!(receipt_for_attempt, Uuid, Uuid, i64 => Result<Option<Value>, WorkError>);
         unused!(review_row, Uuid, bool => Result<Option<Value>, WorkError>);
         unused!(latest_local_review, &str, Uuid, Uuid => Result<Option<Value>, WorkError>);
         unused!(plan_decision, Uuid => Result<Option<Value>, WorkError>);
         unused!(budget, &str, Uuid => Result<Option<Value>, WorkError>);
-        fn readiness(&mut self, _policy_digests: Option<&[String]>) -> Result<Vec<Value>, WorkError> { Ok(self.readiness_rows.clone()) }
-        fn role_granted(&mut self, _workflow_id: Uuid, _profile: &str, _mode: &str) -> Result<bool, WorkError> { Ok(true) }
-        fn policy_drifted(&mut self, _workflow_id: Uuid, _current_snapshot: &Value) -> Result<Option<bool>, WorkError> { Ok(Some(false)) }
+        fn readiness(
+            &mut self,
+            _policy_digests: Option<&[String]>,
+        ) -> Result<Vec<Value>, WorkError> {
+            Ok(self.readiness_rows.clone())
+        }
+        fn role_granted(
+            &mut self,
+            _workflow_id: Uuid,
+            _profile: &str,
+            _mode: &str,
+        ) -> Result<bool, WorkError> {
+            Ok(true)
+        }
+        fn policy_drifted(
+            &mut self,
+            _workflow_id: Uuid,
+            _current_snapshot: &Value,
+        ) -> Result<Option<bool>, WorkError> {
+            Ok(Some(false))
+        }
         unused!(artifact, Uuid, Uuid => Result<Value, WorkError>);
         unused!(owner_continuation_used, Uuid => Result<bool, WorkError>);
         unused!(revival_floor, Uuid => Result<Option<String>, WorkError>);
@@ -1784,7 +1853,13 @@ mod tests {
         unused!(ensure_decide_action, Uuid, &str => Result<(), WorkError>);
         unused!(hosted_merge_candidates, Uuid => Result<Vec<Value>, WorkError>);
         unused!(insert_merge_action, Uuid, &str, Uuid, &str => Result<(), WorkError>);
-        fn workflow_busy(&mut self, _workflow_id: Uuid, _check: crate::workflow_tx::BusyCheck) -> Result<bool, WorkError> { Ok(self.busy_any) }
+        fn workflow_busy(
+            &mut self,
+            _workflow_id: Uuid,
+            _check: crate::workflow_tx::BusyCheck,
+        ) -> Result<bool, WorkError> {
+            Ok(self.busy_any)
+        }
         unused!(writer_active, Uuid => Result<bool, WorkError>);
         unused!(amend_policy_available, => Result<bool, WorkError>);
         unused!(allowance_workflows, Option<(&str, Uuid)> => Result<Vec<Value>, WorkError>);
@@ -1799,16 +1874,71 @@ mod tests {
         unused!(action_by_source_review, Uuid, Uuid, &str, &str, bool => Result<Option<Value>, WorkError>);
         unused!(insert_workflow_review, &Value => Result<Uuid, WorkError>);
         unused!(insert_readiness_successor, Uuid, Uuid, &str => Result<Uuid, WorkError>);
-        fn model_route_actions(&mut self, _project: &str, _workflow_id: Uuid) -> Result<Vec<Value>, WorkError> { Ok(self.route_actions.clone()) }
-        fn newer_plan_task_exists(&mut self, _project: &str, _workflow_id: Uuid, _task_id: Uuid, _created_at: &str, _or_equal: bool) -> Result<bool, WorkError> { Ok(self.newer_plan) }
-        fn workflow_task_blocked(&mut self, _project: &str, _workflow_id: Uuid) -> Result<bool, WorkError> { Ok(self.task_blocked) }
-        fn operator_cancel_event_exists(&mut self, _workflow_id: Uuid) -> Result<bool, WorkError> { Ok(self.cancel_event) }
-        fn successful_route_attempt(&mut self, _project: &str, _workflow_id: Uuid, _profile: &str, _model: &str) -> Result<Option<Uuid>, WorkError> { Ok(self.successful_attempt) }
-        fn quota_resume_used(&mut self, _workflow_id: Uuid, _episode: &str) -> Result<i64, WorkError> { Ok(self.resume_used) }
-        fn workflow_review_open(&mut self, _workflow_id: Uuid) -> Result<bool, WorkError> { Ok(self.review_open) }
+        fn model_route_actions(
+            &mut self,
+            _project: &str,
+            _workflow_id: Uuid,
+        ) -> Result<Vec<Value>, WorkError> {
+            Ok(self.route_actions.clone())
+        }
+        fn newer_plan_task_exists(
+            &mut self,
+            _project: &str,
+            _workflow_id: Uuid,
+            _task_id: Uuid,
+            _created_at: &str,
+            _or_equal: bool,
+        ) -> Result<bool, WorkError> {
+            Ok(self.newer_plan)
+        }
+        fn workflow_task_blocked(
+            &mut self,
+            _project: &str,
+            _workflow_id: Uuid,
+        ) -> Result<bool, WorkError> {
+            Ok(self.task_blocked)
+        }
+        fn operator_cancel_event_exists(&mut self, _workflow_id: Uuid) -> Result<bool, WorkError> {
+            Ok(self.cancel_event)
+        }
+        fn successful_route_attempt(
+            &mut self,
+            _project: &str,
+            _workflow_id: Uuid,
+            _profile: &str,
+            _model: &str,
+        ) -> Result<Option<Uuid>, WorkError> {
+            Ok(self.successful_attempt)
+        }
+        fn quota_resume_used(
+            &mut self,
+            _workflow_id: Uuid,
+            _episode: &str,
+        ) -> Result<i64, WorkError> {
+            Ok(self.resume_used)
+        }
+        fn workflow_review_open(&mut self, _workflow_id: Uuid) -> Result<bool, WorkError> {
+            Ok(self.review_open)
+        }
         unused!(plan_resume_exists, &str, Uuid, Uuid => Result<bool, WorkError>);
-        fn readiness_for_worker(&mut self, _worker_id: &str, _incarnation: Uuid, _policy_digest: &str, _activated_at: &str) -> Result<Vec<Value>, WorkError> { Ok(self.worker_rows.clone()) }
-        fn binary_pin_busy(&mut self, _project: &str, _workflow_id: Uuid, _task_id: Uuid, _created_at: &str) -> Result<bool, WorkError> { Ok(self.busy) }
+        fn readiness_for_worker(
+            &mut self,
+            _worker_id: &str,
+            _incarnation: Uuid,
+            _policy_digest: &str,
+            _activated_at: &str,
+        ) -> Result<Vec<Value>, WorkError> {
+            Ok(self.worker_rows.clone())
+        }
+        fn binary_pin_busy(
+            &mut self,
+            _project: &str,
+            _workflow_id: Uuid,
+            _task_id: Uuid,
+            _created_at: &str,
+        ) -> Result<bool, WorkError> {
+            Ok(self.busy)
+        }
         fn insert_action_returning(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError> {
             self.records.borrow_mut().actions.push(row.clone());
             Ok(Some(Uuid::from_u128(901)))
@@ -1876,7 +2006,7 @@ mod tests {
         template: FakeTx,
     }
 
-impl WorkflowTxFactory for ScriptedFactory {
+    impl WorkflowTxFactory for ScriptedFactory {
         fn run(
             &self,
             _read_only: bool,
@@ -1937,7 +2067,7 @@ impl WorkflowTxFactory for ScriptedFactory {
         receipt: Value,
     }
 
-impl WorkflowDecisionPort for PinDecisions {
+    impl WorkflowDecisionPort for PinDecisions {
         fn plan_decide(&self, _request: &PlanDecideRequest) -> Result<Value, WorkError> {
             Ok(json!({}))
         }
@@ -2096,8 +2226,7 @@ impl WorkflowDecisionPort for PinDecisions {
                 profiles: profiles.clone(),
                 project_workflows: vec![(
                     "homelab".to_string(),
-                    ProjectWorkflowPolicy::new("agy-author", "codex-reviewer", 3, false)
-                        .unwrap(),
+                    ProjectWorkflowPolicy::new("agy-author", "codex-reviewer", 3, false).unwrap(),
                 )],
                 repair_policy: json!({}),
                 workflow_policy_compatibility: "forge-autonomy-v1".to_string(),
@@ -2362,7 +2491,6 @@ impl WorkflowDecisionPort for PinDecisions {
         );
     }
 
-
     // -- Model-route recovery over the same harness -----------------
 
     struct RouteProof {
@@ -2429,7 +2557,11 @@ impl WorkflowDecisionPort for PinDecisions {
                 audit_sha256: "9".repeat(64),
             },
         };
-        RouteWorld { pin, command, proof }
+        RouteWorld {
+            pin,
+            command,
+            proof,
+        }
     }
 
     #[test]
@@ -2458,7 +2590,10 @@ impl WorkflowDecisionPort for PinDecisions {
             records.events[0]["payload"]["stage"],
             json!("provider_model_route")
         );
-        assert_eq!(records.events[0]["payload"]["model"], json!("gemini-backup"));
+        assert_eq!(
+            records.events[0]["payload"]["model"],
+            json!("gemini-backup")
+        );
     }
 
     #[test]
@@ -2531,7 +2666,6 @@ impl WorkflowDecisionPort for PinDecisions {
         );
     }
 
-
     // -- Quota wait/resume over the same harness --------------------
 
     struct WaitWorld {
@@ -2578,15 +2712,9 @@ impl WorkflowDecisionPort for PinDecisions {
         assert_eq!(records.actions.len(), 1);
         assert_eq!(
             records.actions[0]["source_key"],
-            json!(format!(
-                "provider-quota-wait:{}",
-                world.command.attempt_id
-            ))
+            json!(format!("provider-quota-wait:{}", world.command.attempt_id))
         );
-        assert_eq!(
-            records.actions[0]["intent"]["ready_at"],
-            Value::Null
-        );
+        assert_eq!(records.actions[0]["intent"]["ready_at"], Value::Null);
         assert_eq!(records.events.len(), 1);
         assert_eq!(
             records.events[0]["payload"]["stage"],
@@ -2663,7 +2791,4 @@ impl WorkflowDecisionPort for PinDecisions {
             Err(reconcile_required())
         );
     }
-
-
-
 }

@@ -207,9 +207,12 @@ where
         argv: &[String],
         timeout_seconds: u64,
     ) -> Result<(i32, Vec<u8>), WorkerError> {
-        let output = self.client.execute(
-            crate::process_exec::ProcessRequest::inherited(argv.to_vec(), timeout_seconds),
-        )?;
+        let output = self
+            .client
+            .execute(crate::process_exec::ProcessRequest::inherited(
+                argv.to_vec(),
+                timeout_seconds,
+            ))?;
         Ok((output.exit_code, output.stdout))
     }
 }

@@ -10,9 +10,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use forge_studio::artifact;
-use forge_studio::service::{Catalog, Service, parse_strict_json};
+use forge_studio::service::{parse_strict_json, Catalog, Service};
 use forge_studio::store::{Store, StoreError};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const ACCEPTED_HEADERS: [&str; 4] = [
     "forge-envelope-version",
@@ -36,7 +36,10 @@ fn read_bounded(path: &Path, maximum: usize) -> Result<Vec<u8>, String> {
 
 fn secret(path: &Path) -> Result<Vec<u8>, String> {
     let raw = read_bounded(path, 256)?;
-    let trimmed = raw.strip_suffix(b"\r\n").or_else(|| raw.strip_suffix(b"\n")).unwrap_or(&raw);
+    let trimmed = raw
+        .strip_suffix(b"\r\n")
+        .or_else(|| raw.strip_suffix(b"\n"))
+        .unwrap_or(&raw);
     let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
     if trimmed.len() < 32
         || trimmed.len() > 254
@@ -252,12 +255,14 @@ fn api_handle(server: &ApiServer, request: &Request, stream: &mut TcpStream) {
         {
             return Err((400, "invalid_request".to_string()));
         }
-        let length: usize = length.parse().map_err(|_| (400, "invalid_request".to_string()))?;
+        let length: usize = length
+            .parse()
+            .map_err(|_| (400, "invalid_request".to_string()))?;
         if !(1..=8192).contains(&length) || request.body.len() != length {
             return Err((400, "invalid_request".to_string()));
         }
-        let body = parse_strict_json(&request.body)
-            .map_err(|_| (400, "invalid_request".to_string()))?;
+        let body =
+            parse_strict_json(&request.body).map_err(|_| (400, "invalid_request".to_string()))?;
         server
             .service
             .dispatch(&destination, &id, &body)
@@ -306,9 +311,7 @@ fn preview_handle(server: &PreviewServer, request: &Request, stream: &mut TcpStr
         }
     }
     match preview {
-        Some((kind, payload)) => {
-            write_response(stream, 200, &kind, &payload, true, head_only)
-        }
+        Some((kind, payload)) => write_response(stream, 200, &kind, &payload, true, head_only),
         None => write_response(
             stream,
             404,
@@ -348,11 +351,8 @@ fn worker_loop(store: &Store, catalog: &Catalog, directory: &Path) {
                     let _ = store.finish(&claim, None);
                     continue;
                 }
-                let built = artifact::build(
-                    &project.repository,
-                    &claim.revision,
-                    &project.directory,
-                );
+                let built =
+                    artifact::build(&project.repository, &claim.revision, &project.directory);
                 match built {
                     Ok(content) => match store.renew(&claim) {
                         Ok(true) => match artifact::publish(directory, &content) {
@@ -397,16 +397,15 @@ fn run() -> Result<(), String> {
                 artifact_directory: directory,
                 signing_key: secret(&config_path_value(&config, "preview_key_file")?)?,
             };
-            let listener = TcpListener::bind(("127.0.0.1", config_port(&config, "preview_port", 18086)?))
-                .map_err(|error| error.to_string())?;
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                    if let Some(request) = read_request(&mut stream) {
-                        if request.method == "GET" || request.method == "HEAD" {
-                            preview_handle(&server, &request, &mut stream);
-                        }
+            let listener =
+                TcpListener::bind(("127.0.0.1", config_port(&config, "preview_port", 18086)?))
+                    .map_err(|error| error.to_string())?;
+            for mut stream in listener.incoming().flatten() {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+                if let Some(request) = read_request(&mut stream) {
+                    if request.method == "GET" || request.method == "HEAD" {
+                        preview_handle(&server, &request, &mut stream);
                     }
                 }
             }
@@ -460,16 +459,15 @@ fn run() -> Result<(), String> {
                 },
                 authorization,
             };
-            let listener = TcpListener::bind(("127.0.0.1", config_port(&config, "api_port", 18085)?))
-                .map_err(|error| error.to_string())?;
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                    if let Some(request) = read_request(&mut stream) {
-                        if request.method == "POST" {
-                            api_handle(&server, &request, &mut stream);
-                        }
+            let listener =
+                TcpListener::bind(("127.0.0.1", config_port(&config, "api_port", 18085)?))
+                    .map_err(|error| error.to_string())?;
+            for mut stream in listener.incoming().flatten() {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+                if let Some(request) = read_request(&mut stream) {
+                    if request.method == "POST" {
+                        api_handle(&server, &request, &mut stream);
                     }
                 }
             }

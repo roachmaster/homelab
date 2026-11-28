@@ -96,13 +96,17 @@ fn main() {
         println!("config ok");
         return;
     }
-    let listener = match std::net::TcpListener::bind((config.listen_host.as_str(), config.listen_port)) {
-        Ok(listener) => listener,
-        Err(error) => {
-            eprintln!("cannot bind {}:{}: {error}", config.listen_host, config.listen_port);
-            std::process::exit(1);
-        }
-    };
+    let listener =
+        match std::net::TcpListener::bind((config.listen_host.as_str(), config.listen_port)) {
+            Ok(listener) => listener,
+            Err(error) => {
+                eprintln!(
+                    "cannot bind {}:{}: {error}",
+                    config.listen_host, config.listen_port
+                );
+                std::process::exit(1);
+            }
+        };
     if let Ok(address) = listener.local_addr() {
         eprintln!("listening on {address}");
     }

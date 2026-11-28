@@ -156,12 +156,10 @@ fn merge_rate_limit(base: &RateLimit, raw: Option<&Value>) -> RateLimit {
 
 pub fn load_config(path: &str) -> Result<Config, ConfigError> {
     let error = |message: String| ConfigError(message);
-    let raw_text = std::fs::read_to_string(path).map_err(|io| {
-        error(format!("cannot read config {path}: {io}"))
-    })?;
-    let raw: Value = serde_json::from_str(&raw_text).map_err(|io| {
-        error(format!("cannot read config {path}: {io}"))
-    })?;
+    let raw_text = std::fs::read_to_string(path)
+        .map_err(|io| error(format!("cannot read config {path}: {io}")))?;
+    let raw: Value = serde_json::from_str(&raw_text)
+        .map_err(|io| error(format!("cannot read config {path}: {io}")))?;
     let Some(object) = raw.as_object() else {
         return Err(error("config must be a JSON object".to_string()));
     };
@@ -231,11 +229,7 @@ pub fn load_config(path: &str) -> Result<Config, ConfigError> {
             if let Some(value) = oauth_object.get(field) {
                 match json_int(Some(value)) {
                     Some(number) if number >= 1 => *slot = number,
-                    _ => {
-                        return Err(error(format!(
-                            "oauth.{field} must be a positive integer"
-                        )))
-                    }
+                    _ => return Err(error(format!("oauth.{field} must be a positive integer"))),
                 }
             }
         }
@@ -271,17 +265,14 @@ pub fn load_config(path: &str) -> Result<Config, ConfigError> {
             || protected.contains(&presence.reader_token_file.as_str())
         {
             return Err(error(
-                "presence files must be separate from existing authentication files"
-                    .to_string(),
+                "presence files must be separate from existing authentication files".to_string(),
             ));
         }
     }
 
     // Listen address: loopback only.
     let listen = string("listen", "127.0.0.1:8791");
-    let (host, port) = listen
-        .rsplit_once(':')
-        .unwrap_or((listen.as_str(), ""));
+    let (host, port) = listen.rsplit_once(':').unwrap_or((listen.as_str(), ""));
     let host_clean = host
         .strip_prefix('[')
         .and_then(|inner| inner.strip_suffix(']'))
@@ -290,8 +281,7 @@ pub fn load_config(path: &str) -> Result<Config, ConfigError> {
         Ok(address) => {
             if !address.is_loopback() {
                 return Err(error(
-                    "listen address must be loopback; expose it through the tunnel"
-                        .to_string(),
+                    "listen address must be loopback; expose it through the tunnel".to_string(),
                 ));
             }
         }
@@ -299,7 +289,9 @@ pub fn load_config(path: &str) -> Result<Config, ConfigError> {
     }
     if port.is_empty()
         || !port.chars().all(|c| c.is_ascii_digit())
-        || port.parse::<i64>().is_ok_and(|value| !(0..=65535).contains(&value))
+        || port
+            .parse::<i64>()
+            .is_ok_and(|value| !(0..=65535).contains(&value))
         || port.parse::<i64>().is_err()
     {
         return Err(error(format!("invalid listen port {port}")));
@@ -408,8 +400,8 @@ mod tests {
         assert!(load(r#"{"listen": "0.0.0.0:8791"}"#).is_err());
         assert!(load(r#"{"max_rows": 0}"#).is_err());
         assert!(load(r#"{"oauth": {"bogus": 1}}"#).is_err());
-        let config = load(r#"{"oauth": {"enabled": true, "issuer": "https://mcp.example.com"}}"#)
-            .unwrap();
+        let config =
+            load(r#"{"oauth": {"enabled": true, "issuer": "https://mcp.example.com"}}"#).unwrap();
         assert!(config.oauth.enabled);
         assert!(load(r#"{"oauth": {"enabled": true, "issuer": "http://x.example"}}"#).is_err());
     }

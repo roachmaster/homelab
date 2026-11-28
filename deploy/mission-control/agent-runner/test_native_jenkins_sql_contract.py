@@ -163,8 +163,14 @@ class NativeJenkinsDatabaseContractTest(unittest.TestCase):
                                reconcile_connect_factory=lambda: self.cluster.connect("forge_coding_worker"))
         with self.assertRaises(WorkerAccessError):
             worker_only.native_ci_binding(self.key(job))
+        self.assertEqual(self.rows("SELECT name FROM forge_agent.schema_migrations WHERE version=54"),
+                         [("pg_proxy_preparation",)])
+        # Preparation keeps direct callers working with explicit reads, while
+        # native mutations still require their owner-scoped API functions.
         for relation in ("coding_tasks", "coding_attempts", "coding_workflows", "coding_reviews"):
-            self.assertFalse(self.rows("SELECT has_table_privilege('forge_coding_reconciler',%s,'SELECT')", ("forge_agent." + relation,))[0][0])
+            with self.subTest(relation=relation):
+                self.assertTrue(self.rows("SELECT has_table_privilege('forge_coding_reconciler',%s,'SELECT')", ("forge_agent." + relation,))[0][0])
+                self.assertFalse(self.rows("SELECT has_table_privilege('forge_coding_reconciler',%s,'INSERT,UPDATE,DELETE,TRUNCATE')", ("forge_agent." + relation,))[0][0])
 
     def test_provider_neutral_gate_observations_preserve_frozen_workflow(self):
         _, author, job = self.local_review(revisions=1)

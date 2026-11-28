@@ -99,9 +99,10 @@ class DefectSchemaTest(unittest.TestCase):
                 before=self.rows(pg,'SELECT to_jsonb(t) FROM forge_agent.coding_tasks t WHERE id=%s',(task,))[0][0]
                 history=self.rows(pg,'SELECT version,name,applied_at FROM forge_agent.schema_migrations ORDER BY version')
                 privileges=self.rows(pg,"SELECT relowner,relacl FROM pg_class WHERE oid='forge_agent.coding_tasks'::regclass")
-                # Use the real current apply/verify entry point, twice.
-                DisposablePostgresCluster.apply_and_verify(pg)
-                DisposablePostgresCluster.apply_and_verify(pg)
+                # Keep the exact M52 -> M53 privilege-preservation proof.
+                # M54 separately adds explicit proxy read grants.
+                upgrade.apply_through(pg, 53)
+                upgrade.apply_through(pg, 53)
                 after=self.rows(pg,'SELECT to_jsonb(t) FROM forge_agent.coding_tasks t WHERE id=%s',(task,))[0][0]
                 self.assertEqual(after.pop('task_kind'),'feature');self.assertIsNone(after.pop('defect'))
                 self.assertEqual(after,before)

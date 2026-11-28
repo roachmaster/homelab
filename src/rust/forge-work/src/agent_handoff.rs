@@ -37,8 +37,6 @@ use crate::workflow_tx::{WorkflowTx, WorkflowTxFactory};
 pub const HANDOFF_POLICY: &str = "forge-provider-author-handoff-v1";
 pub const HANDOFF_PREFIX: &str = "provider-author-handoff:";
 
-
-
 fn not_reviewable() -> WorkError {
     WorkError::rejected(409, "not_reviewable")
 }
@@ -59,7 +57,7 @@ fn opt_uuid(row: &Value, key: &str) -> Option<Uuid> {
 pub fn handoff_changed_snapshot(
     original: &Value,
     catalog: &dyn WorkflowCatalog,
-    native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native: &crate::workflow_policy::NativePolicyMatcher<'_>,
 ) -> Result<Value, WorkError> {
     let mut selected = original.clone();
     for (entry, mode) in [("author_plan", "plan"), ("author_implement", "implement")] {
@@ -145,7 +143,7 @@ fn quota_source_in_tx(
 fn effective_in_tx(
     tx: &mut dyn WorkflowTx,
     catalog: &dyn WorkflowCatalog,
-    native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native: &crate::workflow_policy::NativePolicyMatcher<'_>,
     owner: &str,
     workflow: &Value,
     source: &Value,
@@ -172,7 +170,9 @@ fn effective_in_tx(
         let entry = format!("author_{source_mode}");
         let source_digest = source["recipes"][&entry]["digest"].as_str()?;
         let expected_digest = expected["recipes"][&entry]["digest"].as_str()?;
-        let task_uuid = intent["task_id"].as_str().and_then(|raw| raw.parse::<Uuid>().ok())?;
+        let task_uuid = intent["task_id"]
+            .as_str()
+            .and_then(|raw| raw.parse::<Uuid>().ok())?;
         let source_revision = intent["source_revision"].as_i64()?;
         Some(
             intent["policy"].as_str()? == HANDOFF_POLICY
@@ -185,13 +185,15 @@ fn effective_in_tx(
                 && intent["source_snapshot_sha256"].as_str()?
                     == source["policy_digest"].as_str()?
                 && intent["source_profile"].as_str()? == source["author_profile"].as_str()?
-                && matches!(intent["source_status"].as_str()?, "queued" | "quota_blocked")
+                && matches!(
+                    intent["source_status"].as_str()?,
+                    "queued" | "quota_blocked"
+                )
                 && matches!(source_mode, "plan" | "implement")
                 && intent["source_recipe_digest"].as_str()? == source_digest
                 && intent["target_profile"].as_str()? == expected["author_profile"].as_str()?
                 && intent["effective_snapshot"] == expected
-                && row["source_key"].as_str()?
-                    == format!("{HANDOFF_PREFIX}{task_uuid}")
+                && row["source_key"].as_str()? == format!("{HANDOFF_PREFIX}{task_uuid}")
                 && finish["status"].as_str()? == "provider_author_handed_off"
                 && finish["intent_sha256"].as_str()? == sha256_canonical(intent)
                 && finish["receipt"]["task_id"].as_str()? == intent["task_id"].as_str()?
@@ -215,7 +217,7 @@ fn effective_in_tx(
 pub struct AgentHandoffProvider {
     tx_factory: Box<dyn WorkflowTxFactory>,
     catalog: Box<dyn WorkflowCatalog>,
-    native: Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+    native: crate::workflow_policy::SharedNativePolicyMatcher,
     owner: String,
     scan_position: RefCell<Option<(String, Uuid)>>,
 }
@@ -224,7 +226,7 @@ impl AgentHandoffProvider {
     pub fn new(
         tx_factory: Box<dyn WorkflowTxFactory>,
         catalog: Box<dyn WorkflowCatalog>,
-        native: Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+        native: crate::workflow_policy::SharedNativePolicyMatcher,
         owner: String,
     ) -> Self {
         Self {
@@ -245,7 +247,13 @@ impl AgentHandoffProvider {
             text(workflow, "project_alias"),
             uuid_of(workflow, "workflow_id"),
         )?;
-        model_snapshot_from(&rows, workflow, self.catalog.as_ref(), &*self.native, &self.owner)
+        model_snapshot_from(
+            &rows,
+            workflow,
+            self.catalog.as_ref(),
+            &*self.native,
+            &self.owner,
+        )
     }
 }
 
@@ -335,10 +343,11 @@ impl AuthorHandoffPort for AgentHandoffProvider {
             let project = text(row, "project_alias").to_string();
             let profile_alias = text(row, "agent_profile").to_string();
             let model = text(row, "model").to_string();
-            let quota = self.tx_factory.run(true, &mut |tx| {
-                Ok(quota_source_in_tx(tx, &project, &profile_alias, &model)?
-                    .unwrap_or(Value::Null))
-            })?;
+            let quota =
+                self.tx_factory.run(true, &mut |tx| {
+                    Ok(quota_source_in_tx(tx, &project, &profile_alias, &model)?
+                        .unwrap_or(Value::Null))
+                })?;
             if quota.is_null() {
                 continue;
             }
@@ -685,7 +694,7 @@ mod tests {
             &self,
             alias: &str,
             mode: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             if alias == "codex-author" {
                 Some(codex_recipe(mode))
@@ -699,7 +708,7 @@ mod tests {
             _alias: &str,
             _mode: &str,
             _model: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }

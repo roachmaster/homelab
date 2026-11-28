@@ -301,10 +301,11 @@ class WorkService:
             # The submitter (plan section 4.2): the operator via portal/CLI,
             # or the coordinator for auto-repair submissions.
             actor=COORDINATOR_ACTOR if command.auto_repair else operator_actor(self._store.owner),
-            resolve_workflow=lambda:self._workflow_snapshot(command.project_alias,command.mode,command.agent_profile,command.workflow_policy_digest,command.workflow_policy_id),
+            resolve_workflow=lambda:self._workflow_snapshot(command.project_alias,command.mode,command.agent_profile,command.workflow_policy_digest,command.workflow_policy_id,
+                                                            delivery_repair=command.delivery_admission is not None),
         )
 
-    def _workflow_snapshot(self,project,mode,profile,digest,policy_id=None):
+    def _workflow_snapshot(self,project,mode,profile,digest,policy_id=None,*,delivery_repair=False):
         presented = digest is not None or policy_id is not None
         selected = self._config.profiles[profile]
         if selected.is_external:
@@ -317,6 +318,17 @@ class WorkService:
                 raise Rejected(409, "result_mismatch", "policy_not_applicable")
             return None
         policy=self._config.project_workflows.get(project)
+        if delivery_repair:
+            if not self._config.delivery_enabled or project not in self._config.delivery_repair_projects:
+                raise Rejected(403, 'denied')
+            selected=self._config.delivery_repair_workflow(project)
+            # This resolver runs only after the store's atomic leased intent
+            # check. Preserve an old saved exact default-policy request while
+            # admitting new requests against the independently frozen repair policy.
+            if selected is not None and profile == selected.author_profile:
+                candidate=selected.snapshot(self._catalog,self._config.repair_policy)
+                if digest == candidate['policy_digest']:
+                    policy=selected
         if policy is None:
             if presented:raise Rejected(409,"result_mismatch","policy_not_applicable")
             return None

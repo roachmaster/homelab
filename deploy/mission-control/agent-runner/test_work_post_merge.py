@@ -15,6 +15,8 @@ from uuid import UUID, uuid4, uuid5
 from test_work_executor import raw_config
 from work_ci_contract import CiGateContractFactory, SCOPED_PROFILE
 from work_post_merge import PostMergeWorker
+from work_external_delivery import SourceArtifactRejected
+from work_publication_clients import PublicationError
 from work_publication import PublicationWorker, PublicationWorkerFactory
 from work_publication_config import parse_config
 from work_worker_config import parse_config as parse_worker
@@ -162,6 +164,97 @@ class PostMergeWorkerTest(unittest.TestCase):
         store = DurablePostMergeStore(job)
         provider = SelectedPostMergeProvider(store, request, status=status, receipt=receipt)
         return config, store, provider, request
+
+    def rejection(self, job, **changes):
+        values = dict(candidate_commit=job['merge_commit'], candidate_tree=job['merge_tree'],
+                      prepared_tree=job['merge_tree'],
+                      rejections=[('cache.pyc', 'private_or_generated_artifact')], rejected_count=1)
+        return SourceArtifactRejected(**{**values, **changes})
+
+    def test_exact_unsubmitted_source_rejection_is_terminal_without_ci_evidence(self):
+        with TemporaryDirectory() as temporary:
+            config, store, provider, _ = self.fixture(Path(temporary))
+            provider.prepare = Mock(side_effect=self.rejection(store.job))
+            worker = PostMergeWorker(config, store, provider)
+            self.assertTrue(worker.run_once())
+            self.assertEqual(store.status, 'failed')
+            self.assertIsNone(store.job['request'])
+            receipt = store.outcomes[-1][2]
+            self.assertEqual(receipt['reason'], 'source_artifact_rejected')
+            self.assertEqual(receipt['stage'], 'source_preparation')
+            self.assertIs(receipt['process_started'], False)
+            self.assertNotIn('cleanup_confirmed', receipt)
+            self.assertNotIn('checks', receipt)
+            self.assertFalse(any(e[0] == 'checkpoint' for e in store.events))
+            self.assertEqual((provider.verifications, provider.cancellations), ([], []))
+            self.assertFalse(worker.run_once())
+            self.assertEqual(provider.prepare.call_count, 1)
+
+    def test_wrong_source_rejection_and_transient_failure_remain_pending(self):
+        for field in ('candidate_commit', 'candidate_tree', 'prepared_tree', None):
+            with self.subTest(field=field), TemporaryDirectory() as temporary:
+                config, store, provider, _ = self.fixture(Path(temporary))
+                error = (self.rejection(store.job, **{field: 'a' * 40}) if field
+                         else PublicationError('source_observation_unavailable'))
+                provider.prepare = Mock(side_effect=error)
+                PostMergeWorker(config, store, provider).run_once()
+                self.assertEqual(store.status, 'pending')
+                self.assertIsNone(store.job['request'])
+                self.assertFalse(any(row[1] == 'failed' for row in store.outcomes))
+                self.assertEqual((provider.verifications, provider.cancellations), ([], []))
+
+    def test_source_rejection_requires_live_lease_and_new_start_authority(self):
+        for boundary in ('lost_lease', 'start_denied', 'cancelled'):
+            with self.subTest(boundary=boundary), TemporaryDirectory() as temporary:
+                config, store, provider, _ = self.fixture(Path(temporary))
+                def reject(job, require_lease):
+                    if boundary == 'lost_lease': store.live = False
+                    raise self.rejection(job)
+                provider.prepare = Mock(side_effect=reject)
+                if boundary == 'start_denied': store.start_allowed = False
+                if boundary == 'cancelled': store.job['cancel_requested'] = True
+                PostMergeWorker(config, store, provider).run_once()
+                if boundary == 'lost_lease': self.assertFalse(store.outcomes)
+                elif boundary == 'start_denied':
+                    self.assertEqual(store.status, 'pending'); provider.prepare.assert_not_called()
+                else:
+                    self.assertEqual(store.status, 'failed'); provider.prepare.assert_not_called()
+                    self.assertNotIn('reason', store.outcomes[-1][2])
+                self.assertEqual((provider.verifications, provider.cancellations), ([], []))
+
+    def test_full_legal_unicode_source_rejection_remains_terminal(self):
+        with TemporaryDirectory() as temporary:
+            config, store, provider, _ = self.fixture(Path(temporary))
+            error = self.rejection(store.job,
+                rejections=[('😀' * 250, 'private_or_generated_artifact')] * 32, rejected_count=32)
+            provider.prepare = Mock(side_effect=error)
+            PostMergeWorker(config, store, provider).run_once()
+            self.assertEqual(store.status, 'failed')
+            self.assertEqual(store.outcomes[-1][2]['rejections'], error.result()['receipt']['rejections'])
+            self.assertIsNone(store.job['request'])
+            self.assertEqual(provider.verifications, [])
+
+    def test_genuinely_oversized_mutated_source_rejection_fails_closed(self):
+        with TemporaryDirectory() as temporary:
+            config, store, provider, _ = self.fixture(Path(temporary))
+            error = self.rejection(store.job)
+            error.result = Mock(return_value={'receipt': {'unexpected': 'x' * 65536}})
+            provider.prepare = Mock(side_effect=error)
+            PostMergeWorker(config, store, provider).run_once()
+            self.assertEqual(store.status, 'pending')
+            self.assertIsNone(store.job['request'])
+            self.assertEqual(provider.verifications, [])
+
+    def test_saved_request_cannot_use_unsubmitted_source_rejection_shortcut(self):
+        with TemporaryDirectory() as temporary:
+            config, store, provider, request = self.fixture(Path(temporary), saved_request=True)
+            provider.prepare = Mock(side_effect=AssertionError('must reuse saved request'))
+            provider.verify = Mock(side_effect=self.rejection(store.job))
+            PostMergeWorker(config, store, provider).run_once()
+            self.assertEqual(store.status, 'pending')
+            self.assertEqual(store.job['request'], request)
+            self.assertIs(store.outcomes[-1][2]['cancellation_required'], True)
+            provider.prepare.assert_not_called()
 
     def test_checkpoints_before_verification_and_passes_only_exact_main_receipt(self):
         with TemporaryDirectory() as temporary:

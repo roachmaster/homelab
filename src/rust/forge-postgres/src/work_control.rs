@@ -34,12 +34,6 @@ pub(crate) struct ControlTask {
     pub workflow_id: Option<Uuid>,
     /// The workflow root task's id (the task itself when standalone).
     pub root_task_id: Uuid,
-    /// The repair family's root task id, when this task is a repair.
-    pub repair_root_task_id: Option<Uuid>,
-    /// The task's title (empty when unset).
-    pub title: String,
-    /// The task's correlation id.
-    pub correlation_id: Uuid,
     /// The stored receipt_json when this (operation, key) already
     /// ran - the caller returns it as a replayed outcome.
     pub replay: Option<Value>,
@@ -50,16 +44,28 @@ pub(crate) struct ControlTask {
 /// (action/intent mismatch is an idempotency conflict), then the
 /// revision fence, then the status gate. `intent` is the caller's
 /// precomputed intent digest.
+pub(crate) struct ControlRequest<'a> {
+    pub project_alias: &'a str,
+    pub task_id: Uuid,
+    pub expected_revision: i64,
+    pub key: &'a str,
+    pub action: &'a str,
+    pub intent: &'a str,
+}
+
 pub(crate) fn control_task(
     tx: &mut crate::tx::Tx<'_, '_>,
     store: &PgWorkStore,
-    project_alias: &str,
-    task_id: Uuid,
-    expected_revision: i64,
-    key: &str,
-    action: &str,
-    intent: &str,
+    request: ControlRequest<'_>,
 ) -> Result<ControlTask, forge_work::WorkError> {
+    let ControlRequest {
+        project_alias,
+        task_id,
+        expected_revision,
+        key,
+        action,
+        intent,
+    } = request;
     let params: &[&(dyn ToSql + Sync)] = &[&store.owner, &project_alias, &task_id];
     let rows = tx
         .query_rows(
@@ -83,11 +89,12 @@ pub(crate) fn control_task(
         base_revision: col(row, "base_revision")?,
         workflow_id: col(row, "workflow_id")?,
         root_task_id: col::<Option<Uuid>>(row, "repair_root_task_id")?.unwrap_or(task_id),
-        repair_root_task_id: col(row, "repair_root_task_id")?,
-        title: col::<Option<String>>(row, "title")?.unwrap_or_default(),
-        correlation_id: col(row, "correlation_id")?,
         replay: None,
     };
+    // Preserve the original typed row-decoding fences without storing fields
+    // that are not part of the control result. The repair root is already decoded above.
+    let _: Option<String> = col(row, "title")?;
+    let _: Uuid = col(row, "correlation_id")?;
     let receipt_params: &[&(dyn ToSql + Sync)] = &[&store.owner, &project_alias, &task_id, &key];
     let receipts = tx
         .query_rows(
@@ -203,9 +210,11 @@ pub(crate) fn control_record(
         task.task_id,
         "checkpoint",
         payload,
-        actor,
-        None,
-        false,
+        crate::work_rows::EventOptions {
+            actor,
+            cause: None,
+            first: false,
+        },
     )?;
     crate::work_common::notify(tx)?;
     Ok(next)

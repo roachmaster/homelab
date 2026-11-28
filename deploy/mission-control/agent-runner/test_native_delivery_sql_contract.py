@@ -159,14 +159,25 @@ class NativeDeliveryDatabaseContractTest(unittest.TestCase):
             self.f.db.native_branch_first_replay(job["review_id"], revision)
         self.assertIsNone(self.f.db.review_claim("no-replay"))
 
-    def test_regular_plan_context_is_null_and_direct_table_access_stays_denied(self):
+    def test_regular_plan_context_is_null_and_preparation_access_is_read_only(self):
         self.f.submit()
         plan = self.f.claim("agy-v2")
         self.assertIsNone(self.f.db.read_native_delivery_context(plan))
-        for role, query in (("forge_coding_worker", "SELECT forge_coding_reconciler_api.native_branch_first_replay(NULL,1)"),
-                            ("forge_coding_reconciler", "SELECT * FROM forge_agent.coding_reviews")):
-            with self.subTest(role=role), closing(self.cluster.connect(role)) as c, c.cursor() as q:
-                with self.assertRaises(psycopg2.Error): q.execute(query)
+        # Additive M54 preparation grants this exact read to the reconciler;
+        # mutation authority remains behind the native delivery functions.
+        self.assertEqual(self.rows("SELECT version,name FROM forge_agent.schema_migrations WHERE version>=54 ORDER BY version"),
+                         [(54,"pg_proxy_preparation")])
+        with closing(self.cluster.connect("forge_coding_reconciler")) as c, c.cursor() as q:
+            q.execute("SELECT * FROM forge_agent.coding_reviews LIMIT 0")
+            self.assertEqual(q.fetchall(), [])
+        denied = (("forge_coding_worker", "SELECT forge_coding_reconciler_api.native_branch_first_replay(NULL,1)"),
+                  ("forge_coding_reconciler", "INSERT INTO forge_agent.coding_reviews DEFAULT VALUES"),
+                  ("forge_coding_reconciler", "UPDATE forge_agent.coding_reviews SET summary=summary WHERE false"),
+                  ("forge_coding_reconciler", "DELETE FROM forge_agent.coding_reviews WHERE false"),
+                  ("forge_coding_reconciler", "TRUNCATE forge_agent.coding_reviews"))
+        for role, query in denied:
+            with self.subTest(role=role,query=query), closing(self.cluster.connect(role)) as c, c.cursor() as q:
+                with self.assertRaises(psycopg2.errors.InsufficientPrivilege): q.execute(query)
 
     def test_branch_push_event_is_durable_idempotent_and_bound_to_actual_local_review(self):
         _, _, job = self.base.local_review()

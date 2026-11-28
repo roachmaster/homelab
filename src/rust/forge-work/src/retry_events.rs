@@ -59,10 +59,7 @@ impl RetryScope {
         scope_kind: &str,
         scope_id: Uuid,
     ) -> Result<RetryScope, String> {
-        if !is_id(owner_id)
-            || !is_id(project_alias)
-            || !RETRY_SCOPE_KINDS.contains(&scope_kind)
-        {
+        if !is_id(owner_id) || !is_id(project_alias) || !RETRY_SCOPE_KINDS.contains(&scope_kind) {
             return Err("Invalid retry event scope".to_string());
         }
         Ok(RetryScope {
@@ -93,6 +90,10 @@ pub fn validate_proof(kind: &str, source_id: &str, digest: &str) -> Result<(), S
 
 /// The retry-event surface, called inside a workflow transaction.
 pub trait RetryEvents {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Public transaction port mirrors retry-event SQL identity, phase and passed-evidence admission fields."
+    )]
     fn observe_failure(
         &mut self,
         scope: &RetryScope,

@@ -38,7 +38,9 @@ fn is_digest(value: &Value) -> bool {
         .as_str()
         .map(|raw| {
             raw.len() == 64
-                && raw.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                && raw
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         })
         .unwrap_or(false)
 }
@@ -104,9 +106,14 @@ fn validate_inner(
         || !lease["workflow_review_id"].is_null()
         || !envelope.is_object()
         || !keys_ok
-        || !["target_json", "target_sha256", "verdict_json", "verdict_sha256"]
-            .iter()
-            .all(|key| envelope_keys.contains(key))
+        || ![
+            "target_json",
+            "target_sha256",
+            "verdict_json",
+            "verdict_sha256",
+        ]
+        .iter()
+        .all(|key| envelope_keys.contains(key))
         || envelope["verdict_sha256"].as_str() != expected.as_str()
         || !envelope["verdict_json"].is_string()
     {
@@ -131,12 +138,8 @@ fn validate_inner(
         )
         .map_err(|_| PeerReviewError::new("feedback.author_handoff"))?;
         let target_author = match &parsed {
-            AuthorHandoffContext::Peer(context) => {
-                context.base.target_author_profile.as_str()
-            }
-            AuthorHandoffContext::Build(context) => {
-                context.base.target_author_profile.as_str()
-            }
+            AuthorHandoffContext::Peer(context) => context.base.target_author_profile.as_str(),
+            AuthorHandoffContext::Build(context) => context.base.target_author_profile.as_str(),
         };
         if text_of(&target, "author_profile") == text_of(lease, "agent_profile")
             || target_author == text_of(&target, "reviewer_profile")
@@ -158,8 +161,7 @@ fn validate_inner(
     let plan_context = plan_context.unwrap();
     if text_of(&target, "target_kind") == "plan" {
         if target["source_attempt_id"].as_str() != plan_context["plan_attempt_id"].as_str()
-            || target["source_result_sha256"].as_str()
-                != plan_context["plan_sha256"].as_str()
+            || target["source_result_sha256"].as_str() != plan_context["plan_sha256"].as_str()
             || (target["base_revision"].as_str() != lease["base_revision"].as_str()
                 && !linked_candidate_input(lease, None))
             || !matches!(
@@ -179,19 +181,15 @@ fn validate_inner(
         let previous: Value = serde_json::from_slice(&context.content)
             .map_err(|_| PeerReviewError::new("feedback.code_binding"))?;
         if previous["parent_attempt_id"].as_str() != target["source_attempt_id"].as_str()
-            || previous["parent_result_sha256"].as_str()
-                != target["source_result_sha256"].as_str()
+            || previous["parent_result_sha256"].as_str() != target["source_result_sha256"].as_str()
             || previous["candidate_commit"].as_str() != target["candidate_commit"].as_str()
-            || previous["gate_manifest_sha256"].as_str()
-                != target["gate_manifest_sha256"].as_str()
+            || previous["gate_manifest_sha256"].as_str() != target["gate_manifest_sha256"].as_str()
             || (!lease["parent_task_id"].is_null()
                 && target["source_task_id"].as_str() == lease["parent_task_id"].as_str()
-                && target["review_id"].as_str()
-                    != lease["repair_source_review_id"].as_str())
+                && target["review_id"].as_str() != lease["repair_source_review_id"].as_str())
             || target["approved_plan"]["attempt_id"].as_str()
                 != plan_context["plan_attempt_id"].as_str()
-            || target["approved_plan"]["sha256"].as_str()
-                != plan_context["plan_sha256"].as_str()
+            || target["approved_plan"]["sha256"].as_str() != plan_context["plan_sha256"].as_str()
         {
             return Err(PeerReviewError::new("feedback.code_binding"));
         }
@@ -222,7 +220,10 @@ mod tests {
             "base_revision": "b".repeat(40),
         });
         assert!(linked_candidate_input(&lease, None));
-        assert!(!linked_candidate_input(&lease, Some("c".repeat(40).as_str())));
+        assert!(!linked_candidate_input(
+            &lease,
+            Some("c".repeat(40).as_str())
+        ));
         let mut broken = lease.clone();
         broken["feedback_id"] = json!(null);
         assert!(!linked_candidate_input(&broken, None));

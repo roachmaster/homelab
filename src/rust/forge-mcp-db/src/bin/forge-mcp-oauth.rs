@@ -76,7 +76,10 @@ fn write_secret_file(path: &Path, text: &str) {
             .map(|meta| meta.file_type().is_symlink())
             .unwrap_or(false)
     {
-        fail(&format!("refusing to overwrite existing {}", path.display()));
+        fail(&format!(
+            "refusing to overwrite existing {}",
+            path.display()
+        ));
     }
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -131,9 +134,11 @@ fn drop_to_db_owner(db_path: &Path) {
     if nix::unistd::geteuid().as_raw() != 0 {
         return;
     }
-    let info = std::fs::metadata(db_path)
-        .ok()
-        .or_else(|| db_path.parent().and_then(|parent| std::fs::metadata(parent).ok()));
+    let info = std::fs::metadata(db_path).ok().or_else(|| {
+        db_path
+            .parent()
+            .and_then(|parent| std::fs::metadata(parent).ok())
+    });
     if let Some(info) = info {
         use std::os::unix::fs::MetadataExt;
         if info.uid() != 0 {
@@ -260,7 +265,10 @@ fn client_command(file: &Path, args: &[String]) {
             }
         }
         Some("revoke") => {
-            let client_id = args.get(1).cloned().unwrap_or_else(|| fail("client_id required"));
+            let client_id = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| fail("client_id required"));
             let mut found = false;
             for record in data["clients"].as_array_mut().unwrap().iter_mut() {
                 if record.get("client_id").and_then(Value::as_str) == Some(client_id.as_str()) {
@@ -325,8 +333,8 @@ fn operator_command(file: &Path, args: &[String]) {
 
 fn grant_command(db: &Path, args: &[String]) {
     drop_to_db_owner(db);
-    let store = OAuthStore::new(db.to_str().unwrap_or_default())
-        .unwrap_or_else(|error| fail(&error));
+    let store =
+        OAuthStore::new(db.to_str().unwrap_or_default()).unwrap_or_else(|error| fail(&error));
     match args.first().map(String::as_str) {
         Some("list") => {
             let as_json = args.iter().any(|arg| arg == "--json");
@@ -372,7 +380,10 @@ fn grant_command(db: &Path, args: &[String]) {
             }
         }
         Some("revoke") => {
-            let grant_id = args.get(1).cloned().unwrap_or_else(|| fail("grant_id required"));
+            let grant_id = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| fail("grant_id required"));
             let count = store
                 .revoke_grants(Some(&grant_id), None)
                 .unwrap_or_else(|error| fail(&format!("{error:?}")));

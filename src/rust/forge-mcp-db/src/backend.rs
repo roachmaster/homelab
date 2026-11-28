@@ -98,7 +98,7 @@ impl Backend {
             .map_err(|_| ToolError("database is unavailable".to_string()))?;
         config.connect_timeout(std::time::Duration::from_secs(5));
         config.application_name("homelab-mcp-postgres");
-        config.options(&format!(
+        config.options(format!(
             "-c statement_timeout={} -c lock_timeout={} \
              -c idle_in_transaction_session_timeout={} \
              -c default_transaction_read_only=on",
@@ -201,12 +201,14 @@ impl Backend {
                 let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
                     .iter()
                     .enumerate()
-                    .map(|(index, param)| -> &(dyn tokio_postgres::types::ToSql + Sync) {
-                        match param {
-                            Param::Text(_) => &text_params[index],
-                            Param::Int(value) => value,
-                        }
-                    })
+                    .map(
+                        |(index, param)| -> &(dyn tokio_postgres::types::ToSql + Sync) {
+                            match param {
+                                Param::Text(_) => &text_params[index],
+                                Param::Int(value) => value,
+                            }
+                        },
+                    )
                     .collect();
                 let fetched = tx
                     .query(&statement, refs.as_slice())
@@ -269,11 +271,7 @@ fn cell_from(row: &Row, index: usize, ty: &Type) -> Cell {
         1083 => Cell::Text(iso_time(get!(chrono::NaiveTime))),
         1114 => {
             let value = get!(chrono::NaiveDateTime);
-            Cell::Text(format!(
-                "{}T{}",
-                value.date(),
-                iso_time(value.time())
-            ))
+            Cell::Text(format!("{}T{}", value.date(), iso_time(value.time())))
         }
         1184 => {
             let value = get!(chrono::DateTime<chrono::Utc>);

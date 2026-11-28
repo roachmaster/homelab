@@ -34,9 +34,11 @@ pub const VALID_SYNC_STATUSES: [&str; 5] = [
     "conflict",
     "unknown",
 ];
-pub const VALID_CACHE_STATUSES: [&str; 5] = ["hit_branch", "hit_main", "miss", "disabled", "unknown"];
+pub const VALID_CACHE_STATUSES: [&str; 5] =
+    ["hit_branch", "hit_main", "miss", "disabled", "unknown"];
 pub const VALID_RESERVATION_STATUSES: [&str; 2] = ["idle", "active"];
-pub const VALID_SCOPE_KINDS: [&str; 3] = ["native_workflow", "standalone_task", "external_workflow"];
+pub const VALID_SCOPE_KINDS: [&str; 3] =
+    ["native_workflow", "standalone_task", "external_workflow"];
 pub const VALID_RELEASE_REASONS: [&str; 5] = [
     "merged",
     "accepted",
@@ -112,7 +114,7 @@ impl std::error::Error for BranchOwnershipConflictError {}
 #[derive(Debug, Clone, PartialEq)]
 pub enum BranchError {
     Value(String),
-    Conflict(BranchOwnershipConflictError),
+    Conflict(Box<BranchOwnershipConflictError>),
     Store(String),
 }
 
@@ -132,6 +134,10 @@ impl From<crate::config::ConfigError> for BranchError {
     fn from(error: crate::config::ConfigError) -> Self {
         BranchError::Value(error.0)
     }
+}
+
+fn ownership_conflict(error: BranchOwnershipConflictError) -> BranchError {
+    BranchError::Conflict(Box::new(error))
 }
 
 fn value_error(message: &str) -> BranchError {
@@ -345,7 +351,12 @@ impl AgentBranchPolicy {
             };
             profile_branches.insert(profile.alias.clone(), branch);
         }
-        AgentBranchPolicy::new(policy, profile_branches, project_overrides, external_profiles)
+        AgentBranchPolicy::new(
+            policy,
+            profile_branches,
+            project_overrides,
+            external_profiles,
+        )
     }
 
     pub fn resolve_branch(
@@ -394,6 +405,10 @@ pub trait BranchProviderPort {
         Ok(None)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Frozen durable branch reservation port retains every scoped identity field used by the SQL adapter."
+    )]
     fn agent_branch_acquire(
         &mut self,
         project_alias: &str,
@@ -554,22 +569,21 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
         } else {
             task_id.clone()
         };
-        let (scope_kind, scope_id, root_task_id) = if job.get("workflow_id").is_some()
-            && !job["workflow_id"].is_null()
-        {
-            (
-                "native_workflow",
-                workflow_id.clone().unwrap_or_default(),
-                root_or_task,
-            )
-        } else {
-            let root = if job_present(job, "repair_root_task_id") {
-                job_text(job, "repair_root_task_id").unwrap()
+        let (scope_kind, scope_id, root_task_id) =
+            if job.get("workflow_id").is_some() && !job["workflow_id"].is_null() {
+                (
+                    "native_workflow",
+                    workflow_id.clone().unwrap_or_default(),
+                    root_or_task,
+                )
             } else {
-                task_id.clone()
+                let root = if job_present(job, "repair_root_task_id") {
+                    job_text(job, "repair_root_task_id").unwrap()
+                } else {
+                    task_id.clone()
+                };
+                ("standalone_task", root.clone(), root)
             };
-            ("standalone_task", root.clone(), root)
-        };
         Ok(Some(json!({
             "project_alias": project_alias,
             "task_id": task_id,
@@ -587,7 +601,8 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
         project_alias: &str,
         agent_profile: &str,
     ) -> Result<String, BranchError> {
-        self.policy.resolve_branch(project_alias, agent_profile, false)
+        self.policy
+            .resolve_branch(project_alias, agent_profile, false)
     }
 
     pub fn acquire(
@@ -627,7 +642,7 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
             publication.as_deref(),
         )?;
         if !result.is_object() || result["acquired"] != json!(true) {
-            return Err(BranchError::Conflict(
+            return Err(ownership_conflict(
                 BranchOwnershipConflictError::from_result(
                     "Persistent agent branch is owned by another active workflow",
                     "branch_ownership_conflict",
@@ -636,8 +651,14 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
             ));
         }
         Ok(Some(BranchReservation {
-            project_alias: scope["project_alias"].as_str().unwrap_or_default().to_string(),
-            agent_profile: scope["agent_profile"].as_str().unwrap_or_default().to_string(),
+            project_alias: scope["project_alias"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            agent_profile: scope["agent_profile"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             branch_name: result["branch_name"]
                 .as_str()
                 .ok_or_else(|| BranchError::Store("branch_name missing".to_string()))?
@@ -648,7 +669,10 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
                 .to_string(),
             scope_kind: scope["scope_kind"].as_str().unwrap_or_default().to_string(),
             scope_id: scope["scope_id"].as_str().unwrap_or_default().to_string(),
-            root_task_id: scope["root_task_id"].as_str().unwrap_or_default().to_string(),
+            root_task_id: scope["root_task_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             task_id: scope["task_id"].as_str().unwrap_or_default().to_string(),
             reservation_epoch: result["reservation_epoch"]
                 .as_i64()
@@ -663,10 +687,7 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
         }))
     }
 
-    pub fn verify_owner(
-        &mut self,
-        reservation: &BranchReservation,
-    ) -> Result<Value, BranchError> {
+    pub fn verify_owner(&mut self, reservation: &BranchReservation) -> Result<Value, BranchError> {
         let result = self.store.agent_branch_verify_owner(
             &reservation.project_alias,
             &reservation.agent_profile,
@@ -675,7 +696,7 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
             reservation.reservation_epoch,
         )?;
         if !result.is_object() || result["valid"] != json!(true) {
-            return Err(BranchError::Conflict(
+            return Err(ownership_conflict(
                 BranchOwnershipConflictError::from_result(
                     "Persistent branch ownership lost or epoch changed",
                     "branch_ownership_lost",
@@ -704,7 +725,7 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
         let row = match row {
             Some(row) if row.is_object() && row["reservation_status"] == json!("active") => row,
             _ => {
-                return Err(BranchError::Conflict(BranchOwnershipConflictError::new(
+                return Err(ownership_conflict(BranchOwnershipConflictError::new(
                     "Persistent branch is not actively reserved for merge",
                 )))
             }
@@ -717,30 +738,35 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
             );
             error.active_scope_kind = row["active_scope_kind"].as_str().map(str::to_string);
             error.active_scope_id = row["active_scope_id"].as_str().map(str::to_string);
-            return Err(BranchError::Conflict(error));
+            return Err(ownership_conflict(error));
         }
         let expected_pr = job_text(job, "pr_url");
         if let (Some(expected), Some(actual)) = (&expected_pr, row["active_pr_url"].as_str()) {
             if actual != expected {
-                return Err(BranchError::Conflict(BranchOwnershipConflictError::new(
+                return Err(ownership_conflict(BranchOwnershipConflictError::new(
                     "Persistent branch active PR mismatch during merge",
                 )));
             }
         }
         let expected_candidate = job_text(job, "candidate_commit");
-        if let (Some(expected), Some(actual)) = (
-            &expected_candidate,
-            row["active_candidate_commit"].as_str(),
-        ) {
+        if let (Some(expected), Some(actual)) =
+            (&expected_candidate, row["active_candidate_commit"].as_str())
+        {
             if actual != expected {
-                return Err(BranchError::Conflict(BranchOwnershipConflictError::new(
+                return Err(ownership_conflict(BranchOwnershipConflictError::new(
                     "Persistent branch active candidate commit mismatch during merge",
                 )));
             }
         }
         Ok(Some(BranchReservation {
-            project_alias: scope["project_alias"].as_str().unwrap_or_default().to_string(),
-            agent_profile: scope["agent_profile"].as_str().unwrap_or_default().to_string(),
+            project_alias: scope["project_alias"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            agent_profile: scope["agent_profile"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             branch_name: row["branch_name"]
                 .as_str()
                 .ok_or_else(|| BranchError::Store("branch_name missing".to_string()))?
@@ -751,7 +777,10 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
                 .to_string(),
             scope_kind: scope["scope_kind"].as_str().unwrap_or_default().to_string(),
             scope_id: scope["scope_id"].as_str().unwrap_or_default().to_string(),
-            root_task_id: scope["root_task_id"].as_str().unwrap_or_default().to_string(),
+            root_task_id: scope["root_task_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             task_id: scope["task_id"].as_str().unwrap_or_default().to_string(),
             reservation_epoch: row["reservation_epoch"]
                 .as_i64()
@@ -845,7 +874,7 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
                 "Cannot release persistent branch without confirming zero open PRs",
             );
             error.code = "open_pr_awaiting_closure".to_string();
-            return Err(BranchError::Conflict(error));
+            return Err(ownership_conflict(error));
         }
         self.store.agent_branch_release(
             &reservation.project_alias,
@@ -921,12 +950,37 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
                 Ok(false) => {
                     summary["blocked"] = json!(summary["blocked"].as_i64().unwrap_or(0) + 1)
                 }
-                Err(_) => {
-                    summary["errors"] = json!(summary["errors"].as_i64().unwrap_or(0) + 1)
-                }
+                Err(_) => summary["errors"] = json!(summary["errors"].as_i64().unwrap_or(0) + 1),
             }
         }
         Ok(summary)
+    }
+}
+
+/// The review worker's branch surface over this provider (the
+/// publication factory passes the same provider Python shares).
+impl<S: BranchProviderPort + Send> crate::review_ports::ReviewBranchPort
+    for AgentBranchProvider<S>
+{
+    fn persistent_enabled(&self) -> bool {
+        AgentBranchProvider::persistent_enabled(self)
+    }
+
+    fn acquire(
+        &mut self,
+        job: &Value,
+        review_id: &str,
+    ) -> Result<Option<crate::review_ports::BranchReservationData>, crate::review_ports::ReviewError>
+    {
+        let reservation = AgentBranchProvider::acquire(self, job, Some(review_id), None)
+            .map_err(|error| crate::review_ports::ReviewError::other(error.to_string()))?;
+        Ok(
+            reservation.map(|reservation| crate::review_ports::BranchReservationData {
+                agent_profile: reservation.agent_profile,
+                branch_name: reservation.branch_name,
+                reservation_epoch: reservation.reservation_epoch,
+            }),
+        )
     }
 }
 
@@ -973,41 +1027,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            policy.resolve_branch("homelab", "muse-primary", false).unwrap(),
+            policy
+                .resolve_branch("homelab", "muse-primary", false)
+                .unwrap(),
             "feature/muse"
         );
         assert_eq!(
-            policy.resolve_branch("homelab", "codex-primary", false).unwrap(),
+            policy
+                .resolve_branch("homelab", "codex-primary", false)
+                .unwrap(),
             "forge/agent/codex-primary"
         );
-    }
-}
-
-/// The review worker's branch surface over this provider (the
-/// publication factory passes the same provider Python shares).
-impl<S: BranchProviderPort + Send> crate::review_ports::ReviewBranchPort
-    for AgentBranchProvider<S>
-{
-    fn persistent_enabled(&self) -> bool {
-        AgentBranchProvider::persistent_enabled(self)
-    }
-
-    fn acquire(
-        &mut self,
-        job: &Value,
-        review_id: &str,
-    ) -> Result<
-        Option<crate::review_ports::BranchReservationData>,
-        crate::review_ports::ReviewError,
-    > {
-        let reservation = AgentBranchProvider::acquire(self, job, Some(review_id), None)
-            .map_err(|error| crate::review_ports::ReviewError::other(error.to_string()))?;
-        Ok(reservation.map(|reservation| {
-            crate::review_ports::BranchReservationData {
-                agent_profile: reservation.agent_profile,
-                branch_name: reservation.branch_name,
-                reservation_epoch: reservation.reservation_epoch,
-            }
-        }))
     }
 }

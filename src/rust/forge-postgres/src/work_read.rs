@@ -90,9 +90,11 @@ impl forge_work::WorkReadPort for PgWorkStore {
             task_id,
             correlation_id,
             action_id,
-            stage_id,
-            view,
-            cursor_token,
+            crate::work_read_cicd::LogPage {
+                stage_id,
+                view,
+                cursor_token,
+            },
             delivery_enabled,
         )
     }

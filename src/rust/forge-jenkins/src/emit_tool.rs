@@ -93,10 +93,13 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     Ok(args)
 }
 
-fn read_bounded(path: &str, maximum: usize, error_code: &str) -> Result<Vec<u8>, JenkinsCodecError> {
-    let data = std::fs::read(path).map_err(|_| {
-        JenkinsCodecError::new(error_code, &format!("Unable to read {path}"))
-    })?;
+fn read_bounded(
+    path: &str,
+    maximum: usize,
+    error_code: &str,
+) -> Result<Vec<u8>, JenkinsCodecError> {
+    let data = std::fs::read(path)
+        .map_err(|_| JenkinsCodecError::new(error_code, &format!("Unable to read {path}")))?;
     if data.is_empty() || data.len() > maximum {
         return Err(JenkinsCodecError::new(
             error_code,
@@ -118,12 +121,10 @@ fn strip_bytes(data: &[u8]) -> &[u8] {
     &data[start..end]
 }
 
-fn resolve_target(
-    args: &Args,
-) -> Result<(String, String, String, Option<String>), ToolError> {
+fn resolve_target(args: &Args) -> Result<(String, String, String, Option<String>), ToolError> {
     if let Some(config_path) = &args.config {
         let config = load_jenkins_config(Some(config_path.as_str()))
-            .map_err(|message| ToolError::InvalidRequest(message))?
+            .map_err(|_| ToolError::InvalidRequest)?
             .expect("a config path yields a config");
         let project = args.project.clone().expect("required");
         if !config.allowed_projects.contains(&project) {
@@ -169,10 +170,7 @@ fn resolve_hmac_secret(
         let data = read_bounded(file, MAX_SECRET_BYTES, "secret_file_unavailable")?;
         return Ok(Some(strip_bytes(&data).to_vec()));
     }
-    let env_name = args
-        .hmac_secret_env
-        .as_deref()
-        .or(config_secret_env);
+    let env_name = args.hmac_secret_env.as_deref().or(config_secret_env);
     if let Some(name) = env_name {
         let raw = getenv(name);
         match raw {
@@ -193,13 +191,10 @@ fn resolve_hmac_secret(
 enum ToolError {
     Codec(JenkinsCodecError),
     Emitter(JenkinsEmitterError),
-    InvalidRequest(String),
+    InvalidRequest,
 }
 
-fn run_inner(
-    args: &Args,
-    getenv: &dyn Fn(&str) -> Option<String>,
-) -> Result<Value, ToolError> {
+fn run_inner(args: &Args, getenv: &dyn Fn(&str) -> Option<String>) -> Result<Value, ToolError> {
     let (project_alias, jenkins_instance, expected_origin, config_secret_env) =
         resolve_target(args)?;
     let raw_body = read_bounded(
@@ -241,15 +236,14 @@ fn run_inner(
         .ok_or_else(|| ToolError::Emitter(JenkinsEmitterError::new("token_file_required")))?;
     let token_bytes = read_bounded(&token_file, MAX_SECRET_BYTES, "token_file_unavailable")
         .map_err(ToolError::Codec)?;
-    let token = String::from_utf8(token_bytes)
-        .map_err(|error| ToolError::InvalidRequest(error.to_string()))?;
+    let token = String::from_utf8(token_bytes).map_err(|_| ToolError::InvalidRequest)?;
     let token = token.trim().to_string();
     let port = u16::try_from(args.runner_port)
         .ok()
         .filter(|port| *port > 0)
-        .ok_or_else(|| ToolError::InvalidRequest("runner port out of range".to_string()))?;
-    let mut emitter = HttpDispatchJenkinsEmitter::new(&token, &args.runner_host, port, 10.0)
-        .map_err(ToolError::InvalidRequest)?;
+        .ok_or(ToolError::InvalidRequest)?;
+    let emitter = HttpDispatchJenkinsEmitter::new(&token, &args.runner_host, port, 10.0)
+        .map_err(|_| ToolError::InvalidRequest)?;
     let receipt = emitter
         .emit(&event, args.request_id.as_deref())
         .map_err(ToolError::Emitter)?;
@@ -257,10 +251,7 @@ fn run_inner(
 }
 
 /// Execute the CLI flow; returns (exit_code, stdout, stderr).
-pub fn execute(
-    argv: &[String],
-    getenv: &dyn Fn(&str) -> Option<String>,
-) -> (i32, String, String) {
+pub fn execute(argv: &[String], getenv: &dyn Fn(&str) -> Option<String>) -> (i32, String, String) {
     let args = match parse_args(argv) {
         Ok(args) => args,
         Err(message) => {
@@ -297,7 +288,7 @@ pub fn execute(
                 format!("{}\n", serde_json::to_string(&payload).expect("serializes")),
             )
         }
-        Err(ToolError::InvalidRequest(_)) => (
+        Err(ToolError::InvalidRequest) => (
             2,
             String::new(),
             format!(

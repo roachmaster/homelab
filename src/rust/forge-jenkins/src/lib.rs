@@ -6,8 +6,8 @@
 //! use preemptive HTTP Basic authentication with a username, not Bearer.
 #![doc = include_str!("../README.md")]
 
-mod client;
 pub mod api;
+mod client;
 pub mod codec;
 pub mod config;
 pub mod consumer;
@@ -15,9 +15,9 @@ pub mod emit_tool;
 pub mod emitter;
 pub mod events;
 mod observation;
-pub mod store;
 #[cfg(feature = "provisioning")]
 pub mod provisioning;
+pub mod store;
 pub mod strict_json;
 
 #[cfg(feature = "http")]

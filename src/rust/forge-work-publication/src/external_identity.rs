@@ -16,7 +16,9 @@ use uuid::Uuid;
 use crate::artifact_identity::{
     ArtifactManifest, VerificationIdentity, VerificationPolicySnapshot,
 };
-use crate::artifact_source::{GitArtifactGitPort, GitArtifactSource, GitSourceConfig, SourceLimits};
+use crate::artifact_source::{
+    GitArtifactGitPort, GitArtifactSource, GitSourceConfig, SourceLimits,
+};
 use crate::ci_contract::CiGatePlan;
 use crate::native_identity_provider::NativeArtifactsPort;
 use crate::publication_clients::PublicationError;
@@ -83,8 +85,12 @@ pub fn validate_content_identity(value: &Value) -> Result<Value, String> {
     if keys.len() != expected.len() || !expected.iter().all(|key| keys.contains(key)) {
         return Err("Invalid external content identity".to_string());
     }
-    if value["version"].as_i64() != Some(1) || !value["version"].is_number()
-        || value["version"].as_f64().map(|number| number.fract() != 0.0).unwrap_or(true)
+    if value["version"].as_i64() != Some(1)
+        || !value["version"].is_number()
+        || value["version"]
+            .as_f64()
+            .map(|number| number.fract() != 0.0)
+            .unwrap_or(true)
     {
         return Err("Invalid external content identity".to_string());
     }
@@ -165,7 +171,10 @@ impl ExternalCandidateIdentityProvider {
         Ok((snapshot, reference))
     }
 
-    pub fn validate_snapshot(snapshot: &Value, reference: &Value) -> Result<Value, PublicationError> {
+    pub fn validate_snapshot(
+        snapshot: &Value,
+        reference: &Value,
+    ) -> Result<Value, PublicationError> {
         let code = |message: String| PublicationError::Code(message);
         validate_content_identity(reference).map_err(code)?;
         let keys: Vec<&str> = match snapshot.as_object() {
@@ -188,8 +197,13 @@ impl ExternalCandidateIdentityProvider {
         }
         let artifact = ArtifactManifest::from_dict(&snapshot["artifact"]).map_err(code)?;
         let base = ArtifactManifest::from_dict(&snapshot["base_artifact"]).map_err(code)?;
-        let protected = ArtifactManifest::from_dict(&snapshot["protected_artifact"]).map_err(code)?;
-        let all_entries: Vec<Value> = artifact.entries.iter().map(|entry| entry.to_dict()).collect();
+        let protected =
+            ArtifactManifest::from_dict(&snapshot["protected_artifact"]).map_err(code)?;
+        let all_entries: Vec<Value> = artifact
+            .entries
+            .iter()
+            .map(|entry| entry.to_dict())
+            .collect();
         let policy = VerificationPolicySnapshot::parse_dict(&snapshot["policy"]).map_err(code)?;
         // The saved manifest is compared structurally (content
         // ids, policy and verification), never by re-hashing
@@ -225,8 +239,9 @@ impl NativeArtifactsPort for GitArtifactsProvider {
         repository: &Path,
         commit: &str,
     ) -> Result<ArtifactManifest, PublicationError> {
-        let config = GitSourceConfig::new(repository.to_path_buf(), commit.to_string(), self.limits)
-            .map_err(PublicationError::Code)?;
+        let config =
+            GitSourceConfig::new(repository.to_path_buf(), commit.to_string(), self.limits)
+                .map_err(PublicationError::Code)?;
         let source = GitArtifactSource {
             config,
             git: self.git.clone(),

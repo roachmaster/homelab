@@ -182,7 +182,7 @@ pub struct VerificationReportData {
 /// run still carries its structured report.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VerificationFailure {
-    pub report: VerificationReportData,
+    pub report: Box<VerificationReportData>,
 }
 
 /// Fixed local checks (work_publication_checks): quiesce the

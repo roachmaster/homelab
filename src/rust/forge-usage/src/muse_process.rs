@@ -23,8 +23,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::rpc::{
-    GroupSignal, MetadataProcess, MetadataProcessConfig, ProcessPorts, ProviderFailure,
-    ProviderResult, SpawnSpec, StreamEvent, StreamKind, parse_strict_json,
+    parse_strict_json, GroupSignal, MetadataProcess, MetadataProcessConfig, ProcessPorts,
+    ProviderFailure, ProviderResult, SpawnSpec, StreamEvent, StreamKind,
 };
 
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024;
@@ -101,9 +101,7 @@ impl MuseUsageProcess {
         expected_binary_sha256: String,
     ) -> Result<MuseUsageProcess, String> {
         if config.code_home.is_some() {
-            return Err(
-                "Muse usage requires isolated typed process configuration".to_string(),
-            );
+            return Err("Muse usage requires isolated typed process configuration".to_string());
         }
         Ok(MuseUsageProcess {
             config,
@@ -249,22 +247,14 @@ impl MuseUsageProcess {
         result
     }
 
-    fn read_inner(
-        &self,
-        uid: u32,
-        gid: u32,
-        state: &mut ReadState,
-    ) -> ProviderResult<Value> {
+    fn read_inner(&self, uid: u32, gid: u32, state: &mut ReadState) -> ProviderResult<Value> {
         let home = make_temp_home()?;
         state.home = Some(home.clone());
         let config_dir = home.join(".config");
         let settings = config_dir.join("muse");
         std::fs::create_dir_all(&settings).map_err(|_| ProviderFailure::unavailable())?;
         let auth = settings.join("auth.json");
-        let credential = match self
-            .stager
-            .stage_auth(&self.config.home, uid, &auth)
-        {
+        let credential = match self.stager.stage_auth(&self.config.home, uid, &auth) {
             Ok(credential) => credential,
             Err(AuthStageFailure::Cleanup) => {
                 state.acquisition_uncertain = true;
@@ -351,7 +341,7 @@ struct ReadState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rpc::tests::{FakeProcess, config as rpc_config, ports};
+    use crate::rpc::tests::{config as rpc_config, ports, FakeProcess};
     use std::sync::Mutex;
 
     struct FakeLease {
@@ -403,10 +393,8 @@ mod tests {
     }
 
     fn write_binary() -> (PathBuf, String) {
-        let path = std::env::temp_dir().join(format!(
-            "forge-usage-muse-test-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("forge-usage-muse-test-{}", std::process::id()));
         std::fs::write(&path, b"fake muse binary").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let hex: String = Sha256::digest(b"fake muse binary")
@@ -425,8 +413,12 @@ mod tests {
             closed: closed.clone(),
         });
         let mut process = FakeProcess::with_lines(888, &[r#"{"schemaVersion": 1}"#]);
-        process.events.push_back((StreamKind::Stdout, StreamEvent::Eof));
-        process.events.push_back((StreamKind::Stderr, StreamEvent::Eof));
+        process
+            .events
+            .push_back((StreamKind::Stdout, StreamEvent::Eof));
+        process
+            .events
+            .push_back((StreamKind::Stderr, StreamEvent::Eof));
         let process_port = MuseUsageProcess::new(
             muse_config(binary.clone()),
             ports(vec![process]),
@@ -461,10 +453,7 @@ mod tests {
             "0".repeat(64),
         )
         .unwrap();
-        assert_eq!(
-            process_port.read().unwrap_err().code,
-            "unsupported_version"
-        );
+        assert_eq!(process_port.read().unwrap_err().code, "unsupported_version");
         let _ = std::fs::remove_file(&binary);
     }
 

@@ -149,12 +149,14 @@ fn review_decide_bound(
         let task = control_task(
             tx,
             store,
-            &request.project_alias,
-            request.task_id,
-            request.expected_revision,
-            &request.idempotency_key,
-            "review_decide",
-            &intent,
+            crate::work_control::ControlRequest {
+                project_alias: &request.project_alias,
+                task_id: request.task_id,
+                expected_revision: request.expected_revision,
+                key: &request.idempotency_key,
+                action: "review_decide",
+                intent: &intent,
+            },
         )?;
         if let Some(replay) = &task.replay {
             return Ok(replay.clone());
@@ -203,8 +205,7 @@ fn review_decide_bound(
         let review_attempt: Option<Uuid> = col(review, "attempt_id")?;
         let review_status: String = col(review, "status")?;
         if review_attempt != task.latest_attempt_id
-            || ["pending", "checking", "approved", "cancelled"]
-                .contains(&review_status.as_str())
+            || ["pending", "checking", "approved", "cancelled"].contains(&review_status.as_str())
         {
             return Err(not_reviewable());
         }
@@ -238,11 +239,8 @@ fn review_decide_bound(
                     .first()
                     .and_then(|row| row.get::<usize, Option<Value>>(0))
                     .ok_or_else(not_reviewable)?;
-                let max_params: &[&(dyn ToSql + Sync)] = &[
-                    &store.owner,
-                    &request.project_alias,
-                    &request.task_id,
-                ];
+                let max_params: &[&(dyn ToSql + Sync)] =
+                    &[&store.owner, &request.project_alias, &request.task_id];
                 let max_rows = tx
                     .query_rows(
                         "SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3",
@@ -298,11 +296,8 @@ fn review_decide_bound(
                     .first()
                     .and_then(|row| row.get::<usize, Option<Value>>(0))
                     .ok_or_else(not_reviewable)?;
-                let max_params: &[&(dyn ToSql + Sync)] = &[
-                    &store.owner,
-                    &request.project_alias,
-                    &request.task_id,
-                ];
+                let max_params: &[&(dyn ToSql + Sync)] =
+                    &[&store.owner, &request.project_alias, &request.task_id];
                 let max_rows = tx
                     .query_rows(
                         "SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3",
@@ -450,12 +445,14 @@ pub(crate) fn repair(
         let task = control_task(
             tx,
             store,
-            &request.project_alias,
-            request.task_id,
-            request.expected_revision,
-            &request.idempotency_key,
-            "repair",
-            &intent,
+            crate::work_control::ControlRequest {
+                project_alias: &request.project_alias,
+                task_id: request.task_id,
+                expected_revision: request.expected_revision,
+                key: &request.idempotency_key,
+                action: "repair",
+                intent: &intent,
+            },
         )?;
         if let Some(replay) = &task.replay {
             let revision = replay
@@ -800,12 +797,14 @@ pub(crate) fn publication_retry(
         let task = control_task(
             tx,
             store,
-            &request.project_alias,
-            request.task_id,
-            request.expected_revision,
-            &request.idempotency_key,
-            "publication_retry",
-            &intent,
+            crate::work_control::ControlRequest {
+                project_alias: &request.project_alias,
+                task_id: request.task_id,
+                expected_revision: request.expected_revision,
+                key: &request.idempotency_key,
+                action: "publication_retry",
+                intent: &intent,
+            },
         )?;
         if let Some(replay) = &task.replay {
             let revision = replay
@@ -910,11 +909,8 @@ pub(crate) fn handoff_author_full(
         return Err(forge_work::WorkError::rejected(403, "denied"));
     }
     run_tx(store, |tx| {
-        let params: &[&(dyn ToSql + Sync)] = &[
-            &store.owner,
-            &command.project_alias,
-            &command.task_id,
-        ];
+        let params: &[&(dyn ToSql + Sync)] =
+            &[&store.owner, &command.project_alias, &command.task_id];
         let task = tx
             .call_json(
                 "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_tasks WHERE (owner_id, project_alias, id) = ($1, $2, $3) FOR UPDATE) t",
@@ -989,9 +985,11 @@ pub(crate) fn handoff_author_full(
                 "workspace_digest": workspace_digest,
                 "reason": "provider_author_handoff",
             }),
-            &coordinator_actor(),
-            None,
-            false,
+            crate::work_rows::EventOptions {
+                actor: &coordinator_actor(),
+                cause: None,
+                first: false,
+            },
         )?;
         Ok(serde_json::json!({
             "project_alias": command.project_alias,
@@ -1124,9 +1122,11 @@ pub(crate) fn handoff_author(
                 "workspace_digest": request.workspace_digest,
                 "reason": "provider_author_handoff",
             }),
-            &coordinator_actor(),
-            None,
-            false,
+            crate::work_rows::EventOptions {
+                actor: &coordinator_actor(),
+                cause: None,
+                first: false,
+            },
         )?;
         outcome_for(
             tx,

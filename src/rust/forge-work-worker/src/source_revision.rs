@@ -14,8 +14,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 pub const VERIFIED_REF: &str = "refs/forge/verified-main";
-pub const SOURCE_REVISION_MESSAGE: &str =
-    "The configured verified project source is unavailable.";
+pub const SOURCE_REVISION_MESSAGE: &str = "The configured verified project source is unavailable.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceRevisionError;
@@ -93,11 +92,7 @@ impl SelectedSourceRevisionProvider {
         } else {
             self.store.project_revisions()?
         };
-        if known.len() > 64
-            || known
-                .iter()
-                .any(|(_alias, head)| !is_sha(head))
-        {
+        if known.len() > 64 || known.iter().any(|(_alias, head)| !is_sha(head)) {
             return Err(SOURCE_REVISION_MESSAGE.to_string());
         }
         let mut result = Vec::new();
@@ -114,9 +109,10 @@ impl SelectedSourceRevisionProvider {
                     head = expected;
                 }
             }
-            let raw = self
-                .git
-                .git(repository, &["rev-parse", "--verify", &format!("{head}^{{commit}}")])?;
+            let raw = self.git.git(
+                repository,
+                &["rev-parse", "--verify", &format!("{head}^{{commit}}")],
+            )?;
             let revision = String::from_utf8_lossy(&raw).trim().to_string();
             if !is_sha(&revision) || (head != "HEAD" && head != revision) {
                 return Err(SOURCE_REVISION_MESSAGE.to_string());
@@ -175,7 +171,9 @@ mod tests {
             store: Box::new(FakeStore {
                 revisions: BTreeMap::from([("homelab".to_string(), head.clone())]),
             }),
-            git: Box::new(FakeGit { verified: Some(head.clone()) }),
+            git: Box::new(FakeGit {
+                verified: Some(head.clone()),
+            }),
         };
         let result = provider.projects().unwrap();
         assert_eq!(result[0]["base_revision"], json!(head));
@@ -190,7 +188,9 @@ mod tests {
             store: Box::new(FakeStore {
                 revisions: BTreeMap::from([("homelab".to_string(), "a".repeat(40))]),
             }),
-            git: Box::new(FakeGit { verified: Some("b".repeat(40)) }),
+            git: Box::new(FakeGit {
+                verified: Some("b".repeat(40)),
+            }),
         };
         assert_eq!(provider.projects(), Err(SourceRevisionError));
     }

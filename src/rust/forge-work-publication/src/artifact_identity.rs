@@ -73,8 +73,7 @@ fn validate_digest(value: &str) -> Result<(), String> {
 }
 
 fn exact_keys(object: &Map<String, Value>, expected: &[&str]) -> bool {
-    object.len() == expected.len()
-        && expected.iter().all(|key| object.contains_key(*key))
+    object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
 }
 
 fn is_int(value: &Value) -> bool {
@@ -220,9 +219,10 @@ fn policy_value(value: &Value, depth: u32, remaining: &mut i64) -> Result<Value,
     match value {
         Value::Null | Value::Bool(_) | Value::String(_) => Ok(value.clone()),
         Value::Number(number) => {
-            if number.is_i64() || number.is_u64() {
-                Ok(value.clone())
-            } else if number.as_f64().is_some_and(|float| float.is_finite()) {
+            if number.is_i64()
+                || number.is_u64()
+                || number.as_f64().is_some_and(|float| float.is_finite())
+            {
                 Ok(value.clone())
             } else {
                 Err("Unsupported verification policy value".to_string())
@@ -300,8 +300,7 @@ impl VerificationPolicySnapshot {
     }
 
     pub fn to_dict(&self) -> Value {
-        json_bytes(&self.content, MAX_POLICY_BYTES)
-            .expect("stored snapshot content re-parses")
+        json_bytes(&self.content, MAX_POLICY_BYTES).expect("stored snapshot content re-parses")
     }
 
     pub fn canonical_bytes(&self) -> &[u8] {
@@ -389,7 +388,13 @@ impl VerificationIdentity {
             .filter(|object| {
                 exact_keys(
                     object,
-                    &["domain", "version", "artifact_id", "policy_sha256", "generation"],
+                    &[
+                        "domain",
+                        "version",
+                        "artifact_id",
+                        "policy_sha256",
+                        "generation",
+                    ],
                 ) && object["domain"] == json!(VERIFICATION_DOMAIN)
                     && is_int(&object["version"])
                     && object["version"].as_i64() == Some(VERSION)

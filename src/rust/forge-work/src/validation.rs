@@ -64,9 +64,13 @@ pub fn as_bounded_int(value: &Value, minimum: i64, maximum_exclusive: i64) -> Op
         return None;
     }
     let number = value.as_i64().or_else(|| {
-        value
-            .as_u64()
-            .and_then(|u| if u <= i64::MAX as u64 { Some(u as i64) } else { None })
+        value.as_u64().and_then(|u| {
+            if u <= i64::MAX as u64 {
+                Some(u as i64)
+            } else {
+                None
+            }
+        })
     })?;
     if number >= minimum && number < maximum_exclusive {
         Some(number)
@@ -156,7 +160,9 @@ pub fn check_text(value: &Value, maximum: usize, empty: bool) -> Option<Vec<u8>>
     }
     if text.len() > maximum
         || contains_secret(text)
-        || text.chars().any(|c| c.is_control() && !matches!(c, '\r' | '\n' | '\t'))
+        || text
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\r' | '\n' | '\t'))
     {
         return None;
     }

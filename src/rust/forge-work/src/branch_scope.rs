@@ -91,9 +91,7 @@ pub fn canonical_branch_slug(branch_name: &str) -> Result<String, String> {
     }
     let stripped = collapsed.trim_matches(|c| matches!(c, '.' | '_' | '-'));
     let mut prefix: String = stripped.chars().take(40).collect();
-    prefix = prefix
-        .trim_end_matches(|c| matches!(c, '.' | '_' | '-'))
-        .to_string();
+    prefix = prefix.trim_end_matches(['.', '_', '-']).to_string();
     if prefix.is_empty() || !prefix.chars().next().unwrap().is_alphanumeric() {
         prefix = "b".to_string();
     }
@@ -173,8 +171,12 @@ mod tests {
             "feature-fix_thing.now-c666980f678e8970"
         );
         assert_eq!(
-            derive_branch_scope(&"c".repeat(40), &"d".repeat(40), Some("Feature/Fix_Thing.Now"))
-                .unwrap(),
+            derive_branch_scope(
+                &"c".repeat(40),
+                &"d".repeat(40),
+                Some("Feature/Fix_Thing.Now")
+            )
+            .unwrap(),
             "branch/feature-fix_thing.now-c666980f678e8970"
         );
         assert_eq!(
@@ -190,7 +192,9 @@ mod tests {
             validate_branch_scope("main", &"d".repeat(40), &"d".repeat(40)).unwrap(),
             "main"
         );
-        assert!(validate_branch_scope("branch/bad..slug", &"c".repeat(40), &"d".repeat(40)).is_err());
+        assert!(
+            validate_branch_scope("branch/bad..slug", &"c".repeat(40), &"d".repeat(40)).is_err()
+        );
         assert!(validate_branch_name("bad//name").is_err());
         assert!(validate_branch_name("-leading").is_err());
         assert!(validate_branch_name("ok/name.lock").is_err());

@@ -548,6 +548,26 @@ class ProxyReadTest(unittest.TestCase):
                 {"workflow_id": "00000000-0000-0000-0000-000000000001"})
         self.assertEqual(created, [])
 
+    def test_defect_and_retained_source_reads_reject_foreign_owner_and_extra_scope(self):
+        for name in ('filed_defects', 'external_filed_defects',
+                     'retained_incident_sources', 'retained_baseline_sources'):
+            instance, created = make_proxy()
+            coordinator = instance.callers['coordinator']
+            args = {'owner_id':'mission-control', 'project_alias':'homelab',
+                    'workflow_id':'00000000-0000-0000-0000-000000000001'}
+            if 'defects' in name:
+                args['task_id'] = '00000000-0000-0000-0000-000000000002'
+            for bad in ({**args,'owner_id':'other-owner'},
+                        {key:value for key,value in args.items() if key != 'owner_id'},
+                        {**args,'source_pattern':'%'}):
+                with self.subTest(name=name,args=bad), self.assertRaises(proxy.Rejected):
+                    instance.execute(coordinator, 'readq.'+name, bad)
+            self.assertEqual(created, [])
+            for caller in instance.callers.values():
+                if caller is coordinator: continue
+                with self.subTest(name=name,caller=caller), self.assertRaises(proxy.Rejected):
+                    instance.execute(caller, 'readq.'+name, args)
+
     def test_every_readq_is_owner_scoped(self):
         # Structural guard: every named read declares exactly the
         # parameters its SQL uses, and (except the two GPU readiness
@@ -1249,8 +1269,9 @@ class ProxyMigrationGuardTest(unittest.TestCase):
     proxy_statements.translate, and collect the methods whose
     statements raise UnsupportedStatement. The result must equal
     UNMIGRATED exactly — a method that migrates drops out and
-    fails the test until the allowlist (and proxy-cutover.sh's
-    UNMIGRATED_CALLERS) is updated, and a regression that adds an
+    fails the test until the method inventory is updated. A module stays in
+    proxy-cutover.sh's UNMIGRATED_CALLERS while any of its methods remain;
+    a regression that adds an
     untranslatable statement anywhere else fails it too."""
 
     UNMIGRATED = {
@@ -1261,16 +1282,14 @@ class ProxyMigrationGuardTest(unittest.TestCase):
             "publication_retry", "repair", "resume", "review_decide",
             "submit"},
         "work_workflow.py": {
-            "_admit_reviewer", "_amend_retry_allowance", "_apply_verdict",
+            "_admit_reviewer", "_apply_verdict",
             "_artifact", "_cancel_workflow",
             "_code_review_source", "_escalate", "_native_deadline_event",
-            "_recover_native_timeouts", "_recover_peer_verdicts",
-            "_recover_preparations", "_recover_source_readiness", "_revive",
-            "_verify_peer_recovery_source", "claim",
+            "_revive",
+            "_verify_peer_recovery_source",
             "defer_source_readiness",
-            "process", "recover", "retry_native_timeout", "retry_peer_verdict",
-            "retry_preparation", "revive_workflow", "validate",
-            "_apply_retry_allowances"},
+            "process", "retry_native_timeout", "retry_peer_verdict",
+            "retry_preparation", "revive_workflow", "validate"},
         "work_owner_control.py": {"resume", "review_decide"},
         "work_owner_reverification.py": {"recover"},
         "queue_store.py": {

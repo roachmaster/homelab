@@ -117,13 +117,16 @@ fn steps() -> Steps<World> {
             }
             Ok(())
         })
-        .when("the underlying process exits with a nonzero status", |w, _| {
-            let mut runner = ProcessGitRunner::new(FailingExec, 40);
-            if let Err(err) = runner.git(Path::new("/tmp/missing"), &["status"]) {
-                w.git_error = Some(err);
-            }
-            Ok(())
-        })
+        .when(
+            "the underlying process exits with a nonzero status",
+            |w, _| {
+                let mut runner = ProcessGitRunner::new(FailingExec, 40);
+                if let Err(err) = runner.git(Path::new("/tmp/missing"), &["status"]) {
+                    w.git_error = Some(err);
+                }
+                Ok(())
+            },
+        )
         .then("execution fails with a protocol error", |w, _| {
             ensure(
                 matches!(w.error, Some(WorkerError::Protocol(_))),
@@ -134,7 +137,10 @@ fn steps() -> Steps<World> {
             "the exit status is zero and stdout matches the input",
             |w, _| {
                 let out = w.output.as_ref().ok_or("no output captured")?;
-                ensure(out.exit_code == 0, format!("exit_code was {}", out.exit_code))?;
+                ensure(
+                    out.exit_code == 0,
+                    format!("exit_code was {}", out.exit_code),
+                )?;
                 ensure(
                     out.stdout == b"bdd-stdin-ok",
                     format!("stdout was {:?}", String::from_utf8_lossy(&out.stdout)),
@@ -165,22 +171,31 @@ fn steps() -> Steps<World> {
         .then(
             "the duplicate is rejected and the frozen factory produces a working client",
             |w, _| {
-                ensure(w.duplicate_rejected, "duplicate registration was not rejected")?;
+                ensure(
+                    w.duplicate_rejected,
+                    "duplicate registration was not rejected",
+                )?;
                 let out = w.output.as_ref().ok_or("frozen client did not run")?;
-                ensure(out.exit_code == 0, format!("exit_code was {}", out.exit_code))?;
+                ensure(
+                    out.exit_code == 0,
+                    format!("exit_code was {}", out.exit_code),
+                )?;
                 ensure(
                     String::from_utf8_lossy(&out.stdout).trim() == "frozen-ok",
                     "unexpected output from frozen client",
                 )
             },
         )
-        .then("the runner reports the repository as unavailable", |w, _| {
-            let err = w.git_error.as_ref().ok_or("expected git error")?;
-            ensure(
-                format!("{err:?}").contains("approved repository or revision is unavailable"),
-                format!("unexpected git error: {err:?}"),
-            )
-        })
+        .then(
+            "the runner reports the repository as unavailable",
+            |w, _| {
+                let err = w.git_error.as_ref().ok_or("expected git error")?;
+                ensure(
+                    format!("{err:?}").contains("approved repository or revision is unavailable"),
+                    format!("unexpected git error: {err:?}"),
+                )
+            },
+        )
 }
 
 #[test]

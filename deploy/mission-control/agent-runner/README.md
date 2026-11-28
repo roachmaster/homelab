@@ -1067,3 +1067,24 @@ Read-only correlation CI/CD stage projections and bounded Errors/Tests/Console l
 are exposed through `ide.work.catalog`, `ide.work.get`, and `ide.work.cicd.stage_log`
 backed by `forge_agent.jenkins_stage_results` and `jenkins_stage_log_chunks`.
 Live migration 0041 activation and portal deployment remain separate authorized steps.
+
+
+Failed-main repair author selection is optional and separate from normal project
+admission. For the Python runtime, configure
+`"delivery_repair_authors": {"homelab": "codex-author"}` alongside
+`"workflow_policy_compatibility": "forge-frozen-workflow-roles-v1"`. The selected
+author must be enabled, native, distinct from the independent reviewer, and use
+its explicitly owned feature branch. The repair policy derives from the project's
+normal policy, changing only its author and corresponding Plan/implementation
+recipes; its complete digest and role snapshot freeze at normal task admission.
+Project default authors, reviewer selection and existing budgets remain unchanged.
+
+Only the factory-selected repair consumer can use this policy through its
+leased delivery operation. Public task submission cannot select the repair
+snapshot. An already saved exact old-policy repair request retains its original
+identity and can finish normal admission once; new requests use the selected
+repair author. Existing workflows retain their snapshots and spent budgets.
+An absent map preserves the original routing. `delivery_repair_projects` still
+controls whether repair admission runs, so an API configuration can stage the
+selector while that list remains empty. This option does not select a Rust worker
+or authorize a proxy cutover; Rust repair routing needs separate implementation.

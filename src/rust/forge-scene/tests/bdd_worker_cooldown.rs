@@ -118,25 +118,31 @@ fn refresh_selection(w: &mut World) -> Result<(), String> {
 
 fn steps() -> Steps<World> {
     Steps::new()
-        .given("the worker cooldown can evaluate configured profiles", |w: &mut World, _| {
-            let root = TempRoot::new();
-            let now = Arc::clone(&w.now);
-            let clock: CooldownClock = Arc::new(move || *now.lock().unwrap());
-            let mut cooldown = ProviderCooldown::with_clock(config_for(&root.0), clock);
-            cooldown.prepare().map_err(|e| format!("{e:?}"))?;
-            w._root = Some(root);
-            w.cooldown = Some(cooldown);
-            Ok(())
-        })
-        .given("the worker cooldown needs a valid state directory", |w, _| {
-            let missing = std::env::temp_dir()
-                .join(format!("forge-missing-parent-{}", Uuid::new_v4().simple()))
-                .join("state");
-            let now = Arc::clone(&w.now);
-            let clock: CooldownClock = Arc::new(move || *now.lock().unwrap());
-            w.cooldown = Some(ProviderCooldown::with_clock(config_for(&missing), clock));
-            Ok(())
-        })
+        .given(
+            "the worker cooldown can evaluate configured profiles",
+            |w: &mut World, _| {
+                let root = TempRoot::new();
+                let now = Arc::clone(&w.now);
+                let clock: CooldownClock = Arc::new(move || *now.lock().unwrap());
+                let mut cooldown = ProviderCooldown::with_clock(config_for(&root.0), clock);
+                cooldown.prepare().map_err(|e| format!("{e:?}"))?;
+                w._root = Some(root);
+                w.cooldown = Some(cooldown);
+                Ok(())
+            },
+        )
+        .given(
+            "the worker cooldown needs a valid state directory",
+            |w, _| {
+                let missing = std::env::temp_dir()
+                    .join(format!("forge-missing-parent-{}", Uuid::new_v4().simple()))
+                    .join("state");
+                let now = Arc::clone(&w.now);
+                let clock: CooldownClock = Arc::new(move || *now.lock().unwrap());
+                w.cooldown = Some(ProviderCooldown::with_clock(config_for(&missing), clock));
+                Ok(())
+            },
+        )
         .when("no quota diagnostics have been recorded", |w, _| {
             refresh_selection(w)
         })
@@ -164,10 +170,13 @@ fn steps() -> Steps<World> {
                 refresh_selection(w)
             },
         )
-        .when("the clock advances past the original retry window", |w, _| {
-            *w.now.lock().unwrap() = 1_601.0;
-            refresh_selection(w)
-        })
+        .when(
+            "the clock advances past the original retry window",
+            |w, _| {
+                *w.now.lock().unwrap() = 1_601.0;
+                refresh_selection(w)
+            },
+        )
         .when("a malformed quota diagnostic is recorded", |w, _| {
             let cooldown = w.cooldown.as_mut().ok_or("cooldown not initialized")?;
             cooldown.record(&primary_lease(), &json!({"version": 99, "code": "invalid"}));
@@ -211,7 +220,10 @@ fn steps() -> Steps<World> {
 
 #[test]
 fn worker_cooldown_feature() {
-    let report = verify(include_str!("../features/worker_cooldown.feature"), &steps())
-        .unwrap_or_else(|errors| panic!("worker_cooldown.feature failed:\n{errors}"));
+    let report = verify(
+        include_str!("../features/worker_cooldown.feature"),
+        &steps(),
+    )
+    .unwrap_or_else(|errors| panic!("worker_cooldown.feature failed:\n{errors}"));
     assert_eq!(report.scenarios, 6);
 }

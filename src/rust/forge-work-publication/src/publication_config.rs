@@ -11,9 +11,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use forge_work_worker::agent_branch::{
-    AgentBranchPolicy, PERSISTENT_BRANCH_POLICY,
-};
+use forge_work_worker::agent_branch::{AgentBranchPolicy, PERSISTENT_BRANCH_POLICY};
 use forge_work_worker::config::{parse_config as parse_worker_config, WorkerConfig};
 use forge_work_worker::native_identity::NativeIdentityConfig;
 
@@ -70,9 +68,9 @@ pub fn absolute_path(value: &Value) -> Result<PathBuf, String> {
 
 pub fn absolute_path_str(text: &str) -> Result<PathBuf, String> {
     if text.is_empty()
-        || text.chars().any(|ch| {
-            ch.is_whitespace() || (ch as u32) < 32 || "\\\"'%".contains(ch)
-        })
+        || text
+            .chars()
+            .any(|ch| ch.is_whitespace() || (ch as u32) < 32 || "\\\"'%".contains(ch))
     {
         return Err("Invalid coding worker path".to_string());
     }
@@ -111,17 +109,16 @@ pub fn parse_proxy(value: Option<&Value>) -> Result<Option<ProxyConfig>, String>
     if object.len() != 2 || !object.contains_key("url") || !object.contains_key("token_file") {
         return Err("Invalid coding worker configuration fields".to_string());
     }
-    let url = object["url"].as_str().ok_or_else(|| "Invalid proxy URL".to_string())?;
+    let url = object["url"]
+        .as_str()
+        .ok_or_else(|| "Invalid proxy URL".to_string())?;
     let (scheme, rest) = url
         .split_once("://")
         .ok_or_else(|| "Invalid proxy URL".to_string())?;
     if scheme != "http" && scheme != "https" {
         return Err("Invalid proxy URL".to_string());
     }
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default();
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     let host_port = authority.rsplit('@').next().unwrap_or_default();
     let hostname = if let Some(stripped) = host_port.strip_prefix('[') {
         stripped.split(']').next().unwrap_or_default()
@@ -297,15 +294,13 @@ pub fn parse_config(
     let mut repositories: BTreeMap<String, String> = BTreeMap::new();
     for (alias, repo_value) in &repository_pairs {
         let valid = project_aliases.contains(alias.as_str())
-            && repo_value
-                .as_str()
-                .is_some_and(|repo| {
-                    repo.chars().count() <= 200
-                        && is_repository(repo)
-                        && !repo.split('/').any(|part| {
-                            part == "." || part == ".." || part.ends_with(".git")
-                        })
-                });
+            && repo_value.as_str().is_some_and(|repo| {
+                repo.chars().count() <= 200
+                    && is_repository(repo)
+                    && !repo
+                        .split('/')
+                        .any(|part| part == "." || part == ".." || part.ends_with(".git"))
+            });
         if !valid {
             return Err("Invalid publication repository grant".to_string());
         }
@@ -316,16 +311,12 @@ pub fn parse_config(
     }
     let github_config = absolute_path(&object["github_config_dir"])?;
     if github_config != worker.account.home.join(".config/gh") {
-        return Err(
-            "Publisher uses only the existing configured GitHub account".to_string(),
-        );
+        return Err("Publisher uses only the existing configured GitHub account".to_string());
     }
     let profile = match object.get("jenkins_verification_profile") {
         None => LEGACY_PROFILE.to_string(),
         Some(Value::String(text)) => text.clone(),
-        Some(_) => {
-            return Err("Unsupported Jenkins verification profile".to_string())
-        }
+        Some(_) => return Err("Unsupported Jenkins verification profile".to_string()),
     };
     let contract = CiGateContractFactory::new(&profile)?.create();
     let execution_scope = match object.get("jenkins_verification_scope") {
@@ -337,16 +328,23 @@ pub fn parse_config(
         return Err("Invalid Jenkins verification scope".to_string());
     }
     if (profile == SCOPED_PROFILE || profile == EVENT_PROFILE)
-        && !["jenkins_verification_scope", "checks", "required_hosted_checks"]
-            .iter()
-            .all(|required| keys.contains(required))
+        && ![
+            "jenkins_verification_scope",
+            "checks",
+            "required_hosted_checks",
+        ]
+        .iter()
+        .all(|required| keys.contains(required))
     {
         return Err(
-            "Scoped Jenkins checks and hosted policy must be explicitly frozen"
-                .to_string(),
+            "Scoped Jenkins checks and hosted policy must be explicitly frozen".to_string(),
         );
     }
-    let plan = contract.plan(if execution_scope == "main" { "main" } else { "detached" })?;
+    let plan = contract.plan(if execution_scope == "main" {
+        "main"
+    } else {
+        "detached"
+    })?;
     let checks_limit = if profile == EVENT_PROFILE { 64 } else { 8 };
     let checks: Vec<Vec<String>> = match object.get("checks") {
         None => default_checks(),
@@ -365,14 +363,10 @@ pub fn parse_config(
                 let mut argv = Vec::new();
                 for arg in args {
                     let Some(text) = arg.as_str() else {
-                        return Err(
-                            "Invalid fixed publication check command".to_string()
-                        );
+                        return Err("Invalid fixed publication check command".to_string());
                     };
                     if text.is_empty() || text.chars().count() > 512 || has_control(text) {
-                        return Err(
-                            "Invalid fixed publication check command".to_string()
-                        );
+                        return Err("Invalid fixed publication check command".to_string());
                     }
                     argv.push(text.to_string());
                 }
@@ -416,9 +410,7 @@ pub fn parse_config(
             .keys()
             .any(|alias| worker.autonomous_projects.contains(alias))
     {
-        return Err(
-            "Trusted merge requires verified project source selection".to_string(),
-        );
+        return Err("Trusted merge requires verified project source selection".to_string());
     }
     if merge_enabled
         && format!("{commit_name}{commit_email}")
@@ -438,16 +430,12 @@ pub fn parse_config(
     let native_identity_protocol = match object.get("native_identity_protocol") {
         None => "legacy-v1".to_string(),
         Some(Value::String(text)) => text.clone(),
-        Some(_) => {
-            return Err("Invalid native identity selection".to_string())
-        }
+        Some(_) => return Err("Invalid native identity selection".to_string()),
     };
     let native_identity_after = match object.get("native_identity_after") {
         None | Some(Value::Null) => None,
         Some(Value::String(text)) => Some(text.clone()),
-        Some(_) => {
-            return Err("Invalid native identity selection".to_string())
-        }
+        Some(_) => return Err("Invalid native identity selection".to_string()),
     };
     NativeIdentityConfig::new(
         worker.state_root.join("publication"),
@@ -455,10 +443,7 @@ pub fn parse_config(
         native_identity_after.clone(),
     )?;
     if native_identity_protocol != "legacy-v1" && hosted_provider != "jenkins" {
-        return Err(
-            "Content identity requires the selected native Jenkins consumer"
-                .to_string(),
-        );
+        return Err("Content identity requires the selected native Jenkins consumer".to_string());
     }
     let delivery_path_raw = match object.get("jenkins_delivery_config") {
         None | Some(Value::Null) => None,
@@ -467,16 +452,12 @@ pub fn parse_config(
     let jenkins_delivery_config = if hosted_provider == "jenkins" {
         let Some(raw_path) = delivery_path_raw else {
             return Err(
-                "Jenkins verification requires explicit delivery configuration"
-                    .to_string(),
+                "Jenkins verification requires explicit delivery configuration".to_string(),
             );
         };
         let path = absolute_path(&raw_path)?;
         if checks != plan.checks {
-            return Err(
-                "Jenkins verification requires the selected exact check suite"
-                    .to_string(),
-            );
+            return Err("Jenkins verification requires the selected exact check suite".to_string());
         }
         Some(path)
     } else {
@@ -493,9 +474,7 @@ pub fn parse_config(
         Some(Value::String(text)) => text.clone(),
         Some(_) => return Err("Invalid native delivery mode".to_string()),
     };
-    if native_delivery_mode != "integrate-first-v1"
-        && native_delivery_mode != "branch-first-v1"
-    {
+    if native_delivery_mode != "integrate-first-v1" && native_delivery_mode != "branch-first-v1" {
         return Err("Invalid native delivery mode".to_string());
     }
     if native_delivery_mode == "branch-first-v1" && hosted_provider != "jenkins" {
@@ -535,16 +514,13 @@ pub fn parse_config(
                 } else {
                     triple[0].starts_with(".github/workflows/")
                 };
-                if !prefix_ok
-                    || triple[0].split('/').any(|part| part == "..")
-                {
+                if !prefix_ok || triple[0].split('/').any(|part| part == "..") {
                     return Err("Invalid required hosted checks".to_string());
                 }
                 parsed.push(triple);
             }
             let unique_rows: HashSet<&[String; 3]> = parsed.iter().collect();
-            let unique_gates: HashSet<&str> =
-                parsed.iter().map(|row| row[2].as_str()).collect();
+            let unique_gates: HashSet<&str> = parsed.iter().map(|row| row[2].as_str()).collect();
             if unique_rows.len() != parsed.len() || unique_gates.len() != parsed.len() {
                 return Err("Invalid required hosted checks".to_string());
             }
@@ -564,9 +540,7 @@ pub fn parse_config(
     let post_merge_enabled = match object.get("post_merge_enabled") {
         None => false,
         Some(Value::Bool(flag)) => *flag,
-        Some(_) => {
-            return Err("Invalid post-merge verification selection".to_string())
-        }
+        Some(_) => return Err("Invalid post-merge verification selection".to_string()),
     };
     let post_merge_delivery_raw = match object.get("post_merge_jenkins_delivery_config") {
         None | Some(Value::Null) => None,
@@ -598,14 +572,11 @@ pub fn parse_config(
     let release_enabled = bool_field("release_enabled")?;
     let interval = match object.get("source_observation_interval_seconds") {
         None => 60,
-        Some(Value::Number(number)) => number
-            .as_i64()
-            .ok_or_else(|| "Source observation requires the sixty-second delivery policy".to_string())?,
+        Some(Value::Number(number)) => number.as_i64().ok_or_else(|| {
+            "Source observation requires the sixty-second delivery policy".to_string()
+        })?,
         Some(_) => {
-            return Err(
-                "Source observation requires the sixty-second delivery policy"
-                    .to_string(),
-            )
+            return Err("Source observation requires the sixty-second delivery policy".to_string())
         }
     };
     if delivery_enabled
@@ -614,9 +585,7 @@ pub fn parse_config(
         return Err("Unified delivery requires scoped main Jenkins verification".to_string());
     }
     if (observation && !delivery_enabled) || interval != 60 {
-        return Err(
-            "Source observation requires the sixty-second delivery policy".to_string(),
-        );
+        return Err("Source observation requires the sixty-second delivery policy".to_string());
     }
     if !observation && object.contains_key("source_observation_interval_seconds") {
         return Err("Unused source observation interval".to_string());
@@ -645,20 +614,14 @@ pub fn parse_config(
     } else if actor_present {
         return Err("Unused portal release actor".to_string());
     }
-    let jenkins_events = parse_jenkins_events(
-        object.get("jenkins_events"),
-        &hosted_provider,
-    )?;
+    let jenkins_events = parse_jenkins_events(object.get("jenkins_events"), &hosted_provider)?;
     let branch_policy = match object.get("branch_policy") {
         None => PERSISTENT_BRANCH_POLICY.to_string(),
-        Some(Value::String(text)) => {
-            forge_work_worker::agent_branch::validate_branch_policy(text)
-                .map_err(|_| "Invalid branch_policy".to_string())?
-        }
+        Some(Value::String(text)) => forge_work_worker::agent_branch::validate_branch_policy(text)
+            .map_err(|_| "Invalid branch_policy".to_string())?,
         Some(_) => return Err("Invalid branch_policy".to_string()),
     };
-    let mut frozen_agent_branches: BTreeMap<String, BTreeMap<String, String>> =
-        BTreeMap::new();
+    let mut frozen_agent_branches: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     if let Some(raw_agent_branches) = object.get("agent_branches") {
         let Some(projects) = raw_agent_branches.as_object() else {
             return Err("Invalid agent_branches configuration".to_string());
@@ -679,10 +642,8 @@ pub fn parse_config(
             };
             let mut project_map = BTreeMap::new();
             for (profile_alias, branch) in mapping {
-                let profile_alias =
-                    identifier(&Value::String(profile_alias.clone())).map_err(|_| {
-                        "Invalid agent_branches profile entry".to_string()
-                    })?;
+                let profile_alias = identifier(&Value::String(profile_alias.clone()))
+                    .map_err(|_| "Invalid agent_branches profile entry".to_string())?;
                 if !profile_aliases.contains(profile_alias.as_str()) {
                     return Err("Invalid agent_branches profile entry".to_string());
                 }
@@ -820,9 +781,7 @@ pub fn load_config(path: &Path) -> Result<PublicationConfig, String> {
         return Err(unable());
     }
     let values = crate::strict_json::strict_parse(&data).map_err(|_| unable())?;
-    let worker_path_value = values
-        .get("worker_config")
-        .ok_or_else(unable)?;
+    let worker_path_value = values.get("worker_config").ok_or_else(unable)?;
     let worker_path = absolute_path(worker_path_value).map_err(|_| unable())?;
     let worker = load_worker_config(&worker_path)?;
     parse_config(&values, &worker, Some(path.clone())).map_err(|_| unable())

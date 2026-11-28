@@ -9,7 +9,7 @@ use std::process::ExitCode;
 
 use forge_jenkins::provisioning::read_owned;
 use nix::fcntl::{Flock, FlockArg};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 const CONFIG_PATH: &str = "/etc/forge-ci/pipeline.json";
 const TRUSTED_PREFIX: &str = "/mnt/data/forge-homelab";
@@ -75,9 +75,7 @@ fn validate_cache_root(raw: &Value, trusted_prefix: &Path) -> Result<PathBuf, St
         || !root.starts_with(trusted_prefix)
         || root == trusted_prefix
     {
-        return Err(
-            "cargo_cache.root must live under the trusted Forge data prefix".to_string(),
-        );
+        return Err("cargo_cache.root must live under the trusted Forge data prefix".to_string());
     }
     Ok(root)
 }
@@ -94,9 +92,7 @@ fn validate_scope_dir(scope: Option<&str>) -> Result<Option<String>, String> {
                     && chars.len() <= 58
                     && (chars[0].is_ascii_lowercase() || chars[0].is_ascii_digit())
                     && chars.iter().all(|c| {
-                        c.is_ascii_lowercase()
-                            || c.is_ascii_digit()
-                            || matches!(c, '.' | '_' | '-')
+                        c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-')
                     })
                     && chars
                         .last()
@@ -139,7 +135,11 @@ fn collect_entries(root: &Path, owner: u32) -> Vec<Entry> {
         if project_dir.is_symlink() || !project_dir.is_dir() {
             continue;
         }
-        let project = project_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let project = project_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         let mut scopes: Vec<PathBuf> = Vec::new();
         if let Ok(read) = std::fs::read_dir(&project_dir) {
             for entry in read.flatten() {
@@ -151,7 +151,11 @@ fn collect_entries(root: &Path, owner: u32) -> Vec<Entry> {
             if scope_dir.is_symlink() || !scope_dir.is_dir() {
                 continue;
             }
-            let scope_name = scope_dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let scope_name = scope_dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             let mut compats: Vec<PathBuf> = Vec::new();
             if let Ok(read) = std::fs::read_dir(&scope_dir) {
                 for entry in read.flatten() {
@@ -264,8 +268,8 @@ fn clear_cache(
         std::os::unix::fs::PermissionsExt::from_mode(0o600),
     )
     .map_err(|error| error.to_string())?;
-    let _exec_lock = Flock::lock(exec_file, FlockArg::LockExclusive)
-        .map_err(|error| error.1.to_string())?;
+    let _exec_lock =
+        Flock::lock(exec_file, FlockArg::LockExclusive).map_err(|error| error.1.to_string())?;
     if !cache_root.exists() {
         return Ok(json!({
             "status": "cleared", "target": target, "removed_entries": 0,
@@ -275,8 +279,7 @@ fn clear_cache(
         .unwrap()
         .clone());
     }
-    let metadata =
-        std::fs::symlink_metadata(&cache_root).map_err(|error| error.to_string())?;
+    let metadata = std::fs::symlink_metadata(&cache_root).map_err(|error| error.to_string())?;
     if !metadata.is_dir() || metadata.uid() != 0 || metadata.mode() & 0o077 != 0 {
         return Err("Unsafe CI cache root directory".to_string());
     }
@@ -287,8 +290,8 @@ fn clear_cache(
         .truncate(false)
         .open(cache_root.join("cache.lock"))
         .map_err(|error| error.to_string())?;
-    let _cache_lock = Flock::lock(cache_file, FlockArg::LockExclusive)
-        .map_err(|error| error.1.to_string())?;
+    let _cache_lock =
+        Flock::lock(cache_file, FlockArg::LockExclusive).map_err(|error| error.1.to_string())?;
     if let Ok(read) = std::fs::read_dir(&cache_root) {
         for entry in read.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -369,8 +372,7 @@ fn run() -> Result<i32, String> {
         index += 1;
     }
     let raw = read_owned(&config_path, 0, 65536, 0o022)?;
-    let parsed: Value =
-        serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+    let parsed: Value = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
     let config: Map<String, Value> = parsed
         .as_object()
         .cloned()
@@ -380,7 +382,12 @@ fn run() -> Result<i32, String> {
     keys.sort();
     let sorted: Map<String, Value> = keys
         .into_iter()
-        .map(|key| (key.clone(), summary.get(key).cloned().unwrap_or(Value::Null)))
+        .map(|key| {
+            (
+                key.clone(),
+                summary.get(key).cloned().unwrap_or(Value::Null),
+            )
+        })
         .collect();
     println!(
         "{}",

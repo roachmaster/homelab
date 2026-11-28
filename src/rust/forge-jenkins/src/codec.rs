@@ -181,10 +181,16 @@ fn synthesize_summary(
 ) -> String {
     let text = match event_kind {
         JenkinsEventKind::BuildQueued => {
-            format!("Jenkins job {job_name} queued (queue #{})", queue_id.unwrap_or_default())
+            format!(
+                "Jenkins job {job_name} queued (queue #{})",
+                queue_id.unwrap_or_default()
+            )
         }
         JenkinsEventKind::BuildStarted => {
-            format!("Jenkins job {job_name} #{} started", build_number.unwrap_or_default())
+            format!(
+                "Jenkins job {job_name} #{} started",
+                build_number.unwrap_or_default()
+            )
         }
         JenkinsEventKind::BuildCompleted => format!(
             "Jenkins job {job_name} #{} completed: {}",
@@ -224,9 +230,7 @@ fn synthesize_summary(
 fn opt_int(value: Option<&Value>) -> Result<Option<i64>, JenkinsCodecError> {
     match value {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(number)) if number.is_i64() || number.is_u64() => {
-            Ok(number.as_i64())
-        }
+        Some(Value::Number(number)) if number.is_i64() || number.is_u64() => Ok(number.as_i64()),
         Some(_) => Err(JenkinsCodecError::invalid_payload(
             "Invalid integer field in Jenkins webhook",
         )),
@@ -296,7 +300,9 @@ pub fn translate_jenkins_webhook(
     let build = payload
         .get("build")
         .filter(|build| build.is_object())
-        .ok_or_else(|| JenkinsCodecError::invalid_payload("Missing build object in Jenkins webhook"))?;
+        .ok_or_else(|| {
+            JenkinsCodecError::invalid_payload("Missing build object in Jenkins webhook")
+        })?;
 
     let raw_job = match payload.get("name") {
         None | Some(Value::Null) => payload.get("job_name"),
@@ -306,11 +312,13 @@ pub fn translate_jenkins_webhook(
         .and_then(Value::as_str)
         .ok_or_else(|| JenkinsCodecError::invalid_payload("Invalid Jenkins job_name"))
         .and_then(|raw| {
-            validate_job_name(raw)
-                .map_err(|message| JenkinsCodecError::invalid_payload(&message))
+            validate_job_name(raw).map_err(|message| JenkinsCodecError::invalid_payload(&message))
         })?;
 
-    let raw_phase = build.get("phase").and_then(Value::as_str).unwrap_or_default();
+    let raw_phase = build
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let event_kind = match raw_phase.to_ascii_uppercase().as_str() {
         "QUEUED" => JenkinsEventKind::BuildQueued,
         "STARTED" => JenkinsEventKind::BuildStarted,
@@ -329,7 +337,10 @@ pub fn translate_jenkins_webhook(
 
     let mut build_result = None;
     if event_kind == JenkinsEventKind::BuildCompleted {
-        let raw_status = build.get("status").and_then(Value::as_str).unwrap_or_default();
+        let raw_status = build
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         build_result = Some(match raw_status.to_ascii_uppercase().as_str() {
             "SUCCESS" => JenkinsBuildResult::Success,
             "FAILURE" => JenkinsBuildResult::Failure,
@@ -358,8 +369,10 @@ pub fn translate_jenkins_webhook(
             })?;
         stage_name = opt_string(stage.get("name"))?;
         if event_kind == JenkinsEventKind::StageCompleted {
-            let raw_stage_status =
-                stage.get("status").and_then(Value::as_str).unwrap_or_default();
+            let raw_stage_status = stage
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             stage_status = Some(match raw_stage_status.to_ascii_uppercase().as_str() {
                 "SUCCESS" => JenkinsStageStatus::Success,
                 "FAILURE" => JenkinsStageStatus::Failure,
@@ -386,12 +399,8 @@ pub fn translate_jenkins_webhook(
                 if !raw_commit.is_null() {
                     let raw_commit = raw_commit.as_str().unwrap_or_default();
                     let bytes = raw_commit.as_bytes();
-                    if bytes.len() != 40
-                        || !bytes.iter().all(|byte| byte.is_ascii_hexdigit())
-                    {
-                        return Err(JenkinsCodecError::invalid_payload(
-                            "Invalid scm.commit SHA",
-                        ));
+                    if bytes.len() != 40 || !bytes.iter().all(|byte| byte.is_ascii_hexdigit()) {
+                        return Err(JenkinsCodecError::invalid_payload("Invalid scm.commit SHA"));
                     }
                     commit_sha = Some(
                         validate_commit_sha(&raw_commit.to_ascii_lowercase())
@@ -410,9 +419,8 @@ pub fn translate_jenkins_webhook(
         if !raw_url.is_null() {
             let raw_url = raw_url.as_str().unwrap_or_default();
             build_url = Some(
-                validate_build_url(raw_url, Some(&trusted_origin)).map_err(|message| {
-                    JenkinsCodecError::new("invalid_build_url", &message)
-                })?,
+                validate_build_url(raw_url, Some(&trusted_origin))
+                    .map_err(|message| JenkinsCodecError::new("invalid_build_url", &message))?,
             );
         }
     }
@@ -456,8 +464,7 @@ pub fn translate_jenkins_webhook(
         }
     }
 
-    let resolved_occurred_at =
-        extract_timestamp(&payload, build, occurred_at.as_deref())?;
+    let resolved_occurred_at = extract_timestamp(&payload, build, occurred_at.as_deref())?;
 
     let summary = match build.get("summary") {
         None | Some(Value::Null) => {
@@ -541,7 +548,9 @@ mod tests {
         assert_eq!(signature.len(), 71);
         verify_hmac_sha256(SECRET, b"{}", Some(&signature)).expect("verify");
         assert_eq!(
-            verify_hmac_sha256(SECRET, b"{}", Some("sha256=abc")).unwrap_err().code,
+            verify_hmac_sha256(SECRET, b"{}", Some("sha256=abc"))
+                .unwrap_err()
+                .code,
             "invalid_signature"
         );
         assert_eq!(

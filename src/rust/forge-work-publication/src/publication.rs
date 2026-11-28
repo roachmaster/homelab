@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -25,12 +25,12 @@ use forge_work_worker::review_ports::{ChecksPort, SnapshotPort};
 use forge_work_worker::review_worker::ReviewWorker;
 
 use crate::delivery_ops::SourceObserver;
-use crate::publication_clients::ProviderError;
 use crate::delivery_worker::ReleaseWorker;
 use crate::jenkins_lifecycle::IntentDrain;
 use crate::merge::MergeWorker;
 use crate::native_jenkins::{BranchProviderObject, SharedNativeCi};
 use crate::post_merge::PostMergeWorker;
+use crate::publication_clients::ProviderError;
 use crate::publication_clients::{
     branch_name, GitHubPullRequestClient, GitRepositoryProvider, PublicationError,
 };
@@ -42,7 +42,10 @@ fn text<'a>(value: &'a Value, key: &str) -> &'a str {
 }
 
 fn is_sha(value: &str) -> bool {
-    value.len() == 40 && value.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    value.len() == 40
+        && value
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 fn is_digest(value: &str) -> bool {
@@ -54,13 +57,29 @@ pub fn validate_job(config: &PublicationConfig, job: &Value) -> Result<(), Publi
     if !job.is_object() {
         return Err(invalid());
     }
-    for name in ["publication_id", "task_id", "attempt_id", "lease_token", "review_id"] {
+    for name in [
+        "publication_id",
+        "task_id",
+        "attempt_id",
+        "lease_token",
+        "review_id",
+    ] {
         validate_uid(text(job, name)).map_err(|_| invalid())?;
     }
-    if !job.get("plan_decision_id").map(|value| value.is_null()).unwrap_or(false) {
+    if !job
+        .get("plan_decision_id")
+        .map(|value| value.is_null())
+        .unwrap_or(false)
+    {
         validate_uid(text(job, "plan_decision_id")).map_err(|_| invalid())?;
-    } else if !((job.get("parent_task_id").map(|value| !value.is_null()).unwrap_or(false)
-        && job.get("feedback_id").map(|value| !value.is_null()).unwrap_or(false))
+    } else if !((job
+        .get("parent_task_id")
+        .map(|value| !value.is_null())
+        .unwrap_or(false)
+        && job
+            .get("feedback_id")
+            .map(|value| !value.is_null())
+            .unwrap_or(false))
         || job.get("direct_implementation") == Some(&json!(true)))
     {
         return Err(PublicationError::new("publication_scope_not_authorized"));
@@ -69,8 +88,16 @@ pub fn validate_job(config: &PublicationConfig, job: &Value) -> Result<(), Publi
         || !is_sha(text(job, "base_revision"))
         || !is_digest(text(job, "workspace_digest"))
         || text(job, "status") != "checking"
-        || !is_sha(job.get("candidate_commit").and_then(Value::as_str).unwrap_or_default())
-        || !is_digest(job.get("gate_manifest_sha256").and_then(Value::as_str).unwrap_or_default())
+        || !is_sha(
+            job.get("candidate_commit")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        )
+        || !is_digest(
+            job.get("gate_manifest_sha256")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        )
     {
         return Err(invalid());
     }
@@ -84,10 +111,11 @@ pub fn validate_job(config: &PublicationConfig, job: &Value) -> Result<(), Publi
             return Err(PublicationError::new("invalid_publication_target"));
         }
     }
-    if ["branch", "commit_sha", "pr_url"]
-        .iter()
-        .any(|name| job.get(*name).map(|value| !value.is_null()).unwrap_or(false))
-    {
+    if ["branch", "commit_sha", "pr_url"].iter().any(|name| {
+        job.get(*name)
+            .map(|value| !value.is_null())
+            .unwrap_or(false)
+    }) {
         return Err(PublicationError::new("publication_requires_reconciliation"));
     }
     Ok(())
@@ -140,12 +168,8 @@ pub trait PublicationPullRequestsFull: Send {
     ) -> Result<Option<String>, PublicationError>;
     fn create(&mut self, job: &Value, head: &str) -> Result<String, PublicationError>;
     fn list_open(&mut self, job: &Value) -> Result<Vec<Value>, PublicationError>;
-    fn validated(
-        &self,
-        job: &Value,
-        head: &str,
-        value: &Value,
-    ) -> Result<String, PublicationError>;
+    fn validated(&self, job: &Value, head: &str, value: &Value)
+        -> Result<String, PublicationError>;
 }
 
 impl PublicationPullRequestsFull for GitHubPullRequestClient {
@@ -189,9 +213,9 @@ fn provider_failure(error: ProviderError) -> ProcessFailure {
     match error {
         ProviderError::Publication(publication) => ProcessFailure {
             code: publication.code().to_string(),
-            conflict: crate::native_jenkins::is_ownership_conflict(
-                &ProviderError::Publication(publication),
-            ),
+            conflict: crate::native_jenkins::is_ownership_conflict(&ProviderError::Publication(
+                publication,
+            )),
         },
         ProviderError::Other(message) => ProcessFailure {
             code: message,
@@ -286,9 +310,7 @@ impl PublicationWorker {
             while !heartbeat_done.load(Ordering::SeqCst) {
                 let lost = worker_stop.load(Ordering::SeqCst)
                     || heartbeat_stop.load(Ordering::SeqCst)
-                    || !store
-                        .publication_renew(&heartbeat_job)
-                        .unwrap_or(false);
+                    || !store.publication_renew(&heartbeat_job).unwrap_or(false);
                 if lost {
                     heartbeat_stop.store(true, Ordering::SeqCst);
                     return;
@@ -307,11 +329,7 @@ impl PublicationWorker {
         outcome
     }
 
-    fn require_lease(
-        &self,
-        job: &Value,
-        local_stop: &AtomicBool,
-    ) -> Result<(), ProcessFailure> {
+    fn require_lease(&self, job: &Value, local_stop: &AtomicBool) -> Result<(), ProcessFailure> {
         if self.stop.load(Ordering::SeqCst) || local_stop.load(Ordering::SeqCst) {
             local_stop.store(true, Ordering::SeqCst);
             return Err(failure("publication_lease_lost"));
@@ -337,7 +355,10 @@ impl PublicationWorker {
         let result = self.process_inner(&job, local_stop, &mut branch, &mut head);
         match result {
             Ok(()) => Ok(()),
-            Err(ProcessFailure { code, conflict: true }) => {
+            Err(ProcessFailure {
+                code,
+                conflict: true,
+            }) => {
                 let _ = self.store.publication_finish(
                     &job,
                     "failed",
@@ -501,7 +522,10 @@ impl PublicationWorker {
             )
             .map_err(provider_failure)?;
         if finish.is_null()
-            || finish.as_object().map(|object| object.is_empty()).unwrap_or(false)
+            || finish
+                .as_object()
+                .map(|object| object.is_empty())
+                .unwrap_or(false)
         {
             return Err(failure("publication_lease_lost"));
         }
@@ -544,7 +568,10 @@ impl PublicationWorker {
             )
             .map_err(provider_failure)?;
         if finish.is_null()
-            || finish.as_object().map(|object| object.is_empty()).unwrap_or(false)
+            || finish
+                .as_object()
+                .map(|object| object.is_empty())
+                .unwrap_or(false)
         {
             return Err(failure("publication_lease_lost"));
         }
@@ -555,7 +582,7 @@ impl PublicationWorker {
     fn publish_reserved(
         &mut self,
         job: &Value,
-        repository: &PathBuf,
+        repository: &Path,
         head: &str,
         existing_head: Option<&str>,
         previous: Option<&str>,
@@ -569,10 +596,11 @@ impl PublicationWorker {
             previous.map(|value| value.to_string()),
             reservation.head_commit_sha.clone(),
             reservation.active_candidate_commit.clone(),
-        ] {
-            if let Some(known) = known {
-                allowed.insert(Some(known));
-            }
+        ]
+        .into_iter()
+        .flatten()
+        {
+            allowed.insert(Some(known));
         }
         if !allowed.contains(&existing_head.map(|value| value.to_string())) {
             return Err(failure("remote_branch_identity_changed"));
@@ -609,10 +637,19 @@ impl PublicationWorker {
                         head,
                         existing_head,
                         Some(&reservation_json),
-                        Some(&mut self.pull_requests as &mut dyn crate::publication_clients::PublicationPullRequestsPort),
+                        Some(
+                            &mut self.pull_requests
+                                as &mut dyn crate::publication_clients::PublicationPullRequestsPort,
+                        ),
                     )
                     .map_err(provider_failure)?;
-                if self.git.remote_head(job).map_err(provider_failure)?.as_deref() != Some(head) {
+                if self
+                    .git
+                    .remote_head(job)
+                    .map_err(provider_failure)?
+                    .as_deref()
+                    != Some(head)
+                {
                     return Err(failure("remote_branch_identity_changed"));
                 }
                 if let Some(provider) = &mut self.branch_provider {
@@ -640,9 +677,7 @@ impl PublicationWorker {
                 if !open_prs.is_empty() {
                     // Lost-ACK reconciliation for exact matching
                     // candidate only.
-                    if open_prs.len() == 1
-                        && open_prs[0]["head"]["sha"].as_str() == Some(head)
-                    {
+                    if open_prs.len() == 1 && open_prs[0]["head"]["sha"].as_str() == Some(head) {
                         url = Some(
                             self.pull_requests
                                 .validated(job, head, &open_prs[0])
@@ -681,7 +716,7 @@ impl PublicationWorker {
     fn publish_legacy(
         &mut self,
         job: &Value,
-        repository: &PathBuf,
+        repository: &Path,
         head: &str,
         existing_head: Option<&str>,
         previous: Option<&str>,
@@ -689,12 +724,9 @@ impl PublicationWorker {
     ) -> Result<String, ProcessFailure> {
         let allowed: HashSet<Option<String>> = match previous {
             None => [None, Some(head.to_string())].into_iter().collect(),
-            Some(previous) => [
-                Some(previous.to_string()),
-                Some(head.to_string()),
-            ]
-            .into_iter()
-            .collect(),
+            Some(previous) => [Some(previous.to_string()), Some(head.to_string())]
+                .into_iter()
+                .collect(),
         };
         if !allowed.contains(&existing_head.map(|value| value.to_string())) {
             return Err(failure("remote_branch_identity_changed"));
@@ -732,7 +764,13 @@ impl PublicationWorker {
                 self.git
                     .push(job, repository, head, None, None, None)
                     .map_err(provider_failure)?;
-                if self.git.remote_head(job).map_err(provider_failure)?.as_deref() != Some(head) {
+                if self
+                    .git
+                    .remote_head(job)
+                    .map_err(provider_failure)?
+                    .as_deref()
+                    != Some(head)
+                {
                     return Err(failure("remote_branch_identity_changed"));
                 }
             }
@@ -816,7 +854,8 @@ impl PublicationWorker {
         let worker_id: String = self.config.worker.worker_id.chars().take(54).collect();
         if let Some(reviewer) = &mut self.reviewer {
             let review = if use_branch_claim {
-                self.store.review_claim_for_branch_policy(&format!("{worker_id}-reviewer"))
+                self.store
+                    .review_claim_for_branch_policy(&format!("{worker_id}-reviewer"))
             } else {
                 self.store.review_claim(&format!("{worker_id}-reviewer"))
             }
@@ -828,17 +867,13 @@ impl PublicationWorker {
                 return Ok(true);
             }
         }
-        if self.merger.is_some() {
+        if let Some(merger) = &mut self.merger {
             let merge = self
                 .store
                 .merge_claim(&format!("{worker_id}-merger"))
                 .map_err(provider_publication)?;
             if let Some(merge) = merge {
-                self.merger
-                    .as_mut()
-                    .expect("checked")
-                    .process(&merge)
-                    .map_err(provider_publication)?;
+                merger.process(&merge).map_err(provider_publication)?;
                 return Ok(true);
             }
         }
@@ -846,7 +881,8 @@ impl PublicationWorker {
             self.store
                 .publication_claim_for_branch_policy(&format!("{worker_id}-publisher"))
         } else {
-            self.store.publication_claim(&format!("{worker_id}-publisher"))
+            self.store
+                .publication_claim(&format!("{worker_id}-publisher"))
         }
         .map_err(provider_publication)?;
         let Some(job) = job else { return Ok(false) };
@@ -875,12 +911,10 @@ impl PublicationWorker {
             }
             None => (None, None),
         };
-        let listener: Option<
-            std::sync::Arc<std::sync::Mutex<Box<dyn PublicationListenerPort>>>,
-        > = self
-            .listener
-            .take()
-            .map(|listener| std::sync::Arc::new(std::sync::Mutex::new(listener)));
+        let listener: Option<std::sync::Arc<std::sync::Mutex<Box<dyn PublicationListenerPort>>>> =
+            self.listener
+                .take()
+                .map(|listener| std::sync::Arc::new(std::sync::Mutex::new(listener)));
         while !self.stop.load(Ordering::SeqCst) {
             // Subscribe before scanning: install the wait drain so
             // long native CI waits keep the listener drained.
@@ -912,9 +946,7 @@ impl PublicationWorker {
 
     fn run_until_idle(
         &mut self,
-        listener: &Option<
-            std::sync::Arc<std::sync::Mutex<Box<dyn PublicationListenerPort>>>,
-        >,
+        listener: &Option<std::sync::Arc<std::sync::Mutex<Box<dyn PublicationListenerPort>>>>,
     ) -> Result<(), PublicationError> {
         while !self.stop.load(Ordering::SeqCst) {
             if self.run_once()? {
@@ -954,9 +986,7 @@ fn libc_o_nofollow() -> i32 {
 
 /// The PublicationWorkerFactory frozen-configuration checks
 /// (provider construction itself is host composition, S7).
-pub fn validate_publication_factory_config(
-    config: &PublicationConfig,
-) -> Result<(), String> {
+pub fn validate_publication_factory_config(config: &PublicationConfig) -> Result<(), String> {
     forge_work_worker::native_identity::NativeIdentityConfig::new(
         config.state_root(),
         &config.native_identity_protocol,
@@ -992,7 +1022,9 @@ pub fn validate_publication_factory_config(
         || ((config.release_enabled || config.source_observation_enabled)
             && !config.delivery_enabled)
     {
-        return Err("Delivery capabilities require the unified scoped Jenkins consumer".to_string());
+        return Err(
+            "Delivery capabilities require the unified scoped Jenkins consumer".to_string(),
+        );
     }
     if config.source_observation_interval_seconds != 60
         || (config.release_enabled

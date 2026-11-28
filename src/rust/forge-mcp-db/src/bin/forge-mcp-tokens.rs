@@ -106,7 +106,10 @@ fn lock(path: &Path) -> Locked {
 }
 
 fn status(record: &Value, now: i64) -> &'static str {
-    if record.get("revoked_at").is_some_and(|value| !value.is_null()) {
+    if record
+        .get("revoked_at")
+        .is_some_and(|value| !value.is_null())
+    {
         return "revoked";
     }
     let expires = record
@@ -127,10 +130,7 @@ fn name_ok(name: &str) -> bool {
         Some(first) if first.is_ascii_alphanumeric() => {}
         _ => return false,
     }
-    name.chars().count() <= 64
-        && chars.all(|c| {
-            c.is_ascii_alphanumeric() || " ._@:-".contains(c)
-        })
+    name.chars().count() <= 64 && chars.all(|c| c.is_ascii_alphanumeric() || " ._@:-".contains(c))
 }
 
 fn command_create(file: &Path, group: &str, args: &[String]) {
@@ -172,7 +172,10 @@ fn command_create(file: &Path, group: &str, args: &[String]) {
     }
     scopes.sort();
     scopes.dedup();
-    if !scopes.iter().all(|scope| KNOWN_SCOPES.contains(&scope.as_str())) {
+    if !scopes
+        .iter()
+        .all(|scope| KNOWN_SCOPES.contains(&scope.as_str()))
+    {
         fail(&format!(
             "unknown scope; allowed: {}",
             KNOWN_SCOPES.join(", ")
@@ -253,7 +256,10 @@ fn command_list(file: &Path, as_json: bool) {
         println!("No tokens.");
         return;
     }
-    println!("{:<12}  {:<8}  {:<20}  {:<8}  NAME", "ID", "STATUS", "EXPIRES", "SCOPES");
+    println!(
+        "{:<12}  {:<8}  {:<20}  {:<8}  NAME",
+        "ID", "STATUS", "EXPIRES", "SCOPES"
+    );
     for row in &rows {
         let scopes = row["scopes"]
             .as_array()
@@ -327,7 +333,10 @@ fn main() {
         Some("create") => command_create(&file, &group, &rest[1..]),
         Some("list") => command_list(&file, rest.iter().any(|arg| arg == "--json")),
         Some("revoke") => {
-            let id = rest.get(1).cloned().unwrap_or_else(|| fail("revoke needs a token id"));
+            let id = rest
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| fail("revoke needs a token id"));
             command_revoke(&file, &group, &id);
         }
         _ => fail("usage: forge-mcp-tokens [--file PATH] [--group GROUP] <create|list|revoke> ..."),

@@ -19,7 +19,7 @@ $grant_external_plan_override$;
 -- proxy is the only writer from here on.
 DO $grant_external_workflows_cutover$
 BEGIN
- IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=53 AND name='pg_proxy_cutover') THEN
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=55 AND name='pg_proxy_cutover') THEN
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_workflow FROM forge_agent, forge_coding_worker, forge_coding_reconciler;
   IF EXISTS(SELECT FROM pg_roles WHERE rolname='muse_events') THEN
    REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA forge_external_workflow FROM muse_events;

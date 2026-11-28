@@ -14,9 +14,7 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use forge_host::runner_http::{
-    configured_listener, load_token, load_work_config, serve, Services,
-};
+use forge_host::runner_http::{configured_listener, load_token, load_work_config, serve, Services};
 use forge_postgres::runner_composition::{
     create_usage_service, create_work_service, runner_pg_config,
 };
@@ -63,16 +61,15 @@ fn main() {
     // Usage service: Python loads the usage config separately;
     // without one it falls back to the work config's shape, and
     // with neither there is no usage service.
-    let usage_config = if let Some(path) =
-        environ.get(forge_work::work_config::USAGE_CONFIG_ENV_VAR)
-    {
-        match load_work_config(path) {
-            Ok(config) => Some(config),
-            Err(error) => fail(&error),
-        }
-    } else {
-        work_config.clone()
-    };
+    let usage_config =
+        if let Some(path) = environ.get(forge_work::work_config::USAGE_CONFIG_ENV_VAR) {
+            match load_work_config(path) {
+                Ok(config) => Some(config),
+                Err(error) => fail(&error),
+            }
+        } else {
+            work_config.clone()
+        };
     let usage_service = match &usage_config {
         Some(config) => {
             let pg = match runner_pg_config(&config.owner) {
@@ -100,15 +97,14 @@ fn main() {
     let jenkins_service = match jenkins_config {
         Some(config) => {
             let store_config = config.clone();
-            let store_factory: forge_jenkins::consumer::StoreFactory =
-                Arc::new(move || {
-                    let pg = runner_pg_config(&store_config.owner)
-                        .expect("runner database configuration");
-                    Box::new(forge_postgres::jenkins_store_adapter::PgJenkinsStore::new(
-                        store_config.clone(),
-                        pg,
-                    )) as Box<dyn forge_jenkins::store::JenkinsStorePort>
-                });
+            let store_factory: forge_jenkins::consumer::StoreFactory = Arc::new(move || {
+                let pg =
+                    runner_pg_config(&store_config.owner).expect("runner database configuration");
+                Box::new(forge_postgres::jenkins_store_adapter::PgJenkinsStore::new(
+                    store_config.clone(),
+                    pg,
+                )) as Box<dyn forge_jenkins::store::JenkinsStorePort>
+            });
             match forge_jenkins::api::create_jenkins_service(
                 Some(config),
                 store_factory,

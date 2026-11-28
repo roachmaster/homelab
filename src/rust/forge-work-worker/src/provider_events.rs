@@ -337,13 +337,12 @@ impl MuseEvents {
             self.run = Some(run);
         }
         let kind_str = kind.unwrap_or("");
-        if kind_str == "run.output.delta"
+        if (kind_str == "run.output.delta"
             || kind_str == "run.usage"
-            || kind_str.starts_with("run.terminal.")
+            || kind_str.starts_with("run.terminal."))
+            && (self.run.is_none() || run_stream.is_none())
         {
-            if self.run.is_none() || run_stream.is_none() {
-                return Err("Missing Muse run binding".to_string());
-            }
+            return Err("Missing Muse run binding".to_string());
         }
         match kind {
             Some("session.run.linked") => {

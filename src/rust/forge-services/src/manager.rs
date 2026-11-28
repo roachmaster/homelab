@@ -77,7 +77,12 @@ fn valid_drop_in(name: &str) -> bool {
 pub fn listeners(component: &Yaml) -> Vec<String> {
     ["listener", "ipv6_listener"]
         .iter()
-        .filter_map(|key| component.get(*key).and_then(Yaml::as_str).map(str::to_string))
+        .filter_map(|key| {
+            component
+                .get(*key)
+                .and_then(Yaml::as_str)
+                .map(str::to_string)
+        })
         .collect()
 }
 
@@ -91,8 +96,7 @@ fn yaml_str<'a>(value: &'a Yaml, key: &str) -> Result<&'a str, ServiceError> {
 /// Load and validate the inventory (load_inventory in services.py).
 pub fn load_inventory(path: &Path) -> Result<BTreeMap<String, Yaml>, ServiceError> {
     let text = std::fs::read_to_string(path).map_err(|io| error(io.to_string()))?;
-    let inventory: Yaml =
-        serde_yaml_ng::from_str(&text).map_err(|yaml| error(yaml.to_string()))?;
+    let inventory: Yaml = serde_yaml_ng::from_str(&text).map_err(|yaml| error(yaml.to_string()))?;
     let items = inventory
         .get("components")
         .and_then(Yaml::as_sequence)
@@ -112,10 +116,14 @@ pub fn load_inventory(path: &Path) -> Result<BTreeMap<String, Yaml>, ServiceErro
             let port_number: u32 = port
                 .parse()
                 .ok()
-                .filter(|value| (1..=65535).contains(value) && port.chars().all(|c| c.is_ascii_digit()))
+                .filter(|value| {
+                    (1..=65535).contains(value) && port.chars().all(|c| c.is_ascii_digit())
+                })
                 .ok_or_else(|| error(format!("Invalid listener for {component}: {endpoint}")))?;
             if address.is_empty() {
-                return Err(error(format!("Invalid listener for {component}: {endpoint}")));
+                return Err(error(format!(
+                    "Invalid listener for {component}: {endpoint}"
+                )));
             }
             let key = (placement.clone(), address.to_string(), port_number);
             if ports.contains(&key) {
@@ -159,7 +167,11 @@ impl Service {
             })
             .unwrap_or_default();
         if !valid_service_name(&unit)
-            || drop_ins.iter().collect::<std::collections::BTreeSet<_>>().len() != drop_ins.len()
+            || drop_ins
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != drop_ins.len()
         {
             return Err(error(format!("Invalid service definition for {id}.")));
         }
@@ -233,11 +245,7 @@ pub fn write_file(path: &Path, contents: Option<&(Vec<u8>, u32)>) -> Result<(), 
 }
 
 pub fn listening_endpoints(run: &RunFn) -> Result<Vec<String>, ServiceError> {
-    let output = run(&[
-        "ss".to_string(),
-        "-H".to_string(),
-        "-ltn".to_string(),
-    ])?;
+    let output = run(&["ss".to_string(), "-H".to_string(), "-ltn".to_string()])?;
     Ok(output
         .lines()
         .filter_map(|row| row.split_whitespace().nth(3).map(str::to_string))
@@ -276,10 +284,7 @@ impl ServiceManager {
         for property in PROPERTIES {
             argv.push(format!("--property={property}"));
         }
-        let output = self.systemctl(
-            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
-            true,
-        )?;
+        let output = self.systemctl(&argv.iter().map(String::as_str).collect::<Vec<_>>(), true)?;
         Ok(output
             .lines()
             .filter_map(|line| {
@@ -291,8 +296,7 @@ impl ServiceManager {
 
     pub fn verify_active(&self, service: &Service) -> Result<(), ServiceError> {
         let deadline = (self.now)() + Duration::from_secs(10);
-        let expected: std::collections::BTreeSet<&String> =
-            service.tcp_listeners.iter().collect();
+        let expected: std::collections::BTreeSet<&String> = service.tcp_listeners.iter().collect();
         loop {
             self.systemctl(&["is-active", "--quiet", &service.unit], false)?;
             let missing: Vec<&String> = if expected.is_empty() {
@@ -326,10 +330,7 @@ impl ServiceManager {
         service: &Service,
         contents: &BTreeMap<PathBuf, (Vec<u8>, u32)>,
     ) -> Result<(), ServiceError> {
-        let directory = std::env::temp_dir().join(format!(
-            "homelab-unit-{}",
-            std::process::id()
-        ));
+        let directory = std::env::temp_dir().join(format!("homelab-unit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).map_err(|io| error(io.to_string()))?;
         let result = (|| -> Result<(), ServiceError> {
@@ -339,10 +340,7 @@ impl ServiceManager {
             (self.run)(&[
                 "systemd-analyze".to_string(),
                 "verify".to_string(),
-                directory
-                    .join(&service.unit)
-                    .to_string_lossy()
-                    .into_owned(),
+                directory.join(&service.unit).to_string_lossy().into_owned(),
             ])?;
             Ok(())
         })();
@@ -371,26 +369,39 @@ impl ServiceManager {
         let active = state.get("ActiveState").map(String::as_str) == Some("active");
         if service_changed && action == "install" {
             if !enabled {
-                attempt(self.systemctl(&["disable", "--now", &service.unit], false).map(|_| ()));
+                attempt(
+                    self.systemctl(&["disable", "--now", &service.unit], false)
+                        .map(|_| ()),
+                );
             } else if !active {
                 attempt(self.systemctl(&["stop", &service.unit], false).map(|_| ()));
             }
         }
         for (relative, contents) in previous {
-            attempt(write_file(&self.unit_root.join(relative), contents.as_ref()));
+            attempt(write_file(
+                &self.unit_root.join(relative),
+                contents.as_ref(),
+            ));
         }
         attempt(self.systemctl(&["daemon-reload"], false).map(|_| ()));
         if service_changed && action == "delete" && enabled {
             if state.get("UnitFileState").map(String::as_str) == Some("enabled-runtime") {
                 attempt(
-                    self.systemctl(&["enable", "--runtime", &service.unit], false).map(|_| ()),
+                    self.systemctl(&["enable", "--runtime", &service.unit], false)
+                        .map(|_| ()),
                 );
             } else {
-                attempt(self.systemctl(&["enable", &service.unit], false).map(|_| ()));
+                attempt(
+                    self.systemctl(&["enable", &service.unit], false)
+                        .map(|_| ()),
+                );
             }
         }
         if service_changed && active {
-            attempt(self.systemctl(&["restart", &service.unit], false).map(|_| ()));
+            attempt(
+                self.systemctl(&["restart", &service.unit], false)
+                    .map(|_| ()),
+            );
         }
         if errors.is_empty() {
             Ok(())
@@ -441,9 +452,9 @@ impl ServiceManager {
                 desired.insert(relative.clone(), (data, mode));
             }
             if action == "install"
-                && previous.iter().any(|(relative, old)| {
-                    old.is_some() && old.as_ref() != desired.get(relative)
-                })
+                && previous
+                    .iter()
+                    .any(|(relative, old)| old.is_some() && old.as_ref() != desired.get(relative))
             {
                 return Err(error(format!(
                     "{unit} has different installed files. Use update."

@@ -127,8 +127,7 @@ pub fn canonical_uuid(value: &Value) -> Result<String, String> {
     let text = value
         .as_str()
         .ok_or_else(|| "invalid_publication_identity".to_string())?;
-    let parsed = Uuid::parse_str(text)
-        .map_err(|_| "invalid_publication_identity".to_string())?;
+    let parsed = Uuid::parse_str(text).map_err(|_| "invalid_publication_identity".to_string())?;
     if parsed.to_string() != text {
         return Err("invalid_publication_identity".to_string());
     }
@@ -201,8 +200,8 @@ pub fn validate_review(config: &ReviewValidationConfig, job: &Value) -> Result<(
             canonical_uuid(value)?;
         }
         _ => {
-            let parent_feedback = py_truthy(job.get("parent_task_id"))
-                && py_truthy(job.get("feedback_id"));
+            let parent_feedback =
+                py_truthy(job.get("parent_task_id")) && py_truthy(job.get("feedback_id"));
             let authorized = parent_feedback
                 || job.get("direct_implementation") == Some(&Value::Bool(true))
                 || (job.get("phase").and_then(Value::as_str) == Some("source")
@@ -278,7 +277,9 @@ pub fn validate_review(config: &ReviewValidationConfig, job: &Value) -> Result<(
     // Python and lands in the structural bucket.
     repair_policy_for(job).map_err(|_| lease_err())?;
     if let Some(required_checks) = policy.get("required_hosted_checks") {
-        let list = required_checks.as_array().ok_or_else(|| "review_gate_policy_changed".to_string())?;
+        let list = required_checks
+            .as_array()
+            .ok_or_else(|| "review_gate_policy_changed".to_string())?;
         let mut names = BTreeSet::new();
         for name in list {
             let name = name
@@ -421,7 +422,10 @@ pub fn event_used(job: &Value, observation: Option<&Value>) -> Result<i64, Strin
     let Some(observation) = observation else {
         return Ok(job.get("round").and_then(Value::as_i64).unwrap_or(0));
     };
-    let kind = observation.get("failure_kind").cloned().unwrap_or(Value::Null);
+    let kind = observation
+        .get("failure_kind")
+        .cloned()
+        .unwrap_or(Value::Null);
     let phase = if py_truthy(observation.get("phase_id")) {
         observation.get("phase_id").cloned().unwrap_or(Value::Null)
     } else {
@@ -453,7 +457,10 @@ pub fn event_used(job: &Value, observation: Option<&Value>) -> Result<i64, Strin
 pub fn verification_job(job: &Value) -> Value {
     let mut result = job.clone();
     if let Some(map) = result.as_object_mut() {
-        map.insert("publication_id".to_string(), job.get("review_id").cloned().unwrap_or(Value::Null));
+        map.insert(
+            "publication_id".to_string(),
+            job.get("review_id").cloned().unwrap_or(Value::Null),
+        );
         map.insert("status".to_string(), json!("checking"));
         map.insert("branch".to_string(), Value::Null);
         map.insert("commit_sha".to_string(), Value::Null);
@@ -497,8 +504,20 @@ fn parse_utc_timestamp(value: &str) -> Option<i128> {
         return None;
     }
     let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-    let days_in_month = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        [(month - 1) as usize];
+    let days_in_month = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ][(month - 1) as usize];
     if day < 1 || day > days_in_month {
         return None;
     }
@@ -669,10 +688,7 @@ mod tests {
     #[test]
     fn validate_review_scope_and_identity_codes() {
         let mut unscoped = job();
-        unscoped
-            .as_object_mut()
-            .unwrap()
-            .remove("plan_decision_id");
+        unscoped.as_object_mut().unwrap().remove("plan_decision_id");
         assert_eq!(
             validate_review(&config(), &unscoped),
             Err("review_scope_not_authorized".to_string())
@@ -738,7 +754,10 @@ mod tests {
             "deploy/mission-control/agent-runner/work_worker.py",
             EVENT_PROFILE
         ));
-        assert!(!protected_gate_path("src/rust/forge-work/src/lib.rs", EVENT_PROFILE));
+        assert!(!protected_gate_path(
+            "src/rust/forge-work/src/lib.rs",
+            EVENT_PROFILE
+        ));
     }
 
     #[test]

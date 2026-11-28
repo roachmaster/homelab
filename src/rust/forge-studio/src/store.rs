@@ -81,17 +81,15 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 }
 
 async fn connect(dsn: &str) -> StoreResult<Client> {
-    let mut config =
-        Config::from_str(dsn).map_err(|error| StoreError::Db(error.to_string()))?;
+    let mut config = Config::from_str(dsn).map_err(|error| StoreError::Db(error.to_string()))?;
     config
         .application_name("forge-studio")
         .options("-c statement_timeout=5000 -c lock_timeout=4000");
     let connect = config.connect(NoTls);
-    let (client, connection) =
-        tokio::time::timeout(std::time::Duration::from_secs(4), connect)
-            .await
-            .map_err(|_| StoreError::Db("connection timed out".to_string()))?
-            .map_err(|error| StoreError::Db(error.to_string()))?;
+    let (client, connection) = tokio::time::timeout(std::time::Duration::from_secs(4), connect)
+        .await
+        .map_err(|_| StoreError::Db("connection timed out".to_string()))?
+        .map_err(|error| StoreError::Db(error.to_string()))?;
     tokio::spawn(async move {
         let _ = connection.await;
     });
@@ -195,6 +193,10 @@ impl Store {
         Store { dsn }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the public Studio submission contract and its callers"
+    )]
     pub fn submit(
         &self,
         project: &(String, String),
@@ -205,11 +207,7 @@ impl Store {
         approved_revision: &str,
         source_recipe: &str,
     ) -> StoreResult<BuildRow> {
-        let (revision, profile, key) = (
-            revision.to_string(),
-            profile.to_string(),
-            key.to_string(),
-        );
+        let (revision, profile, key) = (revision.to_string(), profile.to_string(), key.to_string());
         let (approved_revision, source_recipe) =
             (approved_revision.to_string(), source_recipe.to_string());
         let project = project.clone();
@@ -299,7 +297,7 @@ impl Store {
         let dsn = self.dsn.clone();
         block_on(async move {
             let mut client = connect(&dsn).await?;
-            let mut tx = begin_tx(&mut client, false).await?;
+            let tx = begin_tx(&mut client, false).await?;
             let result = async {
                 let id = Uuid::parse_str(&claim.build_id)
                     .map_err(|error| StoreError::Db(error.to_string()))?;
@@ -332,7 +330,11 @@ impl Store {
             let mut client = connect(&dsn).await?;
             let mut tx = begin_tx(&mut client, false).await?;
             let result = async {
-                let state = if artifact.is_some() { "succeeded" } else { "failed" };
+                let state = if artifact.is_some() {
+                    "succeeded"
+                } else {
+                    "failed"
+                };
                 let (digest, size) = match &artifact {
                     Some((digest, size)) => (Some(digest.clone()), Some(*size as i32)),
                     None => (None, None),
@@ -448,7 +450,11 @@ async fn claim_body(tx: &mut Transaction<'_>) -> StoreResult<Option<BuildRow>> {
     for row in &expired {
         let id: Uuid = row.get("build_id");
         let attempts: i32 = row.get("attempts");
-        let state = if attempts >= MAX_ATTEMPTS { "failed" } else { "queued" };
+        let state = if attempts >= MAX_ATTEMPTS {
+            "failed"
+        } else {
+            "queued"
+        };
         tx.execute(
             "UPDATE forge_game.builds SET state = $1, \
              attempt_token = NULL, lease_until = NULL WHERE build_id = $2",

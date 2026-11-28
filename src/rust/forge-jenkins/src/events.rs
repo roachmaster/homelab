@@ -16,13 +16,8 @@ pub const MAX_BUILD_URL_BYTES: usize = 512;
 pub const MAX_SUMMARY_BYTES: usize = 1024;
 pub const MAX_ERROR_BYTES: usize = 1024;
 
-pub const VALID_DELIVERY_STATUSES: [&str; 5] = [
-    "pending",
-    "leased",
-    "consumed",
-    "failed",
-    "dead_lettered",
-];
+pub const VALID_DELIVERY_STATUSES: [&str; 5] =
+    ["pending", "leased", "consumed", "failed", "dead_lettered"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JenkinsEventKind {
@@ -195,9 +190,9 @@ pub fn validate_actor(value: &str) -> Result<String, String> {
 pub fn validate_job_name(value: &str) -> Result<String, String> {
     let shape = !value.is_empty()
         && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'/' | b'-')
-        });
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'/' | b'-'));
     if !shape {
         return Err("Invalid Jenkins job_name".to_string());
     }
@@ -216,9 +211,9 @@ pub fn validate_job_name(value: &str) -> Result<String, String> {
 fn is_delivery_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-'))
 }
 
 pub fn validate_delivery_id(value: &str) -> Result<String, String> {
@@ -266,11 +261,7 @@ fn is_control(ch: char) -> bool {
     (ch as u32) < 0x20 || (0x7f..=0x9f).contains(&(ch as u32))
 }
 
-pub fn validate_bounded_text(
-    value: &str,
-    max_bytes: usize,
-    label: &str,
-) -> Result<String, String> {
+pub fn validate_bounded_text(value: &str, max_bytes: usize, label: &str) -> Result<String, String> {
     validate_bounded_text_mode(value, max_bytes, label, false)
 }
 
@@ -347,9 +338,7 @@ fn parse_origin_parts(url: &str) -> Result<OriginParts, String> {
     if scheme != "https" && scheme != "http" {
         return Err("Jenkins URL must use HTTPS or explicit loopback HTTP".to_string());
     }
-    let authority_end = rest
-        .find(|ch| matches!(ch, '/' | '?' | '#'))
-        .unwrap_or(rest.len());
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..authority_end];
     if authority.contains('@') {
         return Err("Jenkins URL must not contain userinfo".to_string());
@@ -372,14 +361,18 @@ fn parse_origin_parts(url: &str) -> Result<OriginParts, String> {
         (hostname.to_string(), port)
     } else {
         match authority.rsplit_once(':') {
-            Some((host, port_text)) if !port_text.is_empty() && port_text.bytes().all(|byte| byte.is_ascii_digit()) => (
-                host.to_string(),
-                Some(
-                    port_text
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid Jenkins URL port".to_string())?,
-                ),
-            ),
+            Some((host, port_text))
+                if !port_text.is_empty() && port_text.bytes().all(|byte| byte.is_ascii_digit()) =>
+            {
+                (
+                    host.to_string(),
+                    Some(
+                        port_text
+                            .parse::<u32>()
+                            .map_err(|_| "Invalid Jenkins URL port".to_string())?,
+                    ),
+                )
+            }
             _ => (authority.to_string(), None),
         }
     };
@@ -410,7 +403,7 @@ pub fn validate_origin(value: &str) -> Result<String, String> {
     let after_authority = value
         .split_once("://")
         .map(|(_, rest)| {
-            let end = rest.find(|ch| matches!(ch, '/' | '?' | '#')).unwrap_or(rest.len());
+            let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
             &rest[end..]
         })
         .unwrap_or("");
@@ -448,13 +441,15 @@ pub fn validate_build_url(value: &str, expected_origin: Option<&str>) -> Result<
     let actual = parse_origin_parts(value)?;
     if let Some(expected_origin) = expected_origin {
         let expected = parse_origin_parts(&validate_origin(expected_origin)?)?;
-        if (actual.scheme.as_str(), actual.hostname.as_str(), actual.effective_port)
-            != (
-                expected.scheme.as_str(),
-                expected.hostname.as_str(),
-                expected.effective_port,
-            )
-        {
+        if (
+            actual.scheme.as_str(),
+            actual.hostname.as_str(),
+            actual.effective_port,
+        ) != (
+            expected.scheme.as_str(),
+            expected.hostname.as_str(),
+            expected.effective_port,
+        ) {
             return Err(
                 "Jenkins build_url origin does not match configured instance origin".to_string(),
             );
@@ -501,17 +496,20 @@ fn parse_iso_epoch(value: &str) -> Option<(i64, u32)> {
     }
     let (time, offset_seconds) = if let Some(stripped) = time.strip_suffix('Z') {
         (stripped, 0i64)
-    } else if let Some(index) = time.rfind(['+', '-']) {
+    } else {
+        // Explicit offsets are required; a missing one remains rejected.
+        let index = time.rfind(['+', '-'])?;
         if index == 0 {
             return None;
         }
-        let sign = if time.as_bytes()[index] == b'+' { 1i64 } else { -1i64 };
+        let sign = if time.as_bytes()[index] == b'+' {
+            1i64
+        } else {
+            -1i64
+        };
         let offset = &time[index + 1..];
         let (hours, minutes) = match offset.split_once(':') {
-            Some((hours, minutes)) => (
-                hours.parse::<i64>().ok()?,
-                minutes.parse::<i64>().ok()?,
-            ),
+            Some((hours, minutes)) => (hours.parse::<i64>().ok()?, minutes.parse::<i64>().ok()?),
             None => {
                 if offset.len() == 4 {
                     (
@@ -524,10 +522,6 @@ fn parse_iso_epoch(value: &str) -> Option<(i64, u32)> {
             }
         };
         (&time[..index], sign * (hours * 3600 + minutes * 60))
-    } else {
-        // No offset: Python's fromisoformat yields a naive
-        // datetime, which the caller rejects.
-        return None;
     };
     let (time_main, micros) = match time.split_once('.') {
         Some((main, fraction)) => {
@@ -561,9 +555,7 @@ pub(crate) fn format_iso_epoch(epoch: i64, micros: u32) -> String {
     let (year, month, day) = civil_from_days(days);
     let (hour, minute, second) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
     if micros != 0 {
-        format!(
-            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{micros:06}Z"
-        )
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{micros:06}Z")
     } else {
         format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
     }
@@ -573,8 +565,8 @@ pub(crate) fn format_iso_epoch(epoch: i64, micros: u32) -> String {
 /// carries (Python: parse_utc_timestamp over a string).
 pub fn parse_utc_timestamp(value: &str) -> Result<String, String> {
     validate_bounded_text(value, 64, "occurred_at")?;
-    let (epoch, micros) =
-        parse_iso_epoch(value).ok_or_else(|| "Invalid Jenkins occurred_at timestamp".to_string())?;
+    let (epoch, micros) = parse_iso_epoch(value)
+        .ok_or_else(|| "Invalid Jenkins occurred_at timestamp".to_string())?;
     Ok(format_iso_epoch(epoch, micros))
 }
 
@@ -619,9 +611,9 @@ fn is_branch_scope(value: &str) -> bool {
     }
     bytes.len() <= 58
         && (bytes[bytes.len() - 1].is_ascii_lowercase() || bytes[bytes.len() - 1].is_ascii_digit())
-        && bytes[1..bytes.len() - 1]
-            .iter()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-'))
+        && bytes[1..bytes.len() - 1].iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -744,9 +736,7 @@ impl JenkinsEventEmit {
             .map(parse_utc_timestamp)
             .transpose()?;
         if params.completion_time_estimated && kind != JenkinsEventKind::StageCompleted {
-            return Err(
-                "completion_time_estimated is allowed only on stage_completed".to_string(),
-            );
+            return Err("completion_time_estimated is allowed only on stage_completed".to_string());
         }
         if started_at.is_some() && !params.completion_time_estimated {
             return Err("started_at requires completion_time_estimated".to_string());
@@ -769,7 +759,10 @@ impl JenkinsEventEmit {
             }
             JenkinsEventKind::BuildStarted => {
                 if params.build_number.is_none() || build_result.is_some() || !no_stage {
-                    return Err("build_started requires build_number and forbids build_result/stage fields".to_string());
+                    return Err(
+                        "build_started requires build_number and forbids build_result/stage fields"
+                            .to_string(),
+                    );
                 }
             }
             JenkinsEventKind::BuildCompleted => {
@@ -792,7 +785,10 @@ impl JenkinsEventEmit {
                     || params.stage_name.is_none()
                     || stage_status.is_none()
                 {
-                    return Err("stage_completed requires build_number, stage_name, and stage_status".to_string());
+                    return Err(
+                        "stage_completed requires build_number, stage_name, and stage_status"
+                            .to_string(),
+                    );
                 }
             }
         }

@@ -16,9 +16,7 @@ use forge_usage::collector::UsagePollStore;
 use forge_work_worker::config::WorkerConfig;
 use forge_work_worker::error::WorkerError;
 use forge_work_worker::ports_runtime::CommandGitRunner;
-use forge_work_worker::ports_worker::{
-    ExternalContextPort, PeerContextPort, ReviewContextPort,
-};
+use forge_work_worker::ports_worker::{ExternalContextPort, PeerContextPort, ReviewContextPort};
 use forge_work_worker::worker::StoreHandles;
 
 use crate::client::PgSession;
@@ -120,11 +118,9 @@ pub fn coding_store_handles(config: &WorkerConfig) -> Result<StoreHandles, Worke
         renew: Box::new(worker_api(config)?),
         progress: Box::new(worker_api(config)?),
         contexts: Box::new(worker_api(config)?),
-        reconciler: Box::new(
-            ReconcilerApi::new(
-                session(config, true).map_err(crate::worker_adapter::map_err)?,
-            ),
-        ),
+        reconciler: Box::new(ReconcilerApi::new(
+            session(config, true).map_err(crate::worker_adapter::map_err)?,
+        )),
     })
 }
 
@@ -136,7 +132,8 @@ pub fn coding_review_contexts(config: &WorkerConfig) -> Option<Box<dyn ReviewCon
         BuildContextProvider::new(
             // A second handle for the build provider, as in Python
             // where both share the one store facade.
-            worker_api(config).unwrap_or_else(|_| WorkerApi::new(session(config, false).expect("session"))),
+            worker_api(config)
+                .unwrap_or_else(|_| WorkerApi::new(session(config, false).expect("session"))),
             &config.state_root,
             root,
         )

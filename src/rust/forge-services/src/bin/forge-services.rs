@@ -4,9 +4,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use forge_services::manager::{
-    Service, ServiceManager, listeners, load_inventory, show_inventory,
-};
+use forge_services::manager::{listeners, load_inventory, show_inventory, Service, ServiceManager};
 use nix::fcntl::{Flock, FlockArg};
 
 fn inventory_path() -> PathBuf {
@@ -37,7 +35,10 @@ fn fail(message: String) -> ExitCode {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(action) = args.first() else {
-        return fail("usage: forge-services <list|status|install|update|delete> [service] [bundle]".to_string());
+        return fail(
+            "usage: forge-services <list|status|install|update|delete> [service] [bundle]"
+                .to_string(),
+        );
     };
     let components = match load_inventory(&inventory_path()) {
         Ok(components) => components,
@@ -59,9 +60,7 @@ fn main() -> ExitCode {
                             != Some("mission-control")
                             || item.get("service").is_none()
                         {
-                            return fail(format!(
-                                "{id} has no Mission Control unit to check."
-                            ));
+                            return fail(format!("{id} has no Mission Control unit to check."));
                         }
                     }
                 }
@@ -77,13 +76,19 @@ fn main() -> ExitCode {
                 {
                     continue;
                 }
-                let id = item.get("id").and_then(serde_yaml_ng::Value::as_str).unwrap_or("");
+                let id = item
+                    .get("id")
+                    .and_then(serde_yaml_ng::Value::as_str)
+                    .unwrap_or("");
                 if let Some(selected) = selected {
                     if id != selected {
                         continue;
                     }
                 }
-                let unit = item.get("service").and_then(serde_yaml_ng::Value::as_str).unwrap_or("");
+                let unit = item
+                    .get("service")
+                    .and_then(serde_yaml_ng::Value::as_str)
+                    .unwrap_or("");
                 let state = match manager.status(unit) {
                     Ok(state) => state,
                     Err(error) => return fail(error.0),

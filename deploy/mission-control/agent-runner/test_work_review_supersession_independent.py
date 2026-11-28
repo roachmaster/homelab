@@ -403,7 +403,7 @@ class SupersedingReviewUpgradeIndependentTest(unittest.TestCase):
                 self.assertEqual(snapshot(), before)
                 self.assertEqual(fixture.rows('SELECT task_kind,defect FROM forge_agent.coding_tasks ORDER BY id'),
                     [('feature', None)] * historical_task_count)
-                self.assertEqual(fixture.rows('SELECT max(version) FROM forge_agent.schema_migrations'), [(53,)])
+                self.assertEqual(fixture.rows('SELECT max(version) FROM forge_agent.schema_migrations'), [(54,)])
                 self.assertEqual(fixture.rows('SELECT review_generation,supersedes_review_id,diagnostics,supersedes_workflow_review_id FROM '
                     'forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s',
                     (critic.workflow_review_id,)), [(0, None, None, None)])

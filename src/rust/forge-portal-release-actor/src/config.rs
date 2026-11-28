@@ -27,7 +27,13 @@ pub const IDENTITY: [&str; 9] = [
     "ci_receipt_sha256",
     "gate_manifest_sha256",
 ];
-pub const CORE: [&str; 5] = ["app.wasm", "index.html", "main.js", "style.css", "worker.js"];
+pub const CORE: [&str; 5] = [
+    "app.wasm",
+    "index.html",
+    "main.js",
+    "style.css",
+    "worker.js",
+];
 /// The exact v2/v3 main check argv list (MAIN_CHECKS in Python form).
 pub fn main_checks() -> Vec<Vec<String>> {
     vec![
@@ -87,10 +93,7 @@ fn unescape_key(raw: &str) -> String {
             Some('f') => out.push('\u{c}'),
             Some('u') => {
                 let hex: String = chars.by_ref().take(4).collect();
-                if let Some(decoded) = u32::from_str_radix(&hex, 16)
-                    .ok()
-                    .and_then(char::from_u32)
-                {
+                if let Some(decoded) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
                     out.push(decoded);
                 }
             }
@@ -118,11 +121,10 @@ fn parse_strict(text: &str) -> Result<Value, String> {
     // object keys need this streaming check (a context stack tracks
     // whether the next string is an object key).
     let mut stack: Vec<Context> = Vec::new();
-    let mut chars = text.chars();
     let mut in_string = false;
     let mut escaped = false;
     let mut current_key: Option<String> = None;
-    while let Some(c) = chars.next() {
+    for c in text.chars() {
         if in_string {
             if escaped {
                 escaped = false;
@@ -198,9 +200,7 @@ pub fn safe_relative(value: &Value) -> Result<String, String> {
     if value.is_empty()
         || value.len() > 1024
         || value.starts_with('/')
-        || value
-            .split('/')
-            .any(|part| matches!(part, "" | "." | ".."))
+        || value.split('/').any(|part| matches!(part, "" | "." | ".."))
         || value.chars().any(|c| (c as u32) < 32 || c == '\\')
     {
         return Err("Unsafe artifact name".to_string());
@@ -239,9 +239,7 @@ pub fn read_root(path: &Path, maximum: usize) -> Result<Vec<u8>, String> {
     }
     use std::os::unix::fs::OpenOptionsExt;
     let mut options = std::fs::OpenOptions::new();
-    options
-        .read(true)
-        .custom_flags(libc_o_nofollow_nonblock());
+    options.read(true).custom_flags(libc_o_nofollow_nonblock());
     let mut file = options
         .open(path)
         .map_err(|_| "Uncontrolled actor input".to_string())?;
@@ -300,10 +298,7 @@ pub fn write_root(path: &Path, raw: &[u8], mode: u32, group: u32) -> Result<(), 
     if path.is_symlink() {
         return Err("Unsafe actor output".to_string());
     }
-    let temporary = parent.join(format!(
-        ".forge-write-{}.new",
-        uuid_hex()
-    ));
+    let temporary = parent.join(format!(".forge-write-{}.new", uuid_hex()));
     use std::os::unix::fs::OpenOptionsExt;
     let mut options = std::fs::OpenOptions::new();
     options
@@ -315,8 +310,12 @@ pub fn write_root(path: &Path, raw: &[u8], mode: u32, group: u32) -> Result<(), 
         let mut file = options
             .open(&temporary)
             .map_err(|_| "Unsafe actor output".to_string())?;
-        nix::unistd::fchown(&file, Some(nix::unistd::Uid::from_raw(0)), Some(nix::unistd::Gid::from_raw(group)))
-            .map_err(|_| "Unsafe actor output".to_string())?;
+        nix::unistd::fchown(
+            &file,
+            Some(nix::unistd::Uid::from_raw(0)),
+            Some(nix::unistd::Gid::from_raw(group)),
+        )
+        .map_err(|_| "Unsafe actor output".to_string())?;
         use std::io::Write;
         file.write_all(raw)
             .and_then(|_| file.sync_all())
@@ -407,8 +406,7 @@ impl ActorConfig {
             Some(Value::Object(presence)) => {
                 let keys: Vec<&String> = presence.keys().collect();
                 if keys.len() != 2
-                    || presence.get("endpoint").and_then(Value::as_str)
-                        != Some("127.0.0.1:8791")
+                    || presence.get("endpoint").and_then(Value::as_str) != Some("127.0.0.1:8791")
                     || presence.get("token_file").and_then(Value::as_str)
                         != Some("/etc/homelab-forge/web/mcp-presence-reader.token")
                 {
@@ -428,11 +426,7 @@ impl ActorConfig {
                 .and_then(Value::as_str)
                 .ok_or_else(|| "Invalid fixed release path".to_string())?;
             let path = PathBuf::from(value);
-            if !path.is_absolute()
-                || path
-                    .components()
-                    .any(|c| c.as_os_str().as_bytes() == b"..")
-            {
+            if !path.is_absolute() || path.components().any(|c| c.as_os_str().as_bytes() == b"..") {
                 return Err("Invalid fixed release path".to_string());
             }
             Ok(path)
@@ -462,7 +456,12 @@ impl ActorConfig {
             candidate_port: object
                 .get("candidate_port")
                 .and_then(Value::as_i64)
-                .filter(|value| object.get("candidate_port").map(|v| v.is_i64()).unwrap_or(false))
+                .filter(|_| {
+                    object
+                        .get("candidate_port")
+                        .map(|v| v.is_i64())
+                        .unwrap_or(false)
+                })
                 .ok_or_else(|| "Invalid fixed release configuration".to_string())?,
             expected_abi: object
                 .get("expected_abi")
@@ -481,7 +480,8 @@ impl ActorConfig {
             && config.replay_archive_root == Path::new("/opt/homelab-forge/replay-archive")
             && config.web_user == "homelab-web"
             && config.web_group == "homelab-web"
-            && config.override_path.parent() == Some(Path::new("/etc/systemd/system/homelab-web.service.d"))
+            && config.override_path.parent()
+                == Some(Path::new("/etc/systemd/system/homelab-web.service.d"))
             && config
                 .override_path
                 .file_name()
@@ -503,8 +503,7 @@ impl ActorConfig {
 /// reviewed verifier; the actor never imports policy from a
 /// candidate checkout. Loaded from the embedded JSON table.
 pub fn v3_main_phases() -> Vec<Value> {
-    serde_json::from_str(include_str!("v3_phases.json"))
-        .expect("embedded v3 phase table parses")
+    serde_json::from_str(include_str!("v3_phases.json")).expect("embedded v3 phase table parses")
 }
 
 pub fn v3_main_checks() -> Vec<Vec<String>> {
@@ -534,11 +533,17 @@ pub fn artifact_commands() -> Vec<Value> {
 }
 
 pub fn is_sha40(value: &str) -> bool {
-    value.len() == 40 && value.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    value.len() == 40
+        && value
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 pub fn is_sha64(value: &str) -> bool {
-    value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    value.len() == 64
+        && value
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 pub fn is_gate_ref(value: &str) -> bool {

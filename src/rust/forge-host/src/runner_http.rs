@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use forge_work::work_api::{self, ExtensionVersions, WorkApiService};
+use forge_work::work_api::{self, WorkApiService};
 use forge_work::WorkError;
 
 pub const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -64,10 +64,7 @@ fn request_id(headers: &Headers) -> Option<String> {
         return None;
     }
     // The value must survive a latin-1 -> UTF-8 round trip.
-    let bytes: Option<Vec<u8>> = value
-        .chars()
-        .map(|c| u8::try_from(c as u32).ok())
-        .collect();
+    let bytes: Option<Vec<u8>> = value.chars().map(|c| u8::try_from(c as u32).ok()).collect();
     let bytes = bytes?;
     String::from_utf8(bytes).ok()?;
     Some(value.to_string())
@@ -152,17 +149,9 @@ fn history_failed(correlation: Option<&str>, status: u16, code: &str) -> (u16, V
     )
 }
 
-fn failed(
-    api: Api,
-    correlation: Option<&str>,
-    status: u16,
-    code: &str,
-) -> (u16, Value) {
+fn failed(api: Api, correlation: Option<&str>, status: u16, code: &str) -> (u16, Value) {
     match api {
-        Api::Work => work_api::failed(
-            correlation,
-            &WorkError::rejected(status, code.to_string()),
-        ),
+        Api::Work => work_api::failed(correlation, &WorkError::rejected(status, code.to_string())),
         Api::Jenkins => forge_jenkins::api::failed(
             correlation,
             &forge_jenkins::store::JenkinsStoreError::Rejected {
@@ -185,9 +174,7 @@ fn usage_store_failed(
     use forge_usage::store::UsageStoreError;
     let rejected = match error {
         UsageStoreError::Rejected(rejected) => rejected.clone(),
-        UsageStoreError::Value(_) => {
-            forge_usage::store::RejectedError::new(400, "invalid_request")
-        }
+        UsageStoreError::Value(_) => forge_usage::store::RejectedError::new(400, "invalid_request"),
         UsageStoreError::Unavailable(_) => {
             forge_usage::store::RejectedError::new(503, "unavailable")
         }
@@ -264,10 +251,7 @@ fn read_request(stream: &mut TcpStream) -> Option<Request> {
         let Some((name, value)) = line.split_once(':') else {
             continue;
         };
-        headers.push((
-            name.trim().to_string(),
-            value.trim().to_string(),
-        ));
+        headers.push((name.trim().to_string(), value.trim().to_string()));
     }
     let content_types: Vec<&str> = header_values(&headers, "Content-Type")
         .into_iter()
@@ -360,8 +344,7 @@ fn dispatch(
                 Ok(destination) => destination,
                 Err(()) => return failed(api, Some(correlation), 400, "invalid_request"),
             };
-            let Some(route) = forge_jenkins::api::JenkinsDestination::parse(&destination)
-            else {
+            let Some(route) = forge_jenkins::api::JenkinsDestination::parse(&destination) else {
                 return failed(api, Some(correlation), 404, "not_found");
             };
             if !body_headers_ok {
@@ -373,9 +356,7 @@ fn dispatch(
             };
             let command = match forge_jenkins::api::decode(route, &body) {
                 Ok(command) => command,
-                Err(error) => {
-                    return forge_jenkins::api::failed(Some(correlation), &error)
-                }
+                Err(error) => return forge_jenkins::api::failed(Some(correlation), &error),
             };
             let Some(service) = &services.jenkins else {
                 return failed(api, Some(correlation), 503, "unavailable");
@@ -384,12 +365,7 @@ fn dispatch(
                 Ok(service) => service,
                 Err(_) => return failed(api, Some(correlation), 503, "unavailable"),
             };
-            match forge_jenkins::api::dispatch(
-                route,
-                correlation,
-                command,
-                Some(&mut service),
-            ) {
+            match forge_jenkins::api::dispatch(route, correlation, command, Some(&mut service)) {
                 Ok(response) => response,
                 Err(error) => forge_jenkins::api::failed(Some(correlation), &error),
             }
@@ -416,8 +392,7 @@ fn dispatch(
             match service.dispatch(route, correlation, command, versions.delivery) {
                 Ok(response) => {
                     let response = work_api::delivery_response(response, versions.delivery);
-                    let response =
-                        work_api::retry_events_response(response, versions.retry_events);
+                    let response = work_api::retry_events_response(response, versions.retry_events);
                     work_api::event_attribution_response(response, versions.event_attribution)
                 }
                 Err(error) => work_api::failed(Some(correlation), &error),
@@ -430,9 +405,7 @@ fn dispatch(
             };
             let route = match forge_usage::api::destination(&destination) {
                 Ok(route) => route,
-                Err(error) => {
-                    return forge_usage::api::failed(Some(correlation), &error)
-                }
+                Err(error) => return forge_usage::api::failed(Some(correlation), &error),
             };
             if !body_headers_ok {
                 return failed(api, Some(correlation), 400, "invalid_request");
@@ -443,9 +416,7 @@ fn dispatch(
             };
             let command = match forge_usage::api::decode(route, correlation, &body) {
                 Ok(command) => command,
-                Err(error) => {
-                    return forge_usage::api::failed(Some(correlation), &error)
-                }
+                Err(error) => return forge_usage::api::failed(Some(correlation), &error),
             };
             match forge_usage::api::dispatch(
                 route,
@@ -461,12 +432,7 @@ fn dispatch(
     }
 }
 
-fn handle_connection(
-    mut stream: TcpStream,
-    services: &Services,
-    token: &str,
-    ready: &AtomicBool,
-) {
+fn handle_connection(mut stream: TcpStream, services: &Services, token: &str, ready: &AtomicBool) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
     let Some(request) = read_request(&mut stream) else {
@@ -501,7 +467,9 @@ fn handle_connection(
             &request.body,
             request.body_headers_ok,
         );
-        if serde_json::to_string(&body).map(|text| text.len()).unwrap_or(0)
+        if serde_json::to_string(&body)
+            .map(|text| text.len())
+            .unwrap_or(0)
             > MAX_RESPONSE_BYTES
         {
             let api = select_api(&request.headers);
@@ -573,9 +541,7 @@ pub fn configured_listener(
         .get("FORGE_RUNNER_PORT")
         .cloned()
         .unwrap_or_else(|| "18083".to_string());
-    if raw_port.is_empty()
-        || !raw_port.is_ascii()
-        || !raw_port.chars().all(|c| c.is_ascii_digit())
+    if raw_port.is_empty() || !raw_port.is_ascii() || !raw_port.chars().all(|c| c.is_ascii_digit())
     {
         return Err("Invalid configured runner port".to_string());
     }
@@ -597,19 +563,14 @@ pub fn configured_listener(
 
 /// The runner token: CREDENTIALS_DIRECTORY/runner.token,
 /// stripped, 32..=128 hex characters.
-pub fn load_token(
-    environ: &std::collections::HashMap<String, String>,
-) -> Result<String, String> {
+pub fn load_token(environ: &std::collections::HashMap<String, String>) -> Result<String, String> {
     let directory = environ
         .get("CREDENTIALS_DIRECTORY")
         .ok_or("CREDENTIALS_DIRECTORY is not set")?;
     let raw = std::fs::read_to_string(format!("{directory}/runner.token"))
         .map_err(|error| format!("Unable to read runner credentials: {error}"))?;
     let token = raw.trim().to_string();
-    if token.len() < 32
-        || token.len() > 128
-        || !token.chars().all(|c| c.is_ascii_hexdigit())
-    {
+    if token.len() < 32 || token.len() > 128 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("Invalid runner credentials".to_string());
     }
     Ok(token)
@@ -618,9 +579,7 @@ pub fn load_token(
 /// Loads and freezes one work config document (the runner's
 /// work and usage configs are independent loads of the same
 /// shape).
-pub fn load_work_config(
-    path: &str,
-) -> Result<forge_work::work_config::WorkApiConfig, String> {
+pub fn load_work_config(path: &str) -> Result<forge_work::work_config::WorkApiConfig, String> {
     let raw = std::fs::read(path)
         .map_err(|error| format!("Unable to read work configuration: {error}"))?;
     if raw.len() > forge_work::work_config::MAX_CONFIG_BYTES {

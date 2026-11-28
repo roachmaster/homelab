@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use forge_agent_driver::benchmark::{
-    DRIVER, LOCK_PATH, MODELS, RESULTS_PATH, check_fixtures, load_cases, run_benchmark,
+    check_fixtures, load_cases, run_benchmark, DRIVER, LOCK_PATH, MODELS, RESULTS_PATH,
 };
 use nix::fcntl::{Flock, FlockArg};
 
@@ -69,10 +69,8 @@ fn main() -> ExitCode {
         }
     };
     let identity = (account.uid.as_raw(), account.gid.as_raw());
-    let fixtures = std::env::temp_dir().join(format!(
-        "forge-agent-fixtures-{}",
-        std::process::id()
-    ));
+    let fixtures =
+        std::env::temp_dir().join(format!("forge-agent-fixtures-{}", std::process::id()));
     let run = (|| -> Result<i32, String> {
         std::fs::create_dir(&fixtures).map_err(|error| error.to_string())?;
         std::fs::set_permissions(&fixtures, std::fs::Permissions::from_mode(0o711))
@@ -103,8 +101,7 @@ fn main() -> ExitCode {
                 selected.push(model);
             }
         }
-        run_benchmark(&selected, &results, &cases, &fixtures, identity)
-            .map_err(|error| error.0)
+        run_benchmark(&selected, &results, &cases, &fixtures, identity).map_err(|error| error.0)
     })();
     let _ = std::fs::remove_dir_all(&fixtures);
     match run {

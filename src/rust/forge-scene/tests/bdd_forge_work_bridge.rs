@@ -232,7 +232,10 @@ fn run_dispatch(
 
 fn steps() -> Steps<World> {
     Steps::new()
-        .given("the work bridge can dispatch registered operations", |_, _| Ok(()))
+        .given(
+            "the work bridge can dispatch registered operations",
+            |_, _| Ok(()),
+        )
         .given(
             "the work bridge can deny traffic when admission is closed",
             |_, _| Ok(()),
@@ -263,32 +266,40 @@ fn steps() -> Steps<World> {
                 run_dispatch(w, header, list_payload(), true)
             },
         )
-        .when("a list envelope arrives while admission is closed", |w, _| {
-            let header = Header::new(route_key(WorkKind::List).unwrap(), "req-closed-1").unwrap();
-            run_dispatch(w, header, list_payload(), false)
-        })
+        .when(
+            "a list envelope arrives while admission is closed",
+            |w, _| {
+                let header =
+                    Header::new(route_key(WorkKind::List).unwrap(), "req-closed-1").unwrap();
+                run_dispatch(w, header, list_payload(), false)
+            },
+        )
         .when("a get header carries a list payload", |w, _| {
             let header = Header::new(route_key(WorkKind::Get).unwrap(), "req-mismatch-1").unwrap();
             run_dispatch(w, header, list_payload(), true)
         })
         .when("an envelope targets an unregistered destination", |w, _| {
-            let header = Header::new(RouteKey::new("work.unknown", 1).unwrap(), "req-unk-1")
-                .unwrap();
+            let header =
+                Header::new(RouteKey::new("work.unknown", 1).unwrap(), "req-unk-1").unwrap();
             run_dispatch(w, header, list_payload(), true)
         })
         .when("a list envelope requests an unsupported version", |w, _| {
-            let header = Header::new(RouteKey::new("work.list", 99).unwrap(), "req-ver-99")
-                .unwrap();
+            let header =
+                Header::new(RouteKey::new("work.list", 99).unwrap(), "req-ver-99").unwrap();
             run_dispatch(w, header, list_payload(), true)
         })
-        .when("an admitted get request hits a failing read port", |w, _| {
-            let header = Header::new(route_key(WorkKind::Get).unwrap(), "req-get-fail").unwrap();
-            let payload = WorkPayload::Get {
-                project_alias: "homelab".into(),
-                task_id: Uuid::nil(),
-            };
-            run_dispatch(w, header, payload, true)
-        })
+        .when(
+            "an admitted get request hits a failing read port",
+            |w, _| {
+                let header =
+                    Header::new(route_key(WorkKind::Get).unwrap(), "req-get-fail").unwrap();
+                let payload = WorkPayload::Get {
+                    project_alias: "homelab".into(),
+                    task_id: Uuid::nil(),
+                };
+                run_dispatch(w, header, payload, true)
+            },
+        )
         .then(
             "the response carries the matching correlation header and task page",
             |w, _| {
@@ -303,7 +314,10 @@ fn steps() -> Steps<World> {
                     matches!(resp, WorkResponse::Tasks(_)),
                     format!("unexpected response: {resp:?}"),
                 )?;
-                ensure(w.port_calls == 1, format!("port_calls was {}", w.port_calls))
+                ensure(
+                    w.port_calls == 1,
+                    format!("port_calls was {}", w.port_calls),
+                )
             },
         )
         .then("dispatch is denied and no port is called", |w, _| {
@@ -311,15 +325,24 @@ fn steps() -> Steps<World> {
                 matches!(w.error, Some(DispatchError::Admission(_))),
                 format!("error was {:?}", w.error),
             )?;
-            ensure(w.port_calls == 0, format!("port_calls was {}", w.port_calls))
-        })
-        .then("dispatch rejects the mismatch and no port is called", |w, _| {
             ensure(
-                matches!(w.error, Some(DispatchError::PayloadMismatch(_))),
-                format!("error was {:?}", w.error),
-            )?;
-            ensure(w.port_calls == 0, format!("port_calls was {}", w.port_calls))
+                w.port_calls == 0,
+                format!("port_calls was {}", w.port_calls),
+            )
         })
+        .then(
+            "dispatch rejects the mismatch and no port is called",
+            |w, _| {
+                ensure(
+                    matches!(w.error, Some(DispatchError::PayloadMismatch(_))),
+                    format!("error was {:?}", w.error),
+                )?;
+                ensure(
+                    w.port_calls == 0,
+                    format!("port_calls was {}", w.port_calls),
+                )
+            },
+        )
         .then(
             "dispatch reports an unknown route and no port is called",
             |w, _| {
@@ -327,7 +350,10 @@ fn steps() -> Steps<World> {
                     matches!(w.error, Some(DispatchError::UnknownRoute(_))),
                     format!("error was {:?}", w.error),
                 )?;
-                ensure(w.port_calls == 0, format!("port_calls was {}", w.port_calls))
+                ensure(
+                    w.port_calls == 0,
+                    format!("port_calls was {}", w.port_calls),
+                )
             },
         )
         .then(
@@ -337,7 +363,10 @@ fn steps() -> Steps<World> {
                     matches!(w.error, Some(DispatchError::Handler(_))),
                     format!("error was {:?}", w.error),
                 )?;
-                ensure(w.port_calls == 1, format!("port_calls was {}", w.port_calls))
+                ensure(
+                    w.port_calls == 1,
+                    format!("port_calls was {}", w.port_calls),
+                )
             },
         )
 }

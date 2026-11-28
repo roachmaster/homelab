@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scaffold Forge Module"
+  short_description: "Scaffold a Forge module with owned ports and wiring"
+  default_prompt: "Use $scaffold-forge-module to create the smallest Forge module scaffold for this capability and verify its public integration."

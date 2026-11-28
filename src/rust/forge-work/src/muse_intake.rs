@@ -58,7 +58,9 @@ fn absolute_path(value: &str) -> Result<String, IntakeError> {
         return Err(intake_err("Invalid coding worker path"));
     }
     if !value.starts_with('/') || value == "/" || value.split('/').any(|part| part == "..") {
-        return Err(intake_err("Coding worker paths must be absolute and specific"));
+        return Err(intake_err(
+            "Coding worker paths must be absolute and specific",
+        ));
     }
     Ok(value.to_string())
 }
@@ -109,7 +111,11 @@ fn object_fields<'a>(
 /// The task title derives from the plan's first non-blank line, so
 /// the payload carries no title field.
 pub fn validate_submit_plan(payload: &Value) -> Result<Value, IntakeError> {
-    let object = object_fields(payload, &["project_alias", "base_revision", "plan"], &["reviewer_profile"])?;
+    let object = object_fields(
+        payload,
+        &["project_alias", "base_revision", "plan"],
+        &["reviewer_profile"],
+    )?;
     let project = identifier(&object["project_alias"])?;
     let reviewer = match object.get("reviewer_profile") {
         Some(value) => identifier(value)?,
@@ -151,9 +157,7 @@ pub fn validate_publish_result(payload: &Value) -> Result<Value, IntakeError> {
         let text = chunk
             .as_str()
             .filter(|text| !text.contains('\0'))
-            .ok_or_else(|| {
-                intake_err("chunk content must be a valid string without NUL bytes")
-            })?;
+            .ok_or_else(|| intake_err("chunk content must be a valid string without NUL bytes"))?;
         if text.is_empty() || text.len() > CHUNK_BYTES {
             return Err(intake_err("chunk content must be 1..16384 UTF-8 bytes"));
         }
@@ -256,7 +260,9 @@ impl PlaceholderIntakeStore {
         if !has_connect_factory {
             return Err("IntakeStore requires a callable connect_factory".to_string());
         }
-        Ok(Self { has_connect_factory })
+        Ok(Self {
+            has_connect_factory,
+        })
     }
 }
 
@@ -311,19 +317,17 @@ pub fn parse_intake_config(raw: &Value) -> Result<MuseIntakeConfig, IntakeError>
             ["worker_id", "owner", "database", "profiles", "projects"]
                 .iter()
                 .all(|key| object.contains_key(*key))
-                && object
-                    .keys()
-                    .all(|key| {
-                        [
-                            "worker_id",
-                            "owner",
-                            "database",
-                            "profiles",
-                            "projects",
-                            "enabled",
-                        ]
-                        .contains(&key.as_str())
-                    })
+                && object.keys().all(|key| {
+                    [
+                        "worker_id",
+                        "owner",
+                        "database",
+                        "profiles",
+                        "projects",
+                        "enabled",
+                    ]
+                    .contains(&key.as_str())
+                })
         })
         .ok_or_else(|| intake_err("Invalid Muse intake configuration fields"))?;
     let enabled = object.get("enabled").cloned().unwrap_or(json!(false));
@@ -350,8 +354,15 @@ pub fn parse_intake_config(raw: &Value) -> Result<MuseIntakeConfig, IntakeError>
                 .iter()
                 .all(|key| db.contains_key(*key))
                 && db.keys().all(|key| {
-                    ["host", "port", "name", "user", "reconciler_user", "passfile"]
-                        .contains(&key.as_str())
+                    [
+                        "host",
+                        "port",
+                        "name",
+                        "user",
+                        "reconciler_user",
+                        "passfile",
+                    ]
+                    .contains(&key.as_str())
                 })
         })
         .ok_or_else(|| intake_err("Invalid Muse intake database fields"))?;

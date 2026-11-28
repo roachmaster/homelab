@@ -25,7 +25,7 @@ impl PgSession {
             .enable_all()
             .build()
             .map_err(|e| AdapterError::Protocol(e.to_string()))?;
-        let (mut client, connection) = rt.block_on(config.to_tokio_config().connect(NoTls))?;
+        let (client, connection) = rt.block_on(config.to_tokio_config().connect(NoTls))?;
         rt.spawn(async move {
             let _ = connection.await;
         });
@@ -49,7 +49,7 @@ impl PgSession {
         let owner = self.config.owner.clone();
         let client = &mut self.client;
         let out = self.rt.block_on(async {
-            let mut tx = client.transaction().await?;
+            let tx = client.transaction().await?;
             tx.execute(
                 "SELECT set_config('forge.coding_owner', $1, true)",
                 &[&owner],
@@ -107,7 +107,7 @@ impl PgSession {
             tx.commit().await?;
             Ok::<_, AdapterError>(value)
         });
-        Ok(out?)
+        out
     }
 
     /// Runs a general row query inside the standard envelope (its own
@@ -123,7 +123,7 @@ impl PgSession {
         let owner = self.config.owner.clone();
         let client = &mut self.client;
         let out = self.rt.block_on(async {
-            let mut tx = client.transaction().await?;
+            let tx = client.transaction().await?;
             tx.execute(
                 "SELECT set_config('forge.coding_owner', $1, true)",
                 &[&owner],
@@ -146,7 +146,7 @@ impl PgSession {
         let owner = self.config.owner.clone();
         let client = &mut self.client;
         let out = self.rt.block_on(async {
-            let mut tx = client.transaction().await?;
+            let tx = client.transaction().await?;
             tx.execute(
                 "SELECT set_config('forge.coding_owner', $1, true)",
                 &[&owner],

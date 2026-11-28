@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
-use crate::command_policy::{CommandError, ExecuteError, execute, parse_command};
+use crate::command_policy::{execute, parse_command, CommandError, ExecuteError};
 
 pub const DRIVER: &str = "forge-agent-driver";
 pub const MODELS: [&str; 2] = ["gpt-oss-20b", "qwen2.5-coder-7b"];
@@ -101,7 +101,9 @@ impl Forge {
             })
             .map_err(|_| failed("OSError"))?;
         let mut raw = Vec::new();
-        stream.read_to_end(&mut raw).map_err(|_| failed("OSError"))?;
+        stream
+            .read_to_end(&mut raw)
+            .map_err(|_| failed("OSError"))?;
         let split = raw
             .windows(4)
             .position(|window| window == b"\r\n\r\n")
@@ -148,7 +150,10 @@ impl Forge {
             if let Some(model) = original.get("model").and_then(Value::as_str) {
                 self.select(model)?;
             }
-        } else if self.request("GET", "/v1/runtime", None)?.get("state").and_then(Value::as_str)
+        } else if self
+            .request("GET", "/v1/runtime", None)?
+            .get("state")
+            .and_then(Value::as_str)
             != Some("stopped")
         {
             self.request("DELETE", "/v1/runtime", None)?;
@@ -167,12 +172,7 @@ impl Forge {
         model: &str,
         case: &Case,
     ) -> Result<(Option<String>, Option<String>, Value), ForgeError> {
-        let filenames = case
-            .files
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ");
+        let filenames = case.files.keys().cloned().collect::<Vec<_>>().join(", ");
         let response = self.request(
             "POST",
             "/v1/chat/completions",
@@ -243,8 +243,8 @@ pub fn check_fixtures(
                 .map_err(|error| error.to_string())?;
         }
         let file_names: Vec<String> = case.files.keys().cloned().collect();
-        let reference = parse_command(&case.reference, &file_names)
-            .map_err(|error: CommandError| error.0)?;
+        let reference =
+            parse_command(&case.reference, &file_names).map_err(|error: CommandError| error.0)?;
         let (status, stdout, stderr) = execute(&reference, &fixture, identity.0, identity.1)
             .map_err(|error| match error {
                 ExecuteError::Timeout => "Reference command timed out".to_string(),
@@ -448,7 +448,7 @@ pub fn run_benchmark(
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                writeln!(ledger, "{}", Value::Object(row).to_string())
+                writeln!(ledger, "{}", Value::Object(row))
                     .and_then(|_| ledger.flush())
                     .map_err(|error| forge_error(error.to_string()))?;
                 *counts.entry(result.clone()).or_insert(0) += 1;
@@ -481,8 +481,7 @@ pub fn run_benchmark(
         run.join("summary.json"),
         format!(
             "{}\n",
-            serde_json::to_string_pretty(&Value::Object(summary.clone()))
-                .unwrap_or_default()
+            serde_json::to_string_pretty(&Value::Object(summary.clone())).unwrap_or_default()
         ),
     );
     restore_result.map(|_| ())?;
@@ -504,10 +503,8 @@ mod tests {
 
     #[test]
     fn cases_yaml_parses_block_scalars() {
-        let directory = std::env::temp_dir().join(format!(
-            "forge-driver-cases-{}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("forge-driver-cases-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join("cases.yaml");
         std::fs::write(

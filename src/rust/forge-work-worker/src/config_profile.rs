@@ -58,9 +58,7 @@ pub fn canonical_profile_slug(profile_alias: &str) -> Result<String, ConfigError
         .to_string();
     if slug.len() > 64 {
         slug.truncate(64);
-        slug = slug
-            .trim_end_matches(|c| c == '.' || c == '_' || c == '-')
-            .to_string();
+        slug = slug.trim_end_matches(['.', '_', '-']).to_string();
     }
     let valid = !slug.is_empty()
         && slug
@@ -78,7 +76,7 @@ pub fn canonical_profile_slug(profile_alias: &str) -> Result<String, ConfigError
 }
 
 /// Git branch name validation (work_agent_branch.validate_git_branch_name):
-/// [A-Za-z0-9][A-Za-z0-9._/-]{0,127}, no "..", "//", "@{", no trailing
+/// `[A-Za-z0-9][A-Za-z0-9._/-]{0,127}`, no "..", "//", "@{", no trailing
 /// "/" or ".", and no empty/dot/dot-dot/lock components.
 pub fn validate_git_branch_name(value: &str) -> Result<String, ConfigError> {
     let shape_ok = !value.is_empty()
@@ -208,7 +206,7 @@ pub struct AccountConfig {
 /// One execution profile. `execution_enabled` and `branch` are
 /// resolved at construction, exactly as the Python __post_init__:
 /// execution defaults on except for the grok/muse backends, and the
-/// branch defaults to forge/agent/<slug>.
+/// branch defaults to `forge/agent/<slug>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerProfile {
     pub alias: String,
@@ -231,7 +229,7 @@ impl WorkerProfile {
         branch: Option<String>,
     ) -> Result<WorkerProfile, ConfigError> {
         let execution_enabled =
-            execution_enabled.unwrap_or_else(|| !matches!(backend.as_str(), "grok" | "muse"));
+            execution_enabled.unwrap_or(!matches!(backend.as_str(), "grok" | "muse"));
         let branch = match branch {
             None => default_agent_branch(&alias)?,
             Some(branch) => validate_profile_branch(&alias, &branch)?,

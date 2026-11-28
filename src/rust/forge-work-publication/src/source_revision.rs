@@ -19,8 +19,7 @@ use crate::publication_clients::{GitRepositoryProvider, ProviderError};
 use crate::publication_config::PublicationConfig;
 
 pub const VERIFIED_REF: &str = "refs/forge/verified-main";
-pub const SOURCE_REVISION_MESSAGE: &str =
-    "The configured verified project source is unavailable.";
+pub const SOURCE_REVISION_MESSAGE: &str = "The configured verified project source is unavailable.";
 
 fn is_sha(value: &str) -> bool {
     value.len() == 40
@@ -99,8 +98,7 @@ impl VerifiedSourceSyncProvider {
         if !is_sha(head) || !is_sha(tree) || !is_sha(previous) {
             return revision_error();
         }
-        require_lease()
-            .map_err(|_| ProviderError::Other(SOURCE_REVISION_MESSAGE.to_string()))?;
+        require_lease().map_err(|_| ProviderError::Other(SOURCE_REVISION_MESSAGE.to_string()))?;
         let remote = self.git.remote_url(alias);
         self.git
             .git(
@@ -151,8 +149,7 @@ impl VerifiedSourceSyncProvider {
                 )
                 .map_err(|_| ProviderError::Other(SOURCE_REVISION_MESSAGE.to_string()))?;
         }
-        require_lease()
-            .map_err(|_| ProviderError::Other(SOURCE_REVISION_MESSAGE.to_string()))?;
+        require_lease().map_err(|_| ProviderError::Other(SOURCE_REVISION_MESSAGE.to_string()))?;
         let zeros = "0".repeat(40);
         self.git
             .git(

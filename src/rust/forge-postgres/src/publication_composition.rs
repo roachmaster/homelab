@@ -29,7 +29,7 @@ use forge_work_worker::agent_branch::{AgentBranchProvider, PERSISTENT_BRANCH_POL
 use forge_work_worker::config::WorkerConfig;
 use forge_work_worker::consumer_cache::configured_consumer_caches;
 use forge_work_worker::native_identity::NativeIdentityConfig;
-use forge_work_worker::ports_runtime::{SystemCommandPort, SupervisorPort};
+use forge_work_worker::ports_runtime::{SupervisorPort, SystemCommandPort};
 use forge_work_worker::review_candidate::ReviewedCandidateProvider;
 use forge_work_worker::review_ports::{
     ChecksPort, ContentIdentityPort, HostedChecksPort, NativeCiPort, RepairSourcesPort,
@@ -40,7 +40,9 @@ use forge_work_worker::supervisor::SystemdSupervisor;
 use forge_work_publication::artifact_source::{
     CallableGitExecutor, GitArtifactGitPort, SourceLimits,
 };
-use forge_work_publication::delivery_ops::{create_release_provider, RootActorPort, SourceObserver};
+use forge_work_publication::delivery_ops::{
+    create_release_provider, RootActorPort, SourceObserver,
+};
 use forge_work_publication::delivery_stores::{
     DeliveryStorePort, DeliveryVerificationStore, MergeStorePort, PostMergeStorePort,
 };
@@ -78,7 +80,9 @@ use crate::delivery_workers_adapter::PgDeliveryWorkers;
 use crate::external_delivery_adapter::PgBranchProvider;
 use crate::factory::PgSessionFactory;
 use crate::jenkins_store_adapter::PgJenkinsStore;
-use crate::publication_store_adapter::{PgNativeCiStore, PgPublicationStore, RetryingPublicationListener};
+use crate::publication_store_adapter::{
+    PgNativeCiStore, PgPublicationStore, RetryingPublicationListener,
+};
 use crate::review_store::PgReviewStore;
 use crate::worker_composition::{passfile_password, pg_config_for};
 
@@ -205,9 +209,7 @@ fn git_bytes_timeout(repo: &Path, args: &[&str], timeout_seconds: f64) -> Result
 
 fn git_port() -> Arc<dyn GitArtifactGitPort + Send + Sync> {
     Arc::new(CallableGitExecutor {
-        execute: |repo: &Path, args: &[&str], timeout: f64| {
-            git_bytes_timeout(repo, args, timeout)
-        },
+        execute: |repo: &Path, args: &[&str], timeout: f64| git_bytes_timeout(repo, args, timeout),
     })
 }
 
@@ -241,9 +243,7 @@ fn make_identity_provider(
     }))))
 }
 
-fn make_candidates(
-    config: &PublicationConfig,
-) -> FactoryResult<ReviewedCandidateProvider> {
+fn make_candidates(config: &PublicationConfig) -> FactoryResult<ReviewedCandidateProvider> {
     let identities = make_identity_provider(config)?
         .map(|provider| Box::new(provider) as Box<dyn ContentIdentityPort>);
     Ok(ReviewedCandidateProvider::new(
@@ -315,9 +315,7 @@ fn validate_factory_selection(
         );
     }
     if observer_present && config.hosted_provider != "jenkins" {
-        return Err(
-            "A Jenkins observer requires a selected Jenkins delivery consumer".to_string(),
-        );
+        return Err("A Jenkins observer requires a selected Jenkins delivery consumer".to_string());
     }
     if (config.delivery_enabled
         && (!config.post_merge_enabled
@@ -341,8 +339,7 @@ fn validate_factory_selection(
         });
     if config.source_observation_interval_seconds != 60
         || (config.release_enabled
-            && !(config.repositories.len() == 1 && config.repositories.contains_key("homelab"))
-            )
+            && !(config.repositories.len() == 1 && config.repositories.contains_key("homelab")))
         || (config.release_enabled && !digest_ok)
         || (!config.release_enabled && config.release_actor_sha256.is_some())
     {
@@ -366,15 +363,17 @@ impl JenkinsEventEmitter for ServiceEmitter {
 
 /// _jenkins_events: build the validated emit-only Jenkins
 /// services for the lifecycle producer.
-fn jenkins_events(
-    config: &PublicationConfig,
-    selected: &JenkinsConfig,
-) -> FactoryResult<(
+type JenkinsEventPorts = (
     Box<dyn JenkinsEventEmitter>,
     Arc<SharedEventLookup>,
     String,
     Box<dyn JenkinsEventEmitter>,
-)> {
+);
+
+fn jenkins_events(
+    config: &PublicationConfig,
+    selected: &JenkinsConfig,
+) -> FactoryResult<JenkinsEventPorts> {
     let section = config
         .jenkins_events
         .as_ref()
@@ -394,8 +393,7 @@ fn jenkins_events(
         .jenkins_delivery_config
         .clone()
         .ok_or_else(|| "Jenkins delivery configuration is unavailable".to_string())?;
-    let raw = read_private(&delivery_path, 65_536, Some(effective_uid()))
-        .map_err(|message| message)?;
+    let raw = read_private(&delivery_path, 65_536, Some(effective_uid()))?;
     let raw: Value =
         serde_json::from_slice(&raw).map_err(|_| "Invalid delivery configuration".to_string())?;
     let delivery = DeliveryConfig::parse(&raw).map_err(|error| error.to_string())?;
@@ -427,10 +425,9 @@ fn jenkins_events(
     };
     let store_config = selected.clone();
     let store_factory: forge_jenkins::consumer::StoreFactory = Arc::new(move || {
-        Box::new(PgJenkinsStore::new(store_config.clone(), pg.clone()))
-            as Box<dyn JenkinsStorePort>
+        Box::new(PgJenkinsStore::new(store_config.clone(), pg.clone())) as Box<dyn JenkinsStorePort>
     });
-    let mut build_service = || -> FactoryResult<JenkinsService> {
+    let build_service = || -> FactoryResult<JenkinsService> {
         create_jenkins_service(
             Some(selected.clone()),
             Arc::clone(&store_factory),
@@ -443,13 +440,16 @@ fn jenkins_events(
     };
     let lookup_service = Arc::new(Mutex::new(build_service()?));
     let emitter = Box::new(ServiceEmitter(InProcessJenkinsEmitter::new(
-        build_service()?,
+        build_service()?
     )));
     let drain_emitter = Box::new(ServiceEmitter(InProcessJenkinsEmitter::new(
-        build_service()?,
+        build_service()?
     )));
     let event_lookup: Arc<SharedEventLookup> = Arc::new(
-        move |project_alias: &str, job_name: &str, commit_sha: &str| -> Result<Vec<Value>, String> {
+        move |project_alias: &str,
+              job_name: &str,
+              commit_sha: &str|
+              -> Result<Vec<Value>, String> {
             let mut service = lookup_service
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -463,13 +463,15 @@ fn jenkins_events(
                     commit_sha: Some(commit_sha.to_string()),
                 })
                 .map_err(|error| error.to_string())?;
-            Ok(result["events"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default())
+            Ok(result["events"].as_array().cloned().unwrap_or_default())
         },
     );
-    Ok((emitter, event_lookup, section.instance.clone(), drain_emitter))
+    Ok((
+        emitter,
+        event_lookup,
+        section.instance.clone(),
+        drain_emitter,
+    ))
 }
 
 /// default_store_factory's handle set plus the factory's create():
@@ -499,9 +501,7 @@ pub fn create_publication_worker(
     }
 
     let workspaces = CodingWorkspacesAdapter::new(config.worker.clone());
-    workspaces
-        .prepare()
-        .map_err(|error| error.to_string())?;
+    workspaces.prepare().map_err(|error| error.to_string())?;
     let snapshots = SharedSnapshots::new(WorkspaceSnapshotProvider::new(
         Box::new(workspaces),
         executor(),
@@ -521,9 +521,8 @@ pub fn create_publication_worker(
     let mut native_shared: Option<SharedNativeCi> = None;
     let mut jenkins_drain: Option<IntentDrain> = None;
     let mut repair_for_review: Option<Box<dyn RepairSourcesPort>> = None;
-    let mut repair_for_merge: Option<
-        Box<dyn forge_work_publication::merge::MergeRepairPort>,
-    > = None;
+    let mut repair_for_merge: Option<Box<dyn forge_work_publication::merge::MergeRepairPort>> =
+        None;
     let reviewer_checks: Box<dyn ChecksPort>;
     let worker_checks: Box<dyn ChecksPort>;
     let reviewer_hosted: Option<Box<dyn HostedChecksPort>>;
@@ -531,27 +530,23 @@ pub fn create_publication_worker(
     let merge_hosted: Box<dyn HostedChecksPort>;
 
     if config.hosted_provider == "jenkins" {
-        let (emitter, event_lookup, instance, drain_emitter) =
-            match &config.jenkins_events {
-                Some(_) => {
-                    let selected = load_jenkins_config(Some(
-                        config
-                            .jenkins_events
-                            .as_ref()
-                            .expect("checked")
-                            .config_path
-                            .to_string_lossy()
-                            .as_ref(),
-                    ))?
-                    .ok_or_else(|| {
-                        "Jenkins events configuration is unavailable".to_string()
-                    })?;
-                    let (emitter, lookup, instance, drain) =
-                        jenkins_events(config, &selected)?;
-                    (Some(emitter), Some(lookup), Some(instance), Some(drain))
-                }
-                None => (None, None, None, None),
-            };
+        let (emitter, event_lookup, instance, drain_emitter) = match &config.jenkins_events {
+            Some(_) => {
+                let selected = load_jenkins_config(Some(
+                    config
+                        .jenkins_events
+                        .as_ref()
+                        .expect("checked")
+                        .config_path
+                        .to_string_lossy()
+                        .as_ref(),
+                ))?
+                .ok_or_else(|| "Jenkins events configuration is unavailable".to_string())?;
+                let (emitter, lookup, instance, drain) = jenkins_events(config, &selected)?;
+                (Some(emitter), Some(lookup), Some(instance), Some(drain))
+            }
+            None => (None, None, None, None),
+        };
         let options = NativeJenkinsOptions {
             client: Some(GitHubPullRequestClient::new(config.clone(), executor())),
             stop: Some(Arc::clone(&stop)),
@@ -576,12 +571,7 @@ pub fn create_publication_worker(
         )?;
         let shared = SharedNativeCi::new(native);
         if let Some(drain_emitter) = drain_emitter {
-            let actions = shared
-                .lock()
-                .delivery
-                .config
-                .state_root
-                .join("actions");
+            let actions = shared.lock().delivery.config.state_root.join("actions");
             jenkins_drain = Some(IntentDrain::new(actions, drain_emitter, 2.0));
         }
         if config.native_delivery_mode == "branch-first-v1" {
@@ -648,8 +638,9 @@ pub fn create_publication_worker(
         reviewer_hosted,
         reviewer_native,
         repair_for_review,
-        make_branch_provider(config, &pg)?
-            .map(|provider| Box::new(provider) as Box<dyn forge_work_worker::review_ports::ReviewBranchPort>),
+        make_branch_provider(config, &pg)?.map(|provider| {
+            Box::new(provider) as Box<dyn forge_work_worker::review_ports::ReviewBranchPort>
+        }),
         Arc::clone(&stop),
     );
 
@@ -678,10 +669,10 @@ pub fn create_publication_worker(
                 git: make_git(config, None),
             }),
             stop: Arc::clone(&stop),
-            native_ci: native_shared
-                .as_ref()
-                .map(|shared| Box::new(shared.clone())
-                    as Box<dyn forge_work_publication::merge::MergeNativeCiPort>),
+            native_ci: native_shared.as_ref().map(|shared| {
+                Box::new(shared.clone())
+                    as Box<dyn forge_work_publication::merge::MergeNativeCiPort>
+            }),
             repair_sources: repair_for_merge,
             branch_provider: make_branch_provider(config, &pg)?
                 .map(|provider| Box::new(provider) as Box<dyn MergeBranchPort>),
@@ -718,12 +709,10 @@ pub fn create_publication_worker(
                 .post_merge_jenkins_delivery_config
                 .clone()
                 .expect("validated when post-merge is enabled");
-            let raw = read_private(&delivery_path, 65_536, Some(effective_uid()))
-                .map_err(|message| message)?;
+            let raw = read_private(&delivery_path, 65_536, Some(effective_uid()))?;
             let raw: Value = serde_json::from_slice(&raw)
                 .map_err(|_| "Invalid delivery configuration".to_string())?;
-            let mut selected =
-                DeliveryConfig::parse(&raw).map_err(|error| error.to_string())?;
+            let mut selected = DeliveryConfig::parse(&raw).map_err(|error| error.to_string())?;
             selected.state_root = state_root.join("native-ci");
             let delivery = DeliveryProviderFactory {
                 config: selected,
@@ -744,11 +733,8 @@ pub fn create_publication_worker(
         } else {
             delivery_store.clone()
         };
-        let mut worker = PostMergeWorker::new(
-            config.clone(),
-            post_merge_store,
-            Box::new(provider),
-        )?;
+        let mut worker =
+            PostMergeWorker::new(config.clone(), post_merge_store, Box::new(provider))?;
         worker.stop = Arc::clone(&stop);
         post_merge = Some(worker);
     }
@@ -794,7 +780,8 @@ pub fn create_publication_worker(
 /// load_config + load_worker): read the publication JSON, load the
 /// referenced worker config, and parse both.
 pub fn load_publication_config(path: &Path) -> FactoryResult<PublicationConfig> {
-    let raw = std::fs::read(path).map_err(|_| "Unable to load publication configuration".to_string())?;
+    let raw =
+        std::fs::read(path).map_err(|_| "Unable to load publication configuration".to_string())?;
     if raw.len() > 65_536 {
         return Err("Unable to load publication configuration".to_string());
     }

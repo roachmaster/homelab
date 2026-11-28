@@ -16,9 +16,9 @@ use forge_work_publication::jenkins_observer::{
 use forge_work_publication::trusted_delivery::JenkinsObserverPort;
 
 fn main() -> ExitCode {
-    let Some(config_path) = std::env::var_os(
-        forge_work_publication::publication_config::CONFIG_ENV,
-    ) else {
+    let Some(config_path) =
+        std::env::var_os(forge_work_publication::publication_config::CONFIG_ENV)
+    else {
         eprintln!("Unable to load publication configuration");
         return ExitCode::FAILURE;
     };

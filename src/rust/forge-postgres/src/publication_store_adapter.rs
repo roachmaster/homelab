@@ -10,10 +10,10 @@ use forge_work_publication::native_jenkins::NativeCiStorePort;
 use forge_work_publication::publication::PublicationClaimPort;
 use forge_work_publication::publication_clients::{ProviderError, PublicationError};
 
+use crate::client::PgSession;
 use crate::config::PgConfig;
 use crate::error::AdapterError;
 use crate::reconciler::ReconcilerApi;
-use crate::client::PgSession;
 
 pub const REVIEW_ADMISSION_LOCK_SALT: i64 = 731_492_647_451;
 
@@ -69,11 +69,7 @@ fn text<'a>(value: &'a Value, key: &str) -> &'a str {
 }
 
 impl PgNativeCiStore {
-    fn native_ci_context(
-        &mut self,
-        job: &Value,
-        acquire: bool,
-    ) -> Result<Value, PublicationError> {
+    fn native_ci_context(&mut self, job: &Value, acquire: bool) -> Result<Value, PublicationError> {
         if !job.is_object() {
             return Err(PublicationError::new("Invalid native CI identity"));
         }
@@ -132,15 +128,16 @@ impl PgNativeCiStore {
             && value["active"].is_boolean()
             && ["active", "cancelled", "superseded", "completed", "inactive"].contains(&state)
             && value["active"].as_bool().unwrap_or(false) == (state == "active")
-            && (value["candidate_commit"].is_null()
-                || is_sha1(text(&value, "candidate_commit")));
+            && (value["candidate_commit"].is_null() || is_sha1(text(&value, "candidate_commit")));
         if !valid {
             return Err(PublicationError::new("Invalid native CI context response"));
         }
         coerce_uuid(text(&value, "workflow_id"), "native CI workflow")?;
         coerce_uuid(text(&value, "correlation_id"), "native CI correlation")?;
         if acquire && value["active"].as_bool() != Some(true) {
-            return Err(PublicationError::new("Native CI source is no longer active"));
+            return Err(PublicationError::new(
+                "Native CI source is no longer active",
+            ));
         }
         Ok(value)
     }
@@ -374,7 +371,9 @@ impl PublicationClaimPort for PgPublicationStore {
         let publication = coerce_uuid_provider(job, "publication_id")?;
         let token = coerce_uuid_provider(job, "lease_token")?;
         if !["publishing", "published", "failed"].contains(&status) {
-            return Err(ProviderError::Other("Invalid publication outcome".to_string()));
+            return Err(ProviderError::Other(
+                "Invalid publication outcome".to_string(),
+            ));
         }
         if summary.contains('\0') || summary.len() > 4096 {
             return Err(ProviderError::Other("Invalid attempt summary".to_string()));
@@ -454,19 +453,17 @@ impl forge_work_publication::publication::PublicationListenerPort for PgPublicat
     fn wait(&mut self, seconds: f64) -> bool {
         use std::time::{Duration, Instant};
         let deadline = Instant::now() + Duration::from_secs_f64(seconds.max(0.0));
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return false;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        match self.receiver.recv_timeout(remaining) {
+            Ok(()) => {
+                while self.receiver.try_recv().is_ok() {}
+                true
             }
-            match self.receiver.recv_timeout(remaining) {
-                Ok(()) => {
-                    while self.receiver.try_recv().is_ok() {}
-                    return true;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => return false,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return false,
-            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => false,
         }
     }
 }
@@ -496,17 +493,13 @@ impl RetryingPublicationListener {
     }
 }
 
-impl forge_work_publication::publication::PublicationListenerPort
-    for RetryingPublicationListener
-{
+impl forge_work_publication::publication::PublicationListenerPort for RetryingPublicationListener {
     fn wait(&mut self, seconds: f64) -> bool {
         if self.inner.is_none() {
             match PgPublicationListener::connect(&self.config) {
                 Ok(listener) => self.inner = Some(listener),
                 Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_secs_f64(
-                        seconds.max(0.0),
-                    ));
+                    std::thread::sleep(std::time::Duration::from_secs_f64(seconds.max(0.0)));
                     return false;
                 }
             }

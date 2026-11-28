@@ -16,14 +16,13 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::feedback::parse_feedback_json;
+use crate::work_error::WorkError;
+use crate::work_requests::ResumeRequest;
 use crate::workflow::{
     bool_of, denied, int_of, operator_actor, present, ready_for_recipe, text, uuid_of,
     WorkflowStore, NATIVE_POLICY_DIGESTS,
 };
 use crate::workflow_continuation::{is_retained_source, recipe, OWNED_FEATURE_BRANCHES};
-use crate::workflow_tx::WorkflowTx;
-use crate::work_error::WorkError;
-use crate::work_requests::ResumeRequest;
 
 pub const SUMMARY: &str =
     "The saved plan could not be verified; review is required before execution.";
@@ -93,12 +92,7 @@ pub struct PlanLineageResume {
 /// the deployment/workspace evidence document the recovery
 /// validates before resuming.
 pub trait PlanLineageEvidencePort {
-    fn evidence(
-        &self,
-        task: &Value,
-        attempt: &Value,
-        receipt: &Value,
-    ) -> Result<Value, WorkError>;
+    fn evidence(&self, task: &Value, attempt: &Value, receipt: &Value) -> Result<Value, WorkError>;
 }
 
 /// The evidence document gate: exactly the five keys, a
@@ -139,7 +133,7 @@ fn evidence_valid(evidence: &Value, receipt: &Value, packet: &Value, task: &Valu
 /// supplies the ready workflow store per call and the evidence
 /// callable at construction. The profile -> configured-branch
 /// map comes from the worker configuration (Python reads
-/// flow.config.profiles[alias].branch); it is injected because
+/// `flow.config.profiles[alias].branch`); it is injected because
 /// the coordinator config's catalog profiles carry no branch
 /// (the WorkflowContinuation precedent).
 pub struct PlanLineageRecovery {
@@ -215,8 +209,7 @@ impl PlanLineageRecovery {
                 Some(w) => {
                     w["enabled"].as_bool() == Some(true)
                         || text(w, "phase") != "escalated"
-                        || text(w, "escalation_reason")
-                            != "Agent stopped: needs_reconcile"
+                        || text(w, "escalation_reason") != "Agent stopped: needs_reconcile"
                         || int_of(&task, "revision") != command.expected_revision
                         || text(&task, "status") != "needs_reconcile"
                         || text(&task, "mode") != "implement"
@@ -326,8 +319,7 @@ impl PlanLineageRecovery {
                     };
                     text(plan, "decision") == "resume"
                         && uuid_of(plan, "task_id") == uuid_of(parent, "id")
-                        && uuid_of(parent, "plan_decision_id")
-                            == uuid_of(plan, "decision_id")
+                        && uuid_of(parent, "plan_decision_id") == uuid_of(plan, "decision_id")
                         && uuid_of(parent, "workflow_id") == workflow_id
                         && uuid_of(q, "task_id") == uuid_of(parent, "id")
                         && uuid_of(q, "repair_task_id") == command.task_id
@@ -339,10 +331,8 @@ impl PlanLineageRecovery {
                         && q["verification"]["cleanup_confirmed"].as_bool() == Some(true)
                         && uuid_of(feedback, "task_id") == command.task_id
                         && uuid_of(feedback, "review_id") == uuid_of(q, "review_id")
-                        && uuid_of(feedback, "parent_attempt_id")
-                            == uuid_of(q, "attempt_id")
-                        && text(feedback, "feedback_sha256")
-                            == text(&task, "feedback_sha256")
+                        && uuid_of(feedback, "parent_attempt_id") == uuid_of(q, "attempt_id")
+                        && text(feedback, "feedback_sha256") == text(&task, "feedback_sha256")
                 }
                 _ => false,
             };
@@ -351,10 +341,8 @@ impl PlanLineageRecovery {
             }
             let plan = plan.unwrap();
             let feedback = feedback.unwrap();
-            let artifact = tx.artifact(
-                uuid_of(&plan, "task_id"),
-                uuid_of(&plan, "plan_attempt_id"),
-            )?;
+            let artifact =
+                tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
             if artifact["result_sha256"] != plan["plan_sha256"] {
                 return Err(mismatch());
             }
@@ -395,8 +383,10 @@ impl PlanLineageRecovery {
                 workflow_id,
                 &json!({"enabled": true, "phase": "repair", "escalation_reason": ""}),
             )?;
-            let digests: Vec<String> =
-                NATIVE_POLICY_DIGESTS.iter().map(|d| d.to_string()).collect();
+            let digests: Vec<String> = NATIVE_POLICY_DIGESTS
+                .iter()
+                .map(|d| d.to_string())
+                .collect();
             for (role, mode, entry) in [
                 ("author_profile", "implement", "author_implement"),
                 ("reviewer_profile", "review", "reviewer_review"),
@@ -405,13 +395,7 @@ impl PlanLineageRecovery {
                 flow.grant(tx, &workflow, profile, mode)?;
                 let rows = tx.readiness(Some(&digests))?;
                 let entry_recipe = recipe(flow, &snapshot, entry)?;
-                if !ready_for_recipe(
-                    &rows,
-                    &command.project_alias,
-                    profile,
-                    mode,
-                    &entry_recipe,
-                ) {
+                if !ready_for_recipe(&rows, &command.project_alias, profile, mode, &entry_recipe) {
                     return Err(rejected(503, "unavailable"));
                 }
             }

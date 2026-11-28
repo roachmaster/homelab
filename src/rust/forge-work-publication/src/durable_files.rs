@@ -16,7 +16,9 @@ const O_NONBLOCK: i32 = 0o4000;
 /// The process effective uid (Python: os.geteuid()), read
 /// from the /proc/self metadata — no libc dependency.
 pub fn effective_uid() -> u32 {
-    std::fs::metadata("/proc/self").map(|meta| meta.uid()).unwrap_or(0)
+    std::fs::metadata("/proc/self")
+        .map(|meta| meta.uid())
+        .unwrap_or(0)
 }
 
 /// A group id by name (Python: grp.getgrnam(name).gr_gid),
@@ -127,7 +129,9 @@ pub fn durable_json_group(
             .create_new(true)
             .custom_flags(O_NOFOLLOW)
             .mode(mode);
-        let mut file = options.open(&temporary).map_err(|error| error.to_string())?;
+        let mut file = options
+            .open(&temporary)
+            .map_err(|error| error.to_string())?;
         if let Some(group) = group {
             std::os::unix::fs::chown(&temporary, Some(effective_uid()), Some(group))
                 .map_err(|error| error.to_string())?;

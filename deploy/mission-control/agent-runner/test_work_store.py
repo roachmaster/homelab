@@ -143,6 +143,11 @@ class WorkStorePostgresTest(unittest.TestCase):
         self.assert_sql_verification(verify_script)
 
     def test_exact_acl_matrix_covers_coding_and_existing_mail_gpu_tables(self):
+        # Revoke/re-grant probes can reorder an equivalent table ACL. Keep this
+        # destructive matrix in its own cluster so later exact-catalog tests
+        # still start from the immutable migration-created ACL ordering.
+        self.cluster = DisposablePostgresCluster().start()
+        self.addCleanup(self.cluster.stop)
         script = SQL_DIR / "management/verify-runner-privileges.sql"
         self.assert_sql_verification(script, user="forge_agent")
         self.assert_sql_verification(script, error="Expected current_user forge_agent")
@@ -155,7 +160,7 @@ class WorkStorePostgresTest(unittest.TestCase):
             "coding_tasks": {"SELECT", "INSERT", "UPDATE"},
             "coding_events": {"SELECT", "INSERT"},
             "coding_control_receipts": {"SELECT", "INSERT"},
-            "coding_worker_grants": set(),
+            "coding_worker_grants": {"SELECT"},
             "coding_worker_readiness": {"SELECT"},
             "coding_attempts": {"SELECT"},
             "coding_result_chunks": {"SELECT"},

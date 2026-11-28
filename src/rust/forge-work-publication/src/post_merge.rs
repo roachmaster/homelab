@@ -17,12 +17,12 @@ use uuid::Uuid;
 use forge_work_worker::diagnostic::{diagnostic_text, MAX_DIAGNOSTIC_BYTES};
 
 use crate::ci_contract::CiGateContractFactory;
-use crate::ci_phases::EVENT_PROFILE;
 use crate::ci_contract::SCOPED_PROFILE;
+use crate::ci_phases::EVENT_PROFILE;
 use crate::cicd_artifacts::{extract_stage_evidence_from_receipt, StageEvidenceParams};
 use crate::delivery_stores::{error_code, PostMergeStorePort, RequireLease, StageEvidencePort};
-use crate::publication_clients::PublicationError;
 use crate::publication_clients::ProviderError;
+use crate::publication_clients::PublicationError;
 use crate::publication_config::PublicationConfig;
 
 pub const REQUEST_KEYS: [&str; 12] = [
@@ -87,9 +87,9 @@ fn is_gate_contract(value: &str) -> bool {
     if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
         return false;
     }
-    bytes[1..bytes.len() - 1]
-        .iter()
-        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-'))
+    bytes[1..bytes.len() - 1].iter().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+    })
 }
 
 fn canonical_uuid(value: &Value) -> Option<String> {
@@ -194,9 +194,7 @@ pub fn passed_receipt(request: &Value, receipt: &Value) -> bool {
         .checks
         .iter()
         .enumerate()
-        .map(|(index, command)| {
-            json!({"index": index, "argv": command, "returncode": 0})
-        })
+        .map(|(index, command)| json!({"index": index, "argv": command, "returncode": 0}))
         .collect();
     if receipt["checks"] != Value::Array(expected_checks) {
         return false;
@@ -204,9 +202,8 @@ pub fn passed_receipt(request: &Value, receipt: &Value) -> bool {
     receipt["checks"]
         .as_array()
         .map(|rows| {
-            rows.iter().all(|row| {
-                row["index"].is_i64() && row["returncode"].is_i64()
-            })
+            rows.iter()
+                .all(|row| row["index"].is_i64() && row["returncode"].is_i64())
         })
         .unwrap_or(false)
 }
@@ -309,7 +306,12 @@ impl PostMergeWorker {
         }
         let worker_id = format!(
             "{}-post-merge",
-            self.config.worker.worker_id.chars().take(49).collect::<String>()
+            self.config
+                .worker
+                .worker_id
+                .chars()
+                .take(49)
+                .collect::<String>()
         );
         let job = self.store.post_merge_claim(&worker_id)?;
         match job {
@@ -357,19 +359,32 @@ impl PostMergeWorker {
             ),
         };
         let params = StageEvidenceParams {
-            project_alias: request["project_alias"].as_str().unwrap_or_default().to_string(),
+            project_alias: request["project_alias"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             action_id: action_id.to_string(),
-            correlation_id: request["correlation_id"].as_str().unwrap_or_default().to_string(),
+            correlation_id: request["correlation_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             job_name: context.job_name.clone(),
-            commit_sha: request["candidate_commit"].as_str().unwrap_or_default().to_string(),
+            commit_sha: request["candidate_commit"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             branch_scope: "main".to_string(),
             pipeline_scope: "main".to_string(),
             receipt_sha256: receipt_sha,
-            task_id: job.get("task_id").and_then(|value| value.as_str()).map(str::to_string),
+            task_id: job
+                .get("task_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
             build_number: receipt["build_number"].as_i64(),
             branch_name: Some("main".to_string()),
         };
-        let entries = extract_stage_evidence_from_receipt(&full_receipt, log_bytes.as_deref(), &params);
+        let entries =
+            extract_stage_evidence_from_receipt(&full_receipt, log_bytes.as_deref(), &params);
         for (evidence, chunks) in entries {
             let _ = context.port.record_stage_evidence(&evidence, &chunks);
         }
@@ -415,19 +430,25 @@ impl PostMergeWorker {
         let heartbeat = std::thread::spawn(move || {
             // Python waits 10s before the first renewal.
             let start = Instant::now();
-            while start.elapsed() < Duration::from_secs(10) && !heartbeat_done.load(Ordering::SeqCst) {
+            while start.elapsed() < Duration::from_secs(10)
+                && !heartbeat_done.load(Ordering::SeqCst)
+            {
                 std::thread::sleep(Duration::from_millis(100));
             }
             while !heartbeat_done.load(Ordering::SeqCst) {
                 let renewed = !heartbeat_stop.load(Ordering::SeqCst)
                     && !heartbeat_lost.load(Ordering::SeqCst)
-                    && heartbeat_store.post_merge_renew(&heartbeat_job).unwrap_or(false);
+                    && heartbeat_store
+                        .post_merge_renew(&heartbeat_job)
+                        .unwrap_or(false);
                 if !renewed {
                     heartbeat_lost.store(true, Ordering::SeqCst);
                     return;
                 }
                 let start = Instant::now();
-                while start.elapsed() < Duration::from_secs(10) && !heartbeat_done.load(Ordering::SeqCst) {
+                while start.elapsed() < Duration::from_secs(10)
+                    && !heartbeat_done.load(Ordering::SeqCst)
+                {
                     std::thread::sleep(Duration::from_millis(100));
                 }
             }
@@ -448,7 +469,11 @@ impl PostMergeWorker {
         require_start_lease: &(dyn Fn() -> Result<(), PublicationError> + Send + Sync),
         lost: &Arc<AtomicBool>,
     ) -> Result<(), ProviderError> {
-        let mut request: Option<Value> = if job.get("request").map(|value| value.is_null()).unwrap_or(true) {
+        let mut request: Option<Value> = if job
+            .get("request")
+            .map(|value| value.is_null())
+            .unwrap_or(true)
+        {
             None
         } else {
             Some(job["request"].clone())
@@ -475,22 +500,32 @@ impl PostMergeWorker {
         };
         let outcome = (|| -> Result<(), ProviderError> {
             if job.get("owner_id") != Some(&Value::String(self.config.worker.owner.clone()))
-                || !self.config.repositories.contains_key(job["project_alias"].as_str().unwrap_or_default())
-                || ["merge_commit", "merge_tree"].iter().any(|key| {
-                    !is_hex40(job[key].as_str().unwrap_or_default())
-                })
+                || !self
+                    .config
+                    .repositories
+                    .contains_key(job["project_alias"].as_str().unwrap_or_default())
+                || ["merge_commit", "merge_tree"]
+                    .iter()
+                    .any(|key| !is_hex40(job[key].as_str().unwrap_or_default()))
             {
                 lost.store(true, Ordering::SeqCst);
                 return Err(ProviderError::Other(
                     "Post-merge owner/project/source mismatch".to_string(),
                 ));
             }
-            let valid_ids = ["post_merge_id", "workflow_id", "correlation_id", "lease_token"]
-                .iter()
-                .all(|key| canonical_uuid(&job[key]).is_some());
+            let valid_ids = [
+                "post_merge_id",
+                "workflow_id",
+                "correlation_id",
+                "lease_token",
+            ]
+            .iter()
+            .all(|key| canonical_uuid(&job[key]).is_some());
             if !valid_ids {
                 lost.store(true, Ordering::SeqCst);
-                return Err(ProviderError::Other("Invalid post-merge identity".to_string()));
+                return Err(ProviderError::Other(
+                    "Invalid post-merge identity".to_string(),
+                ));
             }
             require_lease().map_err(ProviderError::Publication)?;
             if let Some(request_value) = &request {
@@ -514,7 +549,9 @@ impl PostMergeWorker {
                 let prepared = self.provider.prepare(job, require_start_lease)?;
                 if prepared["status"].as_str() == Some("superseded") {
                     let observed = prepared["observed_main"].as_str().unwrap_or_default();
-                    if !is_hex40(observed) || observed == job["merge_commit"].as_str().unwrap_or_default() {
+                    if !is_hex40(observed)
+                        || observed == job["merge_commit"].as_str().unwrap_or_default()
+                    {
                         return Err(ProviderError::Other(
                             "Invalid superseded main observation".to_string(),
                         ));
@@ -547,12 +584,13 @@ impl PostMergeWorker {
                 self.provider.cancel(job, &request_value, require_lease)?
             } else {
                 require_start_lease().map_err(ProviderError::Publication)?;
-                self.provider.verify(job, &request_value, require_start_lease)?
+                self.provider
+                    .verify(job, &request_value, require_start_lease)?
             };
-            if !outcome.is_object()
-                || !outcome["receipt"].is_object()
-            {
-                return Err(ProviderError::Other("Invalid post-merge observation".to_string()));
+            if !outcome.is_object() || !outcome["receipt"].is_object() {
+                return Err(ProviderError::Other(
+                    "Invalid post-merge observation".to_string(),
+                ));
             }
             let mut receipt = outcome["receipt"].clone();
             let status = outcome["status"].as_str().unwrap_or_default().to_string();
@@ -561,13 +599,21 @@ impl PostMergeWorker {
                 .cloned()
                 .unwrap_or_else(|| json!("Main verification observation saved."));
             if !summary.is_string() {
-                return Err(ProviderError::Other("Invalid post-merge summary".to_string()));
+                return Err(ProviderError::Other(
+                    "Invalid post-merge summary".to_string(),
+                ));
             }
             let summary = summary.as_str().unwrap_or_default().to_string();
             // Bound stored telemetry; a transport never grants
             // arbitrary DB payloads.
-            if serde_json::to_string(&receipt).map(|text| text.len()).unwrap_or(usize::MAX) > 65536 {
-                return Err(ProviderError::Other("Oversized post-merge receipt".to_string()));
+            if serde_json::to_string(&receipt)
+                .map(|text| text.len())
+                .unwrap_or(usize::MAX)
+                > 65536
+            {
+                return Err(ProviderError::Other(
+                    "Oversized post-merge receipt".to_string(),
+                ));
             }
             if status == "passed" && !cancelling && passed_receipt(&request_value, &receipt) {
                 self.persist_stage_artifacts(job, &request_value, &receipt);
@@ -581,7 +627,10 @@ impl PostMergeWorker {
                     .unwrap_or(&summary)
                     .to_string();
                 finish("failed", &receipt, &summary, require_lease)?;
-            } else if matches!(status.as_str(), "pending" | "failed" | "cancelled" | "passed") {
+            } else if matches!(
+                status.as_str(),
+                "pending" | "failed" | "cancelled" | "passed"
+            ) {
                 if cancelling || status != "pending" {
                     if let Some(object) = receipt.as_object_mut() {
                         object.insert("cancellation_required".to_string(), Value::Bool(true));

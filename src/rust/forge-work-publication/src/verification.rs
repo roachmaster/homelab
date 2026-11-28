@@ -132,9 +132,7 @@ impl VerificationMetadata {
 
     fn line(&mut self, line: &[u8]) {
         if let Some(rest) = line.strip_prefix(b"FORGE_CHECK_START ") {
-            if !rest.is_empty()
-                && rest.len() <= 10
-                && rest.iter().all(|byte| byte.is_ascii_digit())
+            if !rest.is_empty() && rest.len() <= 10 && rest.iter().all(|byte| byte.is_ascii_digit())
             {
                 if let Ok(value) = std::str::from_utf8(rest).unwrap_or("").parse::<i64>() {
                     if 0 <= value && value < self.command_count {
@@ -145,10 +143,7 @@ impl VerificationMetadata {
         }
         if let Some(rest) = line.strip_prefix(b"FORGE_VERIFIER_TOOLCHAIN ") {
             if !rest.is_empty() && rest.len() <= 128 && self.toolchain.is_none() {
-                self.toolchain = Some(diagnostic_text(
-                    &String::from_utf8_lossy(rest),
-                    128,
-                ));
+                self.toolchain = Some(diagnostic_text(&String::from_utf8_lossy(rest), 128));
             }
         }
     }
@@ -238,7 +233,9 @@ pub fn protected_retry_observation(
                 && version.as_i64() == Some(3)
                 && receipt_digest.is_some_and(|digest| {
                     digest.len() == 64
-                        && digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                        && digest
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
                 })
         });
     if !bound {
@@ -257,18 +254,22 @@ pub fn protected_retry_observation(
     {
         return Err("Protected retry stage changed".to_string());
     }
-    let rows = expected["phase_results"].as_array().cloned().unwrap_or_default();
+    let rows = expected["phase_results"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let failed = rows
         .iter()
         .find(|row| row["returncode"].as_i64() != Some(0));
-    let passed_phase_ids: Vec<Value> = if receipt["failure"] == json!("source_changed_during_checks") {
-        Vec::new()
-    } else {
-        rows.iter()
-            .filter(|row| row["returncode"].as_i64() == Some(0))
-            .map(|row| row["phase_id"].clone())
-            .collect()
-    };
+    let passed_phase_ids: Vec<Value> =
+        if receipt["failure"] == json!("source_changed_during_checks") {
+            Vec::new()
+        } else {
+            rows.iter()
+                .filter(|row| row["returncode"].as_i64() == Some(0))
+                .map(|row| row["phase_id"].clone())
+                .collect()
+        };
     Ok(Some(json!({
         "failure_kind": expected["failure_kind"],
         "passed_kinds": expected["passed_kinds"],
@@ -378,9 +379,7 @@ fn find_diagnostic(text: &str) -> Option<(String, Option<String>)> {
             } else {
                 (None, rest)
             };
-            if (bracket.is_some() || !rest.starts_with('['))
-                && after.starts_with(':')
-            {
+            if (bracket.is_some() || !rest.starts_with('[')) && after.starts_with(':') {
                 alternative_a = Some((start + (line.len() - after.len()) + 1, bracket));
             }
         }
@@ -391,10 +390,7 @@ fn find_diagnostic(text: &str) -> Option<(String, Option<String>)> {
                 .map(|index| capture_start + index)
                 .unwrap_or(text.len());
             if capture_end > capture_start {
-                return Some((
-                    text[start..capture_end].trim().to_string(),
-                    bracket,
-                ));
+                return Some((text[start..capture_end].trim().to_string(), bracket));
             }
         }
         // Alternative B: FAIL: / ERROR: with the same capture shape.
@@ -406,10 +402,7 @@ fn find_diagnostic(text: &str) -> Option<(String, Option<String>)> {
                     .map(|index| capture_start + index)
                     .unwrap_or(text.len());
                 if capture_end > capture_start {
-                    return Some((
-                        text[start..capture_end].trim().to_string(),
-                        None,
-                    ));
+                    return Some((text[start..capture_end].trim().to_string(), None));
                 }
             }
         }
@@ -440,7 +433,9 @@ fn find_error_path(text: &str) -> String {
         }
         if cursor > capture_start
             && bytes.get(cursor) == Some(&b':')
-            && bytes.get(cursor + 1).is_some_and(|byte| byte.is_ascii_digit())
+            && bytes
+                .get(cursor + 1)
+                .is_some_and(|byte| byte.is_ascii_digit())
         {
             return text[capture_start..cursor].to_string();
         }
@@ -638,7 +633,10 @@ mod tests {
         let finding = &report.findings[0];
         assert_eq!(finding["diagnostic_code"], json!("E0308"));
         assert_eq!(finding["path"], json!("src/main.rs"));
-        assert!(finding["finding_id"].as_str().unwrap().starts_with("finding-"));
+        assert!(finding["finding_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("finding-"));
         // A missing cleanup witness is infrastructure by itself.
         let report = project_verification(&commands(), None, 1, b"", "d", false, None);
         assert_eq!(report.category, "infrastructure");
@@ -652,9 +650,12 @@ mod tests {
             .enumerate()
             .map(|(index, phase)| json!({"index": index, "argv": phase.argv, "returncode": 0}))
             .collect();
-        let evidence =
-            crate::ci_phases::event_stage_evidence("feature/x", &Value::Array(checks.clone()), None)
-                .unwrap();
+        let evidence = crate::ci_phases::event_stage_evidence(
+            "feature/x",
+            &Value::Array(checks.clone()),
+            None,
+        )
+        .unwrap();
         let mut receipt = json!({
             "cleanup_confirmed": true,
             "verification_profile": "forge-sdlc-jenkins-v3",
@@ -680,9 +681,11 @@ mod tests {
             phases.len()
         );
         // A non-v3 profile never observes.
-        assert!(protected_retry_observation("legacy", "feature/x", None, None)
-            .unwrap()
-            .is_none());
+        assert!(
+            protected_retry_observation("legacy", "feature/x", None, None)
+                .unwrap()
+                .is_none()
+        );
         // A tampered stage record is refused.
         let mut bad = receipt.clone();
         bad["failure_kind"] = json!("tests");
