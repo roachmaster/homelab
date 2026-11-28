@@ -85,6 +85,7 @@ class CursorTest(unittest.TestCase):
         self.transport = FakeTransport()
         self.connection = ProxyConnection(ProxyClient(
             "http://127.0.0.1:18087", "coordinator", token="test-token"))
+        self.addCleanup(self.connection.close)
         self.connection.client._request = lambda method, path, body=None: \
             self._fake_request(method, path, body)
 
@@ -194,6 +195,11 @@ class CursorTest(unittest.TestCase):
         cursor = self.cursor()
         cursor.execute("LISTEN forge_agent_jobs")
         self.assertIn("forge_agent_jobs", self.connection._channels)
+        thread = self.connection._notify_thread
+        self.doCleanups()
+        self.assertFalse(thread.is_alive())
+        self.assertIsNone(self.connection._notify_reader)
+        self.assertIsNone(self.connection._notify_writer)
 
     def test_unsupported_statement_raises(self):
         cursor = self.cursor()

@@ -3061,3 +3061,17 @@ recipe catalog document, addressed by digest in forge-work).
 forge-postgres 16/16 unit tests, fmt + check-deps green. Next per the
 full-migration map (~/workspace/deploy-design/full-migration-map.yaml):
 S2 forge-work-worker.
+
+## Proxy-client test cleanup — 2026-11-28
+
+The fake CursorTest connection now registers close as a unittest cleanup. Its
+LISTEN test verifies cleanup stops the actual polling thread and closes both
+notification pipe handles. Previously the immediate-empty fake long poll left a
+daemon spinning through all later backend modules. A bounded isolated
+reproduction left that thread alive and consumed 255ms CPU in 250ms idle time;
+explicit close stopped it. All 70 proxy-client tests pass after the fix. Runtime
+transport, production polling, database scope and CI gates are unchanged.
+
+Jenkins153 is superseded through its normal cancellation/cleanup port; its
+partial results do not qualify this successor. Evidence is retained privately
+under /mnt/data/homelab-build/codex-j153-latency-20261128/.
