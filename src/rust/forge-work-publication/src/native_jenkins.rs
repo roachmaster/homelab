@@ -2716,7 +2716,7 @@ impl NativeJenkinsVerification {
                         }
                         if !report.checks_passed {
                             return Err(NativeRunError::Failure(VerificationFailure {
-                                report: report.into_data(),
+                                report: Box::new(report.into_data()),
                             }));
                         }
                         let plan = self.plan(binding).map_err(NativeRunError::Publication)?;
@@ -2755,7 +2755,7 @@ impl NativeJenkinsVerification {
                         )
                         .map_err(NativeRunError::Publication)?;
                     return Err(NativeRunError::Failure(VerificationFailure {
-                        report: report.into_data(),
+                        report: Box::new(report.into_data()),
                     }));
                 }
             }
@@ -2782,7 +2782,7 @@ impl NativeJenkinsVerification {
             )
             .map_err(NativeRunError::Publication)?;
         Err(NativeRunError::Failure(VerificationFailure {
-            report: report.into_data(),
+            report: Box::new(report.into_data()),
         }))
     }
 
@@ -3412,7 +3412,7 @@ impl ChecksPort for NativeJenkinsVerification {
             Ok(report) => Ok(report.into_data()),
             Err(NativeRunError::Failure(failure)) => Err(failure),
             Err(NativeRunError::Publication(error)) => Err(VerificationFailure {
-                report: funnel_report(error.code()).into_data(),
+                report: Box::new(funnel_report(error.code()).into_data()),
             }),
         }
     }

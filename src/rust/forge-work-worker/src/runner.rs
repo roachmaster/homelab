@@ -126,6 +126,7 @@ pub struct InvocationContexts {
 }
 
 /// Optional run-time callbacks.
+#[derive(Default)]
 pub struct RunCallbacks {
     /// Persists one accepted public progress report.
     pub report_progress: Option<crate::progress::ProgressCallback>,
@@ -133,16 +134,6 @@ pub struct RunCallbacks {
     pub report_activity: Option<Box<dyn FnMut()>>,
     /// Seconds left on the database deadline, if known.
     pub deadline_hint: Option<Box<dyn FnMut() -> Option<f64>>>,
-}
-
-impl Default for RunCallbacks {
-    fn default() -> Self {
-        RunCallbacks {
-            report_progress: None,
-            report_activity: None,
-            deadline_hint: None,
-        }
-    }
 }
 
 fn execution(outcome: &str, summary: &str) -> WorkerError {
@@ -258,8 +249,8 @@ impl CommandRunnerProvider {
         let mut witness = identity.clone();
         witness["attempt_id"] = serde_json::json!(attempt_uuid);
         witness["state"] = serde_json::json!("pending_scope_or_inode_cleanup");
-        let parent = crate::native_auth::open_directory(&directory)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let parent =
+            crate::native_auth::open_directory(&directory).map_err(std::io::Error::other)?;
         let witness_name = format!("{attempt_uuid}.json");
         let fd = nix::fcntl::openat(
             &parent,
@@ -373,9 +364,12 @@ impl CommandRunnerProvider {
         let pinned_hex: String = pinned_hash.iter().map(|b| format!("{b:02x}")).collect();
         let mut session: Option<SessionSelection> = None;
         if backend == "antigravity" {
-            if self.sessions.is_some() && lease.workflow_review_id.is_none() {
+            if let Some(sessions) = self
+                .sessions
+                .as_mut()
+                .filter(|_| lease.workflow_review_id.is_none())
+            {
                 let git: &mut dyn GitRunner = &mut *self.git;
-                let sessions = self.sessions.as_mut().unwrap();
                 session = Some(
                     sessions
                         .select(lease, workspace, &pinned_hex, git)
@@ -434,7 +428,7 @@ impl CommandRunnerProvider {
                 &serde_json::to_string(lease.defect.as_ref().unwrap_or(&serde_json::Value::Null))
                     .unwrap_or_default(),
             );
-            prompt.push_str("\n");
+            prompt.push('\n');
             prompt.push_str(DEFECT_TRIAGE);
         }
         prompt.push_str("\n\nAGENT BRANCH AND CACHE RULES: ");
@@ -794,10 +788,11 @@ impl CommandRunnerProvider {
                     peer_file.clone(),
                     peer_feedback_file.clone(),
                     external_file.clone(),
-                ] {
-                    if let Some(path) = path {
-                        note_paths.push(path);
-                    }
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    note_paths.push(path);
                 }
                 note_paths.extend(build_files.iter().cloned());
                 if progress {
@@ -891,10 +886,11 @@ impl CommandRunnerProvider {
             (argv, prompt.into_bytes(), external_sandbox)
         };
         let mut readonly_files: Vec<PathBuf> = Vec::new();
-        for path in [feedback_file, peer_file, peer_feedback_file, external_file] {
-            if let Some(path) = path {
-                readonly_files.push(path);
-            }
+        for path in [feedback_file, peer_file, peer_feedback_file, external_file]
+            .into_iter()
+            .flatten()
+        {
+            readonly_files.push(path);
         }
         readonly_files.extend(build_files);
         if transport.is_some() && progress {
@@ -1530,8 +1526,9 @@ impl CommandRunnerProvider {
                                         if let Some(activity) = &mut callbacks.report_activity {
                                             activity();
                                         }
-                                        if !stderr && invocation.transport.is_some() {
-                                            let transport = invocation.transport.as_mut().unwrap();
+                                        if let Some(transport) =
+                                            invocation.transport.as_mut().filter(|_| !stderr)
+                                        {
                                             match transport.feed(&data) {
                                                 Ok(output) => {
                                                     if !output.is_empty() {

@@ -107,7 +107,6 @@ fn verify_staged_file(
         return false;
     }
     use std::io::Read;
-    use std::os::fd::AsFd;
     let mut file = std::fs::File::from(fd);
     let mut content = Vec::new();
     if file.read_to_end(&mut content).is_err() {

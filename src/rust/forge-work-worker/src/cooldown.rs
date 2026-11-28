@@ -326,8 +326,7 @@ impl CooldownPort for ProviderCooldown {
 
 impl ProviderCooldown {
     fn record_inner(&self, lease: &Lease, diagnostic: &Value) -> Result<(), WorkerError> {
-        forge_usage::diagnostics::quota_summary(diagnostic)
-            .map_err(|error| WorkerError::protocol(error))?;
+        forge_usage::diagnostics::quota_summary(diagnostic).map_err(WorkerError::protocol)?;
         let profile = &lease.agent_profile;
         let model = lease
             .recipe

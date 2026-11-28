@@ -58,9 +58,7 @@ pub fn canonical_profile_slug(profile_alias: &str) -> Result<String, ConfigError
         .to_string();
     if slug.len() > 64 {
         slug.truncate(64);
-        slug = slug
-            .trim_end_matches(|c| c == '.' || c == '_' || c == '-')
-            .to_string();
+        slug = slug.trim_end_matches(['.', '_', '-']).to_string();
     }
     let valid = !slug.is_empty()
         && slug
@@ -231,7 +229,7 @@ impl WorkerProfile {
         branch: Option<String>,
     ) -> Result<WorkerProfile, ConfigError> {
         let execution_enabled =
-            execution_enabled.unwrap_or_else(|| !matches!(backend.as_str(), "grok" | "muse"));
+            execution_enabled.unwrap_or(!matches!(backend.as_str(), "grok" | "muse"));
         let branch = match branch {
             None => default_agent_branch(&alias)?,
             Some(branch) => validate_profile_branch(&alias, &branch)?,

@@ -157,7 +157,7 @@ fn absolute_path(value: &Value) -> Result<PathBuf, ConfigError> {
     let path = PathBuf::from(text);
     if !path.is_absolute()
         || path.components().any(|c| c.as_os_str() == "..")
-        || path == PathBuf::from("/")
+        || path == std::path::Path::new("/")
     {
         return Err(ConfigError::new(
             "Coding worker paths must be absolute and specific",
@@ -604,64 +604,6 @@ pub fn verify_recipe(config: &WorkerConfig, lease: &crate::lease::Lease) -> bool
     recipe == &expected
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample() -> Value {
-        serde_json::json!({
-            "worker_id": "worker-1",
-            "owner": "forge",
-            "database": {"host": "/run/postgresql", "port": 5432, "name": "forge_agent", "user": "forge_coding_worker"},
-            "account": {"user": "forgeqa", "uid": 1001, "gid": 1001, "home": "/home/forgeqa"},
-            "workspace_root": "/srv/forge/workspaces",
-            "state_root": "/srv/forge/state",
-            "projects": {"homelab": "/srv/repos/homelab"},
-            "profiles": {
-                "codex-author": {"backend": "codex", "model": "gpt-5", "modes": ["plan", "review"]},
-                "muse-db-primary": {"backend": "muse", "model": "muse-1", "modes": ["plan", "review"], "branch": "feature/muse"}
-            },
-            "binaries": {"codex": "/usr/local/bin/codex", "muse": "/usr/local/bin/muse-cli"}
-        })
-    }
-
-    #[test]
-    fn parses_and_advertises() {
-        let config = parse_config(&sample()).unwrap();
-        assert_eq!(config.policy_digest().len(), 64);
-        // muse defaults execution off; only codex-author advertises.
-        assert_eq!(config.allowed_profiles(), vec!["codex-author".to_string()]);
-        let advertised = config.advertised_profiles();
-        assert_eq!(advertised.len(), 1);
-        assert_eq!(advertised[0].alias, "codex-author");
-        assert_eq!(
-            config.profile("muse-db-primary").unwrap().branch,
-            "feature/muse"
-        );
-        assert_eq!(
-            config.profile("codex-author").unwrap().branch,
-            "forge/agent/codex-author"
-        );
-    }
-
-    #[test]
-    fn rejects_proxy_and_bad_shapes() {
-        let mut with_proxy = sample();
-        with_proxy["database"]["proxy"] =
-            serde_json::json!({"url": "http://x", "token_file": "/t"});
-        assert!(parse_config(&with_proxy).unwrap_err().0.contains("retired"));
-        let mut bad_modes = sample();
-        bad_modes["profiles"]["codex-author"]["modes"] = serde_json::json!(["plan", "plan"]);
-        assert_eq!(
-            parse_config(&bad_modes).unwrap_err().0,
-            "Invalid coding worker modes"
-        );
-        let mut repo_overlap = sample();
-        repo_overlap["projects"]["homelab"] = serde_json::json!("/srv/forge/workspaces/homelab");
-        assert!(parse_config(&repo_overlap).is_err());
-    }
-}
-
 /// Validate direct typed construction too, before selected
 /// factories act (work_worker_config.validated_copy): serialize
 /// the typed config back to the raw document shape and re-parse
@@ -749,4 +691,62 @@ pub fn validated_copy(config: &WorkerConfig) -> Result<WorkerConfig, ConfigError
     let mut parsed = parse_config(&raw)?;
     parsed.source_path = config.source_path.clone();
     Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Value {
+        serde_json::json!({
+            "worker_id": "worker-1",
+            "owner": "forge",
+            "database": {"host": "/run/postgresql", "port": 5432, "name": "forge_agent", "user": "forge_coding_worker"},
+            "account": {"user": "forgeqa", "uid": 1001, "gid": 1001, "home": "/home/forgeqa"},
+            "workspace_root": "/srv/forge/workspaces",
+            "state_root": "/srv/forge/state",
+            "projects": {"homelab": "/srv/repos/homelab"},
+            "profiles": {
+                "codex-author": {"backend": "codex", "model": "gpt-5", "modes": ["plan", "review"]},
+                "muse-db-primary": {"backend": "muse", "model": "muse-1", "modes": ["plan", "review"], "branch": "feature/muse"}
+            },
+            "binaries": {"codex": "/usr/local/bin/codex", "muse": "/usr/local/bin/muse-cli"}
+        })
+    }
+
+    #[test]
+    fn parses_and_advertises() {
+        let config = parse_config(&sample()).unwrap();
+        assert_eq!(config.policy_digest().len(), 64);
+        // muse defaults execution off; only codex-author advertises.
+        assert_eq!(config.allowed_profiles(), vec!["codex-author".to_string()]);
+        let advertised = config.advertised_profiles();
+        assert_eq!(advertised.len(), 1);
+        assert_eq!(advertised[0].alias, "codex-author");
+        assert_eq!(
+            config.profile("muse-db-primary").unwrap().branch,
+            "feature/muse"
+        );
+        assert_eq!(
+            config.profile("codex-author").unwrap().branch,
+            "forge/agent/codex-author"
+        );
+    }
+
+    #[test]
+    fn rejects_proxy_and_bad_shapes() {
+        let mut with_proxy = sample();
+        with_proxy["database"]["proxy"] =
+            serde_json::json!({"url": "http://x", "token_file": "/t"});
+        assert!(parse_config(&with_proxy).unwrap_err().0.contains("retired"));
+        let mut bad_modes = sample();
+        bad_modes["profiles"]["codex-author"]["modes"] = serde_json::json!(["plan", "plan"]);
+        assert_eq!(
+            parse_config(&bad_modes).unwrap_err().0,
+            "Invalid coding worker modes"
+        );
+        let mut repo_overlap = sample();
+        repo_overlap["projects"]["homelab"] = serde_json::json!("/srv/forge/workspaces/homelab");
+        assert!(parse_config(&repo_overlap).is_err());
+    }
 }

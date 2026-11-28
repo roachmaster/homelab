@@ -39,7 +39,7 @@ pub fn sha1_hex(data: &[u8]) -> String {
             w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
         }
         let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
-        for i in 0..80 {
+        for (i, word) in w.iter().enumerate() {
             let (f, k) = match i {
                 0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
                 20..=39 => (b ^ c ^ d, 0x6ED9EBA1),
@@ -51,7 +51,7 @@ pub fn sha1_hex(data: &[u8]) -> String {
                 .wrapping_add(f)
                 .wrapping_add(e)
                 .wrapping_add(k)
-                .wrapping_add(w[i]);
+                .wrapping_add(*word);
             e = d;
             d = c;
             c = b.rotate_left(30);

@@ -98,16 +98,18 @@ fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
 
 fn fail_report(checks: &[Vec<String>], code: &str) -> VerificationFailure {
     VerificationFailure {
-        report: project_verification(
-            checks,
-            Some(code),
-            -1,
-            b"",
-            &format!("{:x}", Sha256::digest(b"")),
-            false,
-            None,
-        )
-        .into_data(),
+        report: Box::new(
+            project_verification(
+                checks,
+                Some(code),
+                -1,
+                b"",
+                &format!("{:x}", Sha256::digest(b"")),
+                false,
+                None,
+            )
+            .into_data(),
+        ),
     }
 }
 
@@ -532,13 +534,13 @@ impl IsolatedCheckRunner {
                     None,
                 );
                 return Err(VerificationFailure {
-                    report: report.into_data(),
+                    report: Box::new(report.into_data()),
                 });
             }
         }
         if failure.is_some() {
             return Err(VerificationFailure {
-                report: outcome.into_data(),
+                report: Box::new(outcome.into_data()),
             });
         }
         Ok(outcome)

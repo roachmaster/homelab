@@ -601,7 +601,7 @@ impl ReviewWorker {
         state.stage = "checks";
         let mut report = match self.checks.run(&check_job, &repository, &guard.lost) {
             Ok(report) => report,
-            Err(failure) => failure.report,
+            Err(failure) => *failure.report,
         };
         self.git.verify(&repository, &head)?;
         guard.require()?;
@@ -615,29 +615,25 @@ impl ReviewWorker {
             }
         }
         let mut repository = repository;
-        if report.code == "main_ancestor_required"
-            && report.cleanup_confirmed
-            && self.repair_sources.is_some()
-            && delivery_failure.is_some()
-        {
+        let repair = if report.code == "main_ancestor_required" && report.cleanup_confirmed {
+            self.repair_sources.as_mut().zip(delivery_failure.as_ref())
+        } else {
+            None
+        };
+        if let Some((repair_sources, failure)) = repair {
             state.stage = "prepare_delivery_repair";
-            let failure = delivery_failure.take().expect("checked above");
             let build = failure
                 .get("build")
                 .cloned()
                 .ok_or_else(|| ReviewError::other("delivery failure lacks build"))?;
             let mut require = || guard.require();
-            let seed = self
-                .repair_sources
-                .as_mut()
-                .expect("checked above")
-                .prepare_local(
-                    &check_job,
-                    &repository,
-                    native_binding.as_ref(),
-                    &build,
-                    &mut require,
-                )?;
+            let seed = repair_sources.prepare_local(
+                &check_job,
+                &repository,
+                native_binding.as_ref(),
+                &build,
+                &mut require,
+            )?;
             repository = PathBuf::from(str_field(&seed, "repository")?);
             head = str_field(&seed, "candidate_commit")?;
             state.head = Some(head.clone());
@@ -772,8 +768,7 @@ impl ReviewWorker {
         if let Some(binding) = &native_binding {
             insert(&mut manifest, "native_ci", binding.clone());
         }
-        if identity_snapshot.is_some() && head == tested_head {
-            let snapshot = identity_snapshot.as_ref().expect("checked above");
+        if let Some(snapshot) = identity_snapshot.as_ref().filter(|_| head == tested_head) {
             insert(&mut manifest, "version", json!(2));
             let reference = self
                 .native_ci
