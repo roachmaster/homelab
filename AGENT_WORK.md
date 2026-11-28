@@ -1,3 +1,20 @@
+## Independent M32 upgrade preservation with additive M53 metadata — 2026-11-28
+
+On exact basefa77558a, the real PostgreSQL superseding-review upgrade proof failed
+because its whole-task snapshot gained task_kind and defect during M53. This
+correction changes only that test's historical task projection: every old field
+and the complete review/budget/workflow/artifact/event/credential/default/HBA
+comparisons remain intact. A separate query asserts all historical tasks retain
+their count and receive feature/NULL defaults before recovery.
+
+The original failing case reproduced before correction, then passed on owned
+socket-only PostgreSQL16 in8.5s. The complete independent-review module passed
+all14 tests in103.8s with zero skips. The proactive scan found other historical
+whole-task upgrade snapshots already account for M53's additive fields; same-schema
+snapshots and explicit old-column projections need no change. No application,
+SQL, production service, native workspace or root maintenance checkout changed.
+This isolated feature/codex correction is for root review/import; no push occurred.
+
 ## Constrained Grok ACP transport — 2026-11-28
 
 Authorized follow-up to the native headless permission cancellation incident:
