@@ -6,6 +6,7 @@
 pub mod app;
 pub mod auth;
 pub mod backend;
+pub mod composition;
 pub mod config;
 pub mod http;
 pub mod oauth;

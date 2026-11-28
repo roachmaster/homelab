@@ -4,12 +4,8 @@
 
 use std::sync::Arc;
 
-use forge_mcp_db::app::{Authenticator, McpApp};
-use forge_mcp_db::auth::{BearerTokenAuth, FailureLimiter};
-use forge_mcp_db::backend::Backend;
+use forge_mcp_db::composition::AppFactory;
 use forge_mcp_db::config::load_config;
-use forge_mcp_db::oauth::{DualAuth, OAuthServer};
-use forge_mcp_db::presence::{create_provider, NoPresence, PresencePort};
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -43,54 +39,13 @@ fn main() {
             std::process::exit(2);
         }
     };
-    // build_app()
-    let presence: Arc<dyn PresencePort> = match create_provider(&config.presence) {
-        Ok(Some(presence)) => Arc::new(presence),
-        Ok(None) => Arc::new(NoPresence),
-        Err(error) => {
-            eprintln!("presence unavailable: {error}");
+    let app = match AppFactory::new(config.clone()).create() {
+        Ok(app) => Arc::new(app),
+        Err(message) => {
+            eprintln!("{message}");
             std::process::exit(2);
         }
     };
-    let static_auth = Arc::new(BearerTokenAuth::new(&config.token_file));
-    let mut oauth = None;
-    if config.oauth.enabled {
-        match OAuthServer::new(&config.oauth) {
-            Ok(server) => {
-                let server = Arc::new(server);
-                for problem in server.problems() {
-                    eprintln!("OAuth: {problem}");
-                }
-                oauth = Some(server);
-            }
-            Err(error) => {
-                eprintln!("OAuth disabled: cannot open state database: {error}");
-            }
-        }
-    }
-    let auth: Arc<dyn Authenticator> = match &oauth {
-        Some(server) => Arc::new(DualAuth {
-            static_auth: static_auth.clone(),
-            oauth: Some(server.clone()),
-        }),
-        None => static_auth,
-    };
-    let rate = &config.rate_limit;
-    let limiter = Arc::new(FailureLimiter::new(
-        rate.failures,
-        rate.window_seconds,
-        rate.lockout_seconds,
-        rate.global_failures_per_minute,
-    ));
-    let backend = Arc::new(Backend::new(config.dsn.clone(), config.statement_timeout_ms));
-    let app = Arc::new(McpApp::new(
-        config.clone(),
-        auth,
-        backend,
-        limiter,
-        presence,
-        oauth,
-    ));
     if let Some(error) = app.auth.error() {
         eprintln!("token file problem: {error}");
         if check_config {
