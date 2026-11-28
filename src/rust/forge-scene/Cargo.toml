@@ -22,3 +22,4 @@ serde_yaml_ng = "=0.10.0"
 [dev-dependencies]
 forge-core.workspace = true
 forge-foundation.workspace = true
+forge-jobs = { path = "../forge-jobs" }

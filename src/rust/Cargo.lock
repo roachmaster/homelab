@@ -443,6 +443,7 @@ version = "0.1.0"
 dependencies = [
  "forge-core",
  "forge-foundation",
+ "forge-jobs",
  "forge-template",
  "serde",
  "serde_json",
