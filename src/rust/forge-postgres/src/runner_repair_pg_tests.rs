@@ -152,6 +152,56 @@ fn actual_private_repair_uses_normal_admission_atomic_lease_and_queued_receipt()
         config.project_workflow("homelab").unwrap().author_profile,
         "grok-primary"
     );
+    let policy_id = catalog["event"]["projects"][0]["workflow"]["policy_id"].clone();
+    assert!(policy_id.is_string());
+    let mut id_only = stale.clone();
+    id_only["base_revision"] = json!("a".repeat(40));
+    id_only["idempotency_key"] = json!("first-native");
+    id_only
+        .as_object_mut()
+        .unwrap()
+        .remove("workflow_policy_digest");
+    id_only["workflow_policy_id"] = policy_id.clone();
+    let command = decode(WorkDestination::Submit, "fixture", &id_only).unwrap();
+    let (_, replayed) = normal
+        .service
+        .dispatch(WorkDestination::Submit, "fixture", command, None)
+        .unwrap();
+    assert_eq!(replayed["event"]["task_id"], response["event"]["task_id"]);
+    id_only["idempotency_key"] = json!("id-only-new");
+    let command = decode(WorkDestination::Submit, "fixture", &id_only).unwrap();
+    let (_, new) = normal
+        .service
+        .dispatch(WorkDestination::Submit, "fixture", command, None)
+        .unwrap();
+    let id_task = Uuid::parse_str(new["event"]["task_id"].as_str().unwrap()).unwrap();
+    runtime.block_on(async {
+        let admin=cluster.connect("postgres").await.unwrap();
+        let row=admin.query_one("SELECT t.intent_digest,w.snapshot FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w ON w.root_task_id=t.id WHERE t.id=$1",&[&id_task]).await.unwrap();
+        let intent=json!({"project_alias":"homelab","base_revision":"a".repeat(40),"mode":"plan","agent_profile":"grok-primary","prompt":"first catalog recipe","acceptance_criteria":"retained","workflow_policy_id":policy_id});
+        assert_eq!(row.get::<_,String>("intent_digest"),forge_work::execution_policy::sha256_canonical(&intent));
+        assert_eq!(row.get::<_,Value>("snapshot")["author_profile"],"grok-primary");
+    });
+    let mut digest_replay = id_only.clone();
+    digest_replay
+        .as_object_mut()
+        .unwrap()
+        .remove("workflow_policy_id");
+    digest_replay["workflow_policy_digest"] = snapshot["policy_digest"].clone();
+    let command = decode(WorkDestination::Submit, "fixture", &digest_replay).unwrap();
+    assert_eq!(
+        normal
+            .service
+            .dispatch(WorkDestination::Submit, "fixture", command, None)
+            .unwrap()
+            .1["event"]["task_id"],
+        id_task.to_string()
+    );
+    digest_replay["prompt"] = json!("changed intent");
+    let command = decode(WorkDestination::Submit, "fixture", &digest_replay).unwrap();
+    assert!(
+        matches!(normal.service.dispatch(WorkDestination::Submit,"fixture",command,None),Err(WorkError::Rejected{status:409,code}) if code=="idempotency_conflict")
+    );
     // Claim contract failures roll back the *actual* SQL claim and its
     // reservation, rather than committing a task the executor cannot start.
     runtime
@@ -212,4 +262,134 @@ fn actual_private_repair_uses_normal_admission_atomic_lease_and_queued_receipt()
         .unwrap();
     assert_eq!(claimed.task_id, task.to_string());
     cluster.stop();
+}
+
+#[test]
+fn external_admission_and_context_share_task_transaction() {
+    if !pg16_available() {
+        assert_ne!(
+            std::env::var("FORGE_REQUIRE_DISPOSABLE_POSTGRES").as_deref(),
+            Ok("1")
+        );
+        return;
+    }
+    for managed in [false, true] {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut cluster = DisposablePostgresCluster::start().unwrap();
+        let resource = if managed {
+            "forge-external-db-v2"
+        } else {
+            "forge-external-db-v1"
+        };
+        let mut raw = json!({"owner":"external-fixture","allowed_projects":["homelab"],"allowed_modes":["plan","review","implement"],"identity_protocol":"content-v2","profiles":{
+            "muse-db-primary":{"backend":"muse","model":"external-runner","resource_profile":resource,"branch":"feature/muse","execution_enabled":true},
+            "codex-primary":{"backend":"codex","model":"gpt-5","resource_profile":"forge-coding-v10"}
+        }});
+        if managed {
+            raw["external_workflows"] = json!({"homelab":{"author_profile":"muse-db-primary","reviewer_profile":"codex-primary"}});
+        }
+        let config = forge_work::work_config::parse_work_config(&raw).unwrap();
+        let mut pg = PgConfig::new(&config.owner);
+        pg.host = cluster.root.to_string_lossy().into_owned();
+        pg.user = "forge_agent".into();
+        let normal = create_work_service(&config, &pg).unwrap();
+        let mut body = json!({"kind":"work_submit","request_id":"fixture","project_alias":"homelab","base_revision":"a".repeat(40),"mode":"plan","agent_profile":"muse-db-primary","prompt":"owned external admission","acceptance_criteria":"preserve scoped context","idempotency_key":"external-first"});
+        if managed {
+            body["workflow_policy_digest"] = config
+                .external_workflow("homelab")
+                .unwrap()
+                .snapshot(&config, &config.native_policy_ref())
+                .unwrap()["policy_digest"]
+                .clone();
+        }
+        // Missing protected service scope rolls back task, policy/identity rows,
+        // events and assignment together (no separate coordinator discovers it).
+        let command = decode(WorkDestination::Submit, "fixture", &body).unwrap();
+        assert!(normal
+            .service
+            .dispatch(WorkDestination::Submit, "fixture", command, None)
+            .is_err());
+        runtime.block_on(async {
+            let admin=cluster.connect("postgres").await.unwrap();
+            assert_eq!(admin.query_one("SELECT count(*) FROM forge_agent.coding_tasks",&[]).await.unwrap().get::<_,i64>(0),0);
+            assert_eq!(admin.query_one("SELECT count(*) FROM forge_external_agent.assignments",&[]).await.unwrap().get::<_,i64>(0),0);
+            admin.batch_execute("CREATE ROLE fixture_muse LOGIN; INSERT INTO forge_external_agent.scope_grants(external_role,service_role,owner_id,project_alias,profile_alias,enabled) VALUES('fixture_muse','forge_agent','external-fixture','homelab','muse-db-primary',true);").await.unwrap();
+        });
+        let command = decode(WorkDestination::Submit, "fixture", &body).unwrap();
+        let (_, response) = normal
+            .service
+            .dispatch(WorkDestination::Submit, "fixture", command, None)
+            .unwrap();
+        let task = Uuid::parse_str(response["event"]["task_id"].as_str().unwrap()).unwrap();
+        let command = decode(WorkDestination::Submit, "fixture", &body).unwrap();
+        assert_eq!(
+            normal
+                .service
+                .dispatch(WorkDestination::Submit, "fixture", command, None)
+                .unwrap()
+                .1,
+            response
+        );
+        runtime.block_on(async {
+            let admin=cluster.connect("postgres").await.unwrap();
+            let row=admin.query_one("SELECT auto_repair,workflow_required,workflow_id FROM forge_agent.coding_tasks WHERE id=$1",&[&task]).await.unwrap();
+            assert!(!row.get::<_,bool>("auto_repair")); assert!(!row.get::<_,bool>("workflow_required")); assert!(row.get::<_,Option<Uuid>>("workflow_id").is_none());
+            assert_eq!(admin.query_one("SELECT count(*) FROM forge_agent.coding_workflows",&[]).await.unwrap().get::<_,i64>(0),0);
+            assert_eq!(admin.query_one("SELECT count(*) FROM forge_external_agent.assignments WHERE task_id=$1",&[&task]).await.unwrap().get::<_,i64>(0),1);
+            if managed {
+                let row=admin.query_one("SELECT c.content,c.sha256,w.state FROM forge_external_agent.assignments a JOIN forge_external_workflow.contexts c USING(assignment_id) JOIN forge_external_workflow.tasks l ON l.task_id=a.task_id JOIN forge_external_workflow.workflows w USING(workflow_id) WHERE a.task_id=$1",&[&task]).await.unwrap();
+                let content:String=row.get("content");
+                let context:Value=serde_json::from_str(&content).unwrap(); assert_eq!(context["stage"],"plan"); assert_eq!(context["request_prompt"],"owned external admission");
+                assert_eq!(row.get::<_,String>("sha256"),forge_work::canonical::sha256_hex(content.as_bytes()));
+                assert_eq!(row.get::<_,Value>("state")["identity_protocol"],"content-v2");
+            } else {
+                assert_eq!(admin.query_one("SELECT count(*) FROM forge_external_workflow.tasks",&[]).await.unwrap().get::<_,i64>(0),0);
+            }
+        });
+        if managed {
+            let workflow = runtime.block_on(async {
+                cluster
+                    .connect("postgres")
+                    .await
+                    .unwrap()
+                    .query_one(
+                        "SELECT workflow_id FROM forge_external_workflow.tasks WHERE task_id=$1",
+                        &[&task],
+                    )
+                    .await
+                    .unwrap()
+                    .get::<_, Uuid>(0)
+            });
+            let mut defect = body.clone();
+            defect["idempotency_key"] = json!("external-discovered-defect");
+            defect["task_kind"] = json!("defect");
+            defect["defect"] = json!({"summary":"Scoped external observation","location":{"repo_path":"src/rust/forge-work/src/work_api.rs","function":"submit","commit":"a".repeat(40)},"observed_behavior":"An owned fixture observation","expected_behavior":"Preserve the discovered workflow reference","severity":"high","evidence":"Disposable database fixture","discovering_task_id":task.to_string(),"discovering_workflow_id":workflow.to_string()});
+            let command = decode(WorkDestination::Submit, "fixture", &defect).unwrap();
+            let (_, accepted) = normal
+                .service
+                .dispatch(WorkDestination::Submit, "fixture", command, None)
+                .unwrap();
+            let defect_task =
+                Uuid::parse_str(accepted["event"]["task_id"].as_str().unwrap()).unwrap();
+            runtime.block_on(async {
+                let admin=cluster.connect("postgres").await.unwrap();
+                let content:String=admin.query_one("SELECT c.content FROM forge_external_agent.assignments a JOIN forge_external_workflow.contexts c USING(assignment_id) WHERE a.task_id=$1",&[&defect_task]).await.unwrap().get(0);
+                assert_eq!(serde_json::from_str::<Value>(&content).unwrap()["task_kind"],"defect");
+            });
+            defect["idempotency_key"] = json!("external-forged-reference");
+            defect["defect"]["discovering_workflow_id"] = json!(Uuid::new_v4().to_string());
+            let command = decode(WorkDestination::Submit, "fixture", &defect).unwrap();
+            assert!(matches!(
+                normal
+                    .service
+                    .dispatch(WorkDestination::Submit, "fixture", command, None),
+                Err(WorkError::Rejected { status: 400, .. })
+            ));
+        }
+        cluster.stop();
+    }
 }

@@ -1831,6 +1831,7 @@ impl WorkApiService {
         match self.call(
             correlation,
             WorkPayload::Submit(SubmitRequest {
+                workflow_policy_id: command.workflow_policy_id,
                 delivery_admission: command.delivery_admission.clone(),
                 project_alias: command.project_alias.clone(),
                 base_revision: command.base_revision.clone(),

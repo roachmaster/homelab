@@ -85,6 +85,40 @@ struct ExternalTxImpl<'x, 't, 'c, 'o> {
     owner: &'o str,
 }
 
+/// Enqueue through the existing external port in the caller's admission
+/// transaction. The selected workflow object is private to this operation;
+/// no coordinator, dispatcher or provider loop is started here.
+pub(crate) fn enqueue_work_admission(
+    tx: &mut Tx<'_, '_>,
+    store: &crate::work_store::PgWorkStore,
+    project: &str,
+    task: Uuid,
+    profile: &str,
+) -> Result<Uuid, WorkError> {
+    let config = store
+        .catalog
+        .as_ref()
+        .ok_or_else(|| WorkError::rejected(503, "unavailable"))?;
+    if !config
+        .profile(profile)
+        .is_some_and(|profile| profile.is_external() && profile.execution_enabled)
+    {
+        return Err(WorkError::rejected(503, "unavailable"));
+    }
+    let mut handle = ExternalTxImpl {
+        tx,
+        owner: &store.owner,
+    };
+    if let Some(workflow) =
+        crate::runner_composition::build_external_store(config, store.factory.config())?
+    {
+        if workflow.manages(project) {
+            return workflow.admit(&mut handle, project, task);
+        }
+    }
+    handle.enqueue(project, task)
+}
+
 type Params = Vec<Box<dyn ToSql + Sync + Send>>;
 
 fn refs(params: &Params) -> Vec<&(dyn ToSql + Sync)> {

@@ -43,6 +43,7 @@ impl ReviewPolicy {
 /// cap, and the review policy - the WorkStore's configuration, with no
 /// behavior of its own beyond session acquisition.
 pub struct PgWorkStore {
+    pub(crate) catalog: Option<forge_work::work_config::WorkApiConfig>,
     pub(crate) delivery_enabled: bool,
     pub(crate) recipes: Vec<forge_work::pinned_recipe::PinnedRecipe>,
     /// The factory fresh sessions are created through, per operation.
@@ -67,6 +68,7 @@ impl PgWorkStore {
         repair_policy: ReviewPolicy,
     ) -> PgWorkStore {
         PgWorkStore {
+            catalog: None,
             delivery_enabled: false,
             recipes: Vec::new(),
             factory,
@@ -87,6 +89,7 @@ impl PgWorkStore {
                 "Recipe catalog scope mismatch",
             ));
         }
+        self.catalog = Some(config.clone());
         self.recipes = config
             .profiles
             .iter()

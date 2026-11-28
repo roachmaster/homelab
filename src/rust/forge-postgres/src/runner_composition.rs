@@ -1250,7 +1250,7 @@ impl WorkflowThreadStart {
     }
 }
 
-fn build_external_store(
+pub(crate) fn build_external_store(
     config: &WorkApiConfig,
     pg: &PgConfig,
 ) -> Result<Option<Rc<ExternalWorkflowStore>>, WorkError> {

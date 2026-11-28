@@ -3279,3 +3279,31 @@ full Rust runtime cutover readiness.
 Strict all-target/all-feature Clippy for forge-work, forge-work-worker, forge-postgres
 and forge-host also passed with `-D warnings`; selected formatting and diff checks
 passed. Logs remain outside source under `/mnt/data/homelab-build/rust-repair-*`.
+
+### 2026-11-28 — Rust external admission and content-v2 submission parity
+
+The normal API now retains an explicitly presented workflow policy ID in the
+existing canonical submit intent and enrolls native workflows from the resolved
+snapshot, including ID-only requests. Replays tolerate only the same task's
+presented/absent/frozen policy fence forms; changes to task intent still conflict.
+Legacy digest-only intent bytes are unchanged. No identity or gate format changed.
+
+External profiles enqueue through the existing scoped external port inside the
+normal task transaction. Managed v2 projects enroll their external workflow and
+store its exact hashed execution context there; legacy v1 assignments retain
+their original transport. Neither creates a native workflow or enables native
+repair. Missing scope rolls back admission entirely. External workflow defect
+references retain owner/project checks, including the managed external table.
+The external policy parser now handles its documented optional defaults without
+panicking, and refuses mistyped defaults.
+
+Validation: 139 forge-work and 40 forge-postgres library tests passed, zero
+ignored; final focused owned-PG admission tests passed again with discovered
+external defect context/refusal coverage. These exercise actual normal API
+composition, both external versions, missing-grant rollback, one-assignment
+replay, native ID-only workflow creation and exact canonical ID intent,
+digest/ID replay and changed-intent denial. Strict all-target/all-feature Clippy
+for both crates and selected format/diff checks passed. Logs are
+`/mnt/data/homelab-build/rust-external-admission-*`. No production model, service,
+SQL, role, branch publication or deployment action was performed. Portal read
+projection parity is still a separate required cutover qualification.

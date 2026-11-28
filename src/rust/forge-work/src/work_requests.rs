@@ -42,6 +42,7 @@ impl DeliveryAdmission {
 /// recipe digest comes from the frozen catalog) and actor-carrying.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubmitRequest {
+    pub workflow_policy_id: Option<Uuid>,
     pub delivery_admission: Option<DeliveryAdmission>,
     pub project_alias: String,
     pub base_revision: String,
