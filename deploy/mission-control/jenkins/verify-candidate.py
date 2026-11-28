@@ -91,6 +91,7 @@ V2_PROTECTED_PATHS = frozenset({
     'deploy/mission-control/portal_release_actor.py',
     'deploy/mission-control/agent-runner/work_api.py',
     'deploy/mission-control/agent-runner/work_defect.py',
+    'deploy/mission-control/agent-runner/work_grok_acp.py',
     'deploy/mission-control/agent-runner/work_config.py',
     'deploy/mission-control/agent-runner/work_store.py',
     'deploy/mission-control/agent-runner/work_workflow.py',

@@ -1,3 +1,38 @@
+## Constrained Grok ACP transport — 2026-11-28
+
+Authorized follow-up to the native headless permission cancellation incident:
+a separately selected ACP1 client now makes bounded one-call native permission
+decisions from frozen task mode, acquired workspace and explicit current notes.
+The legacy headless selection remains the default. New Grok worker config alone
+can select `grok_transport: acp-constrained-v1`; API recipes/catalogs do not change.
+
+The existing supervisor and inode-bound native-auth staging/cleanup remain in
+control. ACP has no client filesystem/terminal RPC, leader, G1, external tools or
+supplied MCP servers. Native bare ask rules remove automatic read/shell bypass;
+only provided allow_once/reject_once options are selected. Plan/review remain
+read-only except the exact immutable progress helper. Implementation retains
+workspace edit/build/test capability under the existing OS boundary. Unknown
+operations receive a one-call denial and fixed direction, not turn cancellation.
+Git config is a closed harmless subset, including protection against filters,
+signature verifiers, includes, fsmonitor and inline-section syntax. Host path
+ancestors and descendants reject symlinks. Native tool input and request/session
+identity cannot change after binding.
+
+Both protected maps and setup-runner include work_grok_acp.py. No SQL migration,
+historical receipt/config rewrite, live service change or old-task revival was
+performed. Root must qualify and stage the matching verifier/runtime/config
+cohort. Final prompt ACP usage projects full input/cache into existing disjoint
+accounting buckets; notification step spend grants no usage authority. Native
+PermissionCancelled is blocked_permission; real interruption remains cancelled.
+
+102 focused ACP/Grok/executor/progress/CI-contract/transport tests passed; the
+ACP module contributes31 cases. setup-runner shell syntax and diff checks passed.
+Evidence: /mnt/data/homelab-build/grok-permission-matcher-20261128. Installed1.0.92
+accepted the selected ACP flags and initialize-only in an empty HOME/network-disabled
+namespace with cwd set to that isolated HOME, then exited0. Offline inspect loaded12 permission rules and managed
+MCP lockdown. No session/new, prompt, authenticate, model or quota call was sent
+to the real CLI; fake-server tests are explicitly not production model proof.
+
 ## Grok native permission-cancellation containment — 2026-11-28
 
 Main137's automatic repairbf84a2c4 began on Grok and was cancelled by the native
@@ -10,8 +45,8 @@ Those old tasks/events remain unchanged and are not revived.
 Source now distinguishes a bounded, known-call native permission refusal plus
 cancelled terminal outcome as blocked_permission; real interrupted runs remain
 cancelled. Model prose and unbound failures cannot acquire a permission cause.
-This is truthful containment, not an upstream matcher fix. A constrained ACP
-transport/broker is being prepared separately; do not enable always-approve or
+This is truthful containment, not an upstream matcher fix. The separately reviewed ACP
+transport below provides the constrained successor; do not enable always-approve or
 guess that changing an allow rule repairs the installed headless client.
 
 ## Real-browser and upgrade corrections — 2026-11-28

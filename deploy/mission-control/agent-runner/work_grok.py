@@ -214,6 +214,8 @@ class GrokEvents:
             if stop!='end_turn' or event.get('error') is not None:
                 self.failure=stop if isinstance(stop,str) else 'failed'
                 self.cancelled=stop=='cancelled'
+            if self.cancelled and event.get('cancellationCategory')=='permission_cancelled':
+                self.permission_cancelled=True
             incomplete=event.get('usage_is_incomplete',False)
             if type(incomplete)is not bool:raise ValueError('Invalid Grok accounting coverage')
             self.usage=None if incomplete else self._usage(event.get('usage'))
