@@ -2,14 +2,14 @@ use chrono::{DateTime, Utc};
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
-use crate::work_common::{col, run_tx, work_err};
+use crate::work_common::{col, run_read_tx, work_err};
 use crate::work_read_scope::list_scope;
 use crate::work_rows::{filed_defects, summary};
 use crate::work_store::PgWorkStore;
 
 /// The raw statuses list_tasks accepts as a filter (Python's
 /// list_tasks validation), alongside the scope names.
-const RAW_STATUSES: [&str; 10] = [
+const RAW_STATUSES: [&str; 11] = [
     "queued",
     "running",
     "cancel_requested",
@@ -20,25 +20,21 @@ const RAW_STATUSES: [&str; 10] = [
     "needs_reconcile",
     "quota_blocked",
     "blocked_permission",
+    "blocked_auth",
 ];
 
 /// The scope filters list_tasks accepts (TASK_SCOPES in Python).
 const SCOPES: [&str; 4] = ["active", "attention", "history", "all"];
 
-/// WorkReadPort::list_tasks: validates the limit (1..=50) and the
-/// filter (a raw status or a scope), then pages. Scope filters
-/// delegate to the classified path in work_read_scope. The raw path
-/// runs the proxy's tasks_page query verbatim with
-/// exclude_external=false (the native v1 adapter has no
-/// external-workflow configuration); delivery_visible is accepted
-/// and ignored in v1 (no delivery configuration).
+/// Preserve legacy raw-status cursor order; scope filters classify full roots
+/// and count them before activity-ordered pagination in a coherent snapshot.
 pub(crate) fn list_tasks(
     store: &PgWorkStore,
     project_alias: &str,
     status_filter: Option<&str>,
     limit: i64,
     cursor_task_id: Option<Uuid>,
-    _delivery_visible: bool,
+    delivery_visible: bool,
     task_kind_filter: Option<&str>,
 ) -> Result<forge_work::work_types::TaskPage, forge_work::WorkError> {
     let invalid = || forge_work::WorkError::rejected(400, "invalid_request");
@@ -63,13 +59,14 @@ pub(crate) fn list_tasks(
                 limit,
                 cursor_task_id,
                 task_kind_filter,
+                delivery_visible,
             );
         }
         if !RAW_STATUSES.contains(&filter) {
             return Err(invalid());
         }
     }
-    run_tx(store, |tx| {
+    run_read_tx(store, |tx| {
         let mut anchor_created: Option<DateTime<Utc>> = None;
         if let Some(cursor) = cursor_task_id {
             let params: &[&(dyn ToSql + Sync)] = &[&store.owner, &project_alias, &cursor];
@@ -85,7 +82,10 @@ pub(crate) fn list_tasks(
                     .map_err(|e| forge_work::WorkError::store(e.to_string()))?,
             );
         }
-        let exclude_external = false;
+        let exclude_external = store
+            .catalog
+            .as_ref()
+            .is_some_and(|c| c.external_workflow(project_alias).is_some());
         let fetch = limit + 1;
         let params: &[&(dyn ToSql + Sync)] = &[
             &store.owner,
@@ -109,10 +109,18 @@ pub(crate) fn list_tasks(
             let mut item = summary(row)?;
             item.filed_defects = filed_defects(
                 tx,
-                &store.owner,
+                store,
                 project_alias,
                 item.task_id,
                 col::<Option<Uuid>>(row, "workflow_id")?,
+            )?;
+            enrich(
+                tx,
+                store,
+                project_alias,
+                &mut item,
+                col::<Option<Uuid>>(row, "workflow_id")?,
+                delivery_visible,
             )?;
             items.push(item);
         }
@@ -121,6 +129,41 @@ pub(crate) fn list_tasks(
         } else {
             None
         };
-        Ok(forge_work::work_types::TaskPage { items, next_cursor })
+        Ok(forge_work::work_types::TaskPage {
+            items,
+            next_cursor,
+            scope_counts: None,
+        })
     })
+}
+
+pub(crate) fn enrich(
+    tx: &mut crate::tx::Tx<'_, '_>,
+    store: &PgWorkStore,
+    project: &str,
+    item: &mut forge_work::TaskSummary,
+    workflow: Option<Uuid>,
+    delivery_visible: bool,
+) -> Result<(), forge_work::WorkError> {
+    item.retry_event = crate::work_projection::retry(tx, store, project, item.task_id, workflow)?;
+    if store.delivery_enabled && delivery_visible && item.delivery.is_none() {
+        item.delivery = tx
+            .call_json(
+                "SELECT forge_agent.delivery_retry_projection($1,$2)",
+                &[&project, &item.task_id],
+            )
+            .map_err(work_err)?;
+    }
+    let (external, _) = crate::external_adapter::project_work_task(
+        tx,
+        store,
+        project,
+        item.task_id,
+        &item.agent_profile,
+    )?;
+    if let Some(external) = external {
+        item.workflow_required = Some(true);
+        item.workflow_phase = external["phase"].as_str().map(str::to_string);
+    }
+    Ok(())
 }

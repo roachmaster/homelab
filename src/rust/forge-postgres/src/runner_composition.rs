@@ -1545,3 +1545,7 @@ mod runner_repair_pg_tests;
 #[cfg(all(test, feature = "test-support"))]
 #[path = "runner_cicd_pg_tests.rs"]
 mod runner_cicd_pg_tests;
+
+#[cfg(all(test, feature = "test-support"))]
+#[path = "runner_list_pg_tests.rs"]
+mod runner_list_pg_tests;

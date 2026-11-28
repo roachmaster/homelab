@@ -32,33 +32,38 @@ pub(crate) fn summary(
         filed_defects: Vec::new(),
         workflow_required: optional_column(row, "workflow_required")?,
         workflow_phase: optional_column(row, "workflow_phase")?,
+        updated_at: optional_column::<DateTime<Utc>>(row, "list_updated_at")?.map(format_ts),
+        workflow_enabled: optional_column(row, "workflow_enabled")?,
+        delivery: optional_column(row, "delivery")?,
+        retry_event: None,
     })
 }
 
-/// WorkStore._filed_defects (native form): the defect tasks that
-/// name this task - directly, through its workflow, or through a
-/// workflow member - as their discovering task or workflow.
-/// Python's external-workflow fallback (the
-/// forge_external_workflow.tasks link and membership) is not
-/// available to this adapter, which carries no external-workflow
-/// configuration: the recorded v1 boundary, shared with the
-/// submit-side discovering checks.
+/// Scoped defects discovered directly or through a native/external workflow family.
 pub(crate) fn filed_defects(
     tx: &mut crate::tx::Tx<'_, '_>,
-    owner: &str,
+    store: &crate::work_store::PgWorkStore,
     project_alias: &str,
     task_id: Uuid,
-    workflow_id: Option<Uuid>,
+    mut workflow_id: Option<Uuid>,
 ) -> Result<Vec<Value>, forge_work::WorkError> {
+    let owner = &store.owner;
+    let external = store
+        .catalog
+        .as_ref()
+        .is_some_and(|c| c.external_workflow(project_alias).is_some());
+    if external && workflow_id.is_none() {
+        workflow_id=tx.call_scalar("SELECT workflow_id FROM forge_external_workflow.tasks WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3",&[&owner,&project_alias,&task_id]).map_err(work_err)?;
+    }
     let task_key = task_id.to_string();
     let workflow_key = workflow_id.map(|id| id.to_string());
     let params: &[&(dyn ToSql + Sync)] = &[&owner, &project_alias, &task_key, &workflow_key];
-    let rows = tx
-        .query_rows(
-            "SELECT id AS task_id, title, defect->>'severity' AS severity FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND task_kind='defect' AND (defect->>'discovering_task_id'=$3 OR ($4::text IS NOT NULL AND defect->>'discovering_workflow_id'=$4) OR EXISTS (SELECT 1 FROM forge_agent.coding_tasks member WHERE member.owner_id=coding_tasks.owner_id AND member.project_alias=coding_tasks.project_alias AND member.id=(coding_tasks.defect->>'discovering_task_id')::uuid AND member.workflow_id=$4::uuid)) AND parent_task_id IS NULL ORDER BY created_at, id LIMIT 50",
-            params,
-        )
-        .map_err(work_err)?;
+    let query = if external {
+        r#"SELECT id AS task_id,title,defect->>'severity' AS severity FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND task_kind='defect' AND (defect->>'discovering_task_id'=$3::text OR ($4::text IS NOT NULL AND defect->>'discovering_workflow_id'=$4::text) OR EXISTS (SELECT 1 FROM forge_agent.coding_tasks member WHERE member.owner_id=coding_tasks.owner_id AND member.project_alias=coding_tasks.project_alias AND member.id=(coding_tasks.defect->>'discovering_task_id')::uuid AND (member.workflow_id=$4::uuid OR EXISTS (SELECT 1 FROM forge_external_workflow.tasks membership WHERE membership.owner_id=member.owner_id AND membership.project_alias=member.project_alias AND membership.task_id=member.id AND membership.workflow_id=$4::uuid)))) AND parent_task_id IS NULL AND NOT forge_external_workflow_api.is_internal(owner_id,project_alias,id) ORDER BY created_at,id LIMIT 50"#
+    } else {
+        "SELECT id AS task_id, title, defect->>'severity' AS severity FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND task_kind='defect' AND (defect->>'discovering_task_id'=$3 OR ($4::text IS NOT NULL AND defect->>'discovering_workflow_id'=$4) OR EXISTS (SELECT 1 FROM forge_agent.coding_tasks member WHERE member.owner_id=coding_tasks.owner_id AND member.project_alias=coding_tasks.project_alias AND member.id=(coding_tasks.defect->>'discovering_task_id')::uuid AND member.workflow_id=$4::uuid)) AND parent_task_id IS NULL ORDER BY created_at, id LIMIT 50"
+    };
+    let rows = tx.query_rows(query, params).map_err(work_err)?;
     let mut items = Vec::new();
     for row in &rows {
         let store = |e: tokio_postgres::Error| forge_work::WorkError::store(e.to_string());

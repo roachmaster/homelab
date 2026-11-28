@@ -44,6 +44,14 @@ pub struct TaskSummary {
     pub workflow_required: Option<bool>,
     /// The workflow's current phase, when the projection carries it.
     pub workflow_phase: Option<String>,
+    /// Scope activity time; absent for legacy raw-status pages.
+    pub updated_at: Option<String>,
+    /// Current workflow automation switch, when available.
+    pub workflow_enabled: Option<bool>,
+    /// Protected delivery projection, when configured and requested.
+    pub delivery: Option<Value>,
+    /// Retained retry budget projection.
+    pub retry_event: Option<Value>,
 }
 
 /// One task in full: its summary plus the public detail projection.
@@ -114,6 +122,40 @@ pub struct StageLogView {
     pub error_excerpt: Option<String>,
 }
 
+/// Complete scope counts before filtering or pagination.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeCounts {
+    pub active: u64,
+    pub attention: u64,
+    pub history: u64,
+    pub all: u64,
+}
+impl ScopeCounts {
+    pub fn from_value(value: &Value) -> Option<Self> {
+        if value.as_object()?.len() != 4 {
+            return None;
+        }
+        let result = Self {
+            active: value["active"].as_u64()?,
+            attention: value["attention"].as_u64()?,
+            history: value["history"].as_u64()?,
+            all: value["all"].as_u64()?,
+        };
+        result.is_valid().then_some(result)
+    }
+    pub fn to_value(&self) -> Value {
+        serde_json::json!({"active":self.active,"attention":self.attention,"history":self.history,"all":self.all})
+    }
+    pub fn is_valid(&self) -> bool {
+        self.all <= crate::operator_dtos::MAX_REVISION as u64
+            && self
+                .active
+                .checked_add(self.attention)
+                .and_then(|n| n.checked_add(self.history))
+                == Some(self.all)
+    }
+}
+
 /// A cursor page of task summaries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskPage {
@@ -121,6 +163,8 @@ pub struct TaskPage {
     pub items: Vec<TaskSummary>,
     /// The task id to continue from, when more tasks remain.
     pub next_cursor: Option<Uuid>,
+    /// Counts before scope selection and keyset pagination.
+    pub scope_counts: Option<ScopeCounts>,
 }
 
 /// A sequence page of events.
@@ -151,4 +195,22 @@ pub struct PolicyIdentity {
     pub kind: String,
     /// The snapshot's pinned digest.
     pub digest: String,
+}
+
+#[cfg(test)]
+mod scope_count_tests {
+    use super::*;
+    #[test]
+    fn counts_reject_negative_overflow_unknown_and_inconsistent_totals() {
+        for value in [
+            serde_json::json!({"active":-1,"attention":0,"history":0,"all":0}),
+            serde_json::json!({"active":u64::MAX,"attention":1,"history":0,"all":0}),
+            serde_json::json!({"active":1,"attention":0,"history":0,"all":0}),
+            serde_json::json!({"active":0,"attention":0,"history":0,"all":0,"extra":1}),
+        ] {
+            assert!(ScopeCounts::from_value(&value).is_none());
+        }
+        let value = serde_json::json!({"active":1,"attention":2,"history":3,"all":6});
+        assert_eq!(ScopeCounts::from_value(&value).unwrap().to_value(), value);
+    }
 }

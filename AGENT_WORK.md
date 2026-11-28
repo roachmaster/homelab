@@ -3420,3 +3420,34 @@ selected formatting and diff checks passed. Logs:
 `/mnt/data/homelab-build/rust-cicd-full-{tests,clippy2}.log`.
 List classification/counts and final integrated HTTP/UI qualification remain
 required before whole-runtime cutover. No production state was changed.
+
+### 2026-11-28 — Rust task-list scope, activity and defect lineage parity
+
+List scopes now classify complete native/external workflow roots and protected
+visible delivery state before counting and activity-keyset pagination. Counts
+are a validated typed port value, raw status pages retain their old order and
+omit counts, and list-only activity/automation fields never leak into the strict
+TaskDetail summary. External member/discovering-workflow defect lineage uses the
+existing owner/project-scoped query. The shipped ordinary Submit route files
+first-class defects; no new public writer route is needed.
+
+History retains the exact closed read predicate for the two operator-archived
+standalone diagnostics: immutable task/attempt/reconciliation/source/checkpoint
+binding, protected operator actor, no workflow/review/publication/live target
+scope or changed revision/result. No archive writer or task/status rewrite was
+added. Only a matching archive checkpoint contributes its activity timestamp;
+arbitrary progress events cannot age or hide tasks.
+
+Validation: final selected cohort passed 44 PostgreSQL and 145 work library
+tests, zero ignored. Actual owned PG checks include native Plan defect Submit,
+Get, discovering-task filed link and filtered List; both external-version scope
+pages, external filed-defect lineage, two historical failed diagnostic markers,
+immutable task bytes, real checkpoint activity time, keyset counts, forged-worker
+actor and stale-revision refusal. No model/native worker, production database or
+service was touched. Final logs:
+`/mnt/data/homelab-build/rust-list-final-tests.log` and
+`/mnt/data/homelab-build/rust-list-final-clippy.log`.
+Strict all-target/all-feature Clippy for PostgreSQL/work and selected formatting
+passed. The BDD bridge test constructor gains only absent scope-count metadata.
+Stale catalog replay/immutable receipt preservation and final integrated HTTP/UI
+qualification remain required before whole-runtime cutover.

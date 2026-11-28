@@ -16,8 +16,6 @@
 //!   ControlOutcome; Python's per-operation extras (repair's
 //!   repair_task_id/review_id, plan_decide's mode is included)
 //!   ride only where the outcome carries them.
-//! - Task/event pages ride the S0 typed shapes (no scope_counts,
-//!   no event attribution/progress projections).
 
 use std::collections::BTreeSet;
 use std::sync::atomic::AtomicBool;
@@ -1546,19 +1544,12 @@ impl WorkApiService {
                     },
                 )? {
                     WorkResponse::Tasks(page) => {
-                        let tasks: Vec<Value> = page.items.iter().map(summary_dict).collect();
-                        Ok((
-                            200,
-                            envelope(
-                                "work_listed",
-                                correlation,
-                                json!({
-                                    "project_alias": project_alias,
-                                    "tasks": tasks,
-                                    "next_cursor": page.next_cursor.map(|c| c.to_string()),
-                                }),
-                            ),
-                        ))
+                        let tasks: Vec<Value> = page.items.iter().map(list_summary_dict).collect();
+                        let mut payload = json!({"project_alias":project_alias,"tasks":tasks,"next_cursor":page.next_cursor.map(|c|c.to_string())});
+                        if let Some(counts) = page.scope_counts {
+                            payload["scope_counts"] = counts.to_value();
+                        }
+                        Ok((200, envelope("work_listed", correlation, payload)))
                     }
                     _ => Err(unavailable()),
                 }
@@ -2088,6 +2079,24 @@ impl WorkApiService {
     }
 }
 
+fn list_summary_dict(summary: &TaskSummary) -> Value {
+    let mut value = summary_dict(summary);
+    for (key, field) in [
+        ("updated_at", summary.updated_at.as_ref().map(|v| json!(v))),
+        (
+            "workflow_enabled",
+            summary.workflow_enabled.map(|v| json!(v)),
+        ),
+        ("delivery", summary.delivery.clone()),
+        ("retry_event", summary.retry_event.clone()),
+    ] {
+        if let Some(field) = field {
+            value[key] = field;
+        }
+    }
+    value
+}
+
 fn summary_dict(summary: &TaskSummary) -> Value {
     let mut map = Map::new();
     map.insert("task_id".to_string(), json!(summary.task_id.to_string()));
@@ -2192,6 +2201,34 @@ mod tests {
             filed_defects: Vec::new(),
             workflow_required: None,
             workflow_phase: None,
+            updated_at: None,
+            workflow_enabled: None,
+            delivery: None,
+            retry_event: None,
+        }
+    }
+
+    #[test]
+    fn list_activity_fields_do_not_leak_into_detail_summary() {
+        let mut item = summary();
+        item.updated_at = Some("2026-11-28T00:00:00Z".into());
+        item.workflow_enabled = Some(false);
+        item.delivery = Some(json!({"state":"queued"}));
+        item.retry_event = Some(json!({"remaining":2}));
+        let listed = list_summary_dict(&item);
+        assert_eq!(
+            listed["updated_at"],
+            item.updated_at.as_ref().unwrap().as_str()
+        );
+        assert_eq!(listed["workflow_enabled"], false);
+        assert_eq!(listed["delivery"], item.delivery.as_ref().unwrap().clone());
+        assert_eq!(
+            listed["retry_event"],
+            item.retry_event.as_ref().unwrap().clone()
+        );
+        for key in ["updated_at", "workflow_enabled", "delivery", "retry_event"] {
+            assert!(summary_dict(&item).get(key).is_none());
+            assert!(list_summary_dict(&summary()).get(key).is_none());
         }
     }
 
@@ -2220,6 +2257,7 @@ mod tests {
             Ok(TaskPage {
                 items: vec![summary()],
                 next_cursor: None,
+                scope_counts: None,
             })
         }
         fn events(

@@ -4,7 +4,7 @@ use crate::pg_fixture::{pg16_available, DisposablePostgresCluster};
 use forge_work::work_api::{decode, WorkCommand, WorkDestination};
 use forge_work_publication::delivery_repair::RepairSubmitPort;
 
-fn config() -> WorkApiConfig {
+pub(super) fn config() -> WorkApiConfig {
     forge_work::work_config::parse_work_config(&json!({
         "owner":"repair-fixture","allowed_projects":["homelab"],"allowed_modes":["plan","review","implement"],
         "profiles": {
@@ -372,6 +372,7 @@ fn actual_private_repair_uses_normal_admission_atomic_lease_and_queued_receipt()
         workflow: claimed.workflow_id.unwrap(),
         lineage,
     });
+    super::runner_list_pg_tests::exercise(&cluster, &runtime, task);
     cluster.stop();
 }
 
@@ -479,6 +480,7 @@ fn external_admission_and_context_share_task_transaction() {
                 "external_database"
             );
         }
+        super::runner_list_pg_tests::external(&normal.service, task, managed);
         runtime.block_on(async {
             let admin=cluster.connect("postgres").await.unwrap();
             admin.batch_execute("GRANT CONNECT ON DATABASE forge_agent TO fixture_muse; GRANT USAGE ON SCHEMA forge_external_agent_api TO fixture_muse; GRANT EXECUTE ON FUNCTION forge_external_agent_api.advertise(text,text,text),forge_external_agent_api.claim(text,text),forge_external_agent_api.progress(uuid,integer,uuid,text),forge_external_agent_api.finish(uuid,integer,uuid,text,text) TO fixture_muse;").await.unwrap();
@@ -559,6 +561,23 @@ fn external_admission_and_context_share_task_transaction() {
                 let content:String=admin.query_one("SELECT c.content FROM forge_external_agent.assignments a JOIN forge_external_workflow.contexts c USING(assignment_id) WHERE a.task_id=$1",&[&defect_task]).await.unwrap().get(0);
                 assert_eq!(serde_json::from_str::<Value>(&content).unwrap()["task_kind"],"defect");
             });
+            let discovered = normal
+                .service
+                .dispatch(
+                    WorkDestination::Get,
+                    "fixture",
+                    WorkCommand::Get {
+                        project_alias: "homelab".into(),
+                        task_id: task,
+                    },
+                    Some(1),
+                )
+                .unwrap()
+                .1;
+            assert_eq!(
+                discovered["event"]["task"]["filed_defects"][0]["task_id"],
+                defect_task.to_string()
+            );
             defect["idempotency_key"] = json!("external-forged-reference");
             defect["defect"]["discovering_workflow_id"] = json!(Uuid::new_v4().to_string());
             let command = decode(WorkDestination::Submit, "fixture", &defect).unwrap();

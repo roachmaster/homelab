@@ -58,6 +58,7 @@ impl WorkReadPort for CountingPorts {
         Ok(TaskPage {
             items: Vec::new(),
             next_cursor: None,
+            scope_counts: None,
         })
     }
 

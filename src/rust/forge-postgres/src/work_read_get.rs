@@ -32,7 +32,7 @@ pub(crate) fn get(
         let mut task = summary(row)?;
         task.filed_defects = filed_defects(
             tx,
-            &store.owner,
+            store,
             project_alias,
             task_id,
             col::<Option<Uuid>>(row, "workflow_id")?,
