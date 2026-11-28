@@ -20,8 +20,8 @@ use forge_work_worker::review_ports::{
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -119,10 +119,7 @@ fn text_of<'a>(job: &'a Value, key: &str) -> &'a str {
 /// branch_name: an explicit validated branch, else the
 /// persistent policy branch for the job's profile, else the
 /// machinery-owned forge/task-<publication-id> fallback.
-pub fn branch_name(
-    job: &Value,
-    config: Option<&PublicationConfig>,
-) -> PublicationResult<String> {
+pub fn branch_name(job: &Value, config: Option<&PublicationConfig>) -> PublicationResult<String> {
     let explicit = job.get("branch_name").and_then(Value::as_str);
     if let Some(explicit) = explicit.filter(|text| !text.is_empty()) {
         let validated = forge_work_worker::config_profile::validate_git_branch_name(explicit)
@@ -134,8 +131,7 @@ pub fn branch_name(
     }
     let persistent = config
         .map(|config| {
-            config.branch_policy
-                == forge_work_worker::agent_branch::PERSISTENT_BRANCH_POLICY
+            config.branch_policy == forge_work_worker::agent_branch::PERSISTENT_BRANCH_POLICY
         })
         .unwrap_or(false);
     let legacy = text_of(job, "branch_publication_id").starts_with("legacy:");
@@ -145,7 +141,11 @@ pub fn branch_name(
             .resolved_branch_policy()
             .map_err(|_| PublicationError::new("invalid_publication_identity"))?;
         return policy
-            .resolve_branch(text_of(job, "project_alias"), text_of(job, "agent_profile"), false)
+            .resolve_branch(
+                text_of(job, "project_alias"),
+                text_of(job, "agent_profile"),
+                false,
+            )
             .map_err(|_| PublicationError::new("invalid_publication_identity"));
     }
     let publication = job
@@ -198,7 +198,14 @@ pub fn artifact_guard(path: &str, data: &[u8]) -> PublicationResult<()> {
         // Repeated placeholder glyphs in examples are not an
         // actual token.
         let prefixes: [&[u8]; 8] = [
-            b"github_pat_", b"ghp_", b"gho_", b"ghu_", b"ghs_", b"ghr_", b"AIza", b"ya29.",
+            b"github_pat_",
+            b"ghp_",
+            b"gho_",
+            b"ghu_",
+            b"ghs_",
+            b"ghr_",
+            b"AIza",
+            b"ya29.",
         ];
         let prefix = prefixes
             .iter()
@@ -241,10 +248,11 @@ fn find_private_key(data: &[u8]) -> Option<usize> {
             }
             let body: usize = rest
                 .iter()
-                .take_while(|b| b.is_ascii_alphanumeric() || **b == b'+' || **b == b'/' || **b == b'=')
+                .take_while(|b| {
+                    b.is_ascii_alphanumeric() || **b == b'+' || **b == b'/' || **b == b'='
+                })
                 .count();
-            if body >= 32
-                && (rest[body..].starts_with(b"\n") || rest[body..].starts_with(b"\r\n"))
+            if body >= 32 && (rest[body..].starts_with(b"\n") || rest[body..].starts_with(b"\r\n"))
             {
                 return Some(start);
             }
@@ -281,9 +289,8 @@ fn find_access_tokens(data: &[u8]) -> Vec<&[u8]> {
 
 fn match_token_at(data: &[u8]) -> Option<usize> {
     let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-    let count = |data: &[u8], accept: &dyn Fn(u8) -> bool| {
-        data.iter().take_while(|b| accept(**b)).count()
-    };
+    let count =
+        |data: &[u8], accept: &dyn Fn(u8) -> bool| data.iter().take_while(|b| accept(**b)).count();
     if data.len() >= 5 && &data[..2] == b"gh" && data[3] == b'_' && b"pousr".contains(&data[2]) {
         let body = count(&data[4..], &|b: u8| b.is_ascii_alphanumeric());
         if body >= 36 {
@@ -318,9 +325,9 @@ pub fn safe_relative(value: &str) -> PublicationResult<PathBuf> {
     let parts: Vec<&str> = value.split('/').collect();
     let invalid = value.is_empty()
         || value.starts_with('/')
-        || parts
-            .iter()
-            .any(|part| part.is_empty() || *part == "." || *part == ".." || part.to_lowercase() == ".git")
+        || parts.iter().any(|part| {
+            part.is_empty() || *part == "." || *part == ".." || part.to_lowercase() == ".git"
+        })
         || value.len() > 1024
         || value.chars().any(|c| (c as u32) < 32);
     if invalid {
@@ -408,8 +415,8 @@ impl CommandExecutor for ProcessCommandExecutor {
             Err(_) => return failed("publication_command_unavailable"),
         };
         let result = self.run(&mut process, data, timeout_seconds);
-        let stopped = forge_work_worker::process::terminate_and_reap(&mut process, 2.0, 2.0)
-            .unwrap_or(false);
+        let stopped =
+            forge_work_worker::process::terminate_and_reap(&mut process, 2.0, 2.0).unwrap_or(false);
         if !stopped {
             return failed("publication_launcher_uncertain");
         }
@@ -550,7 +557,13 @@ pub struct CallableExecutor<F>(pub F);
 
 impl<F> CommandExecutor for CallableExecutor<F>
 where
-    F: FnMut(&[String], &[(String, String)], Option<&Path>, Option<&[u8]>, f64) -> PublicationResult<Vec<u8>>
+    F: FnMut(
+            &[String],
+            &[(String, String)],
+            Option<&Path>,
+            Option<&[u8]>,
+            f64,
+        ) -> PublicationResult<Vec<u8>>
         + Send,
 {
     fn execute(
@@ -664,8 +677,10 @@ impl WorkspaceSnapshotProvider {
         .map(|part| part.to_string())
         .collect();
         let raw = self.execute.execute(&argv, &git_env(), None, None, 60.0)?;
-        let mut names: Vec<&[u8]> =
-            raw.split(|byte| *byte == 0).filter(|name| !name.is_empty()).collect();
+        let mut names: Vec<&[u8]> = raw
+            .split(|byte| *byte == 0)
+            .filter(|name| !name.is_empty())
+            .collect();
         names.sort_unstable();
         names.dedup();
         if names.len() > MAX_FILES {
@@ -706,7 +721,10 @@ impl WorkspaceSnapshotProvider {
                 safe_link(&name, &target_text)?;
                 (target_text.into_bytes(), "link")
             } else if metadata.is_file() {
-                (read_no_follow(&source, MAX_WORKSPACE_BYTES - total + 1)?, "file")
+                (
+                    read_no_follow(&source, MAX_WORKSPACE_BYTES - total + 1)?,
+                    "file",
+                )
             } else {
                 return Err(PublicationError::new("unsafe_artifact_type"));
             };
@@ -738,7 +756,9 @@ impl SnapshotPort for WorkspaceSnapshotProvider {
             .digest(&mut git)
             .map_err(|error| ReviewError::other(error.to_string()))?;
         if digest != expected_digest {
-            return Err(ReviewError::from(PublicationError::new("workspace_changed")));
+            return Err(ReviewError::from(PublicationError::new(
+                "workspace_changed",
+            )));
         }
         let mut files = Vec::new();
         self.create_inner(&workspace.lease.path.clone(), &expected_digest, &mut files)
@@ -748,7 +768,9 @@ impl SnapshotPort for WorkspaceSnapshotProvider {
             .digest(&mut git)
             .map_err(|error| ReviewError::other(error.to_string()))?;
         if digest != expected_digest {
-            return Err(ReviewError::from(PublicationError::new("workspace_changed")));
+            return Err(ReviewError::from(PublicationError::new(
+                "workspace_changed",
+            )));
         }
         Ok(ReviewSnapshot {
             files,
@@ -935,9 +957,13 @@ impl GitRepositoryProvider {
             argv.push(repository.to_string_lossy().into_owned());
         }
         argv.extend(args.iter().map(|arg| arg.to_string()));
-        Ok(self
-            .execute
-            .execute(&argv, &parent_environment(&self.config), None, None, timeout_seconds)?)
+        Ok(self.execute.execute(
+            &argv,
+            &parent_environment(&self.config),
+            None,
+            None,
+            timeout_seconds,
+        )?)
     }
 
     pub fn git_text(
@@ -960,8 +986,7 @@ impl GitRepositoryProvider {
             .join("agent-branches")
             .join(project_alias)
             .join(slug);
-        std::fs::create_dir_all(&root)
-            .map_err(|error| ProviderError::Other(error.to_string()))?;
+        std::fs::create_dir_all(&root).map_err(|error| ProviderError::Other(error.to_string()))?;
         if is_symlink(&root) || root.parent().map(is_symlink).unwrap_or(false) {
             return Err(PublicationError::new("publication_state_changed").into());
         }
@@ -976,13 +1001,18 @@ impl GitRepositoryProvider {
             return;
         }
         if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
-            if self.git(Some(clone_dir), &["rebase", "--abort"], false, 60.0).is_err() {
+            if self
+                .git(Some(clone_dir), &["rebase", "--abort"], false, 60.0)
+                .is_err()
+            {
                 let _ = std::fs::remove_dir_all(git_dir.join("rebase-merge"));
                 let _ = std::fs::remove_dir_all(git_dir.join("rebase-apply"));
             }
         }
         if git_dir.join("MERGE_HEAD").exists()
-            && self.git(Some(clone_dir), &["merge", "--abort"], false, 60.0).is_err()
+            && self
+                .git(Some(clone_dir), &["merge", "--abort"], false, 60.0)
+                .is_err()
         {
             let _ = std::fs::remove_file(git_dir.join("MERGE_HEAD"));
         }
@@ -1101,7 +1131,11 @@ impl GitRepositoryProvider {
             )?;
             self.git(
                 Some(clone_dir),
-                &["update-ref", &format!("refs/heads/{branch}"), candidate_commit],
+                &[
+                    "update-ref",
+                    &format!("refs/heads/{branch}"),
+                    candidate_commit,
+                ],
                 false,
                 60.0,
             )?;
@@ -1110,13 +1144,16 @@ impl GitRepositoryProvider {
     }
 
     fn persistent_mode(&self, job: &Value) -> bool {
-        self.config.branch_policy
-            == forge_work_worker::agent_branch::PERSISTENT_BRANCH_POLICY
+        self.config.branch_policy == forge_work_worker::agent_branch::PERSISTENT_BRANCH_POLICY
             && !text_of(job, "agent_profile").is_empty()
             && !text_of(job, "branch_publication_id").starts_with("legacy:")
     }
 
-    pub fn prepare(&mut self, job: &Value, snapshot: &ReviewSnapshot) -> ProviderResult<(PathBuf, String)> {
+    pub fn prepare(
+        &mut self,
+        job: &Value,
+        snapshot: &ReviewSnapshot,
+    ) -> ProviderResult<(PathBuf, String)> {
         self.prepare_inner(job, snapshot, false)
     }
 
@@ -1174,10 +1211,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 impl GitRepositoryProvider {
-    fn record_sync(
-        &mut self,
-        record: &BranchSyncRecord,
-    ) -> ProviderResult<()> {
+    fn record_sync(&mut self, record: &BranchSyncRecord) -> ProviderResult<()> {
         self.branch_provider.record_sync(record)
     }
 
@@ -1306,7 +1340,11 @@ impl GitRepositoryProvider {
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
             .collect();
         for child in children {
-            if child.file_name().map(|name| name == ".git").unwrap_or(false) {
+            if child
+                .file_name()
+                .map(|name| name == ".git")
+                .unwrap_or(false)
+            {
                 continue;
             }
             let metadata = child
@@ -1352,7 +1390,11 @@ impl GitRepositoryProvider {
                     use std::os::unix::fs::PermissionsExt;
                     std::fs::set_permissions(
                         &destination,
-                        std::fs::Permissions::from_mode(if entry.executable { 0o755 } else { 0o644 }),
+                        std::fs::Permissions::from_mode(if entry.executable {
+                            0o755
+                        } else {
+                            0o644
+                        }),
                     )
                     .map_err(|error| ProviderError::Other(error.to_string()))?;
                 }
@@ -1368,8 +1410,8 @@ impl GitRepositoryProvider {
                 60.0,
             )?
             .is_empty();
-        let parent_context = !text_of(job, "parent_task_id").is_empty()
-            && !text_of(job, "feedback_id").is_empty();
+        let parent_context =
+            !text_of(job, "parent_task_id").is_empty() && !text_of(job, "feedback_id").is_empty();
         if !changed && (!branch_first || !parent_context) {
             return Err(PublicationError::new("no_source_changes").into());
         }
@@ -1383,8 +1425,12 @@ impl GitRepositoryProvider {
             )?;
         }
         let authored = self.git_text(Some(&repository), &["rev-parse", "HEAD"], false, 60.0)?;
-        let authored_tree =
-            self.git_text(Some(&repository), &["rev-parse", "HEAD^{tree}"], false, 60.0)?;
+        let authored_tree = self.git_text(
+            Some(&repository),
+            &["rev-parse", "HEAD^{tree}"],
+            false,
+            60.0,
+        )?;
         let remote = self.remote_url(text_of(job, "project_alias"));
         let persistent = self.persistent_mode(job);
         let fetched_at = utc_now_iso();
@@ -1415,7 +1461,14 @@ impl GitRepositoryProvider {
         }
         self.git(
             Some(&repository),
-            &["fetch", "--quiet", "--no-tags", "--", &remote, "refs/heads/main"],
+            &[
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "--",
+                &remote,
+                "refs/heads/main",
+            ],
             true,
             120.0,
         )?;
@@ -1542,8 +1595,12 @@ impl GitRepositoryProvider {
             })?;
         }
         if branch_first {
-            let candidate_tree =
-                self.git_text(Some(&repository), &["rev-parse", "HEAD^{tree}"], false, 60.0)?;
+            let candidate_tree = self.git_text(
+                Some(&repository),
+                &["rev-parse", "HEAD^{tree}"],
+                false,
+                60.0,
+            )?;
             crate::durable_files::durable_json(
                 &prepared,
                 &json!({
@@ -1634,15 +1691,12 @@ impl GitRepositoryProvider {
         identity: &Value,
         snapshot: &ReviewSnapshot,
     ) -> ProviderResult<(PathBuf, String)> {
-        let raw = crate::durable_files::read_private(
-            prepared,
-            65536,
-            Some(nix_uid()),
-        )
-        .map_err(ProviderError::Other)?;
+        let raw = crate::durable_files::read_private(prepared, 65536, Some(nix_uid()))
+            .map_err(ProviderError::Other)?;
         let receipt: Value = crate::strict_json::strict_parse(&raw)
             .map_err(|error| ProviderError::Other(error.to_string()))?;
-        let state_changed = || ProviderError::from(PublicationError::new("publication_state_changed"));
+        let state_changed =
+            || ProviderError::from(PublicationError::new("publication_state_changed"));
         if receipt.get("identity") != Some(identity) {
             return Err(state_changed());
         }
@@ -1734,9 +1788,7 @@ impl GitRepositoryProvider {
                 .get("conflict_paths")
                 .and_then(Value::as_array)
                 .ok_or_else(state_changed)?;
-            if paths_value.len() > 32
-                || paths_value.iter().any(|path| !path.is_string())
-            {
+            if paths_value.len() > 32 || paths_value.iter().any(|path| !path.is_string()) {
                 return Err(state_changed());
             }
             let paths: Vec<String> = paths_value
@@ -1927,12 +1979,10 @@ fn nix_uid() -> u32 {
 }
 
 impl ReviewGitPort for GitRepositoryProvider {
-    fn git_bytes(
-        &mut self,
-        repo: Option<&Path>,
-        args: &[&str],
-    ) -> Result<Vec<u8>, ReviewError> {
-        Ok(self.git(repo, args, false, 60.0).map_err(ReviewError::from)?)
+    fn git_bytes(&mut self, repo: Option<&Path>, args: &[&str]) -> Result<Vec<u8>, ReviewError> {
+        Ok(self
+            .git(repo, args, false, 60.0)
+            .map_err(ReviewError::from)?)
     }
 
     fn verify(&mut self, repo: &Path, head: &str) -> Result<(), ReviewError> {
@@ -1952,7 +2002,9 @@ impl ReviewGitPort for GitRepositoryProvider {
         job: &Value,
         snapshot: &ReviewSnapshot,
     ) -> Result<(PathBuf, String), ReviewError> {
-        Ok(self.prepare_source(job, snapshot).map_err(ReviewError::from)?)
+        Ok(self
+            .prepare_source(job, snapshot)
+            .map_err(ReviewError::from)?)
     }
 }
 
@@ -2038,7 +2090,12 @@ impl GitHubPullRequestClient {
             .map_err(|_| PublicationError::new("invalid_pull_request_response"))
     }
 
-    pub(crate) fn validated(&self, job: &Value, head: &str, value: &Value) -> PublicationResult<String> {
+    pub(crate) fn validated(
+        &self,
+        job: &Value,
+        head: &str,
+        value: &Value,
+    ) -> PublicationResult<String> {
         let repository = self
             .config
             .repositories
@@ -2217,12 +2274,16 @@ mod tests {
     #[test]
     fn guard_rejects_private_and_token_material() {
         assert_eq!(
-            artifact_guard("src/.env.production", b"x").unwrap_err().code(),
+            artifact_guard("src/.env.production", b"x")
+                .unwrap_err()
+                .code(),
             "private_or_generated_artifact"
         );
         assert!(artifact_guard("src/.env.example", b"x").is_ok());
         assert_eq!(
-            artifact_guard("home/.config/gh/hosts.yml", b"x").unwrap_err().code(),
+            artifact_guard("home/.config/gh/hosts.yml", b"x")
+                .unwrap_err()
+                .code(),
             "private_or_generated_artifact"
         );
         let key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQC7\nrest";
@@ -2232,7 +2293,9 @@ mod tests {
         );
         let token = format!("ghp_{}", "Ab1x".repeat(9));
         assert_eq!(
-            artifact_guard("src/a.txt", token.as_bytes()).unwrap_err().code(),
+            artifact_guard("src/a.txt", token.as_bytes())
+                .unwrap_err()
+                .code(),
             "access_token_artifact"
         );
         // A placeholder of repeated glyphs is not a token.
@@ -2244,12 +2307,27 @@ mod tests {
     #[test]
     fn safe_paths() {
         assert!(safe_relative("a/b.rs").is_ok());
-        assert_eq!(safe_relative("../x").unwrap_err().code(), "unsafe_artifact_path");
-        assert_eq!(safe_relative("a/.git/config").unwrap_err().code(), "unsafe_artifact_path");
-        assert_eq!(safe_relative("/abs").unwrap_err().code(), "unsafe_artifact_path");
+        assert_eq!(
+            safe_relative("../x").unwrap_err().code(),
+            "unsafe_artifact_path"
+        );
+        assert_eq!(
+            safe_relative("a/.git/config").unwrap_err().code(),
+            "unsafe_artifact_path"
+        );
+        assert_eq!(
+            safe_relative("/abs").unwrap_err().code(),
+            "unsafe_artifact_path"
+        );
         assert!(safe_link("a/b.rs", "../c.rs").is_ok());
-        assert_eq!(safe_link("a.rs", "../x").unwrap_err().code(), "unsafe_artifact_symlink");
-        assert_eq!(safe_link("a/b.rs", "../../x").unwrap_err().code(), "unsafe_artifact_symlink");
+        assert_eq!(
+            safe_link("a.rs", "../x").unwrap_err().code(),
+            "unsafe_artifact_symlink"
+        );
+        assert_eq!(
+            safe_link("a/b.rs", "../../x").unwrap_err().code(),
+            "unsafe_artifact_symlink"
+        );
     }
 
     #[test]
@@ -2282,21 +2360,22 @@ mod tests {
             .unwrap();
         assert_eq!(out, b"hello\n");
         let failed = executor.execute(
-            &["/bin/sh".to_string(), "-c".to_string(), "exit 3".to_string()],
+            &[
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "exit 3".to_string(),
+            ],
             &[],
             None,
             None,
             10.0,
         );
         assert_eq!(failed.unwrap_err().code(), "publication_command_failed");
-        let missing = executor.execute(
-            &["/nonexistent/binary".to_string()],
-            &[],
-            None,
-            None,
-            10.0,
+        let missing = executor.execute(&["/nonexistent/binary".to_string()], &[], None, None, 10.0);
+        assert_eq!(
+            missing.unwrap_err().code(),
+            "publication_command_unavailable"
         );
-        assert_eq!(missing.unwrap_err().code(), "publication_command_unavailable");
     }
 
     #[test]
@@ -2310,10 +2389,7 @@ mod tests {
         // A full ephemeral prepare against a real local git
         // repository: clone, base check, snapshot write,
         // commit, main merge, verify.
-        let root = std::env::temp_dir().join(format!(
-            "forge-pub-clients-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("forge-pub-clients-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let canonical = root.join("canonical");
@@ -2336,12 +2412,48 @@ mod tests {
                 )
                 .unwrap()
         };
-        run(&["/usr/bin/git", "init", "--quiet", "-b", "main", canonical.to_str().unwrap()], None);
+        run(
+            &[
+                "/usr/bin/git",
+                "init",
+                "--quiet",
+                "-b",
+                "main",
+                canonical.to_str().unwrap(),
+            ],
+            None,
+        );
         std::fs::write(canonical.join("file.txt"), "base\n").unwrap();
-        run(&["/usr/bin/git", "-C", canonical.to_str().unwrap(), "add", "--all"], None);
-        run(&["/usr/bin/git", "-C", canonical.to_str().unwrap(), "commit", "--quiet", "-m", "base"], None);
+        run(
+            &[
+                "/usr/bin/git",
+                "-C",
+                canonical.to_str().unwrap(),
+                "add",
+                "--all",
+            ],
+            None,
+        );
+        run(
+            &[
+                "/usr/bin/git",
+                "-C",
+                canonical.to_str().unwrap(),
+                "commit",
+                "--quiet",
+                "-m",
+                "base",
+            ],
+            None,
+        );
         let base = String::from_utf8(run(
-            &["/usr/bin/git", "-C", canonical.to_str().unwrap(), "rev-parse", "HEAD"],
+            &[
+                "/usr/bin/git",
+                "-C",
+                canonical.to_str().unwrap(),
+                "rev-parse",
+                "HEAD",
+            ],
             None,
         ))
         .unwrap()
@@ -2423,13 +2535,26 @@ mod tests {
         let (repository, head) = provider.prepare(&job, &snapshot).unwrap();
         assert_ne!(head, base);
         let shown = String::from_utf8(run(
-            &["/usr/bin/git", "-C", repository.to_str().unwrap(), "show", &format!("{head}:file.txt")],
+            &[
+                "/usr/bin/git",
+                "-C",
+                repository.to_str().unwrap(),
+                "show",
+                &format!("{head}:file.txt"),
+            ],
             None,
         ))
         .unwrap();
         assert_eq!(shown, "changed\n");
         let tree = String::from_utf8(run(
-            &["/usr/bin/git", "-C", repository.to_str().unwrap(), "ls-tree", "--name-only", &head],
+            &[
+                "/usr/bin/git",
+                "-C",
+                repository.to_str().unwrap(),
+                "ls-tree",
+                "--name-only",
+                &head,
+            ],
             None,
         ))
         .unwrap();
@@ -2472,12 +2597,14 @@ impl CodingWorkspacesAdapter {
         CODING_WORKSPACES.with(|cell| {
             let mut slot = cell.borrow_mut();
             if slot.is_none() {
-                *slot = Some(forge_work_worker::workspace_provider::WorkspaceProvider::new(
-                    self.config.clone(),
-                    Box::new(forge_work_worker::ports_runtime::CommandGitRunner::default()),
-                    None,
-                    None,
-                ));
+                *slot = Some(
+                    forge_work_worker::workspace_provider::WorkspaceProvider::new(
+                        self.config.clone(),
+                        Box::new(forge_work_worker::ports_runtime::CommandGitRunner::default()),
+                        None,
+                        None,
+                    ),
+                );
             }
             action(slot.as_mut().expect("provider installed"))
         })
@@ -2521,9 +2648,7 @@ impl SnapshotWorkspacesPort for CodingWorkspacesAdapter {
 /// provider and passes it to both the publication worker and the
 /// review worker.
 #[derive(Clone)]
-pub struct SharedSnapshots(
-    pub std::sync::Arc<std::sync::Mutex<WorkspaceSnapshotProvider>>,
-);
+pub struct SharedSnapshots(pub std::sync::Arc<std::sync::Mutex<WorkspaceSnapshotProvider>>);
 
 impl SharedSnapshots {
     pub fn new(provider: WorkspaceSnapshotProvider) -> SharedSnapshots {
@@ -2552,12 +2677,17 @@ mod null_object_tests {
         let urls = github_remote_urls_for(
             [("homelab".to_string(), "roachmaster/homelab".to_string())].into(),
         );
-        assert_eq!(urls("homelab"), "https://github.com/roachmaster/homelab.git");
+        assert_eq!(
+            urls("homelab"),
+            "https://github.com/roachmaster/homelab.git"
+        );
         assert_eq!(urls("unknown"), "https://github.com/.git");
     }
 
     #[test]
     fn no_branch_records_accepts_every_sync_and_owner_check() {
-        assert!(NoBranchRecords.verify_owner(&json!({"branch_name": "b"})).is_ok());
+        assert!(NoBranchRecords
+            .verify_owner(&json!({"branch_name": "b"}))
+            .is_ok());
     }
 }

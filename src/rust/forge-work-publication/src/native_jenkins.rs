@@ -24,7 +24,9 @@ use forge_work_worker::review_ports::{
 };
 use forge_work_worker::supervisor::unit_name;
 
-use crate::ci_contract::{CiGateContract, CiGateContractFactory, CiGatePlan, LEGACY_PROFILE, SCOPED_PROFILE};
+use crate::ci_contract::{
+    CiGateContract, CiGateContractFactory, CiGatePlan, LEGACY_PROFILE, SCOPED_PROFILE,
+};
 use crate::ci_phases::EVENT_PROFILE;
 use crate::durable_files::{durable_json, effective_uid, read_private};
 use crate::identity_contract::content_policy_path;
@@ -32,12 +34,12 @@ use crate::jenkins_lifecycle::{EventLookup, LifecycleTracker};
 use crate::merge::MergeNativeCiPort;
 use crate::native_identity_provider::NativeVerificationIdentityProvider;
 use crate::publication_clients::{
-    branch_name, GitHubPullRequestClient, GitRepositoryProvider, PublicationError, ProviderError,
+    branch_name, GitHubPullRequestClient, GitRepositoryProvider, ProviderError, PublicationError,
 };
 use crate::publication_config::PublicationConfig;
 use crate::trusted_delivery::{
-    canonical_bytes, contract_for_config, derive_branch_scope, digest as validate_digest,
-    gate_ref, jenkins_gate_manifest, native_action_id, native_action_ids, protected_delivery_gate,
+    canonical_bytes, contract_for_config, derive_branch_scope, digest as validate_digest, gate_ref,
+    jenkins_gate_manifest, native_action_id, native_action_ids, protected_delivery_gate,
     sha as validate_sha, validate_uid, DeliveryConfig, DeliveryError,
 };
 use crate::trusted_delivery_provider::TrustedDeliveryPort;
@@ -121,12 +123,18 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn read_json(path: &Path, owner: Option<u32>) -> Result<Value, PublicationError> {
-    let raw = read_private(path, 65_536, owner).map_err(|message| PublicationError::new(&message))?;
+    let raw =
+        read_private(path, 65_536, owner).map_err(|message| PublicationError::new(&message))?;
     serde_json::from_slice(&raw).map_err(|_| err("invalid_json"))
 }
 
-fn read_json_max(path: &Path, maximum: usize, owner: Option<u32>) -> Result<Value, PublicationError> {
-    let raw = read_private(path, maximum, owner).map_err(|message| PublicationError::new(&message))?;
+fn read_json_max(
+    path: &Path,
+    maximum: usize,
+    owner: Option<u32>,
+) -> Result<Value, PublicationError> {
+    let raw =
+        read_private(path, maximum, owner).map_err(|message| PublicationError::new(&message))?;
     serde_json::from_slice(&raw).map_err(|_| err("invalid_json"))
 }
 
@@ -160,7 +168,9 @@ pub fn native_check_accounting(
         complete: false,
         valid: false,
     };
-    let Some(rows) = receipt.and_then(|value| value.get("checks")).and_then(Value::as_array)
+    let Some(rows) = receipt
+        .and_then(|value| value.get("checks"))
+        .and_then(Value::as_array)
     else {
         return invalid;
     };
@@ -200,8 +210,11 @@ pub fn native_check_accounting(
         .map(|(index, check)| {
             let mut check = check.clone();
             if index < rows.len() {
-                check["status"] =
-                    json!(if rows[index]["returncode"].as_i64() == Some(0) { "passed" } else { "failed" });
+                check["status"] = json!(if rows[index]["returncode"].as_i64() == Some(0) {
+                    "passed"
+                } else {
+                    "failed"
+                });
             }
             check
         })
@@ -217,8 +230,7 @@ pub fn native_check_accounting(
 type Clock = Box<dyn Fn() -> f64 + Send>;
 type Wait = Box<dyn FnMut(f64) + Send>;
 pub type Emitter = Box<dyn crate::jenkins_lifecycle::JenkinsEventEmitter>;
-pub type SharedEventLookup =
-    dyn Fn(&str, &str, &str) -> Result<Vec<Value>, String> + Send + Sync;
+pub type SharedEventLookup = dyn Fn(&str, &str, &str) -> Result<Vec<Value>, String> + Send + Sync;
 
 pub fn monotonic_now() -> f64 {
     use std::sync::OnceLock;
@@ -326,11 +338,20 @@ impl NativeJenkinsVerification {
     fn scope(&self, value: &Value, job: &Value) -> Result<Map<String, Value>, PublicationError> {
         if !value.is_object()
             || text(value, "owner_id") != self.config.worker.owner
-            || !self.config.repositories.contains_key(text(value, "project_alias"))
+            || !self
+                .config
+                .repositories
+                .contains_key(text(value, "project_alias"))
         {
             return Err(err("native_ci_scope_denied"));
         }
-        for key in ["task_id", "attempt_id", "review_id", "workflow_id", "correlation_id"] {
+        for key in [
+            "task_id",
+            "attempt_id",
+            "review_id",
+            "workflow_id",
+            "correlation_id",
+        ] {
             validate_uid(text(value, key)).map_err(|_| err("native_ci_scope_denied"))?;
         }
         for key in IDENTITY {
@@ -353,7 +374,12 @@ impl NativeJenkinsVerification {
 
     fn directory(&self, action: &str) -> Result<PathBuf, PublicationError> {
         let action = validate_uid(action).map_err(|_| err("native_ci_state_changed"))?;
-        let path = self.delivery.config.state_root.join("actions").join(&action);
+        let path = self
+            .delivery
+            .config
+            .state_root
+            .join("actions")
+            .join(&action);
         let parent = path.parent().expect("actions parent").to_path_buf();
         let is_link = |candidate: &Path| {
             candidate
@@ -420,7 +446,8 @@ impl NativeJenkinsVerification {
             .and_then(Value::as_str)
             .unwrap_or(LEGACY_PROFILE)
             .to_string();
-        let expected = binding_version(&profile).map_err(|message| PublicationError::new(&message))?;
+        let expected =
+            binding_version(&profile).map_err(|message| PublicationError::new(&message))?;
         if binding.get("version").and_then(Value::as_str) != Some(expected.as_str()) {
             return Err(err("native_ci_profile_changed"));
         }
@@ -444,11 +471,17 @@ impl NativeJenkinsVerification {
         let plan = CiGateContractFactory::new(&profile)
             .map_err(|message| PublicationError::new(&message))?
             .create()
-            .plan(request.get("branch_scope").and_then(Value::as_str).unwrap_or("detached"))
+            .plan(
+                request
+                    .get("branch_scope")
+                    .and_then(Value::as_str)
+                    .unwrap_or("detached"),
+            )
             .map_err(|message| PublicationError::new(&message))?;
         if (profile == SCOPED_PROFILE || profile == EVENT_PROFILE)
             && (binding.get("logical_checks") != Some(&json!(plan.logical_checks))
-                || binding.get("policy_required_hosted_checks") != Some(&json!(plan.logical_checks)))
+                || binding.get("policy_required_hosted_checks")
+                    != Some(&json!(plan.logical_checks)))
         {
             return Err(err("native_ci_policy_scope_changed"));
         }
@@ -509,23 +542,33 @@ impl NativeJenkinsVerification {
         let mut expected = Map::new();
         expected.insert("version".to_string(), json!(plan.result_version()));
         expected.insert("action_id".to_string(), json!(action));
-        expected.insert("workflow_id".to_string(), json!(text_map(scope, "workflow_id")));
-        expected.insert("project_alias".to_string(), json!(text_map(scope, "project_alias")));
+        expected.insert(
+            "workflow_id".to_string(),
+            json!(text_map(scope, "workflow_id")),
+        );
+        expected.insert(
+            "project_alias".to_string(),
+            json!(text_map(scope, "project_alias")),
+        );
         expected.insert(
             "candidate_commit".to_string(),
-            json!(validate_sha(text(request, "candidate_commit")).map_err(|_| err("native_ci_source_unsupported"))?),
+            json!(validate_sha(text(request, "candidate_commit"))
+                .map_err(|_| err("native_ci_source_unsupported"))?),
         );
         expected.insert(
             "candidate_tree".to_string(),
-            json!(validate_sha(text(request, "candidate_tree")).map_err(|_| err("native_ci_source_unsupported"))?),
+            json!(validate_sha(text(request, "candidate_tree"))
+                .map_err(|_| err("native_ci_source_unsupported"))?),
         );
         expected.insert(
             "expected_main".to_string(),
-            json!(validate_sha(text(request, "integration_base")).map_err(|_| err("native_ci_source_unsupported"))?),
+            json!(validate_sha(text(request, "integration_base"))
+                .map_err(|_| err("native_ci_source_unsupported"))?),
         );
         expected.insert(
             "gate_manifest_sha256".to_string(),
-            json!(gate_ref(text(request, "gate_manifest_sha256")).map_err(|_| err("native_ci_source_unsupported"))?),
+            json!(gate_ref(text(request, "gate_manifest_sha256"))
+                .map_err(|_| err("native_ci_source_unsupported"))?),
         );
         expected.insert(
             "verification_profile".to_string(),
@@ -534,7 +577,10 @@ impl NativeJenkinsVerification {
                 .and_then(Value::as_str)
                 .unwrap_or(LEGACY_PROFILE)),
         );
-        expected.insert("correlation_id".to_string(), json!(text_map(scope, "correlation_id")));
+        expected.insert(
+            "correlation_id".to_string(),
+            json!(text_map(scope, "correlation_id")),
+        );
         if let Some(branch_scope) = request.get("branch_scope") {
             expected.insert("branch_scope".to_string(), branch_scope.clone());
         }
@@ -582,7 +628,10 @@ impl NativeJenkinsVerification {
         {
             return false;
         }
-        if expected.iter().any(|(key, value)| submitted.get(key) != Some(value)) {
+        if expected
+            .iter()
+            .any(|(key, value)| submitted.get(key) != Some(value))
+        {
             return false;
         }
         validate_digest(text(&submitted, "bundle_sha256")).is_ok()
@@ -652,7 +701,11 @@ impl NativeJenkinsVerification {
             return false;
         }
         let journal = directory.join("jenkins.json");
-        let result = self.delivery.config.results_root.join(format!("{action}.json"));
+        let result = self
+            .delivery
+            .config
+            .results_root
+            .join(format!("{action}.json"));
         let present = |path: &Path| {
             path.exists()
                 || path
@@ -687,13 +740,20 @@ impl NativeJenkinsVerification {
 
     fn historical_terminal_inner(&mut self, directory: &Path) -> Option<bool> {
         let action = validate_uid(directory.file_name()?.to_str()?).ok()?;
-        let binding = read_json(&directory.join("native-binding.json"), Some(effective_uid())).ok()?;
+        let binding = read_json(
+            &directory.join("native-binding.json"),
+            Some(effective_uid()),
+        )
+        .ok()?;
         let profile = binding["request"]
             .get("verification_profile")
             .and_then(Value::as_str)
             .unwrap_or(LEGACY_PROFILE)
             .to_string();
-        if !matches!(profile.as_str(), LEGACY_PROFILE | SCOPED_PROFILE | EVENT_PROFILE) {
+        if !matches!(
+            profile.as_str(),
+            LEGACY_PROFILE | SCOPED_PROFILE | EVENT_PROFILE
+        ) {
             return Some(false);
         }
         let frozen_version = binding_version(&profile).ok()?;
@@ -708,12 +768,15 @@ impl NativeJenkinsVerification {
         let request = binding["request"].clone();
         let scope = self.scope(&binding["scope"], &request).ok()?;
         if text(&request, "action_id") != action
-            || IDENTITY.iter().any(|key| request.get(*key) != scope.get(*key))
+            || IDENTITY
+                .iter()
+                .any(|key| request.get(*key) != scope.get(*key))
         {
             return Some(false);
         }
         let mut identity = Value::Object(scope.clone());
-        identity["candidate_commit"] = json!(validate_sha(text(&request, "candidate_commit")).ok()?);
+        identity["candidate_commit"] =
+            json!(validate_sha(text(&request, "candidate_commit")).ok()?);
         identity["candidate_tree"] = json!(validate_sha(text(&request, "candidate_tree")).ok()?);
         identity["native_gate_manifest_sha256"] =
             json!(validate_digest(text(&binding, "native_gate_manifest_sha256")).ok()?);
@@ -737,8 +800,12 @@ impl NativeJenkinsVerification {
             let path = directory.join(filename);
             if path.exists() {
                 let value = read_json(&path, Some(effective_uid())).ok()?;
-                if terminal.contains(&value.get("status").and_then(Value::as_str).unwrap_or_default())
-                    && value["receipt"].get("cleanup_confirmed") == Some(&json!(true))
+                if terminal.contains(
+                    &value
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ) && value["receipt"].get("cleanup_confirmed") == Some(&json!(true))
                 {
                     observed = Some(value);
                     break;
@@ -753,26 +820,41 @@ impl NativeJenkinsVerification {
             return Some(false);
         }
         let raw_request = read_private(
-            &self.delivery.config.spool_root.join(&action).join("request.json"),
+            &self
+                .delivery
+                .config
+                .spool_root
+                .join(&action)
+                .join("request.json"),
             65_536,
             Some(effective_uid()),
         )
         .ok()?;
         let submitted: Value = serde_json::from_slice(&raw_request).ok()?;
         let plan = self.plan(&binding).ok()?;
-        let expected = self.expected_spool_request(&binding, &scope, &action).ok()?;
+        let expected = self
+            .expected_spool_request(&binding, &scope, &action)
+            .ok()?;
         let submitted_object = submitted.as_object()?;
         if submitted_object.len() != expected.len() + 1
             || !submitted_object.contains_key("bundle_sha256")
-            || !expected.keys().all(|key| submitted_object.contains_key(key))
+            || !expected
+                .keys()
+                .all(|key| submitted_object.contains_key(key))
             || !is_int(&submitted["version"])
-            || expected.iter().any(|(key, value)| submitted.get(key) != Some(value))
+            || expected
+                .iter()
+                .any(|(key, value)| submitted.get(key) != Some(value))
         {
             return Some(false);
         }
         validate_digest(text(&submitted, "bundle_sha256")).ok()?;
         let root_raw = read_private(
-            &self.delivery.config.results_root.join(format!("{action}.json")),
+            &self
+                .delivery
+                .config
+                .results_root
+                .join(format!("{action}.json")),
             262_144,
             Some(0),
         )
@@ -782,7 +864,10 @@ impl NativeJenkinsVerification {
             || !is_int(&root["version"])
             || root["version"].as_i64() != Some(plan.result_version())
             || (plan.coverage().is_some() && root.get("coverage") != plan.coverage().as_ref())
-            || !matches!(root.get("status").and_then(Value::as_str), Some("passed" | "failed"))
+            || !matches!(
+                root.get("status").and_then(Value::as_str),
+                Some("passed" | "failed")
+            )
             || root.get("cleanup_confirmed") != Some(&json!(true))
             || expected
                 .iter()
@@ -811,7 +896,9 @@ impl NativeJenkinsVerification {
         let commands = plan.checks.clone();
         let checks_valid = checks.len() <= commands.len()
             && checks.iter().enumerate().all(|(index, check)| {
-                let Some(object) = check.as_object() else { return false };
+                let Some(object) = check.as_object() else {
+                    return false;
+                };
                 object.len() == 3
                     && is_int(&check["index"])
                     && check["index"].as_i64() == Some(index as i64)
@@ -823,7 +910,9 @@ impl NativeJenkinsVerification {
         }
         if root.get("status").and_then(Value::as_str) == Some("passed")
             && (checks.len() != commands.len()
-                || checks.iter().any(|check| check["returncode"].as_i64() != Some(0)))
+                || checks
+                    .iter()
+                    .any(|check| check["returncode"].as_i64() != Some(0)))
         {
             return Some(false);
         }
@@ -842,8 +931,11 @@ pub trait BranchProviderObject: Send {
         publication_id: Option<&str>,
     ) -> Result<Option<BranchReservation>, BranchError>;
     fn resolve_scope_for_job(&mut self, job: &Value) -> Result<Option<Value>, BranchError>;
-    fn branch_for_profile(&self, project_alias: &str, agent_profile: &str)
-        -> Result<String, BranchError>;
+    fn branch_for_profile(
+        &self,
+        project_alias: &str,
+        agent_profile: &str,
+    ) -> Result<String, BranchError>;
     fn record_cache_sync(
         &mut self,
         project_alias: &str,
@@ -893,7 +985,9 @@ impl BranchProviderObject for SharedAgentBranches {
         _project_alias: &str,
         _agent_profile: &str,
     ) -> Result<String, BranchError> {
-        Err(BranchError::Value("persistent branches are not selected".to_string()))
+        Err(BranchError::Value(
+            "persistent branches are not selected".to_string(),
+        ))
     }
     fn record_cache_sync(
         &mut self,
@@ -928,13 +1022,14 @@ struct ClientPullRequests<'a>(&'a mut GitHubPullRequestClient);
 
 impl forge_work_worker::agent_branch::PullRequestsPort for ClientPullRequests<'_> {
     fn list_open(&mut self, job: &Value) -> Result<Vec<Value>, BranchError> {
-        crate::publication_clients::PublicationPullRequestsPort::list_open(self.0, job)
-            .map_err(|error| match error {
+        crate::publication_clients::PublicationPullRequestsPort::list_open(self.0, job).map_err(
+            |error| match error {
                 ProviderError::Publication(publication) => {
                     BranchError::Store(publication.code().to_string())
                 }
                 ProviderError::Other(message) => BranchError::Store(message),
-            })
+            },
+        )
     }
 }
 
@@ -1013,7 +1108,6 @@ impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send> BranchProvid
     }
 }
 
-
 /// Rebuild a BranchReservation from its serialized form (the
 /// inverse of reservation_value, for the value-carrying ports).
 pub(crate) fn reservation_from_value(value: &Value) -> Result<BranchReservation, BranchError> {
@@ -1054,8 +1148,8 @@ fn branch_provider_error(error: BranchError) -> ProviderError {
 }
 
 /// The merge worker's branch surface over the shared provider.
-impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send>
-    crate::merge::MergeBranchPort for AgentBranchProvider<S>
+impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send> crate::merge::MergeBranchPort
+    for AgentBranchProvider<S>
 {
     fn persistent_enabled(&self) -> bool {
         AgentBranchProvider::persistent_enabled(self)
@@ -1065,13 +1159,15 @@ impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send>
         &mut self,
         job: &Value,
     ) -> Result<Option<crate::merge::MergeReservation>, ProviderError> {
-        let reservation = AgentBranchProvider::verify_merge_owner(self, job)
-            .map_err(branch_provider_error)?;
-        Ok(reservation.map(|reservation| crate::merge::MergeReservation {
-            agent_profile: reservation.agent_profile.clone(),
-            branch_name: reservation.branch_name.clone(),
-            raw: reservation_value(&reservation),
-        }))
+        let reservation =
+            AgentBranchProvider::verify_merge_owner(self, job).map_err(branch_provider_error)?;
+        Ok(
+            reservation.map(|reservation| crate::merge::MergeReservation {
+                agent_profile: reservation.agent_profile.clone(),
+                branch_name: reservation.branch_name.clone(),
+                raw: reservation_value(&reservation),
+            }),
+        )
     }
 
     fn release(
@@ -1081,8 +1177,8 @@ impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send>
         remote_open_pr_confirmed_none: bool,
         merge_commit: Option<&str>,
     ) -> Result<Value, ProviderError> {
-        let reservation = reservation_from_value(&reservation.raw)
-            .map_err(branch_provider_error)?;
+        let reservation =
+            reservation_from_value(&reservation.raw).map_err(branch_provider_error)?;
         AgentBranchProvider::release(
             self,
             &reservation,
@@ -1124,8 +1220,7 @@ impl<S: forge_work_worker::agent_branch::BranchProviderPort + Send>
         &mut self,
         reservation: &Value,
     ) -> crate::publication_clients::ProviderResult<()> {
-        let reservation =
-            reservation_from_value(reservation).map_err(branch_provider_error)?;
+        let reservation = reservation_from_value(reservation).map_err(branch_provider_error)?;
         AgentBranchProvider::verify_owner(self, &reservation)
             .map(|_| ())
             .map_err(branch_provider_error)
@@ -1178,7 +1273,9 @@ impl NativeJenkinsVerification {
         let context = self.store.native_ci_acquire_context(job)?;
         let scope = self.scope(&context, job)?;
         let stopped = self.stop.load(Ordering::SeqCst)
-            || stop.map(|flag| flag.load(Ordering::SeqCst)).unwrap_or(false);
+            || stop
+                .map(|flag| flag.load(Ordering::SeqCst))
+                .unwrap_or(false);
         if context.get("active") != Some(&json!(true))
             || stopped
             || !self.store.review_renew(job)?
@@ -1193,15 +1290,23 @@ impl NativeJenkinsVerification {
             .config
             .state_root
             .join("branches")
-            .join(format!("{}.json", scope["review_id"].as_str().unwrap_or_default()));
+            .join(format!(
+                "{}.json",
+                scope["review_id"].as_str().unwrap_or_default()
+            ));
         let existing = path.exists();
         let mut reservation: Option<BranchReservation> = None;
         if self.branch_provider.persistent_enabled() {
             let mut acquire_job = job.clone();
             acquire_job["workflow_id"] = scope["workflow_id"].clone();
             acquire_job["correlation_id"] = scope["correlation_id"].clone();
-            reservation = self.branch_provider
-                .acquire(&acquire_job, scope.get("review_id").and_then(Value::as_str), None)
+            reservation = self
+                .branch_provider
+                .acquire(
+                    &acquire_job,
+                    scope.get("review_id").and_then(Value::as_str),
+                    None,
+                )
                 .map_err(|error| match error {
                     BranchError::Conflict(conflict) => PublicationError::new(&conflict.code),
                     BranchError::Value(message) | BranchError::Store(message) => {
@@ -1228,7 +1333,10 @@ impl NativeJenkinsVerification {
             }
             let remote = self.git.remote_head(&selected).map_err(to_publication)?;
             let mut allowed: Vec<Option<String>> = vec![None, Some(head.clone())];
-            for known in [&reservation.head_commit_sha, &reservation.active_candidate_commit] {
+            for known in [
+                &reservation.head_commit_sha,
+                &reservation.active_candidate_commit,
+            ] {
                 if let Some(known) = known {
                     allowed.push(Some(known.clone()));
                 }
@@ -1242,7 +1350,9 @@ impl NativeJenkinsVerification {
                 }
                 write_json(&path, &receipt)?;
                 let stopped = self.stop.load(Ordering::SeqCst)
-                    || stop.map(|flag| flag.load(Ordering::SeqCst)).unwrap_or(false);
+                    || stop
+                        .map(|flag| flag.load(Ordering::SeqCst))
+                        .unwrap_or(false);
                 if stopped || !self.store.review_renew(job)? {
                     return Err(err("native_branch_scope_inactive"));
                 }
@@ -1253,7 +1363,9 @@ impl NativeJenkinsVerification {
                     &head,
                     remote.as_deref(),
                     Some(&reservation_json),
-                    self.client.as_mut().map(|client| client as &mut dyn crate::publication_clients::PublicationPullRequestsPort),
+                    self.client.as_mut().map(|client| {
+                        client as &mut dyn crate::publication_clients::PublicationPullRequestsPort
+                    }),
                 );
                 match push_result {
                     Ok(()) => {}
@@ -1261,14 +1373,22 @@ impl NativeJenkinsVerification {
                         return Err(to_publication(error));
                     }
                     Err(_) => {
-                        if self.git.remote_head(&selected).map_err(to_publication)?.as_deref()
+                        if self
+                            .git
+                            .remote_head(&selected)
+                            .map_err(to_publication)?
+                            .as_deref()
                             != Some(head.as_str())
                         {
                             return Err(err("native_branch_requires_reconcile"));
                         }
                     }
                 }
-                if self.git.remote_head(&selected).map_err(to_publication)?.as_deref()
+                if self
+                    .git
+                    .remote_head(&selected)
+                    .map_err(to_publication)?
+                    .as_deref()
                     != Some(head.as_str())
                 {
                     return Err(err("native_branch_requires_reconcile"));
@@ -1302,26 +1422,32 @@ impl NativeJenkinsVerification {
                 }
                 write_json(&path, &receipt)?;
                 let stopped = self.stop.load(Ordering::SeqCst)
-                    || stop.map(|flag| flag.load(Ordering::SeqCst)).unwrap_or(false);
+                    || stop
+                        .map(|flag| flag.load(Ordering::SeqCst))
+                        .unwrap_or(false);
                 if stopped || !self.store.review_renew(job)? {
                     return Err(err("native_branch_scope_inactive"));
                 }
-                if let Err(error) = self.git.push(
-                    &selected,
-                    repository,
-                    &head,
-                    None,
-                    None,
-                    None,
-                ) {
+                if let Err(error) = self
+                    .git
+                    .push(&selected, repository, &head, None, None, None)
+                {
                     let _ = error;
-                    if self.git.remote_head(&selected).map_err(to_publication)?.as_deref()
+                    if self
+                        .git
+                        .remote_head(&selected)
+                        .map_err(to_publication)?
+                        .as_deref()
                         != Some(head.as_str())
                     {
                         return Err(err("native_branch_requires_reconcile"));
                     }
                 }
-                if self.git.remote_head(&selected).map_err(to_publication)?.as_deref()
+                if self
+                    .git
+                    .remote_head(&selected)
+                    .map_err(to_publication)?
+                    .as_deref()
                     != Some(head.as_str())
                 {
                     return Err(err("native_branch_requires_reconcile"));
@@ -1335,15 +1461,19 @@ impl NativeJenkinsVerification {
         let _ = selected;
         if !event.is_object()
             || event.as_object().map(|object| object.len()).unwrap_or(0) != 2
-            || !event.as_object().map(|object| {
-                object.contains_key("event_id") && object.contains_key("correlation_id")
-            }).unwrap_or(false)
+            || !event
+                .as_object()
+                .map(|object| {
+                    object.contains_key("event_id") && object.contains_key("correlation_id")
+                })
+                .unwrap_or(false)
             || validate_uid(text(&event, "correlation_id")).ok().as_deref()
                 != scope.get("correlation_id").and_then(Value::as_str)
         {
             return Err(err("native_branch_event_unconfirmed"));
         }
-        validate_uid(text(&event, "event_id")).map_err(|_| err("native_branch_event_unconfirmed"))?;
+        validate_uid(text(&event, "event_id"))
+            .map_err(|_| err("native_branch_event_unconfirmed"))?;
         let event_path = path.with_extension("event.json");
         if event_path.exists() {
             if read_json(&event_path, None)? != event {
@@ -1382,14 +1512,16 @@ impl NativeJenkinsVerification {
             || manifest.get("candidate_commit") != job.get("candidate_commit")
             || source.get("scope") != binding.get("scope")
             || source.get("candidate_commit") != job.get("candidate_commit")
-            || source.get("branch_publication_id").and_then(Value::as_str) != Some(original.as_str())
+            || source.get("branch_publication_id").and_then(Value::as_str)
+                != Some(original.as_str())
             || binding_read != binding
         {
             return Err(err("native_branch_identity_changed"));
         }
         if source.get("version").and_then(Value::as_str) == Some("forge-native-branch-v2") {
             let mut selected = job.clone();
-            selected["branch_publication_id"] = json!(validate_uid(&original).map_err(|_| err("native_branch_identity_changed"))?);
+            selected["branch_publication_id"] =
+                json!(validate_uid(&original).map_err(|_| err("native_branch_identity_changed"))?);
             selected["agent_profile"] = source["agent_profile"].clone();
             selected["branch_name"] = source["branch"].clone();
             if source.get("branch").and_then(Value::as_str)
@@ -1457,8 +1589,14 @@ impl NativeJenkinsVerification {
     /// Expose only genuine correlated build metadata for author
     /// feedback.
     pub fn failure_context(&mut self, job: &Value) -> Result<Option<Value>, PublicationError> {
-        let index = read_json(&self.index_path(text(job, "review_id"))?, Some(effective_uid()))?;
-        let binding = self.read_binding(&validate_uid(text(&index, "action_id")).map_err(|_| err("native_ci_binding_changed"))?)?;
+        let index = read_json(
+            &self.index_path(text(job, "review_id"))?,
+            Some(effective_uid()),
+        )?;
+        let binding = self.read_binding(
+            &validate_uid(text(&index, "action_id"))
+                .map_err(|_| err("native_ci_binding_changed"))?,
+        )?;
         if binding["scope"].get("review_id") != job.get("review_id")
             || binding["request"].get("candidate_commit") != job.get("candidate_commit")
         {
@@ -1490,24 +1628,42 @@ impl NativeJenkinsVerification {
 
     fn index_path(&self, review_id: &str) -> Result<PathBuf, PublicationError> {
         let review = validate_uid(review_id).map_err(|_| err("native_ci_review_changed"))?;
-        Ok(self.delivery.config.state_root.join("reviews").join(format!("{review}.json")))
+        Ok(self
+            .delivery
+            .config
+            .state_root
+            .join("reviews")
+            .join(format!("{review}.json")))
     }
 
-    fn files(&mut self, repository: &Path, head: &str) -> Result<BTreeMap<String, Value>, PublicationError> {
-        let raw = self.git.git(Some(repository), &["ls-tree", "-r", "--full-tree", "-z", head], false, 60.0)?;
+    fn files(
+        &mut self,
+        repository: &Path,
+        head: &str,
+    ) -> Result<BTreeMap<String, Value>, PublicationError> {
+        let raw = self.git.git(
+            Some(repository),
+            &["ls-tree", "-r", "--full-tree", "-z", head],
+            false,
+            60.0,
+        )?;
         let mut files = BTreeMap::new();
         for record in raw.split(|byte| *byte == 0) {
             if record.is_empty() {
                 continue;
             }
-            let tab = record.iter().position(|byte| *byte == b'\t').ok_or_else(|| err("native_ci_source_unsupported"))?;
+            let tab = record
+                .iter()
+                .position(|byte| *byte == b'\t')
+                .ok_or_else(|| err("native_ci_source_unsupported"))?;
             let description = String::from_utf8_lossy(&record[..tab]).into_owned();
             let parts: Vec<&str> = description.split(' ').collect();
             if parts.len() != 3 {
                 return Err(err("native_ci_source_unsupported"));
             }
             let (mode, kind, blob) = (parts[0], parts[1], parts[2]);
-            let path = String::from_utf8(record[tab + 1..].to_vec()).map_err(|_| err("native_ci_source_unsupported"))?;
+            let path = String::from_utf8(record[tab + 1..].to_vec())
+                .map_err(|_| err("native_ci_source_unsupported"))?;
             if kind != "blob"
                 || !matches!(mode, "100644" | "100755")
                 || files.len() >= 20_000
@@ -1529,15 +1685,26 @@ impl NativeJenkinsVerification {
         repository: &Path,
         branch_scope: Option<&str>,
     ) -> Result<(String, String, String, String, String, String), PublicationError> {
-        let head = validate_sha(&self.git.git_text(Some(repository), &["rev-parse", "HEAD"], false, 60.0)?)
-            .map_err(|_| err("native_ci_candidate_changed"))?;
+        let head = validate_sha(&self.git.git_text(
+            Some(repository),
+            &["rev-parse", "HEAD"],
+            false,
+            60.0,
+        )?)
+        .map_err(|_| err("native_ci_candidate_changed"))?;
         if head != text(job, "candidate_commit") {
             return Err(err("native_ci_candidate_changed"));
         }
-        let tree = validate_sha(&self.git.git_text(Some(repository), &["rev-parse", &format!("{head}^{{tree}}")], false, 60.0)?)
-            .map_err(|_| err("native_ci_candidate_changed"))?;
-        let gate_tree = forge_work_worker::review_candidate::tree_map(&mut self.git, repository, &head)
-            .map_err(|error| PublicationError::new(&error.to_string()))?;
+        let tree = validate_sha(&self.git.git_text(
+            Some(repository),
+            &["rev-parse", &format!("{head}^{{tree}}")],
+            false,
+            60.0,
+        )?)
+        .map_err(|_| err("native_ci_candidate_changed"))?;
+        let gate_tree =
+            forge_work_worker::review_candidate::tree_map(&mut self.git, repository, &head)
+                .map_err(|error| PublicationError::new(&error.to_string()))?;
         let gate_source = gate_source_digest(&gate_tree, &self.contract.profile);
         let native_gate = gate_manifest_sha256(
             &json!(self.config.checks),
@@ -1548,14 +1715,13 @@ impl NativeJenkinsVerification {
             return Err(err("native_ci_gate_changed"));
         }
         let files = self.files(repository, &head)?;
-        let (source, helper, gate) = if self.contract.profile == SCOPED_PROFILE
-            || self.contract.profile == EVENT_PROFILE
-        {
-            jenkins_gate_manifest(&self.delivery.config, &files, branch_scope, false)
-        } else {
-            jenkins_gate_manifest(&self.delivery.config, &files, None, true)
-        }
-        .map_err(|error| PublicationError::new(&error.to_string()))?;
+        let (source, helper, gate) =
+            if self.contract.profile == SCOPED_PROFILE || self.contract.profile == EVENT_PROFILE {
+                jenkins_gate_manifest(&self.delivery.config, &files, branch_scope, false)
+            } else {
+                jenkins_gate_manifest(&self.delivery.config, &files, None, true)
+            }
+            .map_err(|error| PublicationError::new(&error.to_string()))?;
         Ok((head, tree, native_gate, source, helper, gate))
     }
 
@@ -1609,7 +1775,9 @@ impl NativeJenkinsVerification {
         if !identities.selected(job)? {
             return Ok(None);
         }
-        let head = self.git.git_text(Some(repository), &["rev-parse", "HEAD"], false, 60.0)?;
+        let head = self
+            .git
+            .git_text(Some(repository), &["rev-parse", "HEAD"], false, 60.0)?;
         if validate_sha(head.trim()).map_err(|_| err("native_ci_candidate_changed"))?
             != text(job, "candidate_commit")
         {
@@ -1625,8 +1793,10 @@ impl NativeJenkinsVerification {
         if context.get("active") != Some(&json!(true)) {
             return Err(err("native_ci_scope_inactive"));
         }
-        let head = validate_sha(text(job, "candidate_commit")).map_err(|_| err("native_ci_candidate_changed"))?;
-        let main = validate_sha(text(job, "integration_base")).map_err(|_| err("native_ci_candidate_changed"))?;
+        let head = validate_sha(text(job, "candidate_commit"))
+            .map_err(|_| err("native_ci_candidate_changed"))?;
+        let main = validate_sha(text(job, "integration_base"))
+            .map_err(|_| err("native_ci_candidate_changed"))?;
         let branch = if self.config.native_delivery_mode == "branch-first-v1" {
             let mut selected = job.clone();
             selected["branch_publication_id"] = scope["review_id"].clone();
@@ -1642,8 +1812,9 @@ impl NativeJenkinsVerification {
             .contract
             .plan(&branch_scope)
             .map_err(|message| PublicationError::new(&message))?;
-        let gate_tree = forge_work_worker::review_candidate::tree_map(&mut self.git, repository, &head)
-            .map_err(|error| PublicationError::new(&error.to_string()))?;
+        let gate_tree =
+            forge_work_worker::review_candidate::tree_map(&mut self.git, repository, &head)
+                .map_err(|error| PublicationError::new(&error.to_string()))?;
         let gate_source = gate_source_digest(&gate_tree, &self.contract.profile);
         let gate = gate_manifest_sha256(
             &json!(self.config.checks),
@@ -1722,7 +1893,9 @@ impl NativeJenkinsVerification {
             .unwrap_or(false);
         if has_snapshot {
             let mut identities = self.identities.take().expect("checked");
-            let head = self.git.git_text(Some(repository), &["rev-parse", "HEAD"], false, 60.0)?;
+            let head = self
+                .git
+                .git_text(Some(repository), &["rev-parse", "HEAD"], false, 60.0)?;
             if validate_sha(head.trim()).map_err(|_| err("native_ci_candidate_changed"))?
                 != text(job, "candidate_commit")
             {
@@ -1813,8 +1986,13 @@ impl NativeJenkinsVerification {
         if context.get("active") != Some(&json!(true)) {
             return Err(err("native_ci_scope_inactive"));
         }
-        let head = validate_sha(&self.git.git_text(Some(repository), &["rev-parse", "HEAD"], false, 60.0)?)
-            .map_err(|_| err("native_ci_candidate_changed"))?;
+        let head = validate_sha(&self.git.git_text(
+            Some(repository),
+            &["rev-parse", "HEAD"],
+            false,
+            60.0,
+        )?)
+        .map_err(|_| err("native_ci_candidate_changed"))?;
         let expected_main = validate_sha(text(job, "integration_base"))
             .map_err(|_| err("native_ci_candidate_changed"))?;
         let mut publication: Option<Value> = None;
@@ -1824,7 +2002,10 @@ impl NativeJenkinsVerification {
                 .config
                 .state_root
                 .join("branches")
-                .join(format!("{}.json", scope["review_id"].as_str().unwrap_or_default()));
+                .join(format!(
+                    "{}.json",
+                    scope["review_id"].as_str().unwrap_or_default()
+                ));
             let mut receipt = read_json(&path, Some(effective_uid()))?;
             let event = read_json(&path.with_extension("event.json"), Some(effective_uid()))?;
             if validate_uid(text(&event, "correlation_id")).ok().as_deref()
@@ -1843,9 +2024,11 @@ impl NativeJenkinsVerification {
         }
         let mut persistent_branch: Option<String> = None;
         if self.branch_provider.persistent_enabled() {
-            if let Some(info) = self.branch_provider.resolve_scope_for_job(job).map_err(|error| {
-                PublicationError::new(&error.to_string())
-            })? {
+            if let Some(info) = self
+                .branch_provider
+                .resolve_scope_for_job(job)
+                .map_err(|error| PublicationError::new(&error.to_string()))?
+            {
                 persistent_branch = Some(
                     self.branch_provider
                         .branch_for_profile(
@@ -1865,7 +2048,9 @@ impl NativeJenkinsVerification {
         } else if head == expected_main {
             Some("main".to_string())
         } else {
-            publication.as_ref().map(|receipt| text(receipt, "branch").to_string())
+            publication
+                .as_ref()
+                .map(|receipt| text(receipt, "branch").to_string())
         };
         let branch_scope = derive_branch_scope(&head, &expected_main, source_branch.as_deref())
             .map_err(|error| PublicationError::new(&error.to_string()))?;
@@ -1938,9 +2123,8 @@ impl NativeJenkinsVerification {
             "transport_sha256": self.transport_digest()?,
         });
         if let Some(snapshot) = &snapshot {
-            binding["content_identity"] =
-                NativeVerificationIdentityProvider::reference(snapshot)
-                    .map_err(|error| PublicationError::new(error.code()))?;
+            binding["content_identity"] = NativeVerificationIdentityProvider::reference(snapshot)
+                .map_err(|error| PublicationError::new(error.code()))?;
         }
         if scoped_profile {
             binding["logical_checks"] = json!(plan.logical_checks);
@@ -1999,7 +2183,12 @@ impl NativeJenkinsVerification {
                     60.0,
                 )?;
             } else {
-                self.git.git(Some(repository), &["update-ref", &reference, &head], false, 60.0)?;
+                self.git.git(
+                    Some(repository),
+                    &["update-ref", &reference, &head],
+                    false,
+                    60.0,
+                )?;
                 let mut references = vec![reference.clone()];
                 if binding.get("source_publication").is_some() {
                     self.git.git(
@@ -2041,7 +2230,10 @@ impl NativeJenkinsVerification {
         let current = self.store.native_ci_binding(&binding["scope"])?;
         self.scope(&current, &binding["scope"])?;
         if let Some(candidate) = current.get("candidate_commit") {
-            if !candidate.is_null() && text(&current, "candidate_commit") != text(&binding["request"], "candidate_commit") {
+            if !candidate.is_null()
+                && text(&current, "candidate_commit")
+                    != text(&binding["request"], "candidate_commit")
+            {
                 return Err(err("native_ci_candidate_changed"));
             }
         }
@@ -2102,9 +2294,11 @@ impl NativeJenkinsVerification {
             )
             .map_err(|error| PublicationError::new(&error.to_string()))?;
         write_json(&directory.join("cancel-observation.json"), &result)?;
-        Ok(result.get("status").and_then(Value::as_str) == Some("cancelled")
-            && (result["receipt"].get("cleanup_confirmed") == Some(&json!(true))
-                || result["receipt"].get("process_started") == Some(&json!(false))))
+        Ok(
+            result.get("status").and_then(Value::as_str) == Some("cancelled")
+                && (result["receipt"].get("cleanup_confirmed") == Some(&json!(true))
+                    || result["receipt"].get("process_started") == Some(&json!(false))),
+        )
     }
 
     fn cancel_wait(&mut self, binding: &Value) -> bool {
@@ -2123,7 +2317,8 @@ impl NativeJenkinsVerification {
     pub fn quiesce(&mut self, job: &Value) -> Result<(), PublicationError> {
         let publication = validate_uid(text(job, "publication_id"))
             .map_err(|_| err("prior_verification_scope_unstopped"))?;
-        let unit = unit_name(&publication).map_err(|_| err("prior_verification_scope_unstopped"))?;
+        let unit =
+            unit_name(&publication).map_err(|_| err("prior_verification_scope_unstopped"))?;
         let proof = self
             .supervisor
             .stop(&unit)
@@ -2157,18 +2352,40 @@ impl NativeJenkinsVerification {
                 && receipt.get("coverage") == plan.coverage().as_ref());
         let accounting = native_check_accounting(
             &commands,
-            if schema_valid { Some(&raw_receipt) } else { None },
+            if schema_valid {
+                Some(&raw_receipt)
+            } else {
+                None
+            },
         );
         let passed = result.get("status").and_then(Value::as_str) == Some("passed")
             && accounting.complete
-            && receipt.get("failure").map(|value| value.is_null()).unwrap_or(true);
+            && receipt
+                .get("failure")
+                .map(|value| value.is_null())
+                .unwrap_or(true);
         let clean = cleanup.unwrap_or(receipt.get("cleanup_confirmed") == Some(&json!(true)));
         let mut metadata = VerificationMetadata::new(commands.len() as i64);
-        metadata.active_index = Some(accounting.failed_index.map(|index| index as i64).unwrap_or(0));
-        let summary = result.get("summary").and_then(Value::as_str).unwrap_or_default().to_string();
-        let mut inferred = if ["cancelled_or_timed_out", "verification_unavailable", "deadline_exceeded", "gate_manifest_mismatch", "no trusted verification receipt"]
-            .iter()
-            .any(|needle| summary.contains(needle))
+        metadata.active_index = Some(
+            accounting
+                .failed_index
+                .map(|index| index as i64)
+                .unwrap_or(0),
+        );
+        let summary = result
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let mut inferred = if [
+            "cancelled_or_timed_out",
+            "verification_unavailable",
+            "deadline_exceeded",
+            "gate_manifest_mismatch",
+            "no trusted verification receipt",
+        ]
+        .iter()
+        .any(|needle| summary.contains(needle))
         {
             "verification_process_unavailable"
         } else {
@@ -2259,18 +2476,31 @@ impl NativeJenkinsVerification {
             &self.delivery.config.jenkins_job,
             text(request, "candidate_commit"),
             lookup,
-            binding["scope"].get("correlation_id").and_then(Value::as_str).map(|value| value.to_string()),
-            request.get("source_branch").and_then(Value::as_str).map(|value| value.to_string()),
-            request.get("branch_scope").and_then(Value::as_str).map(|value| value.to_string()),
+            binding["scope"]
+                .get("correlation_id")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
+            request
+                .get("source_branch")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
+            request
+                .get("branch_scope")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
         );
         let _ = tracker.reconcile();
         Some(tracker)
     }
 
     fn record_cancellation(&self, tracker: &mut Option<LifecycleTracker>, binding: &Value) {
-        let Some(tracker) = tracker.as_mut() else { return };
+        let Some(tracker) = tracker.as_mut() else {
+            return;
+        };
         let action = text(&binding["request"], "action_id");
-        let Ok(directory) = self.directory(action) else { return };
+        let Ok(directory) = self.directory(action) else {
+            return;
+        };
         let path = directory.join("cancel-observation.json");
         if !path.exists() {
             return;
@@ -2311,7 +2541,9 @@ impl NativeJenkinsVerification {
             log_bytes = std::fs::read(&log_path).ok();
         }
         let receipt_sha = match receipt_sha {
-            Some(value) if value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()) => value,
+            Some(value) if value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()) => {
+                value
+            }
             _ => sha256_hex(&canonical_bytes(&full_receipt)),
         };
         if self.branch_provider.persistent_enabled() {
@@ -2321,7 +2553,11 @@ impl NativeJenkinsVerification {
                     .and_then(Value::as_str)
                     .or_else(|| cache.get("status").and_then(Value::as_str))
                     .unwrap_or_default();
-                let status = if raw_status == "hit_main_seed" { "hit_main" } else { raw_status };
+                let status = if raw_status == "hit_main_seed" {
+                    "hit_main"
+                } else {
+                    raw_status
+                };
                 if ["hit_branch", "hit_main", "miss", "disabled"].contains(&status) {
                     let source_pub = binding.get("source_publication");
                     let profile = source_pub
@@ -2332,7 +2568,12 @@ impl NativeJenkinsVerification {
                         .and_then(|value| value.get("branch"))
                         .and_then(Value::as_str)
                         .map(|value| value.to_string())
-                        .or_else(|| request.get("source_branch").and_then(Value::as_str).map(|value| value.to_string()));
+                        .or_else(|| {
+                            request
+                                .get("source_branch")
+                                .and_then(Value::as_str)
+                                .map(|value| value.to_string())
+                        });
                     let profile = match profile {
                         Some(profile) => Some(profile),
                         None => self
@@ -2373,11 +2614,21 @@ impl NativeJenkinsVerification {
             job_name: self.delivery.config.jenkins_job.clone(),
             commit_sha: text(request, "candidate_commit").to_string(),
             branch_scope: branch_scope.clone(),
-            pipeline_scope: if branch_scope == "main" { "main".to_string() } else { "branch".to_string() },
+            pipeline_scope: if branch_scope == "main" {
+                "main".to_string()
+            } else {
+                "branch".to_string()
+            },
             receipt_sha256: receipt_sha,
-            task_id: scope.get("task_id").and_then(Value::as_str).map(|value| value.to_string()),
+            task_id: scope
+                .get("task_id")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
             build_number: receipt.get("build_number").and_then(Value::as_i64),
-            branch_name: request.get("source_branch").and_then(Value::as_str).map(|value| value.to_string()),
+            branch_name: request
+                .get("source_branch")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
         };
         let entries = crate::cicd_artifacts::extract_stage_evidence_from_receipt(
             &full_receipt,
@@ -2484,14 +2735,18 @@ impl NativeJenkinsVerification {
             let result = self.delivery.verify(&binding["request"], &require_lease);
             match result {
                 Ok(result) => {
-                    let directory = self.directory(text(&binding["request"], "action_id"))
+                    let directory = self
+                        .directory(text(&binding["request"], "action_id"))
                         .map_err(NativeRunError::Publication)?;
                     write_json(&directory.join("observation.json"), &result)
                         .map_err(NativeRunError::Publication)?;
                     if let Some(tracker) = tracker.as_mut() {
                         tracker.observe(&result);
                     }
-                    let status = result.get("status").and_then(Value::as_str).unwrap_or_default();
+                    let status = result
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
                     if status == "passed" || status == "failed" {
                         self.persist_stage_artifacts(binding, &result);
                         let mut report = self
@@ -2500,7 +2755,12 @@ impl NativeJenkinsVerification {
                         if !report.cleanup_confirmed {
                             let cleanup = self.cancel_wait(binding);
                             report = self
-                                .report(binding, &result, Some("verification_scope_unstopped"), Some(cleanup))
+                                .report(
+                                    binding,
+                                    &result,
+                                    Some("verification_scope_unstopped"),
+                                    Some(cleanup),
+                                )
                                 .map_err(NativeRunError::Publication)?;
                         }
                         if !report.checks_passed {
@@ -2514,7 +2774,8 @@ impl NativeJenkinsVerification {
                         } else if plan.scope == "branch" {
                             "Jenkins completed branch in-memory checks; browser/database were not run.".to_string()
                         } else {
-                            "Jenkins completed full main browser and four-suite backend checks.".to_string()
+                            "Jenkins completed full main browser and four-suite backend checks."
+                                .to_string()
                         };
                         return Ok(report);
                     }
@@ -2535,7 +2796,12 @@ impl NativeJenkinsVerification {
                         "summary": "Native Jenkins observation failed; scoped cleanup was requested.",
                     });
                     let report = self
-                        .report(binding, &result, Some("verification_process_unavailable"), Some(cleanup))
+                        .report(
+                            binding,
+                            &result,
+                            Some("verification_process_unavailable"),
+                            Some(cleanup),
+                        )
                         .map_err(NativeRunError::Publication)?;
                     return Err(NativeRunError::Failure(VerificationFailure {
                         report: report.into_data(),
@@ -2557,7 +2823,12 @@ impl NativeJenkinsVerification {
             "summary": "Native Jenkins verification was cancelled or lost its lease.",
         });
         let report = self
-            .report(binding, &result, Some("verification_timeout_or_cancelled"), Some(cleanup))
+            .report(
+                binding,
+                &result,
+                Some("verification_timeout_or_cancelled"),
+                Some(cleanup),
+            )
             .map_err(NativeRunError::Publication)?;
         Err(NativeRunError::Failure(VerificationFailure {
             report: report.into_data(),
@@ -2569,12 +2840,24 @@ impl NativeJenkinsVerification {
         job: &Value,
         repository: &Path,
     ) -> Result<Value, PublicationError> {
-        let index = read_json(&self.index_path(text(job, "review_id"))?, Some(effective_uid()))?;
+        let index = read_json(
+            &self.index_path(text(job, "review_id"))?,
+            Some(effective_uid()),
+        )?;
         let binding = self.read_binding(
-            &validate_uid(text(&index, "action_id")).map_err(|_| err("native_ci_binding_changed"))?,
+            &validate_uid(text(&index, "action_id"))
+                .map_err(|_| err("native_ci_binding_changed"))?,
         )?;
         if binding["scope"].get("review_id") != job.get("review_id")
-            || self.source(job, repository, binding["request"].get("branch_scope").and_then(Value::as_str))?.2
+            || self
+                .source(
+                    job,
+                    repository,
+                    binding["request"]
+                        .get("branch_scope")
+                        .and_then(Value::as_str),
+                )?
+                .2
                 != text(&binding, "native_gate_manifest_sha256")
         {
             return Err(err("native_ci_binding_changed"));
@@ -2611,7 +2894,10 @@ impl NativeJenkinsVerification {
             ("gate_manifest_sha256", job["gate_manifest_sha256"].clone()),
             ("checks_passed", json!(true)),
         ];
-        if expected.iter().any(|(key, value)| manifest.get(*key) != Some(value)) {
+        if expected
+            .iter()
+            .any(|(key, value)| manifest.get(*key) != Some(value))
+        {
             return Err(err("native_ci_candidate_changed"));
         }
         let mut normalized = job.clone();
@@ -2630,7 +2916,9 @@ impl NativeJenkinsVerification {
         let source = self.source(
             &source_job,
             &repository,
-            binding["request"].get("branch_scope").and_then(Value::as_str),
+            binding["request"]
+                .get("branch_scope")
+                .and_then(Value::as_str),
         )?;
         if source.2 != text(&binding, "native_gate_manifest_sha256")
             || source.4 != text(&binding, "verifier_sha256")
@@ -2677,22 +2965,27 @@ impl NativeJenkinsVerification {
         if !receipt.is_object() {
             return Err(err("native_ci_check_accounting_invalid"));
         }
-        let status = result.get("status").and_then(Value::as_str).unwrap_or_default().to_string();
+        let status = result
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         let plan = self.plan(&binding)?;
         let (status, checks, findings) = if status == "passed" || status == "failed" {
             let report = self.report(&binding, &result, None, None)?;
             let commands = self.commands(&binding)?;
             let accounting = native_check_accounting(&commands, Some(&receipt));
-            if !accounting.valid
-                || (status == "passed" && !report.checks_passed)
-            {
+            if !accounting.valid || (status == "passed" && !report.checks_passed) {
                 return Err(err("native_ci_check_accounting_invalid"));
             }
             if !report.cleanup_confirmed {
                 return Err(err("native_ci_scope_unstopped"));
             }
             if !report.checks_passed
-                && report.checks.iter().all(|check| check.get("status").and_then(Value::as_str) == Some("passed"))
+                && report
+                    .checks
+                    .iter()
+                    .all(|check| check.get("status").and_then(Value::as_str) == Some("passed"))
             {
                 // Hosted SQL records per-check success before
                 // overall status. Its schema cannot represent a
@@ -2700,7 +2993,12 @@ impl NativeJenkinsVerification {
                 // so never persist an all-green hosted set.
                 return Err(err("native_ci_failure_outside_fixed_checks"));
             }
-            let status = if report.checks_passed { "passed" } else { "failed" }.to_string();
+            let status = if report.checks_passed {
+                "passed"
+            } else {
+                "failed"
+            }
+            .to_string();
             let (states, logical): (Vec<String>, std::collections::HashMap<String, String>) =
                 if plan.profile == EVENT_PROFILE {
                     let mut states = Vec::new();
@@ -2735,7 +3033,10 @@ impl NativeJenkinsVerification {
                         .iter()
                         .enumerate()
                         .map(|(index, command)| {
-                            (check_id(command, index), plan.phases[index].logical_gate.clone())
+                            (
+                                check_id(command, index),
+                                plan.phases[index].logical_gate.clone(),
+                            )
                         })
                         .collect();
                     (states, logical)
@@ -2820,7 +3121,13 @@ impl NativeJenkinsVerification {
             status,
             checks,
             findings,
-            summary: format!("Jenkins: {}", result.get("summary").and_then(Value::as_str).unwrap_or_default()),
+            summary: format!(
+                "Jenkins: {}",
+                result
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            ),
             toolchain: "Not reported".to_string(),
         })
     }
@@ -2836,11 +3143,17 @@ impl NativeJenkinsVerification {
             .cloned()
             .unwrap_or_default();
         let prefix = format!("https://github.com/{repository}/pull/");
-        let url = job.get("pr_url").and_then(Value::as_str).unwrap_or_default();
+        let url = job
+            .get("pr_url")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let number = url.strip_prefix(&prefix).unwrap_or_default();
         if number.is_empty()
             || !number.chars().all(|character| character.is_ascii_digit())
-            || number.parse::<i64>().map(|value| value < 1 || value.to_string() != number).unwrap_or(true)
+            || number
+                .parse::<i64>()
+                .map(|value| value < 1 || value.to_string() != number)
+                .unwrap_or(true)
         {
             return Err(err("native_ci_pull_request_changed"));
         }
@@ -2852,7 +3165,10 @@ impl NativeJenkinsVerification {
         let value = client.api("GET", &format!("repos/{repository}/pulls/{number}"), None)?;
         client.validated(&identity, text(job, "candidate_commit"), &value)?;
         if value.get("state").and_then(Value::as_str) != Some("open")
-            || value.get("merged_at").map(|value| !value.is_null()).unwrap_or(false)
+            || value
+                .get("merged_at")
+                .map(|value| !value.is_null())
+                .unwrap_or(false)
         {
             return Err(err("native_ci_pull_request_changed"));
         }
@@ -2867,7 +3183,9 @@ impl NativeJenkinsVerification {
             .unwrap_or_else(|| "unavailable".to_string());
         let code = if !code.is_empty()
             && code.len() <= 80
-            && code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            && code
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
         {
             code.to_string()
         } else {
@@ -2880,7 +3198,9 @@ impl NativeJenkinsVerification {
                 .next()
                 .map(|c| c.is_ascii_alphabetic() || c == '_')
                 .unwrap_or(false)
-            && error_type.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && error_type
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
             error_type.to_string()
         } else {
@@ -2916,7 +3236,10 @@ impl NativeJenkinsVerification {
         }
         if self.action_iterator.is_none() {
             let mut entries: Vec<PathBuf> = std::fs::read_dir(&actions)
-                .map(|read| read.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect())
+                .map(|read| {
+                    read.filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                        .collect()
+                })
                 .unwrap_or_default();
             entries.sort();
             self.action_iterator = Some(entries.into());
@@ -2949,8 +3272,13 @@ impl NativeJenkinsVerification {
         if self.historical_terminal(directory) {
             return Ok(());
         }
-        let action = validate_uid(directory.file_name().and_then(|name| name.to_str()).unwrap_or_default())
-            .map_err(|_| err("native_ci_state_changed"))?;
+        let action = validate_uid(
+            directory
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default(),
+        )
+        .map_err(|_| err("native_ci_state_changed"))?;
         let binding = self.read_binding(&action)?;
         let cancelled = directory.join("cancel-observation.json");
         if cancelled.exists() {
@@ -2965,8 +3293,10 @@ impl NativeJenkinsVerification {
         let observed = directory.join("observation.json");
         if observed.exists() {
             let result = read_json(&observed, Some(effective_uid()))?;
-            if matches!(result.get("status").and_then(Value::as_str), Some("passed" | "failed"))
-                && result["receipt"].get("cleanup_confirmed") == Some(&json!(true))
+            if matches!(
+                result.get("status").and_then(Value::as_str),
+                Some("passed" | "failed")
+            ) && result["receipt"].get("cleanup_confirmed") == Some(&json!(true))
             {
                 return Ok(());
             }
@@ -3026,15 +3356,20 @@ pub fn create_native_jenkins(
         .jenkins_delivery_config
         .clone()
         .ok_or_else(|| "Native Jenkins delivery configuration is unavailable".to_string())?;
-    let raw = read_private(&config_path, 65_536, Some(effective_uid()))
-        .map_err(|message| message)?;
-    let raw: Value = serde_json::from_slice(&raw).map_err(|_| "Invalid delivery configuration".to_string())?;
+    let raw =
+        read_private(&config_path, 65_536, Some(effective_uid())).map_err(|message| message)?;
+    let raw: Value =
+        serde_json::from_slice(&raw).map_err(|_| "Invalid delivery configuration".to_string())?;
     let mut selected = DeliveryConfig::parse(&raw).map_err(|error| error.to_string())?;
     let contract = contract_for_config(&selected).map_err(|error| error.to_string())?;
     if contract.profile != config.jenkins_verification_profile {
         return Err("Native Jenkins profile selections disagree".to_string());
     }
-    let expected_scope = if config.jenkins_verification_scope == "main" { "main" } else { "detached" };
+    let expected_scope = if config.jenkins_verification_scope == "main" {
+        "main"
+    } else {
+        "detached"
+    };
     let expected_plan = contract.plan(expected_scope).map_err(|message| message)?;
     let legacy_logical_ok = {
         let names: std::collections::HashSet<&str> = config
@@ -3042,7 +3377,11 @@ pub fn create_native_jenkins(
             .iter()
             .map(|row| row[2].as_str())
             .collect();
-        names == LOGICAL_CHECKS.iter().copied().collect::<std::collections::HashSet<&str>>()
+        names
+            == LOGICAL_CHECKS
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<&str>>()
     };
     if selected.owner != config.worker.owner
         || selected.github_config_dir != config.github_config_dir
@@ -3071,7 +3410,8 @@ pub fn create_native_jenkins(
             .iter()
             .find(|(name, _)| name == alias)
             .map(|(_, path)| path.clone());
-        if &project.repository != repository || Some(&project.canonical_repo) != canonical.as_ref() {
+        if &project.repository != repository || Some(&project.canonical_repo) != canonical.as_ref()
+        {
             return Err("Native Jenkins project scope changed".to_string());
         }
     }
@@ -3136,11 +3476,7 @@ impl HostedChecksPort for NativeJenkinsVerification {
 }
 
 impl NativeCiPort for NativeJenkinsVerification {
-    fn prepare_identity(
-        &mut self,
-        job: &Value,
-        repo: &Path,
-    ) -> Result<Option<Value>, ReviewError> {
+    fn prepare_identity(&mut self, job: &Value, repo: &Path) -> Result<Option<Value>, ReviewError> {
         NativeJenkinsVerification::prepare_identity(self, job, repo)
             .map_err(|error| ReviewError::other(error.code()))
     }
@@ -3174,8 +3510,7 @@ impl NativeCiPort for NativeJenkinsVerification {
 
 impl MergeNativeCiPort for NativeJenkinsVerification {
     fn publication_job(&mut self, job: &Value) -> Result<Value, ProviderError> {
-        NativeJenkinsVerification::publication_job(self, job)
-            .map_err(ProviderError::Publication)
+        NativeJenkinsVerification::publication_job(self, job).map_err(ProviderError::Publication)
     }
 }
 
@@ -3194,7 +3529,9 @@ impl SharedNativeCi {
     }
 
     pub fn lock(&self) -> std::sync::MutexGuard<'_, NativeJenkinsVerification> {
-        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub fn reconcile_once(&self, limit: i64) -> Result<(), PublicationError> {
@@ -3247,11 +3584,7 @@ impl HostedChecksPort for SharedNativeCi {
 }
 
 impl NativeCiPort for SharedNativeCi {
-    fn prepare_identity(
-        &mut self,
-        job: &Value,
-        repo: &Path,
-    ) -> Result<Option<Value>, ReviewError> {
+    fn prepare_identity(&mut self, job: &Value, repo: &Path) -> Result<Option<Value>, ReviewError> {
         NativeCiPort::prepare_identity(&mut *self.lock(), job, repo)
     }
 
@@ -3315,7 +3648,10 @@ mod tests {
         ]});
         let accounting = native_check_accounting(&commands(), Some(&receipt));
         assert!(!accounting.valid);
-        assert!(accounting.checks.iter().all(|check| check["status"] == json!("not_run")));
+        assert!(accounting
+            .checks
+            .iter()
+            .all(|check| check["status"] == json!("not_run")));
     }
 
     #[test]
@@ -3330,7 +3666,10 @@ mod tests {
     fn binding_versions_follow_the_profile() {
         assert_eq!(binding_version(LEGACY_PROFILE).unwrap(), VERSION);
         assert_eq!(binding_version(SCOPED_PROFILE).unwrap(), SCOPED_VERSION);
-        assert_eq!(binding_version(EVENT_PROFILE).unwrap(), "forge-native-jenkins-v3");
+        assert_eq!(
+            binding_version(EVENT_PROFILE).unwrap(),
+            "forge-native-jenkins-v3"
+        );
     }
 }
 
@@ -3343,7 +3682,10 @@ mod shared_branch_tests {
         let mut branches = SharedAgentBranches;
         assert!(!branches.persistent_enabled());
         assert!(branches.acquire(&json!({}), None, None).unwrap().is_none());
-        assert!(branches.resolve_scope_for_job(&json!({})).unwrap().is_none());
+        assert!(branches
+            .resolve_scope_for_job(&json!({}))
+            .unwrap()
+            .is_none());
         assert!(branches.branch_for_profile("homelab", "codex").is_err());
         assert_eq!(
             branches
