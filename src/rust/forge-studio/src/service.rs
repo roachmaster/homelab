@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 use crate::artifact;
 use crate::store::{BuildRow, BuildStore, StoreError};
@@ -216,12 +216,32 @@ impl Catalog {
 }
 
 const ROUTES: [(&str, &str, &str); 6] = [
-    ("game.project.list", "game_project_list", "game_projects_listed"),
-    ("game.project.get", "game_project_get", "game_project_opened"),
-    ("game.build.submit", "game_build_submit", "game_build_submitted"),
+    (
+        "game.project.list",
+        "game_project_list",
+        "game_projects_listed",
+    ),
+    (
+        "game.project.get",
+        "game_project_get",
+        "game_project_opened",
+    ),
+    (
+        "game.build.submit",
+        "game_build_submit",
+        "game_build_submitted",
+    ),
     ("game.build.get", "game_build_get", "game_build_status"),
-    ("game.build.cancel", "game_build_cancel", "game_build_cancelled"),
-    ("game.artifact.get", "game_artifact_get", "game_artifact_opened"),
+    (
+        "game.build.cancel",
+        "game_build_cancel",
+        "game_build_cancelled",
+    ),
+    (
+        "game.artifact.get",
+        "game_artifact_get",
+        "game_artifact_opened",
+    ),
 ];
 
 /// The Studio control API. Its store is a port, bound by the
@@ -363,9 +383,9 @@ impl Service {
                     let record = self.store.cancel(&key, build_id)?;
                     fields.insert("build".to_string(), self.build_view(&record));
                 } else {
-                    let record = self
-                        .store
-                        .status(&key, build_id, cursor.as_i64().unwrap_or(0) as i32)?;
+                    let record =
+                        self.store
+                            .status(&key, build_id, cursor.as_i64().unwrap_or(0) as i32)?;
                     if destination == "game.artifact.get" {
                         let preview = self.artifact_view(&record);
                         if preview.is_null() {
@@ -465,9 +485,7 @@ fn scan_string(text: &str, start: usize) -> Result<(String, usize), String> {
                     b'b' => out.push('\u{0008}'),
                     b'f' => out.push('\u{000C}'),
                     b'u' => {
-                        let hex = text
-                            .get(index + 2..index + 6)
-                            .ok_or("bad unicode escape")?;
+                        let hex = text.get(index + 2..index + 6).ok_or("bad unicode escape")?;
                         let code = u32::from_str_radix(hex, 16)
                             .map_err(|_| "bad unicode escape".to_string())?;
                         out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
@@ -533,9 +551,7 @@ mod tests {
             directory: "game".to_string(),
         };
         // Python: sha256(json.dumps([1, "static-web", "/srv/repo", "game"]))
-        let expected = artifact::sha256_hex(
-            br#"[1, "static-web", "/srv/repo", "game"]"#,
-        );
+        let expected = artifact::sha256_hex(br#"[1, "static-web", "/srv/repo", "game"]"#);
         assert_eq!(project.source_recipe(), expected);
     }
 }
