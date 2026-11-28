@@ -49,7 +49,7 @@ if [[ ! -e "$secrets/token" ]]; then
     trap - EXIT
 fi
 [[ ! -L "$secrets/token" && -s "$secrets/token" ]] || die 'Invalid runner token.'
-install -m 0644 -o root -g root "$directory/$unit" "/etc/systemd/system/$unit"
+install -m 0644 -o root -g root "$directory/forge-agent-runner-dispatch.service" "/etc/systemd/system/$unit"
 systemctl daemon-reload
 start=$(systemctl show -p ExecStart --value "$unit")
 [[ $start == "{ path=$selected/bin/forge-runner ;"* ]] || die 'A service override selects a different runner.'

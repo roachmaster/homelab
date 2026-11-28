@@ -117,6 +117,12 @@ class WorkflowExitStatusTests(unittest.TestCase):
         root = SCRIPTS.parents[2]
         deploy = root / "deploy"
         self.assertEqual(sorted(str(p.relative_to(deploy)) for p in deploy.rglob("*.py")), [])
+        for path in deploy.rglob("*"):
+            if not path.is_file():
+                continue
+            self.assertNotIn(path.suffix, {".whl", ".pyc", ".pyo", ".pyz"}, str(path))
+            self.assertNotIn(path.name, {"Pipfile", "Pipfile.lock", "pyproject.toml", "setup.cfg"}, str(path))
+            self.assertFalse(path.match("requirements*.txt"), str(path))
         units = list(deploy.rglob("*.service")) + list(deploy.rglob("*.timer"))
         for file in units:
             for line in file.read_text().splitlines():

@@ -238,14 +238,14 @@ checkpoints in a transaction. The retained tombstone prevents stale writes from
 recreating the chat. Unlinked legacy run snapshots retain their independent
 scope.
 
-## Mail
+## Mail in the schema 54 deployment
 
 Mail uses `ide.mail.list`, `ide.mail.open`, `ide.mail.send`, `ide.mail.retry`,
-and the opt-in `ide.mail.archive` operation on the same versioned dispatch endpoint. Apply migration `0007` and install the
-packages in `requirements-mail-tokenizer.txt` from its hashed wheel set in the
-runner's Python environment. Install the matching Forge adapter and worker,
-configure `gpt-oss-120b` with its Mail profile, then enable `chat.mail_enabled`
-on the web host with workspace persistence and asynchronous dispatch enabled.
+and the opt-in `ide.mail.archive` operation on the same versioned dispatch
+endpoint. The previous release used a Python Harmony wheel to count the tokens
+in its pinned Mail profile. The native GPU worker supports that profile on the
+inference side. The coordinator must qualify the matching offline token counts
+and queue admission before selecting native Mail.
 
 The `gpt-oss-120b-harmony-v1` profile uses a 4,096-token context with 1,024 tokens
 reserved for generation (including reasoning), a 16-token operating margin and
