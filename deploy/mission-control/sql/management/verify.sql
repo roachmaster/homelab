@@ -3,6 +3,7 @@
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
+\ir verify-native-ci-v4.sql
 \ir verify-defect-tasks.sql
 \ir verify-agent-feature-branches.sql
 \ir verify-author-handoff.sql

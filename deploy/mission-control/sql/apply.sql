@@ -434,4 +434,10 @@ INSERT INTO forge_agent.schema_migrations(version,name) VALUES(54,'pg_proxy_prep
 -- perform it. Apply it only via sql/apply-cutover.sql from
 -- deploy/mission-control/proxy-cutover.sh, after quiescence
 -- verification, credential rotation, and session termination.
+SELECT NOT EXISTS (SELECT FROM forge_agent.schema_migrations WHERE version=56) AS apply_0056
+\gset
+\if :apply_0056
+\ir migrations/0056_native_ci_verifier.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(56,'native_ci_verifier');
+\endif
 COMMIT;

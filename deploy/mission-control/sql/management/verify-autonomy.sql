@@ -94,6 +94,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
   actual:=jsonb_set(actual,'{indexes}',(SELECT jsonb_agg(CASE WHEN item->>0='coding_workflow_reviews_workflow_id_target_kind_source_atte_key' THEN jsonb_set(item,'{1}',(SELECT old->1 FROM jsonb_array_elements(expected.data->'indexes') old WHERE old->>0=item->>0)) ELSE item END ORDER BY n) FROM jsonb_array_elements(actual->'indexes') WITH ORDINALITY a(item,n) WHERE item->>0 NOT IN('coding_workflow_reviews_supersedes_review_id_key','coding_workflow_reviews_one_live_source')));
   actual:=jsonb_set(actual,'{triggers}',(SELECT jsonb_agg(item ORDER BY n) FROM jsonb_array_elements(actual->'triggers') WITH ORDINALITY a(item,n) WHERE item->>0<>'coding_workflow_reviews_supersession_guard'));
  END IF;
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=56 AND name='native_ci_verifier') AND expected.name='coding_workflow_reviews' THEN actual:=replace(actual::text,'forge-sdlc-jenkins-v[1-4]:','forge-sdlc-jenkins-v[1-3]:')::jsonb;END IF;
  -- M49 widened only the gate check to also accept named contracts; verify the exact
  -- widened expression by restoring the predecessor text before the shape compare.
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=49 AND name='gate_contract_names') AND expected.name='coding_workflow_reviews' THEN
