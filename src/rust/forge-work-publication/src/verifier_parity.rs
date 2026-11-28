@@ -23,81 +23,7 @@ pub trait VerifierAstPort {
     fn parse(&self, source: &[u8]) -> Result<Value, String>;
 }
 
-const AST_DUMP_SCRIPT: &str = r"
-import sys, ast, json
-def conv(node):
-    if isinstance(node, ast.AST):
-        out = {'_type': type(node).__name__}
-        for field in node._fields:
-            out[field] = conv(getattr(node, field))
-        return out
-    if isinstance(node, list):
-        return [conv(item) for item in node]
-    if isinstance(node, (str, bool, int)) or node is None:
-        return node
-    if isinstance(node, float):
-        return {'$float': repr(node)}
-    if isinstance(node, bytes):
-        return {'$bytes': node.hex()}
-    return {'$other': type(node).__name__}
-try:
-    tree = ast.parse(sys.stdin.buffer.read().decode('utf-8'))
-except Exception as error:
-    sys.stderr.write(str(error))
-    sys.exit(1)
-sys.stdout.write(json.dumps(conv(tree)))
-";
-
-/// The production AST port: CPython's own parser via a fixed script.
-pub struct PythonAstPort;
-
-/// AST parser adapter backed by any bounded process-exec `IoClient`.
-pub struct IoClientAstPort<C> {
-    client: C,
-}
-
-impl<C> IoClientAstPort<C> {
-    pub fn new(client: C) -> Self {
-        Self { client }
-    }
-}
-
-impl<C> VerifierAstPort for IoClientAstPort<C>
-where
-    C: forge_core::io_client::IoClient<
-            Request = forge_work_worker::process_exec::ProcessRequest,
-            Response = forge_work_worker::process_exec::ProcessOutput,
-            Error = forge_work_worker::WorkerError,
-        > + Send
-        + Sync,
-{
-    fn parse(&self, source: &[u8]) -> Result<Value, String> {
-        let request = forge_work_worker::process_exec::ProcessRequest::inherited(
-            vec![
-                "/usr/bin/python3".to_string(),
-                "-B".to_string(),
-                "-c".to_string(),
-                AST_DUMP_SCRIPT.to_string(),
-            ],
-            30,
-        )
-        .with_stdin(source.to_vec());
-        let output = self
-            .client
-            .execute(request)
-            .map_err(|error| format!("{error:?}"))?;
-        if output.exit_code != 0 {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-        }
-        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
-    }
-}
-
-impl VerifierAstPort for PythonAstPort {
-    fn parse(&self, source: &[u8]) -> Result<Value, String> {
-        IoClientAstPort::new(forge_work_worker::process_exec::SystemProcessExec).parse(source)
-    }
-}
+pub use crate::historical_ast::RustAstPort;
 
 // ---------------------------------------------------------------------------
 // AST helpers
@@ -1595,13 +1521,13 @@ mod tests {
     use crate::ci_contract::CiGateContractFactory;
 
     fn verifier_source() -> Vec<u8> {
-        include_bytes!("../tests/fixtures/legacy_ci_policy.py").to_vec()
+        include_bytes!("../tests/fixtures/legacy_ci_policy.txt").to_vec()
     }
 
     #[test]
     fn historical_policy_fixture_matches_legacy_profiles() {
         let source = verifier_source();
-        let port = PythonAstPort;
+        let port = RustAstPort;
         for profile in [LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE] {
             verify_source_policy_parity(&source, profile, &port)
                 .unwrap_or_else(|error| panic!("source parity {profile}: {error}"));
@@ -1628,7 +1554,7 @@ mod tests {
                 "",
             );
         assert_ne!(skewed, text);
-        let port = PythonAstPort;
+        let port = RustAstPort;
         let error =
             verify_source_policy_parity(skewed.as_bytes(), EVENT_PROFILE, &port).unwrap_err();
         assert!(error.contains("work_external_plan_override.py"), "{error}");
@@ -1649,7 +1575,7 @@ mod tests {
         let text = String::from_utf8(source).unwrap();
         let skewed = text.replace("('/usr/bin/make', 'ci'),", "('/usr/bin/make', 'check'),");
         assert_ne!(skewed, text);
-        let port = PythonAstPort;
+        let port = RustAstPort;
         let error =
             verify_source_policy_parity(skewed.as_bytes(), LEGACY_PROFILE, &port).unwrap_err();
         assert!(error.contains("legacy CHECKS differ"), "{error}");

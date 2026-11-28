@@ -2,7 +2,7 @@
 //!
 //! Unifies the worker's and publication crate's bounded subprocess calls
 //! (`CommandGitRunner`, `SystemCommandPort`, `consumer_cache::git`,
-//! `ProcessObserverExecute`, and `PythonAstPort`) behind a single typed
+//! and `ProcessObserverExecute`) behind a single typed
 //! `IoClient` contract with an explicit `EnvPolicy`, optional stdin, and
 //! captured stdout/stderr, plus an effect-free `forge_core::bootstrap`
 //! registrar for host composition.

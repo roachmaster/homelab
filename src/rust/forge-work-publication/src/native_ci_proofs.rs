@@ -30,7 +30,7 @@ use crate::publication_clients::{CommandExecutor, ProcessCommandExecutor};
 use crate::strict_json::strict_parse;
 use crate::trusted_delivery::{jenkins_gate_manifest, native_action_ids, DeliveryConfig};
 use crate::verification::{check_id, protected_retry_observation};
-use crate::verifier_parity::{PythonAstPort, VerifierAstPort};
+use crate::verifier_parity::{RustAstPort, VerifierAstPort};
 
 pub const OLD_HELPER: &str = "80d0edca103852fca1474245516f2cc56894ebe94857bd5af6d9dd70bd92927d";
 pub const M38_PATHS: [&str; 2] = [
@@ -774,7 +774,7 @@ impl NativePostfixProof {
             config,
             selector,
             execute: std::cell::RefCell::new(ProcessCommandExecutor),
-            ast_port: Box::new(PythonAstPort),
+            ast_port: Box::new(RustAstPort),
         }
     }
 

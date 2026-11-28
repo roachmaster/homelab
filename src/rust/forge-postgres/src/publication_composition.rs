@@ -858,6 +858,52 @@ pub fn load_publication_config(path: &Path) -> FactoryResult<PublicationConfig> 
     )
 }
 
+/// Compose the standalone external delivery daemon with its own configured
+/// reconciler identity, the same pinned provider and the optional read observer.
+pub fn external_delivery_worker(
+    config: DeliveryConfig,
+    observer: Option<Box<dyn JenkinsObserverPort>>,
+    stop: Arc<AtomicBool>,
+) -> Result<forge_work_publication::trusted_delivery_provider::ExternalDeliveryWorker, String> {
+    use crate::external_delivery_adapter::PgExternalDeliveryStore;
+    use forge_work_publication::trusted_delivery_provider::ExternalDeliveryWorker;
+    let pg = PgConfig {
+        host: config.database["host"]
+            .as_str()
+            .ok_or("Missing reconciler host")?
+            .into(),
+        port: u16::try_from(
+            config.database["port"]
+                .as_u64()
+                .ok_or("Missing reconciler port")?,
+        )
+        .map_err(|_| "Invalid port")?,
+        dbname: config.database["name"]
+            .as_str()
+            .ok_or("Missing reconciler database")?
+            .into(),
+        user: config.database["user"]
+            .as_str()
+            .ok_or("Missing reconciler role")?
+            .into(),
+        password: None,
+        owner: config.owner.clone(),
+        connect_timeout: Duration::from_secs(4),
+        statement_timeout: Duration::from_secs(10),
+    };
+    let dao = PgExternalDeliveryStore::new(pg, &config.owner).map_err(|e| e.to_string())?;
+    let worker_id = config.worker_id.clone();
+    let delivery = DeliveryProviderFactory { config, observer }
+        .create(executor(), executor(), git_port())
+        .map_err(|e| e.to_string())?;
+    Ok(ExternalDeliveryWorker {
+        dao: std::rc::Rc::new(std::cell::RefCell::new(Box::new(dao))),
+        delivery,
+        worker_id,
+        stop,
+    })
+}
+
 #[cfg(test)]
 mod observer_tests {
     use super::*;
@@ -913,50 +959,4 @@ mod observer_tests {
             ]
         );
     }
-}
-
-/// Compose the standalone external delivery daemon with its own configured
-/// reconciler identity, the same pinned provider and the optional read observer.
-pub fn external_delivery_worker(
-    config: DeliveryConfig,
-    observer: Option<Box<dyn JenkinsObserverPort>>,
-    stop: Arc<AtomicBool>,
-) -> Result<forge_work_publication::trusted_delivery_provider::ExternalDeliveryWorker, String> {
-    use crate::external_delivery_adapter::PgExternalDeliveryStore;
-    use forge_work_publication::trusted_delivery_provider::ExternalDeliveryWorker;
-    let pg = PgConfig {
-        host: config.database["host"]
-            .as_str()
-            .ok_or("Missing reconciler host")?
-            .into(),
-        port: u16::try_from(
-            config.database["port"]
-                .as_u64()
-                .ok_or("Missing reconciler port")?,
-        )
-        .map_err(|_| "Invalid port")?,
-        dbname: config.database["name"]
-            .as_str()
-            .ok_or("Missing reconciler database")?
-            .into(),
-        user: config.database["user"]
-            .as_str()
-            .ok_or("Missing reconciler role")?
-            .into(),
-        password: None,
-        owner: config.owner.clone(),
-        connect_timeout: Duration::from_secs(4),
-        statement_timeout: Duration::from_secs(10),
-    };
-    let dao = PgExternalDeliveryStore::new(pg, &config.owner).map_err(|e| e.to_string())?;
-    let worker_id = config.worker_id.clone();
-    let delivery = DeliveryProviderFactory { config, observer }
-        .create(executor(), executor(), git_port())
-        .map_err(|e| e.to_string())?;
-    Ok(ExternalDeliveryWorker {
-        dao: std::rc::Rc::new(std::cell::RefCell::new(Box::new(dao))),
-        delivery,
-        worker_id,
-        stop,
-    })
 }

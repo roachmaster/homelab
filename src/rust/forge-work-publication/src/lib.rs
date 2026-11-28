@@ -22,6 +22,7 @@ pub mod durable_files;
 pub mod external_delivery;
 pub mod external_identity;
 pub mod external_verification;
+mod historical_ast;
 pub mod hosted_checks;
 pub mod identity_contract;
 pub mod identity_store;

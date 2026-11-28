@@ -27,7 +27,7 @@ use crate::trusted_delivery::{
     DeliveryConfig, DeliveryError, DeliveryResult, ForgeJenkinsPort, RequireLease,
     SourceArtifactRejected, ARTIFACT_REJECTION_CODES, EPHEMERAL_BRANCH_PREFIX, PARAMETERS,
 };
-use crate::verifier_parity::PythonAstPort;
+use crate::verifier_parity::RustAstPort;
 
 fn value_error<T>(message: &str) -> DeliveryResult<T> {
     Err(DeliveryError::value(message.to_string()))
@@ -1912,7 +1912,7 @@ impl DeliveryProviderFactory {
             crate::verifier_parity::verify_verifier_policy_parity_contract(
                 &contract,
                 &verifier_source,
-                &PythonAstPort,
+                &RustAstPort,
             )?;
         }
         let mut observer = self.observer;

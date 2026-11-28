@@ -8,7 +8,6 @@ use forge_core::provider::Factory;
 use forge_scene::bdd::{ensure, verify, Steps};
 use forge_work_publication::jenkins_observer::ObserverExecute;
 use forge_work_publication::registrar::{register_publication, register_publication_with};
-use forge_work_publication::verifier_parity::VerifierAstPort;
 use forge_work_worker::process_exec::{register_process_exec, ProcessOutput, ProcessRequest};
 use forge_work_worker::WorkerError;
 use serde_json::Value;
@@ -83,7 +82,7 @@ fn steps() -> Steps<World> {
             |_, _| Ok(()),
         )
         .given(
-            "the verifier AST port can parse source over an injected executor",
+            "the historical verifier factory can parse policy source",
             |_, _| Ok(()),
         )
         .when("publication is staged alone and frozen", |w, _| {
@@ -181,25 +180,20 @@ fn steps() -> Steps<World> {
             Ok(())
         })
         .when(
-            "the executor succeeds with a JSON AST and later fails with a syntax error",
+            "the historical policy parser reads valid source and then encounters invalid syntax",
             |w, _| {
-                let ok_stub = StubExec::ok(0, br#"{"_type":"Module","body":[]}"#, b"");
-                let ok_frozen = Registry::new()
-                    .register(register_publication_with(ok_stub).map_err(|e| e.to_string())?)
-                    .map_err(|e| format!("{:?}", e.reason()))?
+                let frozen = Registry::new()
+                    .register(register_process_exec().unwrap())
+                    .unwrap()
+                    .register(register_publication().unwrap())
+                    .unwrap()
                     .freeze()
-                    .map_err(|e| format!("{e:?}"))?;
-                let ((), ok_factories) = ok_frozen.into_factories();
-                w.ast_value = Some(ok_factories.ast_port().parse(b"pass\n")?);
-
-                let fail_stub = StubExec::ok(1, b"", b"SyntaxError: invalid syntax\n");
-                let fail_frozen = Registry::new()
-                    .register(register_publication_with(fail_stub).map_err(|e| e.to_string())?)
-                    .map_err(|e| format!("{:?}", e.reason()))?
-                    .freeze()
-                    .map_err(|e| format!("{e:?}"))?;
-                let ((), fail_factories) = fail_frozen.into_factories();
-                w.ast_error = fail_factories.ast_port().parse(b"def (").err();
+                    .unwrap();
+                let (_, factories) = frozen.into_factories();
+                let parser = factories.ast_port.create().unwrap();
+                use forge_work_publication::verifier_parity::VerifierAstPort;
+                w.ast_value = Some(parser.parse(b"pass\n")?);
+                w.ast_error = parser.parse(b"def (").err();
                 Ok(())
             },
         )
@@ -256,13 +250,13 @@ fn steps() -> Steps<World> {
             },
         )
         .then(
-            "the first call yields the parsed module and the second returns stderr text",
+            "the first call yields the parsed module and the second returns the parser error",
             |w, _| {
                 let ast = w.ast_value.as_ref().ok_or("missing parsed AST")?;
                 ensure(ast["_type"] == "Module", format!("unexpected AST: {ast}"))?;
                 let err = w.ast_error.as_ref().ok_or("missing AST syntax error")?;
                 ensure(
-                    err.contains("SyntaxError: invalid syntax"),
+                    err.contains("Invalid historical verifier syntax"),
                     format!("unexpected AST error: {err}"),
                 )
             },
