@@ -38,12 +38,18 @@ impl IoClient for FailingExec {
 
 fn steps() -> Steps<World> {
     Steps::new()
-        .given("the process executor can run bounded commands", |_, _| Ok(()))
+        .given(
+            "the process executor can run bounded commands",
+            |_: &mut World, _| Ok(()),
+        )
         .given(
             "the process executor can be registered at bootstrap",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
-        .given("a git runner needs a process executor", |_, _| Ok(()))
+        .given(
+            "a git runner needs a process executor",
+            |_: &mut World, _| Ok(()),
+        )
         .when("an empty argument list is submitted", |w, _| {
             match SystemProcessExec.execute(ProcessRequest::inherited(Vec::new(), 5)) {
                 Ok(out) => w.output = Some(out),
@@ -93,7 +99,8 @@ fn steps() -> Steps<World> {
                 Err(rejected) => {
                     w.duplicate_rejected = true;
                     let frozen = rejected
-                        .into_original()
+                        .into_parts()
+                        .0
                         .freeze()
                         .map_err(|e| format!("{e:?}"))?;
                     let ((), factory) = frozen.into_factories();

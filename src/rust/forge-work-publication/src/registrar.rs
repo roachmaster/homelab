@@ -155,7 +155,7 @@ mod tests {
             .expect_err("duplicate publication group rejected");
         assert_eq!(dup.original().group_count(), 2);
 
-        let frozen = dup.into_original().freeze().expect("freeze succeeds");
+        let frozen = dup.into_parts().0.freeze().expect("freeze succeeds");
         let (((), _exec_factory), pub_factories) = frozen.into_factories();
         let _observer = pub_factories.observer_exec.create().unwrap();
         let _ast = pub_factories.ast_port.create().unwrap();
