@@ -1,0 +1,65 @@
+# A dog, its collar, its chip and its crate.
+#
+# This file is data only. `cargo run -p forge-scene -- render scenes/dog.yaml`
+# feeds it through templates/scene.rs.forge at build time and writes
+# generated/dog.rs. Nothing reads YAML at runtime.
+scene: dog
+title: A dog whose owner can be found from its collar or its chip
+
+ports:
+  - name: Collar
+    verbs: [{ name: read, request: Glance, response: OwnerTag }]
+    default: bare_neck
+  - name: Chip
+    verbs: [{ name: scan, request: Scan, response: ChipRecord }]
+    default: unchipped
+  - name: Training
+    verbs: [{ name: settle, request: Crate, response: Mood }]
+    default: untrained
+  - name: Dog
+    verbs:
+      - { name: owner, request: Encounter, response: OwnerName }
+      - { name: settle, request: Crate, response: Mood }
+  - name: Kennel
+    verbs: [{ name: board, request: Stay, response: Ticket }]
+
+instances:
+  - { name: leather_collar, port: Collar, lifecycle: singleton, says: Ana }
+  - { name: bare_neck, port: Collar, stereotype: default, lifecycle: singleton, says: "" }
+  - { name: engraved_collar, port: Collar, lifecycle: assisted, assisted_arg: owner }
+  - { name: registry_chip, port: Chip, lifecycle: lazy_singleton, says: Ana }
+  - { name: unchipped, port: Chip, stereotype: default, lifecycle: singleton, says: "" }
+  - { name: crate_trained, port: Training, lifecycle: transient, says: calm }
+  - { name: untrained, port: Training, stereotype: default, lifecycle: singleton, says: whines }
+  - name: rex
+    port: Dog
+    lifecycle: singleton
+    depends_on:
+      - { port: Collar, optional: true }
+      - { port: Chip, optional: true }
+      - { port: Training, optional: true }
+    answers:
+      # Ask collaborators in order; the first non-empty answer wins.
+      - { verb: owner, ask: [collar.read, chip.scan], otherwise: stray }
+      - { verb: settle, ask: [training.settle], otherwise: whines }
+  - { name: pretend_dog, port: Dog, stereotype: test_double, lifecycle: singleton, says: pretend }
+  - name: boarding_kennel
+    port: Kennel
+    lifecycle: singleton
+    depends_on:
+      - { port: Dog, optional: false }
+    answers:
+      - { verb: board, ask: [dog.owner], otherwise: "" }
+
+decorators:
+  - { name: sitter, port: Dog }
+
+envs:
+  - name: prod
+    bind: [rex, leather_collar, registry_chip, crate_trained, boarding_kennel]
+    decorate: [sitter]
+  - { name: yard, bind: [rex] }
+  - { name: shelter, bind: [rex, registry_chip] }
+  - { name: lonely, bind: [boarding_kennel] }
+  - name: test
+    bind: [pretend_dog, leather_collar, registry_chip, crate_trained, boarding_kennel]

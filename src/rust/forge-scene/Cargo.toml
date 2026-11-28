@@ -1,0 +1,25 @@
+[package]
+name = "forge-scene"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+description = "Build-time scene codegen (schema + template + data) and a typed BDD layer"
+
+[[bin]]
+name = "forge-scene"
+path = "src/bin/forge-scene.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+forge-template.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "=0.10.0"
+
+[dev-dependencies]
+forge-core.workspace = true
+forge-foundation.workspace = true
+forge-jobs = { path = "../forge-jobs" }

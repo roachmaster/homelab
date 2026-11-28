@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/roachmaster/homelab/src/rust/forge-scene/schemas/scene.schema.json",
+  "title": "Forge scene",
+  "description": "Structural data for one provider/factory scene. Rendered at build time by forge-scene through templates/scene.rs.forge; never read at runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scene", "title", "ports", "instances", "envs"],
+  "properties": {
+    "scene": { "$ref": "#/$defs/snake" },
+    "title": { "type": "string" },
+    "ports": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/port" } },
+    "instances": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/instance" } },
+    "decorators": { "type": "array", "items": { "$ref": "#/$defs/decorator" } },
+    "envs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/env" } }
+  },
+  "$defs": {
+    "snake": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "pascal": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
+    "port": {
+      "description": "A trait. Every verb takes one request newtype and returns one response newtype.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "verbs"],
+      "properties": {
+        "name": { "$ref": "#/$defs/pascal" },
+        "verbs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/verb" } },
+        "default": { "$ref": "#/$defs/snake", "description": "Null-object instance bound when no environment binds this port." }
+      }
+    },
+    "verb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "request", "response"],
+      "properties": {
+        "name": { "$ref": "#/$defs/snake" },
+        "request": { "$ref": "#/$defs/pascal" },
+        "response": { "$ref": "#/$defs/pascal" }
+      }
+    },
+    "instance": {
+      "description": "One implementation (stereotype) of a port and the lifecycle its provider owns.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "port", "lifecycle"],
+      "properties": {
+        "name": { "$ref": "#/$defs/snake" },
+        "port": { "$ref": "#/$defs/pascal" },
+        "stereotype": { "enum": ["impl", "default", "test_double"] },
+        "lifecycle": { "enum": ["singleton", "lazy_singleton", "transient", "assisted"] },
+        "says": { "type": "string", "description": "What a leaf implementation answers to every verb." },
+        "assisted_arg": { "$ref": "#/$defs/snake", "description": "Runtime argument supplied at get time; the variant answers with it." },
+        "depends_on": { "type": "array", "items": { "$ref": "#/$defs/dependency" } },
+        "answers": { "type": "array", "items": { "$ref": "#/$defs/answer" } }
+      }
+    },
+    "dependency": {
+      "description": "A collaborator, held as its port's provider. Optional collaborators fall back to the port default.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port", "optional"],
+      "properties": {
+        "port": { "$ref": "#/$defs/pascal" },
+        "optional": { "type": "boolean" }
+      }
+    },
+    "answer": {
+      "description": "Chain of responsibility for one verb: ask collaborators in order, first non-empty answer wins.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verb", "ask", "otherwise"],
+      "properties": {
+        "verb": { "$ref": "#/$defs/snake" },
+        "ask": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$" } },
+        "otherwise": { "type": "string" }
+      }
+    },
+    "decorator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "port"],
+      "properties": {
+        "name": { "$ref": "#/$defs/snake" },
+        "port": { "$ref": "#/$defs/pascal" }
+      }
+    },
+    "env": {
+      "description": "One container. Every environment runs the same stage, freeze and construct step.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "bind"],
+      "properties": {
+        "name": { "$ref": "#/$defs/snake" },
+        "bind": { "type": "array", "items": { "$ref": "#/$defs/snake" } },
+        "decorate": { "type": "array", "items": { "$ref": "#/$defs/snake" } }
+      }
+    }
+  }
+}
