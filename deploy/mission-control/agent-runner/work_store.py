@@ -866,28 +866,12 @@ class WorkStore:
             link = cursor.fetchone()
             workflow_id = link['workflow_id'] if link else None
         external_enabled = self._external_workflow_for(project_alias) is not None
-        external_filter = "AND NOT forge_external_workflow_api.is_internal(owner_id,project_alias,id)" if external_enabled else ""
-        external_membership = """OR EXISTS (
-            SELECT 1 FROM forge_external_workflow.tasks membership
-            WHERE membership.owner_id=member.owner_id AND membership.project_alias=member.project_alias
-              AND membership.task_id=member.id AND membership.workflow_id=%s::uuid
-        )""" if external_enabled else ""
-        workflow_key = str(workflow_id) if workflow_id else None
-        parameters = [self._owner, project_alias, str(row['id']), workflow_key, workflow_key, workflow_key]
-        if external_enabled:
-            parameters.append(workflow_key)
-        cursor.execute(f"""SELECT id AS task_id,title,defect->>'severity' AS severity
-            FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND task_kind='defect'
-            AND (defect->>'discovering_task_id'=%s
-                 OR (%s::text IS NOT NULL AND defect->>'discovering_workflow_id'=%s)
-                 OR EXISTS (
-                     SELECT 1 FROM forge_agent.coding_tasks member
-                     WHERE member.owner_id=coding_tasks.owner_id AND member.project_alias=coding_tasks.project_alias
-                       AND member.id=(coding_tasks.defect->>'discovering_task_id')::uuid
-                       AND (member.workflow_id=%s::uuid {external_membership})
-                 ))
-            AND parent_task_id IS NULL {external_filter} ORDER BY created_at,id LIMIT 50""", parameters)
-        return [{**item,'task_id':str(item['task_id'])} for item in cursor.fetchall()]
+        items = _read_query(cursor,
+            "external_filed_defects" if external_enabled else "filed_defects",
+            {"owner_id":self._owner, "project_alias":project_alias,
+             "task_id":str(row['id']),
+             "workflow_id":str(workflow_id) if workflow_id else None})
+        return [{**item,'task_id':str(item['task_id'])} for item in items]
 
     def get(self, *, project_alias, task_id):
         self._require_project(project_alias)

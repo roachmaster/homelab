@@ -257,6 +257,51 @@ def run_read_query(cursor, name, params):
             for row in cursor.fetchall()]
 
 
+def run_workflow_action_lease(cursor, owner, worker_id):
+    """Use the existing atomic proxy lease; retain direct predecessor locking."""
+    if isinstance(cursor, ProxyCursor):
+        return cursor._connection.client.operation(
+            "op.workflow_action_lease", {"worker_id":worker_id})
+    cursor.execute("SELECT a.* FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w ON w.workflow_id=a.workflow_id WHERE a.owner_id=%s AND a.kind IN('review','decide') AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated') AND(a.status='pending' OR(a.status='leased' AND a.lease_expires_at<=clock_timestamp())) ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT 1", (owner,))
+    action = cursor.fetchone()
+    if not action:
+        return None
+    cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='leased',worker_id=%s,lease_token=gen_random_uuid(),lease_expires_at=clock_timestamp()+interval '60 seconds',updated_at=clock_timestamp() WHERE action_id=%s RETURNING *", (worker_id, action['action_id']))
+    return dict(cursor.fetchone())
+
+
+def run_retry_allowance_amend(cursor, project, root, policy):
+    """Amend one scope atomically on the selected transport.
+
+    Proxy requests use the existing M54 composite: generic SAVEPOINTs stay
+    unsupported. Direct predecessor fixtures retain their exact savepoint and
+    P0009/P0006 behavior without requiring a later migration or new grants.
+    """
+    if isinstance(cursor, ProxyCursor):
+        result = cursor._connection.client.operation(
+            "op.workflow_retry_allowance_amend",
+            {"project":project, "root":proxy_statements.to_json_value(root),
+             "policy":proxy_statements.to_json_value(policy)})
+        amended = (isinstance(result, dict) and set(result) == {"amended"}
+                   and result["amended"] is True)
+        skipped = (isinstance(result, dict) and set(result) == {"skipped"}
+                   and result["skipped"] in ("P0009", "P0006"))
+        if not (amended or skipped):
+            raise ProxyError("Proxy retry allowance returned an invalid result", code="transport_error")
+        return
+    from psycopg2.extras import Json
+    cursor.execute('SAVEPOINT retry_allowance_scope')
+    try:
+        cursor.execute('SELECT forge_agent.amend_agent_retry_policy(%s,%s,%s)',
+                       (project,root,Json(dict(policy))))
+    except psycopg2.Error as error:
+        cursor.execute('ROLLBACK TO SAVEPOINT retry_allowance_scope')
+        if error.pgcode not in {'P0009','P0006'}:
+            raise
+    finally:
+        cursor.execute('RELEASE SAVEPOINT retry_allowance_scope')
+
+
 def connect_factory(url, caller, *, token_file=None, token=None,
                     timeout=DEFAULT_TIMEOUT_SECONDS):
     """Return a zero-arg connection factory for ``caller`` at ``url``.

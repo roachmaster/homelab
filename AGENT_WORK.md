@@ -1,3 +1,34 @@
+## Closed proxy adapters for coordinator reads and claim — 2026-11-28
+
+The actual PostgreSQL proxy tests exposed unwired Python coordinator paths:
+M53 defect discovery still emitted a correlated raw SELECT, retry allowance
+updates emitted unsupported SAVEPOINTs, and claim/recovery still emitted raw
+joins and row-lock SQL despite existing closed ports. The coordinator now uses
+the existing named recovery/allowance/workflow reads and M54 atomic allowance
+and lease composites. Direct predecessor connections retain their original
+savepoint error isolation and lease locking. Action JSON restores only known
+UUID and timezone-aware timestamp fields; opaque receipts remain unchanged.
+
+Four new closed reads cover the two exact defect-discovery variants and the
+two retained-source projections. They remain coordinator-only and bind the
+configured owner plus project; retained-source reads also bind workflow and
+keep the two immutable completion/prefix predicates. Defect reads preserve
+root filtering, workflow membership, external visibility, ordering and the
+50-row ceiling. Historical pre-M53 fixtures project only the exact new defect
+read identities when those columns are genuinely absent. Existing migration
+SQL, all historical pins, authority-method AST guards, parser rejection of
+SAVEPOINT and the seven blocked cutover groups remain unchanged. The exact
+method inventory drops only the eight newly wired methods; other coordinator
+mutators and M55 cutover are still held.
+
+All four original failures were reproduced before the fix and pass afterward.
+Validation includes real disposable PostgreSQL proxy and direct workflow/
+retained-source/budget/legacy contracts, negative owner/caller/extra-argument
+checks, immutable receipt/counter assertions, source-boundary checks and the
+264-test preflight with zero skips. Private logs are under
+/mnt/data/homelab-build/codex-proxy-runtime-20261128-evidence/.
+No remote publication or live database/service change was made here.
+
 ## Jenkins and usage lint qualification — 2026-11-28
 
 The incoming Rust Jenkins/usage ports failed the unchanged warnings-as-errors

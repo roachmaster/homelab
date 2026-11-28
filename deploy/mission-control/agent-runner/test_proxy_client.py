@@ -632,6 +632,48 @@ class CompositeCallTest(unittest.TestCase):
         self.assertEqual(cursor.rowcount, 1)
 
 
+class RetryAllowanceAdapterTest(unittest.TestCase):
+    def test_proxy_uses_only_atomic_composite_and_validates_receipt(self):
+        from unittest.mock import Mock
+        from uuid import UUID
+        root = UUID("00000000-0000-0000-0000-000000000001")
+        client = Mock()
+        cursor = ProxyConnection(client).cursor()
+        for receipt in ({"amended": True}, {"skipped": "P0009"}, {"skipped": "P0006"}):
+            client.operation.return_value = receipt
+            proxy_client.run_retry_allowance_amend(cursor, "homelab", root, {"max_rounds":20})
+            client.operation.assert_called_with("op.workflow_retry_allowance_amend",
+                {"project":"homelab", "root":str(root), "policy":{"max_rounds":20}})
+        for receipt in (None, {}, {"amended":1}, {"skipped":"P0001"}, {"amended":True,"extra":1}):
+            client.operation.return_value = receipt
+            with self.subTest(receipt=receipt), self.assertRaises(ProxyError):
+                proxy_client.run_retry_allowance_amend(cursor,"homelab",root,{})
+
+    def test_direct_savepoint_recovers_only_documented_scope_errors(self):
+        import psycopg2
+        from unittest.mock import Mock
+        class ScopeError(psycopg2.Error):
+            def __init__(self, code): self.code = code
+            @property
+            def pgcode(self): return self.code
+        for code in (None, "P0009", "P0006", "P0001"):
+            cursor = Mock()
+            def execute(sql, params=None):
+                if code and sql.startswith('SELECT forge_agent.amend_agent_retry_policy'):
+                    raise ScopeError(code)
+            cursor.execute.side_effect = execute
+            with self.subTest(code=code):
+                if code == "P0001":
+                    with self.assertRaises(ScopeError):
+                        proxy_client.run_retry_allowance_amend(cursor,"homelab","root",{})
+                else:
+                    proxy_client.run_retry_allowance_amend(cursor,"homelab","root",{})
+                calls = [call.args[0] for call in cursor.execute.call_args_list]
+                self.assertEqual(calls[0], 'SAVEPOINT retry_allowance_scope')
+                self.assertEqual(calls[-1], 'RELEASE SAVEPOINT retry_allowance_scope')
+                self.assertEqual('ROLLBACK TO SAVEPOINT retry_allowance_scope' in calls, bool(code))
+
+
 class ReadQueryTest(unittest.TestCase):
     """proxy_client.run_read_query on both transports."""
 
@@ -779,6 +821,17 @@ class RestoreActionJobTest(unittest.TestCase):
         self.assertIsInstance(job["created_at"], datetime)
         self.assertIsNone(job["lease_expires_at"])
         self.assertEqual(job["status"], "leased")
+
+    def test_rejects_malformed_known_fields_and_preserves_opaque_receipts(self):
+        from work_workflow import _restore_action_job
+        for field,value in (('action_id',True), ('workflow_id','invalid'),
+                            ('created_at','2026-11-25T10:00:00'),
+                            ('updated_at',5)):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                _restore_action_job({field:value})
+        receipt = {'workflow_id':'opaque retained receipt'}
+        self.assertEqual(_restore_action_job({'finish_receipt':receipt}),
+                         {'finish_receipt':receipt})
 
 
 class TransportSelectionTest(unittest.TestCase):

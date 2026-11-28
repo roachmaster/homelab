@@ -1527,6 +1527,44 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
             [("queued", 1)])
         self.assertEqual(record["next_sequence"], 1)
 
+    def test_retained_incident_named_read_preserves_binding_and_scope(self):
+        from work_workflow_continuation import retained_sources
+        task = self.insert_task()
+        self._task_ids.append(task)
+        workflow = self._insert_workflow(task)
+        binding = {'id':task, 'revision':'1', 'status':'failed', 'latest_attempt_id':None}
+        self.fixture_sql("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,finish_receipt) VALUES(%s,'mission-control','homelab','decide','policy-continuation:retained-proof','completed',%s)",
+                         (workflow, json.dumps({'receipt':{'retained_sources':[binding]}})))
+        with self.store._transaction(read_only=True) as cursor:
+            self.assertEqual(retained_sources(cursor,workflow,owner='mission-control',project='homelab'), [binding])
+            self.assertEqual(retained_sources(cursor,workflow,owner='mission-control',project='other'), [])
+            with self.assertRaises(ValueError):
+                retained_sources(cursor,workflow,owner='mission-control')
+
+    def test_filed_defect_named_reads_preserve_discovery_scope(self):
+        from test_work_defect import defect
+        from uuid import UUID
+        discovered = self.insert_task()
+        unrelated = self.insert_task()
+        filed = self.insert_task()
+        self._task_ids.extend([discovered, unrelated, filed])
+        payload = {**defect(), 'discovering_task_id':discovered}
+        self.fixture_sql("UPDATE forge_agent.coding_tasks SET task_kind='defect',defect=%s,title='Scoped defect' WHERE id=%s",
+                         (json.dumps(payload), filed))
+        def read(name, args):
+            from proxy_client import run_read_query
+            with self.store._transaction(read_only=True) as cursor:
+                return run_read_query(cursor, name, args)
+        for name in ('filed_defects', 'external_filed_defects'):
+            args = {'owner_id':'mission-control', 'project_alias':'homelab',
+                    'task_id':discovered, 'workflow_id':None}
+            rows = read(name, args)
+            self.assertEqual(rows, [{'task_id':filed,'title':'Scoped defect','severity':'high'}])
+            self.assertEqual(read(name,{**args,'task_id':unrelated}), [])
+            self.assertEqual(read(name,{**args,'project_alias':'elsewhere'}), [])
+        detail = self.store.get(project_alias='homelab', task_id=UUID(discovered))
+        self.assertEqual(detail['filed_defects'], [{'task_id':filed,'title':'Scoped defect','severity':'high'}])
+
     def test_get_read_through_the_proxy(self):
         from uuid import UUID
         task_id = self.insert_task()
@@ -1850,13 +1888,20 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
             project_workflows={"homelab": _ClaimPolicy()},
             allowed_modes={"plan", "review", "implement"},
             profiles={})
+        self.fixture_sql("UPDATE forge_agent.coding_review_budget SET repair_rounds=2,stagnant_rounds=1 WHERE root_task_id=%s", (task_id,))
+        prior_events = self.fixture_sql("SELECT sequence,event_kind,payload FROM forge_agent.coding_events WHERE task_id=%s ORDER BY sequence", (task_id,))
         flow = WorkflowStore(config, None, self.store)
         with self.store._transaction() as cursor:
+            flow._amend_retry_allowance(cursor, "homelab", task_id)
             flow._amend_retry_allowance(cursor, "homelab", task_id)
         rows = self.fixture_sql(
             "SELECT policy FROM forge_agent.coding_review_budget"
             " WHERE root_task_id = %s", (task_id,))
         self.assertEqual(rows[0][0]["max_rounds"], AGENT_RETRY_LIMIT)
+        self.assertEqual(self.fixture_sql("SELECT repair_rounds,stagnant_rounds FROM forge_agent.coding_review_budget WHERE root_task_id=%s", (task_id,)), [(2,1)])
+        after_events = self.fixture_sql("SELECT sequence,event_kind,payload FROM forge_agent.coding_events WHERE task_id=%s ORDER BY sequence", (task_id,))
+        self.assertEqual(after_events[:len(prior_events)], prior_events)
+        self.assertEqual(len(after_events), len(prior_events)+1)
 
     def test_cancel_workflow_through_the_proxy(self):
         from uuid import UUID

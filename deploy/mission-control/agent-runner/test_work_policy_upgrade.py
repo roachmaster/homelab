@@ -194,7 +194,10 @@ class HistoricalDefectConnection(psycopg2.extensions.connection):
             def execute(self, query, parameters=None):
                 # Shape-only historical tasks cannot have discovery links.
                 compact=' '.join(query.split()) if isinstance(query,str) else ''
-                if compact.startswith("SELECT id AS task_id,title,defect->>'severity' AS severity FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND task_kind='defect'"):
+                from forge_pg_proxy import READ_QUERIES
+                defect_reads = {READ_QUERIES[name][0] for name in
+                                ("filed_defects", "external_filed_defects")}
+                if (isinstance(query,str) and query in defect_reads) or compact.startswith("SELECT id AS task_id,title,defect->>'severity' AS severity FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND task_kind='defect'"):
                     connection.defect_projection_count+=1
                     return super().execute('SELECT NULL::uuid AS task_id,NULL::text AS title,NULL::text AS severity WHERE false')
                 if isinstance(query,str) and connection.historical_m39_projection:
