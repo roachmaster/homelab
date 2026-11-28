@@ -72,6 +72,60 @@ pub trait ObserverClock {
 /// streams drained (the runner's `command` port shape).
 pub struct ProcessObserverExecute;
 
+/// Observer command adapter backed by any bounded process-exec `IoClient`.
+pub struct IoClientObserverExecute<C> {
+    client: C,
+}
+
+impl<C> IoClientObserverExecute<C> {
+    pub fn new(client: C) -> Self {
+        Self { client }
+    }
+}
+
+impl<C> ObserverExecute for IoClientObserverExecute<C>
+where
+    C: forge_core::io_client::IoClient<
+            Request = forge_work_worker::process_exec::ProcessRequest,
+            Response = forge_work_worker::process_exec::ProcessOutput,
+            Error = forge_work_worker::WorkerError,
+        > + Send
+        + Sync,
+{
+    fn execute(
+        &self,
+        argv: &[String],
+        env: &[(String, String)],
+        timeout_seconds: f64,
+    ) -> ObserverResult<Vec<u8>> {
+        if argv.is_empty() {
+            return Err(invalid("Empty observer command"));
+        }
+        let env_pairs: Vec<(&str, &str)> = env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let timeout = timeout_seconds.max(1.0).ceil() as u64;
+        let request = forge_work_worker::process_exec::ProcessRequest::cleared(
+            argv.to_vec(),
+            timeout,
+            &[],
+            &env_pairs,
+        );
+        let output = self.client.execute(request).map_err(|error| match error {
+            forge_work_worker::WorkerError::Protocol(msg) if msg.contains("time bound") => {
+                invalid("Observer command timed out")
+            }
+            other => invalid(&format!("Observer command failed: {other:?}")),
+        })?;
+        if output.exit_code == 0 {
+            Ok(output.stdout)
+        } else {
+            Err(invalid("Observer command failed"))
+        }
+    }
+}
+
 impl ObserverExecute for ProcessObserverExecute {
     fn execute(
         &self,
@@ -79,57 +133,8 @@ impl ObserverExecute for ProcessObserverExecute {
         env: &[(String, String)],
         timeout_seconds: f64,
     ) -> ObserverResult<Vec<u8>> {
-        use std::io::Read;
-        let mut command = std::process::Command::new(
-            argv.first().ok_or_else(|| invalid("Empty observer command"))?,
-        );
-        command
-            .args(&argv[1..])
-            .env_clear()
-            .envs(env.iter().cloned())
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        let mut child = command
-            .spawn()
-            .map_err(|error| invalid(&format!("Observer command failed: {error}")))?;
-        let mut stdout_pipe = child.stdout.take().expect("piped stdout");
-        let stdout_thread = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stdout_pipe.read_to_end(&mut bytes);
-            bytes
-        });
-        let mut stderr_pipe = child.stderr.take().expect("piped stderr");
-        let stderr_thread = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stderr_pipe.read_to_end(&mut bytes);
-            bytes
-        });
-        let deadline = std::time::Instant::now()
-            + std::time::Duration::from_secs_f64(timeout_seconds.max(0.0));
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    let stdout = stdout_thread.join().unwrap_or_default();
-                    let _ = stderr_thread.join();
-                    if status.success() {
-                        return Ok(stdout);
-                    }
-                    return Err(invalid("Observer command failed"));
-                }
-                Ok(None) => {
-                    if std::time::Instant::now() >= deadline {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(invalid("Observer command timed out"));
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(error) => {
-                    return Err(invalid(&format!("Observer command failed: {error}")));
-                }
-            }
-        }
+        IoClientObserverExecute::new(forge_work_worker::process_exec::SystemProcessExec)
+            .execute(argv, env, timeout_seconds)
     }
 }
 

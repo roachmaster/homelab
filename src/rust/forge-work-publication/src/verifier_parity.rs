@@ -17,7 +17,6 @@
 
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 
 use crate::ci_contract::{
     legacy_checks, scoped_branch_checks, scoped_main_checks, CiGateContract, CiGateContractFactory,
@@ -65,28 +64,51 @@ sys.stdout.write(json.dumps(conv(tree)))
 /// The production AST port: CPython's own parser via a fixed script.
 pub struct PythonAstPort;
 
-impl VerifierAstPort for PythonAstPort {
+/// AST parser adapter backed by any bounded process-exec `IoClient`.
+pub struct IoClientAstPort<C> {
+    client: C,
+}
+
+impl<C> IoClientAstPort<C> {
+    pub fn new(client: C) -> Self {
+        Self { client }
+    }
+}
+
+impl<C> VerifierAstPort for IoClientAstPort<C>
+where
+    C: forge_core::io_client::IoClient<
+            Request = forge_work_worker::process_exec::ProcessRequest,
+            Response = forge_work_worker::process_exec::ProcessOutput,
+            Error = forge_work_worker::WorkerError,
+        > + Send
+        + Sync,
+{
     fn parse(&self, source: &[u8]) -> Result<Value, String> {
-        let mut child = std::process::Command::new("/usr/bin/python3")
-            .args(["-B", "-c", AST_DUMP_SCRIPT])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|error| error.to_string())?;
-        child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| "ast port stdin unavailable".to_string())?
-            .write_all(source)
-            .map_err(|error| error.to_string())?;
-        let output = child
-            .wait_with_output()
-            .map_err(|error| error.to_string())?;
-        if !output.status.success() {
+        let request = forge_work_worker::process_exec::ProcessRequest::inherited(
+            vec![
+                "/usr/bin/python3".to_string(),
+                "-B".to_string(),
+                "-c".to_string(),
+                AST_DUMP_SCRIPT.to_string(),
+            ],
+            30,
+        )
+        .with_stdin(source.to_vec());
+        let output = self
+            .client
+            .execute(request)
+            .map_err(|error| format!("{error:?}"))?;
+        if output.exit_code != 0 {
             return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
         }
         serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+    }
+}
+
+impl VerifierAstPort for PythonAstPort {
+    fn parse(&self, source: &[u8]) -> Result<Value, String> {
+        IoClientAstPort::new(forge_work_worker::process_exec::SystemProcessExec).parse(source)
     }
 }
 

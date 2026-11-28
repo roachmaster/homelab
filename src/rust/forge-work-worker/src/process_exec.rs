@@ -1,15 +1,17 @@
 //! Bounded subprocess execution behind `forge_core::io_client::IoClient`.
 //!
-//! Unifies the worker's bounded subprocess calls (`CommandGitRunner`,
-//! `SystemCommandPort`, and `consumer_cache::git`) behind a single typed
-//! `IoClient` contract with an explicit `EnvPolicy`, plus an effect-free
-//! `forge_core::bootstrap` registrar for host composition.
+//! Unifies the worker's and publication crate's bounded subprocess calls
+//! (`CommandGitRunner`, `SystemCommandPort`, `consumer_cache::git`,
+//! `ProcessObserverExecute`, and `PythonAstPort`) behind a single typed
+//! `IoClient` contract with an explicit `EnvPolicy`, optional stdin, and
+//! captured stdout/stderr, plus an effect-free `forge_core::bootstrap`
+//! registrar for host composition.
 
 use crate::error::WorkerError;
 use forge_core::bootstrap::PreparedGroup;
 use forge_core::io_client::IoClient;
 use forge_core::provider::Factory;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -35,6 +37,7 @@ pub struct ProcessRequest {
     pub argv: Vec<String>,
     pub timeout_seconds: u64,
     pub env: EnvPolicy,
+    pub stdin: Option<Vec<u8>>,
 }
 
 impl ProcessRequest {
@@ -43,6 +46,7 @@ impl ProcessRequest {
             argv,
             timeout_seconds,
             env: EnvPolicy::Inherit,
+            stdin: None,
         }
     }
 
@@ -62,19 +66,26 @@ impl ProcessRequest {
                     .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
                     .collect(),
             },
+            stdin: None,
         }
+    }
+
+    pub fn with_stdin(mut self, input: Vec<u8>) -> Self {
+        self.stdin = Some(input);
+        self
     }
 }
 
-/// Captured exit status and stdout bytes from a bounded subprocess execution.
+/// Captured exit status, stdout, and stderr bytes from a bounded subprocess execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessOutput {
     pub exit_code: i32,
     pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
-/// Concrete `IoClient` that spawns a bounded subprocess with stdout piped,
-/// stdin/stderr suppressed, and a hard wall-clock kill deadline.
+/// Concrete `IoClient` that spawns a bounded subprocess with optional stdin,
+/// piped stdout/stderr, and a hard wall-clock kill deadline.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemProcessExec;
 
@@ -93,9 +104,13 @@ impl IoClient for SystemProcessExec {
         let mut builder = Command::new(program);
         builder
             .args(&request.argv[1..])
-            .stdin(Stdio::null())
+            .stdin(if request.stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
 
         match &request.env {
             EnvPolicy::Inherit => {}
@@ -115,12 +130,29 @@ impl IoClient for SystemProcessExec {
         let mut child = builder
             .spawn()
             .map_err(|error| WorkerError::Protocol(format!("command spawn failed: {error}")))?;
-        let mut pipe = child.stdout.take().expect("stdout piped");
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+
+        if let Some(input) = request.stdin {
+            let mut stdin_pipe = child.stdin.take().expect("stdin piped");
+            std::thread::spawn(move || {
+                let _ = stdin_pipe.write_all(&input);
+                let _ = stdin_pipe.flush();
+            });
+        }
+
+        let mut stdout_pipe = child.stdout.take().expect("stdout piped");
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
         std::thread::spawn(move || {
             let mut data = Vec::new();
-            let _ = pipe.read_to_end(&mut data);
-            let _ = tx.send(data);
+            let _ = stdout_pipe.read_to_end(&mut data);
+            let _ = out_tx.send(data);
+        });
+
+        let mut stderr_pipe = child.stderr.take().expect("stderr piped");
+        let (err_tx, err_rx) = mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut data = Vec::new();
+            let _ = stderr_pipe.read_to_end(&mut data);
+            let _ = err_tx.send(data);
         });
 
         let deadline = Instant::now() + Duration::from_secs(request.timeout_seconds.max(1));
@@ -145,10 +177,12 @@ impl IoClient for SystemProcessExec {
             }
         };
 
-        let stdout = rx.recv().unwrap_or_default();
+        let stdout = out_rx.recv().unwrap_or_default();
+        let stderr = err_rx.recv().unwrap_or_default();
         Ok(ProcessOutput {
             exit_code: status.code().unwrap_or(-1),
             stdout,
+            stderr,
         })
     }
 }
@@ -228,15 +262,16 @@ mod tests {
     }
 
     #[test]
-    fn executes_real_subprocess_and_captures_stdout_and_exit_code() {
+    fn executes_real_subprocess_with_stdin_and_captures_stdout_stderr() {
         let out = SystemProcessExec
-            .execute(ProcessRequest::inherited(
-                vec!["/bin/echo".into(), "forge-ok".into()],
-                5,
-            ))
+            .execute(
+                ProcessRequest::inherited(vec!["/bin/cat".into()], 5)
+                    .with_stdin(b"forge-stdin".to_vec()),
+            )
             .unwrap();
         assert_eq!(out.exit_code, 0);
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "forge-ok");
+        assert_eq!(out.stdout, b"forge-stdin");
+        assert!(out.stderr.is_empty());
 
         let failed = SystemProcessExec
             .execute(ProcessRequest::inherited(vec!["/bin/false".into()], 5))
@@ -303,6 +338,7 @@ mod tests {
         let fake = FakeProcessExec::returning(Ok(ProcessOutput {
             exit_code: 0,
             stdout: b"abc123\n".to_vec(),
+            stderr: Vec::new(),
         }));
         let mut runner = ProcessGitRunner::new(fake, 40);
         let out = runner
@@ -339,6 +375,7 @@ mod tests {
         let failing = FakeProcessExec::returning(Ok(ProcessOutput {
             exit_code: 128,
             stdout: Vec::new(),
+            stderr: b"fatal: not a git repo\n".to_vec(),
         }));
         let mut failing_runner = ProcessGitRunner::new(failing, 40);
         let err = failing_runner
@@ -352,6 +389,7 @@ mod tests {
         let fake = FakeProcessExec::returning(Ok(ProcessOutput {
             exit_code: 0,
             stdout: b"ActiveState=inactive\n".to_vec(),
+            stderr: Vec::new(),
         }));
         let mut port = ProcessCommandPort::new(fake);
         let argv = vec!["systemctl".into(), "show".into(), "unit.scope".into()];
