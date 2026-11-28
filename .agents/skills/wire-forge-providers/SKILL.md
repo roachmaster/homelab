@@ -69,3 +69,12 @@ public config, factory, and registrar exports. Use [Model Forge Modules](../mode
 for capability design, [Trace Forge Commands](../trace-forge-command/SKILL.md)
 for admitted request flow, and [Forge UML](../document-forge-uml/SKILL.md) when
 the task calls for an ownership or construction diagram.
+
+## Focused implementation skills
+
+- [Scaffold Forge Module](../scaffold-forge-module/SKILL.md): create the smallest
+  role-appropriate crate/module scaffold and public integration proof.
+- [Write Forge BDD Tests](../write-forge-bdd-tests/SKILL.md): bind executable
+  feature scenarios to real public APIs through the typed BDD harness.
+- [Wrap Forge Process Exec](../wrap-forge-process-exec/SKILL.md): select a typed
+  process port while preserving its environment, bounds and cleanup guarantees.
