@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use forge_core::bootstrap::PreparedGroup;
+use forge_core::provider::Factory;
 use forge_usage::collector::UsagePollStore;
 use forge_work_worker::config::WorkerConfig;
 use forge_work_worker::error::WorkerError;
@@ -26,7 +27,9 @@ use crate::config::PgConfig;
 use crate::context_providers::{BuildContextProvider, PeerContextProvider, ReviewContextProvider};
 use crate::error::AdapterError;
 use crate::external_context::{ExternalContextProvider, ExternalGitPort};
+use crate::factory::PgSessionFactory;
 use crate::reconciler::ReconcilerApi;
+use crate::registrar::{RECONCILER_SESSION, WORKER_SESSION};
 use crate::usage_store_adapter::PgUsagePollStore;
 use crate::worker::WorkerApi;
 
@@ -115,27 +118,51 @@ fn worker_api(config: &WorkerConfig) -> Result<WorkerApi, WorkerError> {
 /// default_store_factory: separate handles over the same connect
 /// factory (the Python facade opens a connection per call).
 pub fn coding_store_handles(config: &WorkerConfig) -> Result<StoreHandles, WorkerError> {
+    coding_store_handles_from(
+        &PgSessionFactory::new(pg_config_for(config, false)),
+        &PgSessionFactory::new(pg_config_for(config, true)),
+    )
+}
+
+/// The store handles over the two role session factories: four
+/// worker-role handles, then the reconciler handle, each its own
+/// connection.
+fn coding_store_handles_from(
+    worker: &PgSessionFactory,
+    reconciler: &PgSessionFactory,
+) -> Result<StoreHandles, WorkerError> {
+    let api = || -> Result<WorkerApi, WorkerError> {
+        Ok(WorkerApi::new(
+            worker.create().map_err(crate::worker_adapter::map_err)?,
+        ))
+    };
     Ok(StoreHandles {
-        worker: Box::new(worker_api(config)?),
-        renew: Box::new(worker_api(config)?),
-        progress: Box::new(worker_api(config)?),
-        contexts: Box::new(worker_api(config)?),
+        worker: Box::new(api()?),
+        renew: Box::new(api()?),
+        progress: Box::new(api()?),
+        contexts: Box::new(api()?),
         reconciler: Box::new(ReconcilerApi::new(
-            session(config, true).map_err(crate::worker_adapter::map_err)?,
+            reconciler
+                .create()
+                .map_err(crate::worker_adapter::map_err)?,
         )),
     })
 }
 
-/// The coding worker's database group: it provides
-/// `coding.store`, which the coding worker group requires, and
-/// hands its store factory to the worker recipe once the registry
-/// is frozen. Staging it opens no connection.
+/// The coding worker's database group: it provides `coding.store`,
+/// which the coding worker group requires, and requires the worker-
+/// and reconciler-role session groups (`register_coding_sessions`).
+/// Once the registry is frozen it turns those session factories into
+/// the store factory the worker recipe binds. Staging it opens no
+/// connection.
 pub struct CodingStore;
 
 impl CodingStore {
-    /// The store factory the worker calls at create().
-    pub fn store_factory(&self) -> StoreFactory {
-        Box::new(coding_store_handles)
+    /// The store factory the worker calls at create(). The sessions
+    /// were configured from the worker config at registration, so the
+    /// config the worker passes back is not consulted.
+    pub fn bind(&self, worker: PgSessionFactory, reconciler: PgSessionFactory) -> StoreFactory {
+        Box::new(move |_config| coding_store_handles_from(&worker, &reconciler))
     }
 }
 
@@ -144,10 +171,27 @@ pub fn register_coding_store() -> PreparedGroup<CodingStore> {
     PreparedGroup::new(
         "forge.postgres.coding_store",
         &[CODING_STORE],
-        &[],
+        &[WORKER_SESSION, RECONCILER_SESSION],
         CodingStore,
     )
     .expect("fixed coding store group identifiers are valid")
+}
+
+/// Stage the worker- and reconciler-role session groups for a coding
+/// worker config (`forge.postgres.worker`, `forge.postgres.reconciler`).
+pub fn register_coding_sessions(
+    config: &WorkerConfig,
+) -> Result<
+    (
+        PreparedGroup<PgSessionFactory>,
+        PreparedGroup<PgSessionFactory>,
+    ),
+    AdapterError,
+> {
+    Ok((
+        crate::registrar::register_worker(pg_config_for(config, false))?,
+        crate::registrar::register_reconciler(pg_config_for(config, true))?,
+    ))
 }
 
 /// The default review context factory (ReviewContextProvider with a
@@ -272,9 +316,8 @@ mod coding_store_tests {
     use forge_work_worker::registrar::register;
     use forge_work_worker::worker::WorkerBindings;
 
-    #[test]
-    fn the_postgres_store_group_satisfies_the_worker_group() {
-        let config = parse_config(&serde_json::json!({
+    fn coding_config() -> WorkerConfig {
+        parse_config(&serde_json::json!({
             "worker_id": "worker-1",
             "owner": "forge",
             "database": {"host": "/run/postgresql", "port": 5432, "name": "forge_agent", "user": "forge_coding_worker"},
@@ -285,8 +328,18 @@ mod coding_store_tests {
             "profiles": {"codex-author": {"backend": "codex", "model": "gpt-5", "modes": ["plan"]}},
             "binaries": {"codex": "/usr/local/bin/codex"}
         }))
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn the_postgres_store_group_satisfies_the_worker_group() {
+        let config = coding_config();
+        let (worker_session, reconciler_session) = register_coding_sessions(&config).unwrap();
         let frozen = Registry::new()
+            .register(worker_session)
+            .unwrap()
+            .register(reconciler_session)
+            .unwrap()
             .register(register_coding_store())
             .unwrap()
             .register(register(config, WorkerBindings::default()).unwrap())
@@ -295,8 +348,70 @@ mod coding_store_tests {
         let Ok(frozen) = frozen else {
             panic!("the postgres store group provides coding.store");
         };
-        let (((), store), worker) = frozen.into_factories();
+        let (((((), worker_session), reconciler_session), store), worker) = frozen.into_factories();
         // Binding connects nothing; only create() would open PostgreSQL.
-        assert!(worker.bind(store.store_factory()).is_ok());
+        assert!(worker
+            .bind(store.bind(worker_session, reconciler_session))
+            .is_ok());
+    }
+
+    #[test]
+    fn the_session_groups_carry_each_role_from_the_worker_config() {
+        let config = coding_config();
+        let (worker_session, reconciler_session) = register_coding_sessions(&config).unwrap();
+        let ((((), worker_session), reconciler_session), _) = Registry::new()
+            .register(worker_session)
+            .unwrap()
+            .register(reconciler_session)
+            .unwrap()
+            .register(register_coding_store())
+            .unwrap()
+            .freeze()
+            .unwrap_or_else(|_| panic!("the store's sessions are staged"))
+            .into_factories();
+        assert_eq!(worker_session.config().user, "forge_coding_worker");
+        assert_eq!(reconciler_session.config().user, "forge_coding_reconciler");
+        for (session, reconciler) in [(&worker_session, false), (&reconciler_session, true)] {
+            let expected = pg_config_for(&config, reconciler);
+            let staged = session.config();
+            assert_eq!(
+                (
+                    &staged.host,
+                    staged.port,
+                    &staged.dbname,
+                    &staged.user,
+                    &staged.owner
+                ),
+                (
+                    &expected.host,
+                    expected.port,
+                    &expected.dbname,
+                    &expected.user,
+                    &expected.owner
+                )
+            );
+            assert_eq!(staged.statement_timeout, expected.statement_timeout);
+        }
+    }
+
+    #[test]
+    fn a_coding_store_without_the_reconciler_session_is_rejected_at_freeze() {
+        let (worker_session, _) = register_coding_sessions(&coding_config()).unwrap();
+        let Err(rejected) = Registry::new()
+            .register(worker_session)
+            .unwrap()
+            .register(register_coding_store())
+            .unwrap()
+            .freeze()
+        else {
+            panic!("the coding store requires the reconciler session");
+        };
+        assert_eq!(
+            rejected.reason(),
+            &forge_core::bootstrap::ValidationError::MissingRequirement {
+                group: "forge.postgres.coding_store".to_string(),
+                binding: RECONCILER_SESSION.to_string(),
+            }
+        );
     }
 }

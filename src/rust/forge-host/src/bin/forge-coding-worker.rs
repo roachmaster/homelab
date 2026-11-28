@@ -2,8 +2,9 @@
 //! (work_worker.py's main()).
 //!
 //! Loads the JSON config named by FORGE_CODING_WORKER_CONFIG,
-//! stages the forge-postgres store group and the coding worker
-//! group, freezes the registry (the worker requires the store),
+//! stages the forge-postgres worker/reconciler session groups, the
+//! store group and the coding worker group, freezes the registry
+//! (the worker requires the store, the store requires both sessions),
 //! binds the frozen store into the worker recipe, installs one
 //! process-owned SIGINT/SIGTERM handler feeding the factory stop
 //! flag, and runs the worker until stopped.
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use forge_core::bootstrap::Registry;
 use forge_postgres::worker_composition::{
     coding_external_contexts, coding_peer_contexts, coding_review_contexts,
-    coding_usage_poll_store, register_coding_store,
+    coding_usage_poll_store, register_coding_sessions, register_coding_store,
 };
 use forge_work_worker::config::parse_config;
 use forge_work_worker::cooldown::ProviderCooldownFactory;
@@ -47,8 +48,14 @@ fn run() -> Result<(), String> {
         external_contexts: Some(Box::new(coding_external_contexts)),
         ..WorkerBindings::default()
     };
+    let (worker_session, reconciler_session) =
+        register_coding_sessions(&config).map_err(|error| error.to_string())?;
     let worker = registrar::register(config, bindings).map_err(|error| error.to_string())?;
-    let (((), store), worker) = Registry::new()
+    let (((((), worker_session), reconciler_session), store), worker) = Registry::new()
+        .register(worker_session)
+        .map_err(|rejected| rejected.reason().to_string())?
+        .register(reconciler_session)
+        .map_err(|rejected| rejected.reason().to_string())?
         .register(register_coding_store())
         .map_err(|rejected| rejected.reason().to_string())?
         .register(worker)
@@ -57,7 +64,7 @@ fn run() -> Result<(), String> {
         .map_err(|rejected| rejected.reason().to_string())?
         .into_factories();
     let factory = worker
-        .bind(store.store_factory())
+        .bind(store.bind(worker_session, reconciler_session))
         .map_err(|error| error.to_string())?;
 
     // Exactly one process-owned signal listener (the forge-agent
