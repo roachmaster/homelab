@@ -110,6 +110,13 @@ fn snap_text<'a>(workflow: &'a Value, key: &str) -> &'a str {
     workflow["snapshot"][key].as_str().unwrap_or("")
 }
 
+/// A key on a snapshot document itself (the effective snapshot
+/// is a flat document, not a workflow row): Python reads
+/// p['author_profile'] directly.
+fn flat_text<'a>(document: &'a Value, key: &str) -> &'a str {
+    document[key].as_str().unwrap_or("")
+}
+
 /// The stop-proof gate shared by all three services: the
 /// systemd unit that ran the attempt is verifiably stopped.
 fn stop_proof_ok(receipt: &Value, attempt: &Value) -> bool {
@@ -835,12 +842,12 @@ impl WorkflowStore {
             let recipe = self.recipe(&effective, &format!("author_{mode}"))?;
             if author_handoff
                 && (recipe.backend != "codex"
-                    || snap_text(&effective, "author_profile")
+                    || flat_text(&effective, "author_profile")
                         == snap_text(&workflow, "author_profile"))
             {
                 return Err(denied());
             }
-            if text(&task, "agent_profile") != snap_text(&effective, "author_profile")
+            if text(&task, "agent_profile") != flat_text(&effective, "author_profile")
                 || recipe.model != command.model
                 || task["pinned_recipe"] != recipe.to_dict()
             {
@@ -905,12 +912,12 @@ impl WorkflowStore {
             let successful = tx.successful_route_attempt(
                 project,
                 workflow_id,
-                snap_text(&effective, "author_profile"),
+                flat_text(&effective, "author_profile"),
                 &recipe.model,
             )?;
             let episode = sha256_canonical(&json!({
                 "workflow_id": workflow_id.to_string(),
-                "profile": snap_text(&effective, "author_profile"),
+                "profile": flat_text(&effective, "author_profile"),
                 "model": recipe.model,
                 "successful_attempt_id": successful.map(|id| id.to_string()),
             }));
@@ -978,7 +985,7 @@ impl WorkflowStore {
             if !ready_for_recipe(
                 &rows,
                 project,
-                snap_text(&effective, "author_profile"),
+                flat_text(&effective, "author_profile"),
                 mode,
                 &recipe,
             ) {
@@ -996,7 +1003,7 @@ impl WorkflowStore {
                 task_id: command.task_id,
                 expected_revision: command.expected_revision,
                 idempotency_key: format!("provider-reset-{}", command.attempt_id),
-                agent_profile: snap_text(&effective, "author_profile").to_string(),
+                agent_profile: flat_text(&effective, "author_profile").to_string(),
                 reconciliation_receipt_id: command.reconciliation_receipt_id,
                 note: if author_handoff {
                     "Continue the same delegated Codex author after the recorded quota wait; provider reset is not assumed."
@@ -1661,6 +1668,10 @@ mod tests {
         task_blocked: bool,
         cancel_event: bool,
         busy_any: bool,
+        route_actions: Vec<Value>,
+        successful_attempt: Option<Uuid>,
+        resume_used: i64,
+        review_open: bool,
         worker_rows: Vec<Value>,
         readiness_rows: Vec<Value>,
         records: Rc<RefCell<PinRecords>>,
@@ -1788,17 +1799,20 @@ mod tests {
         unused!(action_by_source_review, Uuid, Uuid, &str, &str, bool => Result<Option<Value>, WorkError>);
         unused!(insert_workflow_review, &Value => Result<Uuid, WorkError>);
         unused!(insert_readiness_successor, Uuid, Uuid, &str => Result<Uuid, WorkError>);
-        unused!(model_route_actions, &str, Uuid => Result<Vec<Value>, WorkError>);
+        fn model_route_actions(&mut self, _project: &str, _workflow_id: Uuid) -> Result<Vec<Value>, WorkError> { Ok(self.route_actions.clone()) }
         fn newer_plan_task_exists(&mut self, _project: &str, _workflow_id: Uuid, _task_id: Uuid, _created_at: &str, _or_equal: bool) -> Result<bool, WorkError> { Ok(self.newer_plan) }
         fn workflow_task_blocked(&mut self, _project: &str, _workflow_id: Uuid) -> Result<bool, WorkError> { Ok(self.task_blocked) }
         fn operator_cancel_event_exists(&mut self, _workflow_id: Uuid) -> Result<bool, WorkError> { Ok(self.cancel_event) }
-        unused!(successful_route_attempt, &str, Uuid, &str, &str => Result<Option<Uuid>, WorkError>);
-        unused!(quota_resume_used, Uuid, &str => Result<i64, WorkError>);
-        unused!(workflow_review_open, Uuid => Result<bool, WorkError>);
+        fn successful_route_attempt(&mut self, _project: &str, _workflow_id: Uuid, _profile: &str, _model: &str) -> Result<Option<Uuid>, WorkError> { Ok(self.successful_attempt) }
+        fn quota_resume_used(&mut self, _workflow_id: Uuid, _episode: &str) -> Result<i64, WorkError> { Ok(self.resume_used) }
+        fn workflow_review_open(&mut self, _workflow_id: Uuid) -> Result<bool, WorkError> { Ok(self.review_open) }
         unused!(plan_resume_exists, &str, Uuid, Uuid => Result<bool, WorkError>);
         fn readiness_for_worker(&mut self, _worker_id: &str, _incarnation: Uuid, _policy_digest: &str, _activated_at: &str) -> Result<Vec<Value>, WorkError> { Ok(self.worker_rows.clone()) }
         fn binary_pin_busy(&mut self, _project: &str, _workflow_id: Uuid, _task_id: Uuid, _created_at: &str) -> Result<bool, WorkError> { Ok(self.busy) }
-        unused!(insert_action_returning, &Value => Result<Option<Uuid>, WorkError>);
+        fn insert_action_returning(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError> {
+            self.records.borrow_mut().actions.push(row.clone());
+            Ok(Some(Uuid::from_u128(901)))
+        }
         unused!(handoff_actions, &str, Uuid => Result<Vec<Value>, WorkError>);
         unused!(quota_source_attempt, &str, &str, &str => Result<Option<Value>, WorkError>);
         unused!(handoff_busy, Uuid, Uuid => Result<bool, WorkError>);
@@ -2170,6 +2184,10 @@ impl WorkflowDecisionPort for PinDecisions {
             task_blocked: false,
             cancel_event: false,
             busy_any: false,
+            route_actions: Vec::new(),
+            successful_attempt: None,
+            resume_used: 0,
+            review_open: false,
             worker_rows: vec![ready_row("agy-author", "plan")],
             readiness_rows: vec![ready_row("codex-reviewer", "review")],
             records: records.clone(),
@@ -2512,5 +2530,140 @@ impl WorkflowDecisionPort for PinDecisions {
             Err(mismatch())
         );
     }
+
+
+    // -- Quota wait/resume over the same harness --------------------
+
+    struct WaitWorld {
+        pin: PinWorld,
+        command: ModelRoute,
+    }
+
+    fn wait_world(summary: &str) -> WaitWorld {
+        let mut pin = pin_world();
+        {
+            let task = pin.template.task.as_mut().unwrap();
+            task["status"] = json!("quota_blocked");
+            task["root_task_id"] = json!(pin.command.task_id.to_string());
+            let attempt = pin.template.attempt.as_mut().unwrap();
+            attempt["outcome"] = json!("quota_blocked");
+            attempt["summary"] = json!(summary);
+            pin.template.readiness_rows = vec![ready_row("agy-author", "plan")];
+        }
+        let command = ModelRoute::new(
+            "homelab",
+            pin.command.task_id,
+            pin.command.attempt_id,
+            3,
+            pin.command.reconciliation_receipt_id,
+            "gemini-primary",
+            "wait-key-1",
+            "quota hit",
+        )
+        .unwrap();
+        WaitWorld { pin, command }
+    }
+
+    const RESET_SOON: &str = "Provider quota exhausted; waiting for allowance. [forge-provider-quota-v1 reset=60 error=aeb6f801f8121cdd783d2841b96c3610c227d73b066c2c0c1ed45b9230c4ee80]";
+
+    #[test]
+    fn quota_wait_without_a_reset_records_the_wait_only() {
+        let world = wait_world(QUOTA_SUMMARY);
+        let store = world.pin.store();
+        let result = store
+            .wait_or_resume_model_route(&world.command, false, &NoAuthorHandoff)
+            .expect("wait");
+        assert_eq!(result, Value::Null);
+        let records = world.pin.records.borrow();
+        assert_eq!(records.actions.len(), 1);
+        assert_eq!(
+            records.actions[0]["source_key"],
+            json!(format!(
+                "provider-quota-wait:{}",
+                world.command.attempt_id
+            ))
+        );
+        assert_eq!(
+            records.actions[0]["intent"]["ready_at"],
+            Value::Null
+        );
+        assert_eq!(records.events.len(), 1);
+        assert_eq!(
+            records.events[0]["payload"]["stage"],
+            json!("provider_quota_wait")
+        );
+    }
+
+    #[test]
+    fn quota_resume_after_the_reset_resumes_and_records() {
+        let world = wait_world(RESET_SOON);
+        let store = world.pin.store();
+        let result = store
+            .wait_or_resume_model_route(&world.command, false, &NoAuthorHandoff)
+            .expect("resume");
+        assert_eq!(result, Value::Null);
+        let records = world.pin.records.borrow();
+        assert_eq!(records.actions.len(), 2);
+        assert_eq!(
+            records.actions[1]["source_key"],
+            json!(format!(
+                "provider-quota-resume:{}",
+                world.command.attempt_id
+            ))
+        );
+        assert_eq!(
+            records.actions[1]["finish_receipt"]["status"],
+            json!("provider_quota_resumed")
+        );
+        assert_eq!(
+            records.actions[1]["finish_receipt"]["receipt"],
+            world.pin.decisions_receipt
+        );
+        assert_eq!(
+            records.actions[0]["intent"]["ready_at"],
+            json!("2026-11-27T01:01:00+00:00")
+        );
+    }
+
+    #[test]
+    fn quota_resume_stops_at_the_episode_limit() {
+        let mut world = wait_world(RESET_SOON);
+        world.pin.template.resume_used = 20;
+        let store = world.pin.store();
+        let result = store
+            .wait_or_resume_model_route(&world.command, false, &NoAuthorHandoff)
+            .expect("capped");
+        assert_eq!(result, Value::Null);
+        let records = world.pin.records.borrow();
+        assert_eq!(records.actions.len(), 1);
+        assert_eq!(
+            records.actions[0]["intent"]["reset_resumes_used"],
+            json!(20)
+        );
+    }
+
+    #[test]
+    fn quota_resume_refuses_an_open_review() {
+        let mut world = wait_world(RESET_SOON);
+        world.pin.template.review_open = true;
+        let store = world.pin.store();
+        assert_eq!(
+            store.wait_or_resume_model_route(&world.command, false, &NoAuthorHandoff),
+            Err(not_reviewable())
+        );
+    }
+
+    #[test]
+    fn quota_wait_requires_the_stopped_attempt_evidence() {
+        let mut world = wait_world(RESET_SOON);
+        world.pin.template.attempt = None;
+        let store = world.pin.store();
+        assert_eq!(
+            store.wait_or_resume_model_route(&world.command, false, &NoAuthorHandoff),
+            Err(reconcile_required())
+        );
+    }
+
+
 
 }
