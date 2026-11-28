@@ -21,22 +21,30 @@ use std::{
     net::TcpStream,
     path::PathBuf,
     rc::Rc,
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, AtomicU64},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
+static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 struct Files(PathBuf);
 impl Files {
+    fn directory() -> PathBuf {
+        for _ in 0..100 {
+            let path = std::env::temp_dir().join(format!(
+                "forge-ui-host-{}-{}",
+                std::process::id(),
+                NEXT_DIRECTORY.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => return path,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("fixture directory: {error}"),
+            }
+        }
+        panic!("fixture directory names exhausted")
+    }
     fn new() -> Self {
-        let p = std::env::temp_dir().join(format!(
-            "forge-ui-host-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir(&p).unwrap();
+        let p = Self::directory();
         let mut files = Vec::new();
         for name in [
             "index.html",

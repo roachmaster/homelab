@@ -1,3 +1,14 @@
+## Parallel web-host fixture correction — 2026-11-28
+
+Jenkins141 caught a timestamp collision while two consumer fixtures created the
+same temporary directory; the other73 host tests passed and trusted cleanup was
+confirmed. The fixture now follows the repository's atomic counter/PID pattern,
+using exclusive directory creation with bounded AlreadyExists retries. It never
+reuses or deletes a colliding path. Application behavior and existing assertions
+are unchanged. All74 consumer tests pass with16 test threads on Rust1.97.1;
+formatting passes. Independent read-only review found no blocker. Qualify this
+successor and full merged main; the previous build is retained as failed.
+
 ## Independent M32 upgrade preservation with additive M53 metadata — 2026-11-28
 
 On exact basefa77558a, the real PostgreSQL superseding-review upgrade proof failed
