@@ -279,8 +279,8 @@ impl UsageCollector {
 /// Effect-free selection; construction/acquisition happens only in
 /// create (UsageCollectorFactory in usage_collector.py).
 pub struct UsageCollectorFactory {
-    factories: Option<Vec<UsageProviderFactory>>,
-    store: Option<Arc<dyn UsagePollStore>>,
+    factories: Vec<UsageProviderFactory>,
+    store: Arc<dyn UsagePollStore>,
     interval: f64,
     ttl: f64,
     clock: CollectorClock,
@@ -288,23 +288,21 @@ pub struct UsageCollectorFactory {
 
 impl UsageCollectorFactory {
     pub fn new(
-        factories: Option<Vec<UsageProviderFactory>>,
-        store: Option<Arc<dyn UsagePollStore>>,
+        factories: Vec<UsageProviderFactory>,
+        store: Arc<dyn UsagePollStore>,
         poll_interval: f64,
         outbox_ttl: f64,
         clock: CollectorClock,
     ) -> Result<UsageCollectorFactory, String> {
-        if let Some(factories) = &factories {
-            if factories.is_empty() || factories.len() > MAX_PROVIDERS || store.is_none() {
-                return Err("Usage collector requires provider factories and store".to_string());
-            }
-            let mut seen = std::collections::HashSet::new();
-            for factory in factories {
-                let alias = factory.config().alias.clone();
-                identifier(&Value::String(alias.clone())).map_err(|error| error.0.to_string())?;
-                if !seen.insert(alias) {
-                    return Err("Duplicate usage provider alias".to_string());
-                }
+        if factories.is_empty() || factories.len() > MAX_PROVIDERS {
+            return Err("Usage collector requires provider factories and store".to_string());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for factory in &factories {
+            let alias = factory.config().alias.clone();
+            identifier(&Value::String(alias.clone())).map_err(|error| error.0.to_string())?;
+            if !seen.insert(alias) {
+                return Err("Duplicate usage provider alias".to_string());
             }
         }
         check_timing(poll_interval, outbox_ttl)?;
@@ -317,14 +315,9 @@ impl UsageCollectorFactory {
         })
     }
 
-    pub fn create(&self) -> Result<Option<UsageCollector>, String> {
-        let Some(factories) = &self.factories else {
-            return Ok(None);
-        };
-        let store = self
-            .store
-            .clone()
-            .ok_or_else(|| "Usage collector requires provider factories and store".to_string())?;
+    pub fn create(&self) -> Result<UsageCollector, String> {
+        let factories = &self.factories;
+        let store = Arc::clone(&self.store);
         let mut providers: Vec<Box<dyn UsageProvider>> = Vec::new();
         let acquire = |factory: &UsageProviderFactory,
                        providers: &mut Vec<Box<dyn UsageProvider>>|
@@ -351,7 +344,6 @@ impl UsageCollectorFactory {
             self.ttl,
             self.clock.clone(),
         )
-        .map(Some)
     }
 }
 

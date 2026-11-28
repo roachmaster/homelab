@@ -644,6 +644,34 @@ impl UsageProvider for CodexUsageProvider {
     }
 }
 
+/// Builds the Muse metadata process for a Muse provider.
+pub trait MuseProcessSource: Send + Sync {
+    /// Build the process; `process` is the provider's (optional)
+    /// typed process configuration.
+    fn build(&self, process: Option<MetadataProcessConfig>) -> Result<MuseUsageProcess, String>;
+}
+
+/// No Muse process support selected: a Muse provider cannot be built,
+/// and says so before looking at its configuration.
+pub struct NoMuseProcess;
+
+impl MuseProcessSource for NoMuseProcess {
+    fn build(&self, _process: Option<MetadataProcessConfig>) -> Result<MuseUsageProcess, String> {
+        Err("Muse usage requires process dependencies".to_string())
+    }
+}
+
+impl MuseProcessSource for MuseProcessDeps {
+    fn build(&self, process: Option<MetadataProcessConfig>) -> Result<MuseUsageProcess, String> {
+        MuseUsageProcess::new(
+            process.ok_or_else(|| "Muse usage requires process configuration".to_string())?,
+            self.ports.clone(),
+            self.stager.clone(),
+            self.binary_sha256.clone(),
+        )
+    }
+}
+
 /// What the provider factory needs to build Muse processes.
 pub struct MuseProcessDeps {
     pub ports: Arc<ProcessPorts>,
@@ -657,7 +685,8 @@ pub struct UsageProviderFactory {
     config: UsageProviderConfig,
     hmac_key: Vec<u8>,
     ports: Arc<ProcessPorts>,
-    muse_deps: Option<Arc<MuseProcessDeps>>,
+    /// `NoMuseProcess` unless Muse process support is selected.
+    muse: Arc<dyn MuseProcessSource>,
     versions: AdapterVersions,
     clock: UsageClock,
 }
@@ -667,7 +696,7 @@ impl UsageProviderFactory {
         config: UsageProviderConfig,
         hmac_key: Vec<u8>,
         ports: Arc<ProcessPorts>,
-        muse_deps: Option<Arc<MuseProcessDeps>>,
+        muse: Arc<dyn MuseProcessSource>,
         versions: AdapterVersions,
         clock: UsageClock,
     ) -> Result<UsageProviderFactory, String> {
@@ -678,7 +707,7 @@ impl UsageProviderFactory {
             config,
             hmac_key,
             ports,
-            muse_deps,
+            muse,
             versions,
             clock,
         })
@@ -700,19 +729,7 @@ impl UsageProviderFactory {
                 version: self.versions.grok.clone(),
             })),
             "muse" => {
-                let deps = self
-                    .muse_deps
-                    .clone()
-                    .ok_or_else(|| "Muse usage requires process dependencies".to_string())?;
-                let process = MuseUsageProcess::new(
-                    self.config
-                        .process
-                        .clone()
-                        .ok_or_else(|| "Muse usage requires process configuration".to_string())?,
-                    deps.ports.clone(),
-                    deps.stager.clone(),
-                    deps.binary_sha256.clone(),
-                )?;
+                let process = self.muse.build(self.config.process.clone())?;
                 Ok(Box::new(MuseUsageProvider {
                     config: self.config.clone(),
                     process: Box::new(process),

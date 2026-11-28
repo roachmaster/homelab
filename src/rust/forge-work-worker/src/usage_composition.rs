@@ -367,19 +367,19 @@ pub fn create_worker_usage_collector(
             provider_config,
             key.clone(),
             ports.clone(),
-            Some(muse_deps.clone()),
+            muse_deps.clone(),
             versions.clone(),
             system_clock(),
         )?);
     }
     let factory = UsageCollectorFactory::new(
-        Some(factories),
-        Some(store),
+        factories,
+        store,
         usage.interval_seconds as f64,
         300.0,
         system_monotonic(),
     )?;
-    factory.create()
+    factory.create().map(Some)
 }
 
 /// UsageCollectorPort adapter over forge-usage's UsageCollector:
