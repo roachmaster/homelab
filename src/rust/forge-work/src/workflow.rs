@@ -325,6 +325,11 @@ pub trait ReviewerCorrectionHook {
 /// superseding_review (F5): recovers superseded reviews and
 /// corrects transcription-defect verdicts.
 pub trait SupersedingHook {
+    /// Whether superseding review handles defective verdicts, which
+    /// retires the legacy in-place peer correction under retry events.
+    fn supersedes(&self) -> bool {
+        true
+    }
     fn recover(&self) -> Result<(), WorkError>;
     fn root_review_id(&self, tx: &mut dyn WorkflowTx, review: &Value) -> Result<Uuid, WorkError>;
     fn correct(
@@ -332,6 +337,75 @@ pub trait SupersedingHook {
         ctx: CorrectionContext,
         error: &PeerReviewError,
     ) -> Result<Option<Value>, WorkError>;
+}
+
+/// Null execution policy: no host policy is composed, so nothing runs
+/// before a claim, the workflow's own snapshot is effective and no
+/// quota block is handled by policy.
+pub struct NoExecutionPolicy;
+
+impl ExecutionPolicyHook for NoExecutionPolicy {
+    fn run_once(&self, _flow: &WorkflowStore) -> Result<(), WorkError> {
+        Ok(())
+    }
+
+    fn effective(&self, workflow: &Value) -> Result<Value, WorkError> {
+        Ok(workflow["snapshot"].clone())
+    }
+
+    fn handles_quota(&self, _workflow: &Value, _task: &Value) -> bool {
+        false
+    }
+}
+
+/// Null recovery pass: nothing to recover.
+pub struct NoRecovery;
+
+impl RunOnceHook for NoRecovery {
+    fn run_once(&self) -> Result<(), WorkError> {
+        Ok(())
+    }
+}
+
+/// Null superseding review: no superseded reviews to recover, a
+/// review family is rooted at the review itself, and no defective
+/// verdict is corrected (the verdict error stands).
+pub struct NoSuperseding;
+
+impl SupersedingHook for NoSuperseding {
+    fn supersedes(&self) -> bool {
+        false
+    }
+
+    fn recover(&self) -> Result<(), WorkError> {
+        Ok(())
+    }
+
+    fn root_review_id(&self, _tx: &mut dyn WorkflowTx, review: &Value) -> Result<Uuid, WorkError> {
+        Ok(uuid_of(review, "workflow_review_id"))
+    }
+
+    fn correct(
+        &self,
+        _ctx: CorrectionContext,
+        _error: &PeerReviewError,
+    ) -> Result<Option<Value>, WorkError> {
+        Ok(None)
+    }
+}
+
+/// Null reviewer correction: an incomplete approval cannot be
+/// corrected, so the verdict path is unavailable (503).
+pub struct NoReviewerCorrection;
+
+impl ReviewerCorrectionHook for NoReviewerCorrection {
+    fn correct(
+        &self,
+        _ctx: CorrectionContext,
+        _error: &IncompleteApproval,
+    ) -> Result<Value, WorkError> {
+        Err(WorkError::rejected(503, "unavailable"))
+    }
 }
 
 /// The coordinator's configuration (work_config.WorkConfig's
@@ -486,28 +560,40 @@ pub struct WorkflowStore {
     /// the durable retry-event accounting is engaged (vs. the
     /// legacy budget path).
     retry_events_enabled: bool,
-    execution_policy: Option<Box<dyn ExecutionPolicyHook>>,
-    feedback_recovery: Option<Box<dyn RunOnceHook>>,
-    peer_feedback_recovery: Option<Box<dyn RunOnceHook>>,
-    superseding_review: Option<Box<dyn SupersedingHook>>,
-    reviewer_correction: Option<Box<dyn ReviewerCorrectionHook>>,
+    execution_policy: Box<dyn ExecutionPolicyHook>,
+    feedback_recovery: Box<dyn RunOnceHook>,
+    peer_feedback_recovery: Box<dyn RunOnceHook>,
+    superseding_review: Box<dyn SupersedingHook>,
+    reviewer_correction: Box<dyn ReviewerCorrectionHook>,
     retry_allowance_position: RefCell<Option<(String, Uuid)>>,
     manual_allowance_position: RefCell<Option<(String, Uuid)>>,
 }
 
 /// The store's sub-ports, bound at construction.
 ///
-/// Each is a capability selection whose presence the store consults
-/// (`superseding_present`, the snapshot fallback, the review-family
-/// fallback), so absence stays meaningful and these remain `Option`.
+/// Every sub-port is always present; one that is not selected is its
+/// null object, which carries the unselected behaviour itself (the
+/// workflow's own snapshot, the review rooted at itself, the verdict
+/// error standing, 503 for an incomplete approval).
 /// `StoreHooks::default()` selects none: the bare store.
-#[derive(Default)]
 pub struct StoreHooks {
-    pub execution_policy: Option<Box<dyn ExecutionPolicyHook>>,
-    pub feedback_recovery: Option<Box<dyn RunOnceHook>>,
-    pub peer_feedback_recovery: Option<Box<dyn RunOnceHook>>,
-    pub superseding_review: Option<Box<dyn SupersedingHook>>,
-    pub reviewer_correction: Option<Box<dyn ReviewerCorrectionHook>>,
+    pub execution_policy: Box<dyn ExecutionPolicyHook>,
+    pub feedback_recovery: Box<dyn RunOnceHook>,
+    pub peer_feedback_recovery: Box<dyn RunOnceHook>,
+    pub superseding_review: Box<dyn SupersedingHook>,
+    pub reviewer_correction: Box<dyn ReviewerCorrectionHook>,
+}
+
+impl Default for StoreHooks {
+    fn default() -> Self {
+        StoreHooks {
+            execution_policy: Box::new(NoExecutionPolicy),
+            feedback_recovery: Box::new(NoRecovery),
+            peer_feedback_recovery: Box::new(NoRecovery),
+            superseding_review: Box::new(NoSuperseding),
+            reviewer_correction: Box::new(NoReviewerCorrection),
+        }
+    }
 }
 
 impl WorkflowStore {
@@ -585,7 +671,7 @@ impl WorkflowStore {
     }
 
     pub(crate) fn superseding_present(&self) -> bool {
-        self.superseding_review.is_some()
+        self.superseding_review.supersedes()
     }
 
     /// WorkStore._require_project.
@@ -609,10 +695,7 @@ impl WorkflowStore {
 
     /// _snapshot: select future execution only.
     pub(crate) fn snapshot_of(&self, workflow: &Value) -> Result<Value, WorkError> {
-        if let Some(hook) = self.execution_policy.as_ref() {
-            return hook.effective(workflow);
-        }
-        Ok(workflow["snapshot"].clone())
+        self.execution_policy.effective(workflow)
     }
 
     /// _current_policy: the configured policy, gated on the
@@ -1106,12 +1189,9 @@ impl WorkflowStore {
             let mut broke = false;
             for task in &tasks {
                 let status = text(task, "status");
-                if status == "quota_blocked" {
-                    if let Some(hook) = self.execution_policy.as_ref() {
-                        if hook.handles_quota(workflow, task) {
-                            continue;
-                        }
-                    }
+                if status == "quota_blocked" && self.execution_policy.handles_quota(workflow, task)
+                {
+                    continue;
                 }
                 if [
                     "quota_blocked",
@@ -1312,22 +1392,14 @@ impl WorkflowStore {
 
     /// claim(): run the recovery passes, then lease one action.
     pub fn claim(&self, worker_id: &str) -> Result<Option<Value>, WorkError> {
-        if let Some(hook) = self.execution_policy.as_ref() {
-            hook.run_once(self)?;
-        }
+        self.execution_policy.run_once(self)?;
         self.apply_retry_allowances()?;
-        if let Some(hook) = self.feedback_recovery.as_ref() {
-            hook.run_once()?;
-        }
-        if let Some(hook) = self.peer_feedback_recovery.as_ref() {
-            hook.run_once()?;
-        }
+        self.feedback_recovery.run_once()?;
+        self.peer_feedback_recovery.run_once()?;
         self.recover_source_readiness()?;
         self.recover_preparations()?;
         self.recover_peer_verdicts()?;
-        if let Some(hook) = self.superseding_review.as_ref() {
-            hook.recover()?;
-        }
+        self.superseding_review.recover()?;
         self.recover_native_timeouts()?;
         let mut projects = self.config.allowed_projects.clone();
         projects.sort();
@@ -1801,24 +1873,7 @@ impl WorkflowStore {
                 Ok(verdict) => verdict,
                 Err(error) => {
                     if let Some(incomplete) = &error.incomplete {
-                        if let Some(hook) = self.reviewer_correction.as_ref() {
-                            return Ok(hook.correct(
-                                CorrectionContext {
-                                    tx,
-                                    workflow,
-                                    review,
-                                    task,
-                                    critic: &critic,
-                                    result: &result,
-                                    action,
-                                },
-                                incomplete,
-                            )?);
-                        }
-                        return Err(WorkError::rejected(503, "unavailable").into());
-                    }
-                    if let Some(hook) = self.superseding_review.as_ref() {
-                        if let Some(receipt) = hook.correct(
+                        return Ok(self.reviewer_correction.correct(
                             CorrectionContext {
                                 tx,
                                 workflow,
@@ -1828,10 +1883,22 @@ impl WorkflowStore {
                                 result: &result,
                                 action,
                             },
-                            &error,
-                        )? {
-                            return Ok(receipt);
-                        }
+                            incomplete,
+                        )?);
+                    }
+                    if let Some(receipt) = self.superseding_review.correct(
+                        CorrectionContext {
+                            tx,
+                            workflow,
+                            review,
+                            task,
+                            critic: &critic,
+                            result: &result,
+                            action,
+                        },
+                        &error,
+                    )? {
+                        return Ok(receipt);
                     }
                     return Err(error.into());
                 }
@@ -1862,10 +1929,7 @@ impl WorkflowStore {
             };
             let source = text(&review, "workflow_review_id").to_string();
             let family = if present(&review, "supersedes_review_id") {
-                match self.superseding_review.as_ref() {
-                    Some(hook) => hook.root_review_id(tx, &review)?,
-                    None => uuid_of(&review, "workflow_review_id"),
-                }
+                self.superseding_review.root_review_id(tx, &review)?
             } else {
                 uuid_of(&review, "workflow_review_id")
             };
@@ -2900,6 +2964,86 @@ mod tests {
         assert_eq!(
             authority.validate(&mut tx, &moved, "code"),
             Err(WorkError::rejected(409, "result_mismatch"))
+        );
+    }
+
+    fn stub_tx() -> StubTx {
+        StubTx {
+            scope: 1,
+            lease: None,
+            state: None,
+        }
+    }
+
+    #[test]
+    fn null_execution_policy_keeps_the_workflow_snapshot() {
+        let workflow = json!({"snapshot": {"policy_digest": "d"}});
+        assert_eq!(
+            NoExecutionPolicy.effective(&workflow).unwrap(),
+            json!({"policy_digest": "d"})
+        );
+        assert!(!NoExecutionPolicy.handles_quota(&workflow, &json!({"status": "quota_blocked"})));
+        assert!(NoRecovery.run_once().is_ok());
+    }
+
+    #[test]
+    fn null_superseding_roots_a_review_at_itself_and_corrects_nothing() {
+        let id = Uuid::new_v4();
+        let review = json!({"workflow_review_id": id.to_string()});
+        let mut tx = stub_tx();
+        assert!(
+            !NoSuperseding.supersedes(),
+            "the legacy correction stays available"
+        );
+        assert!(NoSuperseding.recover().is_ok());
+        assert_eq!(NoSuperseding.root_review_id(&mut tx, &review).unwrap(), id);
+        let value = json!({});
+        let context = CorrectionContext {
+            tx: &mut tx,
+            workflow: &value,
+            review: &review,
+            task: &value,
+            critic: &value,
+            result: &value,
+            action: &value,
+        };
+        let error = PeerReviewError::new("transcription");
+        assert_eq!(NoSuperseding.correct(context, &error).unwrap(), None);
+    }
+
+    #[test]
+    fn null_reviewer_correction_is_unavailable() {
+        let mut tx = stub_tx();
+        let value = json!({});
+        let context = CorrectionContext {
+            tx: &mut tx,
+            workflow: &value,
+            review: &value,
+            task: &value,
+            critic: &value,
+            result: &value,
+            action: &value,
+        };
+        let incomplete = IncompleteApproval {
+            verdict: json!({}),
+            missing_finding_ids: Vec::new(),
+        };
+        assert_eq!(
+            NoReviewerCorrection
+                .correct(context, &incomplete)
+                .unwrap_err(),
+            WorkError::rejected(503, "unavailable")
+        );
+    }
+
+    #[test]
+    fn default_store_hooks_are_the_null_objects() {
+        let hooks = StoreHooks::default();
+        assert!(!hooks.superseding_review.supersedes());
+        let workflow = json!({"snapshot": 7});
+        assert_eq!(
+            hooks.execution_policy.effective(&workflow).unwrap(),
+            json!(7)
         );
     }
 }

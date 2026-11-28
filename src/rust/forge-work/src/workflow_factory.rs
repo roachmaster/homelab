@@ -18,8 +18,9 @@ use crate::context_recovery::{FeedbackRecoveryProvider, PeerFeedbackRecoveryProv
 use crate::reviewer_correction::ReviewerCorrectionProvider;
 use crate::superseding_review::SupersedingReviewProvider;
 use crate::workflow::{
-    CoordinatorConfig, CoordinatorHooks, ExecutionPolicyHook, ExternalWorkflowHook, RunOnceHook,
-    StoreHooks, WorkflowCoordinator, WorkflowDecisionPort, WorkflowStore,
+    CoordinatorConfig, CoordinatorHooks, ExecutionPolicyHook, ExternalWorkflowHook,
+    NoExecutionPolicy, RunOnceHook, StoreHooks, WorkflowCoordinator, WorkflowDecisionPort,
+    WorkflowStore,
 };
 use crate::workflow_policy::WorkflowCatalog;
 use crate::workflow_tx::WorkflowTxFactory;
@@ -39,8 +40,7 @@ pub struct WorkflowStoreFactory {
     /// whether the durable retry-event accounting is engaged.
     pub retry_events_enabled: bool,
     /// Host-composed execution policy hook (ExecutionPolicyFactory
-    /// equivalent); when None the store runs without it, exactly
-    /// the unset-hook state.
+    /// equivalent); when None, create() binds `NoExecutionPolicy`.
     pub execution_policy: Option<Box<dyn ExecutionPolicyHook>>,
 }
 
@@ -58,19 +58,15 @@ impl WorkflowStoreFactory {
                 self.native_policy_matches,
                 self.retry_events_enabled,
                 StoreHooks {
-                    execution_policy: self.execution_policy,
-                    feedback_recovery: Some(Box::new(FeedbackRecoveryProvider::bound(
+                    execution_policy: self
+                        .execution_policy
+                        .unwrap_or_else(|| Box::new(NoExecutionPolicy)),
+                    feedback_recovery: Box::new(FeedbackRecoveryProvider::bound(store.clone())),
+                    peer_feedback_recovery: Box::new(PeerFeedbackRecoveryProvider::bound(
                         store.clone(),
-                    ))),
-                    peer_feedback_recovery: Some(Box::new(PeerFeedbackRecoveryProvider::bound(
-                        store.clone(),
-                    ))),
-                    superseding_review: Some(Box::new(SupersedingReviewProvider::bound(
-                        store.clone(),
-                    ))),
-                    reviewer_correction: Some(Box::new(ReviewerCorrectionProvider::bound(
-                        store.clone(),
-                    ))),
+                    )),
+                    superseding_review: Box::new(SupersedingReviewProvider::bound(store.clone())),
+                    reviewer_correction: Box::new(ReviewerCorrectionProvider::bound(store.clone())),
                 },
             )
         })
@@ -363,7 +359,10 @@ mod tests {
     #[test]
     fn the_store_owns_its_sub_ports_without_a_cycle() {
         let store = store();
-        assert!(store.superseding_present(), "default sub-ports are bound at create()");
+        assert!(
+            store.superseding_present(),
+            "default sub-ports are bound at create()"
+        );
         let weak = Arc::downgrade(&store);
         drop(store);
         assert!(
