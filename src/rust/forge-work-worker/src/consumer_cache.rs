@@ -115,20 +115,23 @@ fn git(root: &Path, args: &[&str]) -> Result<(i32, Vec<u8>), WorkerError> {
         root.to_string_lossy().into_owned(),
     ];
     argv.extend(args.iter().map(|arg| arg.to_string()));
-    crate::ports_runtime::spawn_bounded(&argv, 15, |builder| {
-        builder.env_clear();
-        for (key, value) in std::env::vars() {
-            if matches!(key.as_str(), "PATH" | "LANG" | "LC_ALL" | "SYSTEMROOT") {
-                builder.env(key, value);
-            }
-        }
-        builder
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .env("GIT_TERMINAL_PROMPT", "0");
-    })
-    .map_err(|_| unverified())
+    let request = crate::process_exec::ProcessRequest::cleared(
+        argv,
+        15,
+        &["PATH", "LANG", "LC_ALL", "SYSTEMROOT"],
+        &[
+            ("GIT_CONFIG_NOSYSTEM", "1"),
+            ("GIT_CONFIG_GLOBAL", "/dev/null"),
+            ("GIT_OPTIONAL_LOCKS", "0"),
+            ("GIT_TERMINAL_PROMPT", "0"),
+        ],
+    );
+    let output = forge_core::io_client::IoClient::execute(
+        &crate::process_exec::SystemProcessExec,
+        request,
+    )
+    .map_err(|_| unverified())?;
+    Ok((output.exit_code, output.stdout))
 }
 
 /// Attempt-scoped mounts for the three public-consumer Cargo
