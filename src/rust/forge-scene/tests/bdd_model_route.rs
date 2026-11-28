@@ -8,7 +8,7 @@ use forge_scene::bdd::{ensure, verify, Steps};
 use forge_work::decision_requests::{PlanDecideRequest, ReviewDecideRequest};
 use forge_work::execution_policy::{
     sha256_canonical, BinaryPinEvidence, BinaryPinRecovery, ModelRoute, ModelRouteEvidence,
-    BINARY_PIN_FAILURE, BINARY_PIN_POLICY, MODEL_ROUTE_POLICY,
+    BINARY_PIN_FAILURE, BINARY_PIN_POLICY,
 };
 use forge_work::model_route::{BinaryProofPort, NoAuthorHandoff, QuotaProofPort};
 use forge_work::pinned_recipe::PinnedRecipe;
