@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use forge_services::composition::{create_service_manager, ServicesConfig};
+use forge_services::forge::{create_service_manager, ServicesConfig};
 use forge_services::manager::{listeners, load_inventory, show_inventory, Service};
 use nix::fcntl::{Flock, FlockArg};
 

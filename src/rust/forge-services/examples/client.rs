@@ -6,9 +6,10 @@
 
 use std::sync::Arc;
 
-use forge_services::composition::{create_service_manager_with, ServicesConfig};
+use forge_services::forge::SystemClock;
+use forge_services::forge::{create_service_manager_with, ServicesConfig};
 use forge_services::manager::ServiceError;
-use forge_services::ports::{CommandRunner, SystemClock};
+use forge_services::ports::CommandRunner;
 
 struct DryRun;
 
