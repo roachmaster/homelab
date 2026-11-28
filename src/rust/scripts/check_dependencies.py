@@ -68,7 +68,7 @@ EXTERNAL = {
                   "nix", "serde_json"},
     "forge-mcp": {"serde", "serde_json"},
     "forge-mcp-host": {"tokio", "rmcp", "serde", "serde_json", "reqwest", "tokio-postgres", "uuid", "axum"},
-    "forge-postgres": {"chrono", "nix", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
+    "forge-postgres": {"bytes", "futures-util", "chrono", "nix", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
     "forge-work": {"serde_json", "sha2", "uuid"},
     "forge-work-worker": {"serde_json", "sha2", "uuid", "nix"},
     "forge-work-publication": {"serde", "serde_json", "sha2", "uuid", "base64", "rustpython-parser"},

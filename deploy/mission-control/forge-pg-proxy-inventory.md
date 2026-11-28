@@ -2,8 +2,12 @@
 
 Generated from the `deploy/mission-control/agent-runner` sources at base
 57a0aca plus the SQL migrations and `grant-runner.sql`. Every data access
-below gets exactly one proxy operation (see `forge_pg_proxy.py`
-`OPERATIONS`). No ad-hoc SQL from clients, ever.
+below gets exactly one proxy operation. The native implementation now uses
+[`forge-postgres::proxy`](../../src/rust/forge-postgres/README.md) and its neutral,
+closed `catalog.json`, extracted from the retained6fa declarations without
+executing the retired Python server. The disabled source unit selects
+`/opt/homelab-forge/event-current/bin/forge-pg-proxy` from the immutable event
+release. No ad-hoc SQL from clients, ever; migration55 remains a separate cutover.
 
 ## 1. Callers and their DB roles
 

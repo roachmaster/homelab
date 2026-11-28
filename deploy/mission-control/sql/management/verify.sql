@@ -752,4 +752,6 @@ ORDER BY version;
 
 \ir verify-autonomy.sql
 
+\ir verify-pg-proxy-chat-date.sql
+
 COMMIT;

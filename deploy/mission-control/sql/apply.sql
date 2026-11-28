@@ -440,4 +440,10 @@ SELECT NOT EXISTS (SELECT FROM forge_agent.schema_migrations WHERE version=56) A
 \ir migrations/0056_native_ci_verifier.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(56,'native_ci_verifier');
 \endif
+SELECT NOT EXISTS (SELECT FROM forge_agent.schema_migrations WHERE version=57) AS apply_0057
+\gset
+\if :apply_0057
+\ir migrations/0057_pg_proxy_chat_date.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(57,'pg_proxy_chat_date');
+\endif
 COMMIT;

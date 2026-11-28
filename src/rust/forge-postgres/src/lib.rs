@@ -23,6 +23,7 @@ pub mod peer_validator;
 #[cfg(feature = "test-support")]
 pub mod pg_fixture;
 pub mod postfix_ledger;
+pub mod proxy;
 pub mod publication_composition;
 pub mod publication_store_adapter;
 pub mod reconciler;

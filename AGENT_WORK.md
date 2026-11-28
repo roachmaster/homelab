@@ -3359,3 +3359,39 @@ all-target/all-feature PostgreSQL Clippy and selected formatting passed.
 Logs: `/mnt/data/homelab-build/rust-task-get-{tests,pg4,clippy}.log`.
 Review/CICD and list classification/count projections still require parity before
 whole-runtime cutover qualification.
+
+## Optional native PostgreSQL proxy — 2026-11-28
+
+Reconstruct the explicitly preserved, disabled proxy as `forge-postgres::proxy`
+and `forge-pg-proxy`, using the immutable event-current release selected by the
+source unit. Direct adapters remain direct, and migration 55 remains unselected.
+The neutral catalog is extracted through a closed AST literal/comprehension
+reader from retained 6fa source; its provenance records that source hash. It
+contains 100 function declarations (96 authorized), 64 entrypoints, 52 scoped tables,
+81 fixed read queries, 8 channels and 6 authenticated caller policies. No Python
+server is restored or executed. Fixed-query bindings preserve contextual SQL
+types and repeated UUID/text uses; omitted SQL defaults differ from explicit NULL.
+
+Bootstrap validates/stages/freezes the selected factory before credential/runtime
+acquisition. Request-scoped role connections, mandatory owner/read-only scopes,
+atomic authenticated mutation+redacted audit, separate notify/subscription grants,
+bounded HTTP framing and per-caller cursors preserve the service boundaries.
+Token/passfile acquisition is private and explicit. Stop admission, wake waiters,
+join workers/listeners, and close database drivers on shutdown; no retry or fake
+commit outcome is introduced. The service is not installed/enabled here.
+
+A real disposable test reproduced the historical migration 54 chat date error (text passed
+into a date column). Additive 57 changes only that explicit cast, guards the exact
+old source/security/ACL, and verifies the complete replacement source/security/ACL.
+Applied 1–56 bytes remain unchanged. Actual tests compile every permitted catalog
+operation as its real role and execute representative writes/reads, audit-failure
+rollback, independent notifications, HTTP refusals and migration 57 before/after/reapply.
+Qualification logs remain private under
+/mnt/data/homelab-build/pg-proxy-rust-evidence-20261128/; full integration/Jenkins
+and any production deployment remain the orchestrator's separate work.
+
+The exact scoped qualification passes 47 tests with no ignored or filtered cases
+(45 library, one real v4/historical gate database case, one independent consumer
+wiring case), strict all-target/all-feature Clippy, formatting, import and dependency
+guards. All 386 permitted role/catalog SQL preparations succeed. This is scoped
+local evidence, not a production or full Jenkins qualification.

@@ -776,6 +776,7 @@ dependencies = [
 name = "forge-postgres"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "forge-core",
  "forge-jenkins",
@@ -784,6 +785,7 @@ dependencies = [
  "forge-work",
  "forge-work-publication",
  "forge-work-worker",
+ "futures-util",
  "nix 0.31.3",
  "serde_json",
  "sha2 0.10.9",
