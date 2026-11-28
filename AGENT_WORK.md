@@ -1,3 +1,26 @@
+## Intermittent triage input ordering and bounded failure locations — 2026-11-28
+
+Jenkins143 on mainf5e057c1 failed inside the nested Agents triage journey, but the
+old diagnostic printed only its journey3893 caller. The exact unchanged f5 source
+passed all28 groups locally with outer exit0 and complete cleanup; its triage,
+relay, Rust model, style and dependency-lock bytes match the prior passing source.
+The discarded Jenkins nested error cannot be reconstructed or claimed as known.
+
+A controlled real-WASM probe batches ordinary Refresh/Kind DOM inputs and reproduces
+the defect-list count failure: the pending refresh correctly refuses a second
+intent before its disabled-state frame arrives; Rust retains All kinds and17 rows.
+The journey now requires the newly seeded row in the accepted refreshed list before
+selecting Defects, then explicitly verifies the selected value and original count.
+Existing phase, geometry, navigation, mutation and safety assertions are retained.
+
+Failure diagnostics now select the earliest stack frame from only journey.mjs or
+agents-triage.mjs and print bounded module/line/column; no paths, URLs, exception
+prose, page text or credentials escape. Two focused diagnostic tests cover nested
+precedence, long private call logs, unknown modules, remote URLs and malformed
+coordinates. No privileged verifier/helper, application, SQL or service changed.
+Root must qualify the exact integrated successor through the complete CI gate;
+local run identities/evidence belong under /mnt/data/homelab-build/codex-triage-f5-*.
+
 ## Parallel web-host fixture correction — 2026-11-28
 
 Jenkins141 caught a timestamp collision while two consumer fixtures created the

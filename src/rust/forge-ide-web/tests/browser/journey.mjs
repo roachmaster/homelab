@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { acquireOwned, bounded, cleanupResources, runHarness } from './report.mjs';
-import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK } from './diagnostics.mjs';
+import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK, journeyFailureLocation } from './diagnostics.mjs';
 import { VIEWPORTS, verifyViewportProfiles } from './viewports.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
 import { startDurableRelay } from './durable-relay.mjs';
@@ -4318,8 +4318,8 @@ const passed = await runHarness({
       await realJourney();
       await controlledLifecycleJourney();
     } catch (error) {
-      const location = String(error.stack).match(/journey\.mjs:(\d+):(\d+)/);
-      if (location) process.stderr.write(`QA_CHECK journey_location=${location[1]}:${location[2]}\n`);
+      const location = journeyFailureLocation(error);
+      if (location) process.stderr.write(`QA_CHECK journey_location=${location}\n`);
       throw error;
     }
   },

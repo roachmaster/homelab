@@ -32,3 +32,16 @@ export async function captureFailureScreenshot(report, output, fixtures, enabled
     timeout: 3_000, mask: [page.locator(SCREENSHOT_MASK)] });
   report.screenshot('captured');
 }
+
+// Only fixed test modules and bounded coordinates leave a failure stack. Never
+// print its prose, paths, URLs, call logs or page-derived values. Prefer the
+// earliest known frame so a nested assertion is not replaced by its caller.
+export function journeyFailureLocation(error) {
+  if (typeof error?.stack !== 'string') return null;
+  // Large assertion call logs precede the frames: scan only a bounded tail.
+  for (const line of error.stack.slice(-16384).split('\n').slice(-32)) {
+    const frame = line.match(/^\s{1,16}at (?:[A-Za-z0-9_.$<> ]{1,160} \()?((?:file:\/\/\/|\/)[^\s()?]{0,4096}\/)?(agents-triage|journey)\.mjs:([1-9][0-9]{0,5}):([1-9][0-9]{0,3})\)?$/);
+    if (frame) return `${frame[2]}.mjs:${Number(frame[3])}:${Number(frame[4])}`;
+  }
+  return null;
+}
