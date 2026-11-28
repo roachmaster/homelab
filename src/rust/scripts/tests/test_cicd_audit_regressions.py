@@ -113,10 +113,18 @@ class GraphInputIntegrityTests(unittest.TestCase):
 
 
 class WorkflowExitStatusTests(unittest.TestCase):
-    def test_deploy_tree_contains_no_python_files(self):
-        deploy = SCRIPTS.parents[2] / "deploy"
-        unexpected = sorted(str(path.relative_to(deploy)) for path in deploy.rglob("*.py"))
-        self.assertEqual(unexpected, [], "Deployment Python belongs outside the deploy tree")
+    def test_release_entry_points_and_deploy_tree_have_no_python_runtime(self):
+        root = SCRIPTS.parents[2]
+        deploy = root / "deploy"
+        self.assertEqual(sorted(str(p.relative_to(deploy)) for p in deploy.rglob("*.py")), [])
+        units = list(deploy.rglob("*.service")) + list(deploy.rglob("*.timer"))
+        for file in units:
+            for line in file.read_text().splitlines():
+                if line.startswith(("ExecStart=", "ExecStartPre=", "ExecReload=", "ExecStop=")):
+                    self.assertNotRegex(line, r"(?:python[0-9.]*|[.]py)(?:\s|$)", str(file))
+        for file in deploy.rglob("*.sh"):
+            for line in file.read_text().splitlines():
+                self.assertNotRegex(line, r"(?:^|\s)(?:/usr/bin/)?python[0-9.]*\s+(?:-|[./])", str(file))
 
     def test_every_required_agent_check_runs_for_all_pull_request_paths(self):
         # Missing checks remain pending forever, so backend/docs-only tasks

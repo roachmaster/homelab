@@ -28,6 +28,8 @@ ALLOWED = {
     "forge-jenkins/src/bin/forge-jenkins-client-token.rs": (1, "CLI binary"),
     "forge-jenkins/src/bin/forge-jenkins-connect-github.rs": (2, "CLI binary"),
     "forge-portal-release-actor/src/system.rs": (1, "standalone release-actor system adapter"),
+    "forge-ci-verifier/src/process.rs": (1, "credential-free segregated candidate supervisor with bounded dual pipes"),
+    "forge-ci-verifier/src/child.rs": (2, "private namespace launcher and fixed executable lookup"),
     "forge-postgres/src/pg_fixture.rs": (2, "PostgreSQL test fixture helper"),
     "forge-postgres/src/publication_composition.rs": (1, "host composition root"),
     "forge-postgres/src/worker_composition.rs": (1, "host composition root"),

@@ -168,7 +168,7 @@ ci-verified:
 ci-main:
 	$(MAKE) ci-verified
 	$(MAKE) ui-qa
-	$(MAKE) backend-suites
+	$(MAKE) backend-suites SCOPE=main
 
 session: ARGS =
 
