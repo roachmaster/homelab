@@ -674,6 +674,17 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         )
     }
 
+    fn clock_now(&mut self) -> Result<i128, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[];
+        self.tx
+            .call_scalar(
+                "SELECT (EXTRACT(EPOCH FROM clock_timestamp())*1000000000)::bigint AS now_ns",
+                params,
+            )
+            .map_err(work_err)
+            .map(|value: Option<i64>| value.unwrap_or_default() as i128)
+    }
+
     fn task_attempt_active(&mut self, task_id: Uuid) -> Result<bool, WorkError> {
         // Python's probe joins the task's owner/project from
         // the task row itself; the workflow's tasks all share

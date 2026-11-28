@@ -32,6 +32,9 @@ pub trait ExternalTx: RetryEvents {
     fn release_savepoint(&mut self, name: &str) -> Result<(), WorkError>;
     fn notify_jobs(&mut self) -> Result<(), WorkError>;
     fn notify_delivery(&mut self) -> Result<(), WorkError>;
+    /// SELECT clock_timestamp() as nanoseconds since the
+    /// epoch (the durable review-retry wait's clock).
+    fn clock_now(&mut self) -> Result<i128, WorkError>;
     /// work_events.insert_event over coding_events (the
     /// caller merges workflow fields into the payload).
     fn insert_event(

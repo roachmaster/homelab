@@ -21,7 +21,9 @@ use crate::external_identity::validate_content_identity;
 use crate::external_review::{parse_verdict, validate_target, ExternalSourceIntegration};
 use crate::external_tx::{ExternalTx, LockMode};
 use crate::external_workflow::{is_hex, opt_uuid, ExternalWorkflowStore, TERMINAL};
+use crate::model_route::format_iso;
 use crate::retry_policy::AGENT_RETRY_LIMIT;
+use crate::workflow_ingress::parse_ts;
 use crate::strict_json::parse_strict;
 use crate::validation::is_int;
 use crate::work_actors::{Actor, ActorKind};
@@ -1117,6 +1119,7 @@ impl ExternalWorkflowStore {
                     &task,
                     &source,
                     "Native reviewer result was oversized or did not match its immutable publication receipt.",
+                    false,
                 );
             }
             Err(error) => return Err(error),
@@ -1141,6 +1144,7 @@ impl ExternalWorkflowStore {
                         "Native reviewer could not finish: {}",
                         text(&critic, "status")
                     ),
+                    text(&critic, "status") != "cancelled",
                 );
             }
             return Ok(false);
@@ -1164,6 +1168,7 @@ impl ExternalWorkflowStore {
                     &task,
                     &source,
                     "Native reviewer returned an invalid bound verdict.",
+                    false,
                 );
             }
         };
@@ -1252,6 +1257,10 @@ impl ExternalWorkflowStore {
 
     /// _retry_review: requeue the same review with the
     /// failure as its correction, under the retry budget.
+    /// Only the trusted terminal-state path in consume_review
+    /// supplies infrastructure=true; malformed or
+    /// receipt-mismatched output keeps reviewer-correction
+    /// semantics regardless of its text.
     pub(crate) fn retry_review(
         &self,
         tx: &mut dyn ExternalTx,
@@ -1260,21 +1269,54 @@ impl ExternalWorkflowStore {
         task: &Value,
         source: &Value,
         summary: &str,
+        infrastructure: bool,
     ) -> Result<bool, WorkError> {
         let review_id = uuid_of(review, "review_id");
         if tx.task_attempt_active(uuid_of(review, "reviewer_task_id"))? {
             return Ok(false);
         }
         let critic = self.task(tx, w, Some(uuid_of(review, "reviewer_task_id")))?;
-        if matches!(
-            text(&critic, "status"),
-            "quota_blocked" | "blocked_auth" | "blocked_permission" | "cancelled"
-        ) {
+        if text(&critic, "status") == "cancelled" {
             self.escalate(tx, w, summary, true, None)?;
             return Ok(true);
         }
         let mut retry = int_of(&w["state"], "review_retries") + 1;
-        let infrastructure = text(&critic, "status") == "needs_reconcile";
+        if infrastructure {
+            // Persist the wait before reserving an admission.
+            // Coordinator restarts and repeated ticks cannot
+            // spend retries or launch reviewers early.
+            let now = tx.clock_now()?;
+            let pending = w["state"]["review_retry_wait"].clone();
+            if pending.is_null() {
+                let retries = int_of(&w["state"], "review_retries").clamp(0, 6);
+                let delay = std::cmp::min(300, 5 * 2i64.pow(retries as u32));
+                w["state"]["review_retry_wait"] = json!({
+                    "review_id": review_id.to_string(),
+                    "not_before": format_iso(now + i128::from(delay) * 1_000_000_000),
+                });
+                self.save(
+                    tx,
+                    w,
+                    "Review infrastructure unavailable; waiting before retry.",
+                    None,
+                    None,
+                    None,
+                )?;
+                return Ok(true);
+            }
+            if pending["review_id"].as_str() != Some(review_id.to_string().as_str()) {
+                return Err(WorkError::store("Review retry wait binding changed"));
+            }
+            let not_before = parse_ts(text(&pending, "not_before")).ok_or_else(|| {
+                WorkError::store("Review retry wait timestamp is invalid")
+            })?;
+            if now < not_before {
+                return Ok(false);
+            }
+            if let Some(state) = w["state"].as_object_mut() {
+                state.remove("review_retry_wait");
+            }
+        }
         if !self.retry_events {
             if retry > AGENT_RETRY_LIMIT {
                 self.escalate(tx, w, summary, !infrastructure, None)?;
