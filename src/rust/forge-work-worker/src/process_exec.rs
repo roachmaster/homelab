@@ -284,7 +284,7 @@ mod tests {
             .expect_err("duplicate binding rejected");
         assert_eq!(rejected.original().group_count(), 1);
 
-        let frozen = rejected.into_original().freeze().expect("freeze succeeds");
+        let frozen = rejected.into_parts().0.freeze().expect("freeze succeeds");
         let ((), factory) = frozen.into_factories();
         let provider = Singleton::new(factory.create().expect("factory creates client"));
         let client = provider.acquire().expect("provider acquires client");
