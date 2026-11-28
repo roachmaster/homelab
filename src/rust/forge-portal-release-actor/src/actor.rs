@@ -3,23 +3,17 @@
 //! exactly as the durable state.json holds them.
 
 use std::collections::BTreeSet;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Instant, SystemTime};
 
 use serde_json::{json, Map, Value};
 
 use crate::config::{
     artifact_commands, canonical, decode, is_gate_ref, is_sha40, is_sha64, main_checks, read_root,
-    safe_relative, sha, v3_main_checks, v3_main_phases, write_root, ActorConfig, CORE, IDENTITY,
-    POLICY, STARTUP_IDENTITY_SECONDS, UNIT,
+    safe_relative, sha, v3_main_checks, v3_main_phases, ActorConfig, CORE, IDENTITY, POLICY,
+    STARTUP_IDENTITY_SECONDS, UNIT,
 };
-use crate::system::{portal_probe_factory, ProbeFactory, SystemPort};
-
-pub type ReadFn = Arc<dyn Fn(&Path, usize) -> Result<Vec<u8>, String> + Send + Sync>;
-pub type WriteFn = Arc<dyn Fn(&Path, &[u8], u32, u32) -> Result<(), String> + Send + Sync>;
-pub type PublicDirFn = Arc<dyn Fn(&Path, &Path) -> Result<(), String> + Send + Sync>;
+use crate::ports::{ActorClock, ActorCollaborators, ProbeProvider, RootFiles};
+use crate::system::SystemPort;
 
 struct ReceiptEvidence {
     health: bool,
@@ -46,37 +40,24 @@ fn map_of(value: &Value) -> Map<String, Value> {
 
 pub struct PortalReleaseActor {
     pub config: ActorConfig,
-    pub system: Box<dyn SystemPort>,
-    pub read: ReadFn,
-    pub write: WriteFn,
-    pub probe_factory: ProbeFactory,
-    pub public_directory: Option<PublicDirFn>,
-    pub clock: Arc<dyn Fn() -> f64 + Send + Sync>,
-    pub monotonic: Arc<dyn Fn() -> f64 + Send + Sync>,
-    pub sleep: Arc<dyn Fn(f64) + Send + Sync>,
+    system: Box<dyn SystemPort>,
+    files: Box<dyn RootFiles>,
+    probes: Box<dyn ProbeProvider>,
+    clock: Box<dyn ActorClock>,
+    /// The lease and capability of the invocation in progress; set by
+    /// `invoke`, not a collaborator.
     authority: Option<Value>,
 }
 
 impl PortalReleaseActor {
-    pub fn new(config: ActorConfig, system: Box<dyn SystemPort>) -> PortalReleaseActor {
-        let base = Instant::now();
+    /// Bind the actor to its configuration and collaborators.
+    pub fn new(config: ActorConfig, collaborators: ActorCollaborators) -> PortalReleaseActor {
         PortalReleaseActor {
             config,
-            system,
-            read: Arc::new(read_root),
-            write: Arc::new(write_root),
-            probe_factory: portal_probe_factory(),
-            public_directory: None,
-            clock: Arc::new(|| {
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|duration| duration.as_secs_f64())
-                    .unwrap_or(0.0)
-            }),
-            monotonic: Arc::new(move || base.elapsed().as_secs_f64()),
-            sleep: Arc::new(|seconds| {
-                std::thread::sleep(std::time::Duration::from_secs_f64(seconds.max(0.0)))
-            }),
+            system: collaborators.system,
+            files: collaborators.files,
+            probes: collaborators.probes,
+            clock: collaborators.clock,
             authority: None,
         }
     }
@@ -141,7 +122,8 @@ impl PortalReleaseActor {
     fn save(&self, directory: &Path, state: &Map<String, Value>) -> Result<(), String> {
         let mut raw = canonical(&Value::Object(state.clone()));
         raw.push(b'\n');
-        (self.write)(&directory.join("state.json"), &raw, 0o600, 0)
+        self.files
+            .write(&directory.join("state.json"), &raw, 0o600, 0)
     }
 
     fn diagnostic(
@@ -188,7 +170,7 @@ impl PortalReleaseActor {
         if !inside_releases || config.parent() != Some(self.config.web_config_root.as_path()) {
             return Err("Portal command escaped configured release boundary".to_string());
         }
-        let raw = (self.read)(&config, 0)?;
+        let raw = self.files.read(&config, 0)?;
         let value = decode(&raw)?;
         if get_str(&value, "bind") != Some("127.0.0.1:8788")
             || get_str(&value, "public_origin") != Some("https://portal.thedevex.com")
@@ -196,7 +178,7 @@ impl PortalReleaseActor {
         {
             return Err("Portal admission configuration changed".to_string());
         }
-        let override_raw = (self.read)(&self.config.override_path, 0)?;
+        let override_raw = self.files.read(&self.config.override_path, 0)?;
         current.insert("config_sha256".to_string(), Value::String(sha(&raw)));
         current.insert(
             "override".to_string(),
@@ -212,7 +194,7 @@ impl PortalReleaseActor {
 
     fn proof(&self, job: &Value) -> Result<(PathBuf, String, Map<String, Value>), String> {
         let ci_action = get_str(job, "ci_action_id").unwrap_or("");
-        let raw = (self.read)(
+        let raw = self.files.read(
             &self
                 .config
                 .ci_results_root
@@ -334,7 +316,7 @@ impl PortalReleaseActor {
             .config
             .ci_results_root
             .join(format!("{ci_action}.artifacts"));
-        let manifest_raw = (self.read)(&root.join("manifest.json"), 0)?;
+        let manifest_raw = self.files.read(&root.join("manifest.json"), 0)?;
         if sha(&manifest_raw) != get_str(export, "manifest_sha256").unwrap_or("") {
             return Err("Artifact manifest digest mismatch".to_string());
         }
@@ -383,7 +365,7 @@ impl PortalReleaseActor {
             {
                 return Err("Artifact exceeds portal-only boundary".to_string());
             }
-            let raw = (self.read)(&root.join(&name), 128 * 1024 * 1024)?;
+            let raw = self.files.read(&root.join(&name), 128 * 1024 * 1024)?;
             if sha(&raw) != item.get("sha256").and_then(Value::as_str).unwrap_or("")
                 || raw.len() as i64 != item.get("byte_count").and_then(Value::as_i64).unwrap_or(-1)
             {
@@ -415,7 +397,7 @@ impl PortalReleaseActor {
         if required.iter().any(|name| !inventory.contains_key(name)) {
             return Err("Incomplete portal packet".to_string());
         }
-        let assets = decode(&(self.read)(&root.join("assets/manifest.json"), 0)?)?;
+        let assets = decode(&self.files.read(&root.join("assets/manifest.json"), 0)?)?;
         if assets.get("format_version") != Some(&json!(1))
             || assets.get("abi_version") != Some(&json!(self.config.expected_abi))
         {
@@ -446,31 +428,7 @@ impl PortalReleaseActor {
 
 impl PortalReleaseActor {
     fn public_parent(&self, root: &Path, directory: &Path) -> Result<(), String> {
-        if let Some(injected) = &self.public_directory {
-            return injected(root, directory);
-        }
-        if directory.strip_prefix(root).is_err() {
-            return Err("Public artifact escaped its release".to_string());
-        }
-        std::fs::create_dir_all(root).map_err(|error| error.to_string())?;
-        let relative = directory.strip_prefix(root).unwrap();
-        let mut current = root.to_path_buf();
-        let mut chain = vec![root.to_path_buf()];
-        for part in relative.components() {
-            current.push(part);
-            chain.push(current.clone());
-        }
-        for path in chain {
-            std::fs::create_dir_all(&path).map_err(|error| error.to_string())?;
-            let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
-            use std::os::unix::fs::MetadataExt;
-            if !metadata.is_dir() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
-                return Err("Unsafe public artifact directory".to_string());
-            }
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                .map_err(|error| error.to_string())?;
-        }
-        Ok(())
+        self.files.public_parent(root, directory)
     }
 
     fn archive(&self, current: &Map<String, Value>) -> Result<(), String> {
@@ -480,7 +438,7 @@ impl PortalReleaseActor {
             .ok_or("Old replay source no longer matches its manifest")?
             .to_string();
         let root = PathBuf::from(&assets).join("game-assets");
-        let manifest_raw = (self.read)(&root.join("manifest.json"), 0)?;
+        let manifest_raw = self.files.read(&root.join("manifest.json"), 0)?;
         let manifest = decode(&manifest_raw)?;
         let digest = sha(&manifest_raw);
         let old = self.config.replay_archive_root.join(&digest);
@@ -492,7 +450,7 @@ impl PortalReleaseActor {
             let raw = if name == "manifest.json" {
                 manifest_raw.clone()
             } else {
-                let raw = (self.read)(&root.join(name), 0)?;
+                let raw = self.files.read(&root.join(name), 0)?;
                 let key = if name.ends_with("room-one.json") {
                     "room-one"
                 } else {
@@ -512,11 +470,11 @@ impl PortalReleaseActor {
             let target = old.join(name);
             self.public_parent(&self.config.replay_archive_root, target.parent().unwrap())?;
             if target.exists() {
-                if (self.read)(&target, 0)? != raw {
+                if self.files.read(&target, 0)? != raw {
                     return Err("Retained replay archive conflict".to_string());
                 }
             } else {
-                (self.write)(&target, &raw, 0o444, 0)?;
+                self.files.write(&target, &raw, 0o444, 0)?;
             }
         }
         Ok(())
@@ -527,7 +485,7 @@ impl PortalReleaseActor {
         let (directory, release) = self.paths(&job);
         let path = directory.join("state.json");
         if path.exists() {
-            let state = map_of(&decode(&(self.read)(&path, 0)?)?);
+            let state = map_of(&decode(&self.files.read(&path, 0)?)?);
             if state.get("job") != Some(&job) {
                 return Err("Release identity replay conflict".to_string());
             }
@@ -609,14 +567,14 @@ impl PortalReleaseActor {
             .map_err(|error| error.to_string())?;
         let inventory = map_of(state.get("inventory").unwrap_or(&Value::Null));
         for (name, expected) in &inventory {
-            let raw = (self.read)(&packet.join(name), 128 * 1024 * 1024)?;
+            let raw = self.files.read(&packet.join(name), 128 * 1024 * 1024)?;
             if sha(&raw) != expected.get("sha256").and_then(Value::as_str).unwrap_or("") {
                 return Err("Sealed packet changed".to_string());
             }
             let target = release.join(name);
             self.public_parent(&release, target.parent().unwrap())?;
             if target.exists() {
-                if (self.read)(&target, 128 * 1024 * 1024)? != raw {
+                if self.files.read(&target, 128 * 1024 * 1024)? != raw {
                     return Err("Release staging conflict".to_string());
                 }
             } else {
@@ -625,7 +583,7 @@ impl PortalReleaseActor {
                 } else {
                     0o444
                 };
-                (self.write)(&target, &raw, mode, 0)?;
+                self.files.write(&target, &raw, mode, 0)?;
             }
         }
         let mut directories: Vec<PathBuf> = Vec::new();
@@ -669,7 +627,7 @@ impl PortalReleaseActor {
             .config
             .web_config_root
             .join(format!("automatic-{release_id}.json"));
-        (self.write)(&live_path, &live_raw, 0o640, web_gid)?;
+        self.files.write(&live_path, &live_raw, 0o640, web_gid)?;
         let mut candidate = config.clone();
         candidate.insert(
             "bind".to_string(),
@@ -681,7 +639,8 @@ impl PortalReleaseActor {
             .config
             .web_config_root
             .join(format!("candidate-{release_id}.json"));
-        (self.write)(&candidate_path, &candidate_raw, 0o640, web_gid)?;
+        self.files
+            .write(&candidate_path, &candidate_raw, 0o640, web_gid)?;
         state.insert(
             "live_config".to_string(),
             Value::String(live_path.to_string_lossy().into_owned()),
@@ -731,7 +690,7 @@ impl PortalReleaseActor {
             );
             let mut old_inventory = Map::new();
             for name in CORE {
-                let raw = (self.read)(&old_assets.join(name), 8 * 1024 * 1024)?;
+                let raw = self.files.read(&old_assets.join(name), 8 * 1024 * 1024)?;
                 old_inventory.insert(format!("assets/{name}"), json!({"sha256": sha(&raw)}));
             }
             let before_value = before.get("value").cloned().unwrap_or(Value::Null);
@@ -766,16 +725,16 @@ impl PortalReleaseActor {
         let origin = get_str(&Value::Object(config.clone()), "public_origin")
             .unwrap_or("")
             .to_string();
-        let deadline = (self.monotonic)() + 60.0;
+        let deadline = self.clock.monotonic() + 60.0;
         loop {
-            let mut probe = (self.probe_factory)(&origin, port);
+            let mut probe = self.probes.probe(&origin, port);
             match probe.check(inventory, &self.config.project_alias) {
                 Ok(_) => return Ok(()),
                 Err(_) => {
-                    if (self.monotonic)() >= deadline {
+                    if self.clock.monotonic() >= deadline {
                         return Err("Portal health verification failed".to_string());
                     }
-                    (self.sleep)(0.5);
+                    self.clock.sleep(0.5);
                 }
             }
         }
@@ -794,7 +753,9 @@ impl PortalReleaseActor {
 
     fn load(&self, job: &Value, public: &Value) -> Result<(PathBuf, Map<String, Value>), String> {
         let (directory, _) = self.paths(job);
-        let state = map_of(&decode(&(self.read)(&directory.join("state.json"), 0)?)?);
+        let state = map_of(&decode(
+            &self.files.read(&directory.join("state.json"), 0)?,
+        )?);
         if state.get("job") != Some(job)
             || canonical(public) != canonical(state.get("plan").unwrap_or(&Value::Null))
         {
@@ -836,7 +797,8 @@ impl PortalReleaseActor {
         body.insert("unit".to_string(), Value::String(UNIT.to_string()));
         let mut raw = canonical(&Value::Object(body));
         raw.push(b'\n');
-        (self.write)(&directory.join("activation.json"), &raw, 0o600, 0)?;
+        self.files
+            .write(&directory.join("activation.json"), &raw, 0o600, 0)?;
         let mut receipt = plan.clone();
         receipt.insert("unit".to_string(), Value::String(UNIT.to_string()));
         receipt.insert("health_confirmed".to_string(), json!(health));
@@ -879,7 +841,7 @@ impl PortalReleaseActor {
     ) -> Option<Map<String, Value>> {
         let started = state.get("startup_started_at").and_then(Value::as_f64);
         let deadline = state.get("startup_deadline_at").and_then(Value::as_f64);
-        let now = (self.clock)();
+        let now = self.clock.wall();
         let valid_window = match (started, deadline) {
             (Some(started), Some(deadline)) => {
                 started > 0.0
@@ -890,7 +852,7 @@ impl PortalReleaseActor {
             }
             _ => false,
         };
-        let local_deadline = (self.monotonic)()
+        let local_deadline = self.clock.monotonic()
             + if valid_window {
                 deadline.unwrap() - now
             } else {
@@ -946,11 +908,11 @@ impl PortalReleaseActor {
                 let _ = self.diagnostic(directory, state, "startup_process_mismatch");
                 return None;
             }
-            let now = (self.clock)();
+            let now = self.clock.wall();
             if !valid_window
                 || now < started.unwrap_or(0.0)
                 || now >= deadline.unwrap_or(0.0)
-                || (self.monotonic)() >= local_deadline
+                || self.clock.monotonic() >= local_deadline
             {
                 let _ = self.diagnostic(directory, state, "startup_identity_timeout");
                 return None;
@@ -963,9 +925,9 @@ impl PortalReleaseActor {
                 let _ = self.diagnostic(directory, state, "startup_identity_pending");
             }
             let wait = (deadline.unwrap() - now)
-                .min(local_deadline - (self.monotonic)())
+                .min(local_deadline - self.clock.monotonic())
                 .min(0.05);
-            (self.sleep)(wait.max(0.0));
+            self.clock.sleep(wait.max(0.0));
         }
     }
 
@@ -1000,7 +962,7 @@ impl PortalReleaseActor {
         let live_config = get_str(&Value::Object(state.clone()), "live_config")
             .unwrap_or("")
             .to_string();
-        if sha(&(self.read)(Path::new(&live_config), 0)?)
+        if sha(&self.files.read(Path::new(&live_config), 0)?)
             != get_str(&Value::Object(state.clone()), "live_config_sha256").unwrap_or("")
         {
             return Err("Prepared live configuration changed".to_string());
@@ -1022,7 +984,7 @@ impl PortalReleaseActor {
             live_config
         );
         let override_text = format!("[Service]\nExecStart=\nExecStart={command}\n");
-        let now = (self.clock)();
+        let now = self.clock.wall();
         state.insert("phase".to_string(), Value::String("activating".to_string()));
         state.insert(
             "target_override_sha256".to_string(),
@@ -1040,7 +1002,7 @@ impl PortalReleaseActor {
         );
         self.save(&directory, &state)?;
         let activation = (|| -> Result<(), String> {
-            (self.write)(
+            self.files.write(
                 &self.config.override_path,
                 override_text.as_bytes(),
                 0o644,
@@ -1153,7 +1115,7 @@ impl PortalReleaseActor {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        (self.write)(
+        self.files.write(
             &self.config.override_path,
             override_text.as_bytes(),
             0o644,
@@ -1233,7 +1195,7 @@ impl PortalReleaseActor {
         );
         let mut inventory = Map::new();
         for name in CORE {
-            let raw = (self.read)(&old_assets.join(name), 8 * 1024 * 1024)?;
+            let raw = self.files.read(&old_assets.join(name), 8 * 1024 * 1024)?;
             inventory.insert(format!("assets/{name}"), json!({"sha256": sha(&raw)}));
         }
         let before_value = map_of(before.get("value").unwrap_or(&Value::Null));
@@ -1262,7 +1224,7 @@ impl PortalReleaseActor {
         );
         let mut inventory = Map::new();
         for name in CORE {
-            let raw = (self.read)(&assets.join(name), 8 * 1024 * 1024)?;
+            let raw = self.files.read(&assets.join(name), 8 * 1024 * 1024)?;
             inventory.insert(format!("assets/{name}"), json!({"sha256": sha(&raw)}));
         }
         let current_value = map_of(current.get("value").unwrap_or(&Value::Null));
@@ -1281,7 +1243,8 @@ impl PortalReleaseActor {
         body.insert("process_started".to_string(), json!(false));
         let mut raw = canonical(&Value::Object(body));
         raw.push(b'\n');
-        (self.write)(&directory.join("activation.json"), &raw, 0o600, 0)?;
+        self.files
+            .write(&directory.join("activation.json"), &raw, 0o600, 0)?;
         let mut receipt = map_of(job);
         receipt.insert("version".to_string(), json!(1));
         receipt.insert("policy".to_string(), Value::String(POLICY.to_string()));
@@ -1345,7 +1308,7 @@ impl PortalReleaseActor {
             if !path.exists() {
                 return self.unstaged_failure(&job);
             }
-            let state = map_of(&decode(&(self.read)(&path, 0)?)?);
+            let state = map_of(&decode(&self.files.read(&path, 0)?)?);
             if state.get("job") != Some(&job) {
                 return Err("Release cleanup identity conflict".to_string());
             }
@@ -1376,7 +1339,7 @@ impl PortalReleaseActor {
             if !path.exists() {
                 return self.unstaged_failure(&job);
             }
-            let state = map_of(&decode(&(self.read)(&path, 0)?)?);
+            let state = map_of(&decode(&self.files.read(&path, 0)?)?);
             if state.get("job") != Some(&job) {
                 return Err("Release reconciliation identity conflict".to_string());
             }
@@ -1417,7 +1380,7 @@ impl ActorFactory {
         let config = ActorConfig::parse(&decode(&read_root(&self.config_path, 0)?)?)?;
         Ok(PortalReleaseActor::new(
             config,
-            Box::new(crate::system::SubprocessSystem),
+            ActorCollaborators::production(Box::new(crate::system::SubprocessSystem)),
         ))
     }
 }
@@ -1432,6 +1395,37 @@ impl Default for ActorFactory {
 mod tests {
     use super::*;
     use crate::system::Probe;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Test files: the plain filesystem, no Root ownership.
+    struct PlainFiles;
+
+    impl RootFiles for PlainFiles {
+        fn read(&self, path: &Path, _maximum: usize) -> Result<Vec<u8>, String> {
+            std::fs::read(path).map_err(|error| error.to_string())
+        }
+
+        fn write(&self, path: &Path, raw: &[u8], mode: u32, _group: u32) -> Result<(), String> {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            std::fs::write(path, raw).map_err(|error| error.to_string())?;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+                .map_err(|error| error.to_string())
+        }
+
+        fn public_parent(&self, _root: &Path, directory: &Path) -> Result<(), String> {
+            std::fs::create_dir_all(directory).map_err(|error| error.to_string())
+        }
+    }
+
+    struct OkProbes;
+
+    impl ProbeProvider for OkProbes {
+        fn probe(&self, _origin: &str, _port: u32) -> Box<dyn Probe> {
+            Box::new(OkProbe)
+        }
+    }
 
     struct FakeSystem {
         current: Map<String, Value>,
@@ -1674,22 +1668,15 @@ mod tests {
             current,
             commit: commit.clone(),
         };
-        let mut actor = PortalReleaseActor::new(config, Box::new(system));
-        // Test reader/writer: plain filesystem, no Root ownership.
-        actor.read =
-            Arc::new(|path, _maximum| std::fs::read(path).map_err(|error| error.to_string()));
-        actor.write = Arc::new(|path, raw, mode, _group| {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            std::fs::write(path, raw).map_err(|error| error.to_string())?;
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-                .map_err(|error| error.to_string())
-        });
-        actor.public_directory = Some(Arc::new(|_root, directory| {
-            std::fs::create_dir_all(directory).map_err(|error| error.to_string())
-        }));
-        actor.probe_factory = Arc::new(|_origin, _port| Box::new(OkProbe) as Box<dyn Probe>);
+        let mut actor = PortalReleaseActor::new(
+            config,
+            ActorCollaborators {
+                system: Box::new(system),
+                files: Box::new(PlainFiles),
+                probes: Box::new(OkProbes),
+                clock: Box::new(crate::ports::SystemActorClock::new()),
+            },
+        );
         let job = json!({
             "release_id": "123e4567-e89b-12d3-a456-426614174000",
             "verification_id": "123e4567-e89b-12d3-a456-426614174002",
