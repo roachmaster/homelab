@@ -23,3 +23,4 @@ serde_yaml_ng = "=0.10.0"
 forge-core.workspace = true
 forge-foundation.workspace = true
 forge-jobs = { path = "../forge-jobs" }
+forge-work-worker = { path = "../forge-work-worker" }
