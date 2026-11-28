@@ -13,3 +13,7 @@ sha2 = "0.10"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "forge-usage-client"
+path = "examples/client.rs"

@@ -2,7 +2,7 @@
 //! dry-run command runner, then query a unit's status. Nothing touches
 //! systemd: the runner prints each command and answers canned output.
 //!
-//! `cargo run -p forge-services --example client`
+//! `cargo run -p forge-services --example forge-services-client`
 
 use std::sync::Arc;
 

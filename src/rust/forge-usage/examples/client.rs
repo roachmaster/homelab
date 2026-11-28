@@ -2,7 +2,7 @@
 //! store provider, create the service, and show the Muse null object.
 //! Nothing here reaches a database or a provider process.
 //!
-//! `cargo run -p forge-usage --example client`
+//! `cargo run -p forge-usage --example forge-usage-client`
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
