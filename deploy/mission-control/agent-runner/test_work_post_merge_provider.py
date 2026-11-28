@@ -60,6 +60,43 @@ class PostMergeProviderTest(unittest.TestCase):
         self.assertEqual(result['status'], 'prepared')
         return result['request']
 
+    def test_tracked_bytecode_rejection_fails_exact_main_without_starting_jenkins(self):
+        from test_work_post_merge import configuration, job_for, DurablePostMergeStore
+        from work_post_merge import PostMergeWorker
+        (self.author / '__pycache__').mkdir()
+        (self.author / '__pycache__/cache.pyc').write_bytes(b'owned generated fixture')
+        self.git(self.author, 'add', '__pycache__/cache.pyc')
+        self.git(self.author, 'commit', '--quiet', '-m', 'Generated artifact fixture')
+        head = self.git(self.author, 'rev-parse', 'HEAD').decode().strip()
+        tree = self.git(self.author, 'rev-parse', 'HEAD^{tree}').decode().strip()
+        self.git(self.author, 'push', '--quiet', str(self.remote), 'HEAD:refs/heads/main')
+        self.git(self.canonical, 'fetch', '--quiet', 'origin', 'main')
+        self.delivery.source_head = Mock(return_value=head)
+        before_refs = self.git(self.remote, 'show-ref')
+        fixture_root = self.root / 'worker-fixture'; fixture_root.mkdir()
+        config, _ = configuration(fixture_root)
+        self.config.owner = config.worker.owner
+        job = job_for(config); job.update(merge_commit=head, merge_tree=tree)
+        store = DurablePostMergeStore(job)
+        self.provider.verify = Mock(side_effect=AssertionError('no Jenkins for rejected source'))
+        self.provider.cancel = Mock(side_effect=AssertionError('no submitted build to cancel'))
+        worker = PostMergeWorker(config, store, self.provider)
+        self.assertTrue(worker.run_once())
+        self.assertEqual(store.status, 'failed')
+        self.assertIsNone(store.job['request'])
+        receipt = store.outcomes[-1][2]
+        self.assertEqual(receipt['candidate_commit'], head)
+        self.assertEqual(receipt['candidate_tree'], tree)
+        self.assertEqual(receipt['prepared_tree'], tree)
+        self.assertEqual(receipt['rejections'], [{'path': '__pycache__/cache.pyc', 'code': 'private_or_generated_artifact'}])
+        self.assertIs(receipt['process_started'], False)
+        self.assertNotIn('cleanup_confirmed', receipt)
+        self.assertFalse(self.provider._binding_path(job).exists())
+        self.assertFalse(any(self.config.spool_root.iterdir()))
+        self.provider.verify.assert_not_called(); self.provider.cancel.assert_not_called()
+        self.assertEqual(self.git(self.remote, 'show-ref'), before_refs)
+        self.assertFalse(worker.run_once())
+
     def test_real_main_preparation_preserves_commit_tree_and_source_authority(self):
         self.delivery.git = Mock(wraps=self.delivery.git)
         self.delivery.prepare_candidate = Mock(wraps=self.delivery.prepare_candidate)

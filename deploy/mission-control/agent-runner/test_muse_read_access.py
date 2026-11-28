@@ -84,7 +84,7 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
         # Either an explicit refusal or a no-op is safe when no reader exists.
         self.cluster.run_sql_script(GRANT)
         self.assertEqual(self.rows("SELECT to_regrole('muse_events')"), [(None,)])
-        self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations"), [(53,)])
+        self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations"), [(54,)])
         self.assertEqual(self.rows("SELECT to_regclass('forge_agent.coding_muse_intake')"), [(None,)])
         self.assertEqual(self.rows(
             "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
@@ -298,38 +298,53 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
 
     def test_source_hba_check_preserves_exact_muse_scram_rule_before_rejects(self):
         deployment = SQL_DIR.parent
-        source = (deployment / "postgres-worker-hba.conf").read_text()
         setup = (deployment / "setup-postgres.sh").read_text()
-        match = re.search(
+        checks = re.findall(
             r'worker_access="\$\(psql_as postgres postgres -Atc "\n(.*?)\n    "\)"',
             setup, re.DOTALL,
         )
-        self.assertIsNotNone(match, "Expected the actual bounded setup HBA check")
-        query = match.group(1).replace("$loopback", "127.0.0.1")
+        self.assertEqual(len(checks), 3, "Expected cutover, preparation and legacy HBA checks")
         hba = self.cluster.data / "pg_hba.conf"
         original = hba.read_bytes()
-        rules = [line for line in source.splitlines() if line and not line.startswith("#")]
-        self.assertEqual(len(rules), 4)
-        variants = {
-            "missing_muse": source.replace(rules[1] + "\n", ""),
-            "wrong_database": source.replace("forge_agent muse_events", "other_database muse_events"),
-            "wrong_user": source.replace("forge_agent muse_events", "forge_agent other_user"),
-            "wrong_auth": source.replace(rules[1], rules[1].replace("scram-sha-256", "trust")),
-            "broad_allow": source.replace("forge_agent muse_events", "all all"),
-            "reordered_reject": "\n".join((rules[0], rules[2], rules[1], rules[3])) + "\n",
-        }
+        ident = self.cluster.data / "pg_ident.conf"
+        original_ident = ident.read_bytes()
         try:
-            # Only this owned cluster's file changes. pg_hba_file_rules parses
-            # the file directly; no service reload or setup script executes.
-            hba.write_text(source + "local all all trust\n")
-            self.assertEqual(self.rows(query), [(True,)])
-            for name, content in variants.items():
-                with self.subTest(variant=name):
-                    self.assertNotEqual(content, source)
-                    hba.write_text(content + "local all all trust\n")
-                    self.assertEqual(self.rows(query), [(False,)])
+            for stage, filename, query, expected_rules in (
+                ("legacy", "postgres-worker-hba.conf", checks[2], 4),
+                ("preparation", "postgres-worker-hba-preparation.conf", checks[1], 10),
+            ):
+                source = (deployment / filename).read_text()
+                if stage == "preparation":
+                    ident.write_bytes(original_ident + b"\n" +
+                        (deployment / "postgres-worker-ident-preparation.conf").read_bytes())
+                query = query.replace("$loopback", "127.0.0.1")
+                rules = [line for line in source.splitlines() if line and not line.startswith("#")]
+                self.assertEqual(len(rules), expected_rules)
+                muse = "host forge_agent muse_events 127.0.0.1/32 scram-sha-256"
+                self.assertEqual(rules.count(muse), 1)
+                reordered = list(rules)
+                first, second = rules.index(muse), rules.index("host all all 127.0.0.1/32 reject")
+                reordered[first], reordered[second] = reordered[second], reordered[first]
+                variants = {
+                    "missing_muse": source.replace(muse + "\n", ""),
+                    "wrong_database": source.replace("forge_agent muse_events", "other_database muse_events"),
+                    "wrong_user": source.replace("forge_agent muse_events", "forge_agent other_user"),
+                    "wrong_auth": source.replace(muse, muse.replace("scram-sha-256", "trust")),
+                    "broad_allow": source.replace("forge_agent muse_events", "all all"),
+                    "reordered_reject": "\n".join(reordered) + "\n",
+                }
+                # Parse only this owned cluster's file; no reload or setup runs.
+                with self.subTest(stage=stage):
+                    hba.write_text(source + "local all all trust\n")
+                    self.assertEqual(self.rows(query), [(True,)])
+                for name, content in variants.items():
+                    with self.subTest(stage=stage, variant=name):
+                        self.assertNotEqual(content, source)
+                        hba.write_text(content + "local all all trust\n")
+                        self.assertEqual(self.rows(query), [(False,)])
         finally:
             hba.write_bytes(original)
+            ident.write_bytes(original_ident)
 
 
 if __name__ == "__main__":

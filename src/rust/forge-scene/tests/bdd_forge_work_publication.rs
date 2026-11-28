@@ -115,10 +115,7 @@ fn steps() -> Steps<World> {
                             .observer_exec
                             .create()
                             .map_err(|e| e.to_string())?;
-                        let _ast = pub_factories
-                            .ast_port
-                            .create()
-                            .map_err(|e| e.to_string())?;
+                        let _ast = pub_factories.ast_port.create().map_err(|e| e.to_string())?;
                         w.factories_built = true;
                     }
                 }
@@ -158,9 +155,10 @@ fn steps() -> Steps<World> {
                     .freeze()
                     .map_err(|e| format!("{e:?}"))?;
                 let ((), factories) = frozen.into_factories();
-                if let Err(err) = factories
-                    .observer_exec()
-                    .execute(&["/usr/bin/jenkins-obs".into()], &[], 5.0)
+                if let Err(err) =
+                    factories
+                        .observer_exec()
+                        .execute(&["/usr/bin/jenkins-obs".into()], &[], 5.0)
                 {
                     w.observer_error = Some(format!("{err:?}"));
                 }
@@ -205,24 +203,37 @@ fn steps() -> Steps<World> {
                 Ok(())
             },
         )
-        .then("freeze fails because the required binding is missing", |w, _| {
-            ensure(w.freeze_failed, "freeze succeeded without process_exec")
-        })
+        .then(
+            "freeze fails because the required binding is missing",
+            |w, _| ensure(w.freeze_failed, "freeze succeeded without process_exec"),
+        )
         .then(
             "the duplicate is refused and the frozen factories construct cleanly",
             |w, _| {
-                ensure(w.duplicate_refused, "duplicate publication group was not refused")?;
+                ensure(
+                    w.duplicate_refused,
+                    "duplicate publication group was not refused",
+                )?;
                 ensure(w.factories_built, "frozen factories failed to construct")
             },
         )
-        .then("the observer returns the captured stdout payload", |w, _| {
-            let bytes = w.observer_output.as_ref().ok_or("missing observer output")?;
-            ensure(
-                bytes == b"observer-ok",
-                format!("unexpected output: {:?}", String::from_utf8_lossy(bytes)),
-            )?;
-            ensure(w.executor_calls == 1, format!("calls was {}", w.executor_calls))
-        })
+        .then(
+            "the observer returns the captured stdout payload",
+            |w, _| {
+                let bytes = w
+                    .observer_output
+                    .as_ref()
+                    .ok_or("missing observer output")?;
+                ensure(
+                    bytes == b"observer-ok",
+                    format!("unexpected output: {:?}", String::from_utf8_lossy(bytes)),
+                )?;
+                ensure(
+                    w.executor_calls == 1,
+                    format!("calls was {}", w.executor_calls),
+                )
+            },
+        )
         .then("the observer reports a timed-out command", |w, _| {
             let err = w.observer_error.as_ref().ok_or("missing observer error")?;
             ensure(
@@ -230,14 +241,20 @@ fn steps() -> Steps<World> {
                 format!("unexpected error: {err}"),
             )
         })
-        .then("the observer refuses the command with zero executor calls", |w, _| {
-            let err = w.observer_error.as_ref().ok_or("missing observer error")?;
-            ensure(
-                err.contains("Empty observer command"),
-                format!("unexpected error: {err}"),
-            )?;
-            ensure(w.executor_calls == 0, format!("calls was {}", w.executor_calls))
-        })
+        .then(
+            "the observer refuses the command with zero executor calls",
+            |w, _| {
+                let err = w.observer_error.as_ref().ok_or("missing observer error")?;
+                ensure(
+                    err.contains("Empty observer command"),
+                    format!("unexpected error: {err}"),
+                )?;
+                ensure(
+                    w.executor_calls == 0,
+                    format!("calls was {}", w.executor_calls),
+                )
+            },
+        )
         .then(
             "the first call yields the parsed module and the second returns stderr text",
             |w, _| {

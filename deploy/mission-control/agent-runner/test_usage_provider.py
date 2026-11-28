@@ -363,31 +363,34 @@ class RpcTest(unittest.TestCase):
     def test_pipe_transport_bounds_timeout_eof_and_stderr_without_provider(self):
         for mode, expected in (("frame", "response_limit"), ("stream", "response_limit"),
                                ("silent", "timeout"), ("eof", "unavailable")):
-            out_read, out_write = os.pipe()
-            err_read, err_write = os.pipe()
-            process = SimpleNamespace(stdout=os.fdopen(out_read, "rb", buffering=0),
-                                      stderr=os.fdopen(err_read, "rb", buffering=0))
-            connection = _Connection(process, timeout=0.01)
-            try:
-                if mode == "frame":
-                    connection.MAX_FRAME = 4
-                    os.write(out_write, b"12345\n")
-                elif mode == "stream":
-                    connection.MAX_STREAM = 4
-                    os.write(err_write, b"PRIVATE STDERR")
-                elif mode == "eof":
-                    os.close(out_write)
-                    out_write = None
-                with self.assertRaises(ProviderFailure) as error:
-                    connection.line()
-                self.assertEqual(error.exception.code, expected)
-            finally:
-                connection.close()
-                process.stdout.close()
-                process.stderr.close()
-                if out_write is not None:
-                    os.close(out_write)
-                os.close(err_write)
+            with self.subTest(mode=mode):
+                out_read, out_write = os.pipe()
+                err_read, err_write = os.pipe()
+                process = SimpleNamespace(stdout=os.fdopen(out_read, "rb", buffering=0),
+                                          stderr=os.fdopen(err_read, "rb", buffering=0))
+                # Ready-data and EOF checks exercise pipe bounds, not scheduling.
+                clock = {} if mode == "silent" else {"monotonic": lambda: 0.0}
+                connection = _Connection(process, timeout=0.01, **clock)
+                try:
+                    if mode == "frame":
+                        connection.MAX_FRAME = 4
+                        os.write(out_write, b"12345\n")
+                    elif mode == "stream":
+                        connection.MAX_STREAM = 4
+                        os.write(err_write, b"PRIVATE STDERR")
+                    elif mode == "eof":
+                        os.close(out_write)
+                        out_write = None
+                    with self.assertRaises(ProviderFailure) as error:
+                        connection.line()
+                    self.assertEqual(error.exception.code, expected)
+                finally:
+                    connection.close()
+                    process.stdout.close()
+                    process.stderr.close()
+                    if out_write is not None:
+                        os.close(out_write)
+                    os.close(err_write)
 
     def test_server_requests_never_execute_auth_or_process_actions(self):
         connection = object.__new__(_Connection)

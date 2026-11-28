@@ -12,7 +12,7 @@ pub const LEGACY_PROFILE: &str = "forge-sdlc-jenkins-v1";
 pub const SCOPED_PROFILE: &str = "forge-sdlc-jenkins-v2";
 pub const CONTRACT_PATH: &str = "deploy/mission-control/agent-runner/work_ci_contract.py";
 
-/// forge-sdlc-jenkins-v[1-3]:(main|detached|branch/<slug>) or a
+/// `forge-sdlc-jenkins-v[1-3]:(main|detached|branch/<slug>)` or a
 /// 64-hex digest, as a full match (work_ci_contract's
 /// validate_gate_reference; forge-work's external_step carries the
 /// same matcher for the external workflow).
@@ -23,7 +23,7 @@ pub fn validate_gate_reference(value: &str) -> Result<String, String> {
     .map_err(|_| "Invalid delivery gate".to_string())
 }
 
-/// branch/<slug> where slug is
+/// `branch/<slug>` where slug is
 /// [a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])? as a full match.
 pub fn is_branch_slug(value: &str) -> bool {
     let chars: Vec<char> = value.chars().collect();
@@ -46,10 +46,7 @@ pub fn scope_kind(scope: &str) -> Result<String, String> {
         return Ok("main".to_string());
     }
     if scope == "detached"
-        || (!scope.contains("..")
-            && scope
-                .strip_prefix("branch/")
-                .is_some_and(is_branch_slug))
+        || (!scope.contains("..") && scope.strip_prefix("branch/").is_some_and(is_branch_slug))
     {
         return Ok("branch".to_string());
     }
@@ -249,9 +246,7 @@ impl CiGatePlan {
             // byte-for-byte.
             return crate::verification::DEFAULT_REQUIRED_HOSTED_CHECKS
                 .iter()
-                .map(|(path, name, gate)| {
-                    [path.to_string(), name.to_string(), gate.to_string()]
-                })
+                .map(|(path, name, gate)| [path.to_string(), name.to_string(), gate.to_string()])
                 .collect();
         }
         let version = if self.profile == EVENT_PROFILE { 3 } else { 2 };
@@ -335,10 +330,14 @@ impl CiGateContract {
             profile: self.profile.clone(),
             scope: kind,
             checks: scoped_branch_checks(),
-            labels: ["source and Python preflight", "make ci", "in-memory backend"]
-                .iter()
-                .map(|item| item.to_string())
-                .collect(),
+            labels: [
+                "source and Python preflight",
+                "make ci",
+                "in-memory backend",
+            ]
+            .iter()
+            .map(|item| item.to_string())
+            .collect(),
             logical_checks: ["source-preflight", "check", "in-memory-backend"]
                 .iter()
                 .map(|item| item.to_string())
@@ -453,10 +452,7 @@ mod tests {
             "deploy/mission-control/sql/migrations/0031_anything.sql",
             |_| false
         ));
-        assert!(contract.protects(
-            "deploy/mission-control/agent-runner/work_api.py",
-            |_| false
-        ));
+        assert!(contract.protects("deploy/mission-control/agent-runner/work_api.py", |_| false));
         assert!(!contract.protects("src/main.rs", |_| false));
         assert!(CiGateContractFactory::new("v9").is_err());
     }

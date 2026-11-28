@@ -7,8 +7,8 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use forge_jenkins::provisioning::{JenkinsHttp, read_owned, utc_now_string};
-use serde_json::{Map, Value, json};
+use forge_jenkins::provisioning::{read_owned, utc_now_string, JenkinsHttp};
+use serde_json::{json, Map, Value};
 
 const STATE: &str = "/var/lib/forge-provisioning/jenkins";
 const RECEIPT_NAME: &str = "mission-control-client-token.secret.json";
@@ -98,7 +98,9 @@ fn install_file_as(path: &Path, content: &[u8], mode: u32) -> Result<(), String>
         .create_new(true)
         .custom_flags(0o400000)
         .mode(mode);
-    let mut file = options.open(&temporary).map_err(|error| error.to_string())?;
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
     file.write_all(content).map_err(|error| error.to_string())?;
     file.sync_all().map_err(|error| error.to_string())?;
     drop(file);
@@ -113,8 +115,7 @@ fn install_file_as(path: &Path, content: &[u8], mode: u32) -> Result<(), String>
 fn for_operator(staging: &Path, target: &Path) -> Result<(), String> {
     let raw = read_owned(staging, nix::unistd::geteuid().as_raw(), 65536, 0o077)?;
     let _ = std::fs::remove_file(staging);
-    let document: Value =
-        serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+    let document: Value = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
     let token = document
         .get("token_value")
         .and_then(Value::as_str)
@@ -247,12 +248,11 @@ fn main_inner() -> Result<Map<String, Value>, String> {
         if code != 200 {
             return Err("Could not obtain a Jenkins CSRF crumb".to_string());
         }
-        let crumb_doc: Value =
-            serde_json::from_slice(&body).map_err(|error| error.to_string())?;
+        let crumb_doc: Value = serde_json::from_slice(&body).map_err(|error| error.to_string())?;
         let field = crumb_doc
             .get("crumbRequestField")
             .and_then(Value::as_str)
-            .unwrap_or("crumb field") ;
+            .unwrap_or("crumb field");
         let crumb = crumb_doc
             .get("crumb")
             .and_then(Value::as_str)
@@ -262,10 +262,7 @@ fn main_inner() -> Result<Map<String, Value>, String> {
             .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
             .filter_map(|(_, value)| value.split(';').next().map(str::to_string))
             .collect();
-        let extra = vec![(
-            "Cookie".to_string(),
-            cookies.join("; "),
-        )];
+        let extra = vec![("Cookie".to_string(), cookies.join("; "))];
         let (code, _, body) = admin.post_form(
             "/user/forge-admin/descriptorByName/jenkins.security.ApiTokenProperty/generateNewToken",
             &[
@@ -278,12 +275,8 @@ fn main_inner() -> Result<Map<String, Value>, String> {
         if code != 200 {
             return Err("Jenkins token generation failed".to_string());
         }
-        let document: Value =
-            serde_json::from_slice(&body).map_err(|error| error.to_string())?;
-        let data = document
-            .get("data")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let document: Value = serde_json::from_slice(&body).map_err(|error| error.to_string())?;
+        let data = document.get("data").cloned().unwrap_or(Value::Null);
         if document.get("status").and_then(Value::as_str) != Some("ok")
             || data.get("tokenName").and_then(Value::as_str) != Some(TOKEN_NAME)
         {
@@ -369,10 +362,7 @@ fn main() -> ExitCode {
     match main_inner() {
         Ok(report) => {
             if !report.is_empty() {
-                println!(
-                    "{}",
-                    json!({"status": "completed", "receipt": report})
-                );
+                println!("{}", json!({"status": "completed", "receipt": report}));
             }
             ExitCode::SUCCESS
         }

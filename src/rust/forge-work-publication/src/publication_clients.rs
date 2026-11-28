@@ -118,7 +118,7 @@ fn text_of<'a>(job: &'a Value, key: &str) -> &'a str {
 
 /// branch_name: an explicit validated branch, else the
 /// persistent policy branch for the job's profile, else the
-/// machinery-owned forge/task-<publication-id> fallback.
+/// machinery-owned `forge/task-<publication-id>` fallback.
 pub fn branch_name(job: &Value, config: Option<&PublicationConfig>) -> PublicationResult<String> {
     let explicit = job.get("branch_name").and_then(Value::as_str);
     if let Some(explicit) = explicit.filter(|text| !text.is_empty()) {
@@ -829,10 +829,6 @@ impl From<ProviderError> for ReviewError {
 
 pub type ProviderResult<T> = Result<T, ProviderError>;
 
-fn other<T>(message: impl Into<String>) -> ProviderResult<T> {
-    Err(ProviderError::Other(message.into()))
-}
-
 /// One branch sync record (the keyword arguments of
 /// AgentBranchProvider.record_sync).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -917,10 +913,12 @@ impl PublicationPullRequestsPort for GitHubPullRequestClient {
 
 /// GitRepositoryProvider: private per-publication clones,
 /// persistent agent-branch cache clones, and the push path.
+pub type RemoteUrlFactory = Box<dyn Fn(&str) -> String + Send>;
+
 pub struct GitRepositoryProvider {
     config: PublicationConfig,
     execute: Box<dyn CommandExecutor>,
-    remote_url_factory: Box<dyn Fn(&str) -> String + Send>,
+    remote_url_factory: RemoteUrlFactory,
     /// `NoBranchRecords` unless persistent branches are selected.
     branch_provider: Box<dyn PublicationBranchPort>,
 }
@@ -940,13 +938,13 @@ impl PublicationBranchPort for NoBranchRecords {
 
 /// The production remote URL selection: each alias's GitHub HTTPS
 /// remote from the publication config's repositories.
-pub fn github_remote_urls(config: &PublicationConfig) -> Box<dyn Fn(&str) -> String + Send> {
+pub fn github_remote_urls(config: &PublicationConfig) -> RemoteUrlFactory {
     github_remote_urls_for(config.repositories.clone())
 }
 
 fn github_remote_urls_for(
     repositories: std::collections::BTreeMap<String, String>,
-) -> Box<dyn Fn(&str) -> String + Send> {
+) -> RemoteUrlFactory {
     Box::new(move |alias: &str| {
         format!(
             "https://github.com/{}.git",
@@ -959,7 +957,7 @@ impl GitRepositoryProvider {
     pub fn new(
         config: PublicationConfig,
         execute: Box<dyn CommandExecutor>,
-        remote_url_factory: Box<dyn Fn(&str) -> String + Send>,
+        remote_url_factory: RemoteUrlFactory,
         branch_provider: Box<dyn PublicationBranchPort>,
     ) -> GitRepositoryProvider {
         GitRepositoryProvider {
@@ -1006,13 +1004,13 @@ impl GitRepositoryProvider {
             argv.push(repository.to_string_lossy().into_owned());
         }
         argv.extend(args.iter().map(|arg| arg.to_string()));
-        Ok(self.execute.execute(
+        self.execute.execute(
             &argv,
             &parent_environment(&self.config),
             None,
             None,
             timeout_seconds,
-        )?)
+        )
     }
 
     pub fn git_text(
@@ -1049,14 +1047,13 @@ impl GitRepositoryProvider {
         if !git_dir.is_dir() {
             return;
         }
-        if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
-            if self
+        if (git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists())
+            && self
                 .git(Some(clone_dir), &["rebase", "--abort"], false, 60.0)
                 .is_err()
-            {
-                let _ = std::fs::remove_dir_all(git_dir.join("rebase-merge"));
-                let _ = std::fs::remove_dir_all(git_dir.join("rebase-apply"));
-            }
+        {
+            let _ = std::fs::remove_dir_all(git_dir.join("rebase-merge"));
+            let _ = std::fs::remove_dir_all(git_dir.join("rebase-apply"));
         }
         if git_dir.join("MERGE_HEAD").exists()
             && self
@@ -1557,7 +1554,6 @@ impl GitRepositoryProvider {
                                 .get("correlation_id")
                                 .and_then(Value::as_str)
                                 .map(|text| text.to_string()),
-                            ..Default::default()
                         })?;
                         return Err(PublicationError::new("main_merge_conflict").into());
                     }
@@ -1640,7 +1636,6 @@ impl GitRepositoryProvider {
                     .get("correlation_id")
                     .and_then(Value::as_str)
                     .map(|text| text.to_string()),
-                ..Default::default()
             })?;
         }
         if branch_first {
@@ -2008,9 +2003,7 @@ fn nix_uid() -> u32 {
 
 impl ReviewGitPort for GitRepositoryProvider {
     fn git_bytes(&mut self, repo: Option<&Path>, args: &[&str]) -> Result<Vec<u8>, ReviewError> {
-        Ok(self
-            .git(repo, args, false, 60.0)
-            .map_err(ReviewError::from)?)
+        self.git(repo, args, false, 60.0).map_err(ReviewError::from)
     }
 
     fn verify(&mut self, repo: &Path, head: &str) -> Result<(), ReviewError> {
@@ -2022,7 +2015,7 @@ impl ReviewGitPort for GitRepositoryProvider {
         job: &Value,
         snapshot: &ReviewSnapshot,
     ) -> Result<(PathBuf, String), ReviewError> {
-        Ok(self.prepare(job, snapshot).map_err(ReviewError::from)?)
+        self.prepare(job, snapshot).map_err(ReviewError::from)
     }
 
     fn prepare_source(
@@ -2030,9 +2023,8 @@ impl ReviewGitPort for GitRepositoryProvider {
         job: &Value,
         snapshot: &ReviewSnapshot,
     ) -> Result<(PathBuf, String), ReviewError> {
-        Ok(self
-            .prepare_source(job, snapshot)
-            .map_err(ReviewError::from)?)
+        self.prepare_source(job, snapshot)
+            .map_err(ReviewError::from)
     }
 }
 
@@ -2314,7 +2306,11 @@ mod tests {
                 .code(),
             "private_or_generated_artifact"
         );
-        let key = b"-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQC7\nrest";
+        let key = concat!(
+            "-----BEGIN OPENSSH ",
+            "PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQC7\nrest"
+        )
+        .as_bytes();
         assert_eq!(
             artifact_guard("src/a.txt", key).unwrap_err().code(),
             "private_key_artifact"

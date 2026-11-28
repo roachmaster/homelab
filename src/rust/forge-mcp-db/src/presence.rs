@@ -221,7 +221,7 @@ impl ReaderTokenAuth {
     pub fn new(path: &str) -> Result<Self, PresenceError> {
         use std::io::Read;
         use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
+        let file = std::fs::OpenOptions::new()
             .read(true)
             // O_NOFOLLOW | O_CLOEXEC
             .custom_flags(0o400000 | 0o2000000)

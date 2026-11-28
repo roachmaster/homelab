@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Forge BDD Tests"
+  short_description: "Bind Forge feature scenarios to real typed APIs"
+  default_prompt: "Use $write-forge-bdd-tests to specify this behavior with Forge feature scenarios and executable public-API step bindings."

@@ -27,7 +27,12 @@ pub const FAILURE_KINDS: [&str; 12] = [
     "reviewer_correction",
 ];
 
-pub const ALL_FEATURES: [&str; 4] = ["PACKAGE=", "FEATURES=", "ALL_FEATURES=1", "NO_DEFAULT_FEATURES=0"];
+pub const ALL_FEATURES: [&str; 4] = [
+    "PACKAGE=",
+    "FEATURES=",
+    "ALL_FEATURES=1",
+    "NO_DEFAULT_FEATURES=0",
+];
 
 pub const FEATURE_VARIANTS: [(&str, &str, &str, bool); 10] = [
     ("remote-https", "forge-remote-https", "", true),
@@ -116,7 +121,12 @@ pub fn event_phases_for_scope(branch_scope: &str) -> Vec<CiPhase> {
             &["/usr/bin/make", "fmt-check", "PACKAGE=", "CHANGED_ONLY=0"],
             "check",
         ),
-        phase("imports", "verification", &["/usr/bin/make", "check-imports"], "check"),
+        phase(
+            "imports",
+            "verification",
+            &["/usr/bin/make", "check-imports"],
+            "check",
+        ),
         phase(
             "dependencies",
             "verification",
@@ -125,7 +135,12 @@ pub fn event_phases_for_scope(branch_scope: &str) -> Vec<CiPhase> {
         ),
     ];
     for target in ["build", "check", "test-compile", "test-release-compile"] {
-        phases.push(make_phase(&format!("all-features-{target}"), "compilation", target, &all));
+        phases.push(make_phase(
+            &format!("all-features-{target}"),
+            "compilation",
+            target,
+            &all,
+        ));
     }
     for (identity, package, features, _lint) in FEATURE_VARIANTS {
         let flags = variant_flags(package, features);
@@ -148,13 +163,28 @@ pub fn event_phases_for_scope(branch_scope: &str) -> Vec<CiPhase> {
         ("test-release", "tests"),
         ("doc", "verification"),
     ] {
-        phases.push(make_phase(&format!("all-features-{target}"), kind, target, &all));
+        phases.push(make_phase(
+            &format!("all-features-{target}"),
+            kind,
+            target,
+            &all,
+        ));
     }
     for (identity, package, features, lint) in FEATURE_VARIANTS {
         let flags = variant_flags(package, features);
-        phases.push(make_phase(&format!("{identity}-tests"), "tests", "test", &flags));
+        phases.push(make_phase(
+            &format!("{identity}-tests"),
+            "tests",
+            "test",
+            &flags,
+        ));
         if lint {
-            phases.push(make_phase(&format!("{identity}-lint"), "lint", "lint", &flags));
+            phases.push(make_phase(
+                &format!("{identity}-lint"),
+                "lint",
+                "lint",
+                &flags,
+            ));
         }
     }
     phases.push(phase(
@@ -281,10 +311,9 @@ pub fn event_stage_evidence(
             .filter(|(_, item)| item.kind == phase.kind)
             .map(|(index, _)| index)
             .collect();
-        if kind_phases
-            .iter()
-            .all(|index| *index < records.len() && records[*index]["returncode"].as_i64() == Some(0))
-        {
+        if kind_phases.iter().all(|index| {
+            *index < records.len() && records[*index]["returncode"].as_i64() == Some(0)
+        }) {
             passed.push(phase.kind.as_str());
         }
     }
@@ -312,7 +341,12 @@ pub fn event_stage_evidence(
         if code == 124 || code < 0 {
             Some("infrastructure".to_string())
         } else {
-            Some(record["kind"].as_str().unwrap_or("infrastructure").to_string())
+            Some(
+                record["kind"]
+                    .as_str()
+                    .unwrap_or("infrastructure")
+                    .to_string(),
+            )
         }
     } else if failure.is_some() {
         Some("verification".to_string())
@@ -349,8 +383,12 @@ mod tests {
         assert_eq!(main[0].logical_gate, "check");
         assert_eq!(branch.last().unwrap().phase_id, "backend-memory");
         assert_eq!(main.last().unwrap().phase_id, "backend-main");
-        assert!(main.iter().any(|phase| phase.phase_id == "browser-journeys"));
-        assert!(!branch.iter().any(|phase| phase.phase_id == "browser-journeys"));
+        assert!(main
+            .iter()
+            .any(|phase| phase.phase_id == "browser-journeys"));
+        assert!(!branch
+            .iter()
+            .any(|phase| phase.phase_id == "browser-journeys"));
         // 5 fixed + 4 all-features builds + 10 variant compiles + 1 ui
         // + 4 all-features gates + 18 variant test/lint + 2 tail + 1/2.
         assert_eq!(branch.len(), 45);
@@ -363,11 +401,10 @@ mod tests {
         let checks: Vec<Value> = phases
             .iter()
             .enumerate()
-            .map(|(index, phase)| {
-                json!({"index": index, "argv": phase.argv, "returncode": 0})
-            })
+            .map(|(index, phase)| json!({"index": index, "argv": phase.argv, "returncode": 0}))
             .collect();
-        let evidence = event_stage_evidence("feature/x", &Value::Array(checks.clone()), None).unwrap();
+        let evidence =
+            event_stage_evidence("feature/x", &Value::Array(checks.clone()), None).unwrap();
         assert_eq!(evidence["failure_kind"], Value::Null);
         assert!(evidence["passed_kinds"]
             .as_array()
@@ -381,15 +418,10 @@ mod tests {
         failing[last]["returncode"] = json!(2);
         // A failed phase with no failure reason is refused, exactly
         // as Python raises; with a reason the kind is the phase's.
-        assert!(
-            event_stage_evidence("feature/x", &Value::Array(failing.clone()), None).is_err()
-        );
-        let evidence = event_stage_evidence(
-            "feature/x",
-            &Value::Array(failing),
-            Some("phase_failed"),
-        )
-        .unwrap();
+        assert!(event_stage_evidence("feature/x", &Value::Array(failing.clone()), None).is_err());
+        let evidence =
+            event_stage_evidence("feature/x", &Value::Array(failing), Some("phase_failed"))
+                .unwrap();
         assert_eq!(evidence["failure_kind"], json!("tests"));
         let evidence = event_stage_evidence(
             "feature/x",

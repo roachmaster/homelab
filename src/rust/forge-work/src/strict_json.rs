@@ -168,8 +168,8 @@ impl<'a> Parser<'a> {
                 b'"' => {
                     let slice = std::str::from_utf8(&self.bytes[start..=index])
                         .map_err(|_| StrictJsonError::Syntax)?;
-                    let value: String = serde_json::from_str(slice)
-                        .map_err(|_| StrictJsonError::Syntax)?;
+                    let value: String =
+                        serde_json::from_str(slice).map_err(|_| StrictJsonError::Syntax)?;
                     self.pos = index + 1;
                     return Ok(value);
                 }

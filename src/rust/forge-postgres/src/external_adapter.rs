@@ -14,9 +14,7 @@ use uuid::Uuid;
 
 use forge_core::provider::Factory;
 
-use forge_work::external_dto::{
-    validate_external_artifact, ExternalReadiness, ExternalWorkPort,
-};
+use forge_work::external_dto::{validate_external_artifact, ExternalReadiness, ExternalWorkPort};
 use forge_work::external_tx::{ExternalTx, ExternalTxFactory, LockMode};
 use forge_work::external_workflow::ExternalWorkflowStore;
 use forge_work::retry_events::RetryEvents;
@@ -233,10 +231,7 @@ impl<'x, 't, 'c, 'o> ExternalTxImpl<'x, 't, 'c, 'o> {
         let offset = params.len();
         let mut where_sql = where_sql.to_string();
         for index in (1..=where_params.len()).rev() {
-            where_sql = where_sql.replace(
-                &format!("${index}"),
-                &format!("${}", index + offset),
-            );
+            where_sql = where_sql.replace(&format!("${index}"), &format!("${}", index + offset));
         }
         params.append(&mut where_params);
         let sql = format!(
@@ -246,7 +241,12 @@ impl<'x, 't, 'c, 'o> ExternalTxImpl<'x, 't, 'c, 'o> {
         self.exec(&sql, &params)
     }
 
-    fn task_row_sql(&mut self, project: &str, task_id: Uuid, for_update: bool) -> Result<Option<Value>, WorkError> {
+    fn task_row_sql(
+        &mut self,
+        project: &str,
+        task_id: Uuid,
+        for_update: bool,
+    ) -> Result<Option<Value>, WorkError> {
         let lock = if for_update { " FOR UPDATE" } else { "" };
         let sql = format!(
             "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=($1,$2,$3){lock}) t"
@@ -497,7 +497,12 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         }
         let params: Params = vec![
             Box::new(self.owner.to_string()),
-            Box::new(row["project_alias"].as_str().unwrap_or_default().to_string()),
+            Box::new(
+                row["project_alias"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
             Box::new(
                 row["root_task_id"]
                     .as_str()
@@ -574,13 +579,8 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         workflow_id: Uuid,
         role: &str,
     ) -> Result<(), WorkError> {
-        let params: &[&(dyn ToSql + Sync)] = &[
-            &self.owner,
-            &project,
-            &task_id,
-            &workflow_id,
-            &role,
-        ];
+        let params: &[&(dyn ToSql + Sync)] =
+            &[&self.owner, &project, &task_id, &workflow_id, &role];
         self.tx
             .call_void(
                 "INSERT INTO forge_external_workflow.tasks(owner_id,project_alias,task_id,workflow_id,role) VALUES($1,$2,$3,$4,$5)",
@@ -663,10 +663,7 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         self.insert_row("forge_agent.coding_tasks", row)
     }
 
-    fn workflow_tasks_locked(
-        &mut self,
-        workflow_id: Uuid,
-    ) -> Result<Vec<Value>, WorkError> {
+    fn workflow_tasks_locked(&mut self, workflow_id: Uuid) -> Result<Vec<Value>, WorkError> {
         let params: Params = vec![Box::new(workflow_id)];
         self.many(
             "SELECT to_jsonb(t) FROM (SELECT t.* FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x ON(x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id) WHERE x.workflow_id=$1 AND t.status IN('queued','running','awaiting_review','needs_reconcile','blocked_auth','blocked_permission','quota_blocked') FOR UPDATE OF t) t",
@@ -812,11 +809,7 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         self.insert_row("forge_external_workflow.reviews", row)
     }
 
-    fn review_row(
-        &mut self,
-        review_id: Uuid,
-        lock: LockMode,
-    ) -> Result<Option<Value>, WorkError> {
+    fn review_row(&mut self, review_id: Uuid, lock: LockMode) -> Result<Option<Value>, WorkError> {
         let lock_sql = match lock {
             LockMode::None => "",
             LockMode::Update => " FOR UPDATE",
@@ -829,11 +822,7 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         self.one(&sql, &params)
     }
 
-    fn update_review_row(
-        &mut self,
-        review_id: Uuid,
-        set: &Value,
-    ) -> Result<u64, WorkError> {
+    fn update_review_row(&mut self, review_id: Uuid, set: &Value) -> Result<u64, WorkError> {
         let where_params: Params = vec![Box::new(review_id)];
         self.update_row(
             "forge_external_workflow.reviews",
@@ -843,10 +832,7 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn reviewing_reviewer_task(
-        &mut self,
-        workflow_id: Uuid,
-    ) -> Result<Option<Uuid>, WorkError> {
+    fn reviewing_reviewer_task(&mut self, workflow_id: Uuid) -> Result<Option<Uuid>, WorkError> {
         let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
         self.tx
             .call_scalar(
@@ -917,11 +903,7 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn fail_open_actions(
-        &mut self,
-        workflow_id: Uuid,
-        result: &Value,
-    ) -> Result<u64, WorkError> {
+    fn fail_open_actions(&mut self, workflow_id: Uuid, result: &Value) -> Result<u64, WorkError> {
         let params: &[&(dyn ToSql + Sync)] = &[&result, &workflow_id];
         self.tx
             .execute_count(
@@ -970,10 +952,7 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
                 &refs(&params),
             )
             .map_err(work_err)?;
-        Ok(rows
-            .iter()
-            .map(|row| row.get::<usize, String>(0))
-            .collect())
+        Ok(rows.iter().map(|row| row.get::<usize, String>(0)).collect())
     }
 
     fn failed_attempt(
@@ -990,7 +969,11 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
         // both). The outcome distinguishes them: 'failed'
         // carries the summary column, 'needs_reconcile' does
         // not - matching the two Python SELECT lists.
-        let select_summary = if outcome == "failed" { "a.summary," } else { "" };
+        let select_summary = if outcome == "failed" {
+            "a.summary,"
+        } else {
+            ""
+        };
         let sql = format!(
             "SELECT to_jsonb(s) FROM (SELECT a.attempt_id,{select_summary}a.unit_name,r.receipt_id,r.stop_proof FROM forge_agent.coding_attempts a JOIN forge_agent.coding_reconciliation_receipts r ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(a.owner_id,a.project_alias,a.task_id,a.attempt_id,$1) WHERE(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=($2,$3,$4,$5) AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL AND a.published_at IS NOT NULL AND a.outcome=$6 AND a.result_sha256 IS NULL AND a.result_byte_count IS NULL AND a.result_chunk_count IS NULL AND NOT EXISTS(SELECT FROM forge_agent.coding_result_chunks c WHERE c.attempt_id=a.attempt_id) AND a.summary=$7 ORDER BY r.created_at DESC LIMIT 1) s"
         );
@@ -1036,10 +1019,7 @@ impl ExternalTx for ExternalTxImpl<'_, '_, '_, '_> {
             .map_err(work_err)
     }
 
-    fn existing_override(
-        &mut self,
-        workflow_id: Uuid,
-    ) -> Result<Option<Value>, WorkError> {
+    fn existing_override(&mut self, workflow_id: Uuid) -> Result<Option<Value>, WorkError> {
         let params: Params = vec![Box::new(workflow_id)];
         self.one(
             "SELECT to_jsonb(t) FROM (SELECT idempotency_key,intent_digest,receipt FROM forge_external_workflow.plan_approve_overrides WHERE workflow_id=$1) t",
@@ -1282,12 +1262,7 @@ impl<Tx: ExternalTx> ExternalWorkPort<Tx> for ExternalWorkDAO {
         &self.profiles
     }
 
-    fn enqueue(
-        &self,
-        tx: &mut Tx,
-        project_alias: &str,
-        task_id: Uuid,
-    ) -> Result<Uuid, WorkError> {
+    fn enqueue(&self, tx: &mut Tx, project_alias: &str, task_id: Uuid) -> Result<Uuid, WorkError> {
         if let Some(flow) = &self.workflow {
             if flow.manages(project_alias) {
                 return flow.admit(tx, project_alias, task_id);
@@ -1296,21 +1271,14 @@ impl<Tx: ExternalTx> ExternalWorkPort<Tx> for ExternalWorkDAO {
         tx.enqueue(project_alias, task_id)
     }
 
-    fn catalogue(
-        &self,
-        tx: &mut Tx,
-    ) -> Result<Vec<ExternalReadiness>, WorkError> {
+    fn catalogue(&self, tx: &mut Tx) -> Result<Vec<ExternalReadiness>, WorkError> {
         let entries = tx.catalogue()?;
         let list = entries
             .as_array()
             .filter(|list| list.len() <= 256)
-            .ok_or_else(|| {
-                WorkError::store("Invalid external readiness collection")
-            })?;
+            .ok_or_else(|| WorkError::store("Invalid external readiness collection"))?;
         list.iter()
-            .map(|entry| {
-                ExternalReadiness::from_value(entry).map_err(WorkError::store)
-            })
+            .map(|entry| ExternalReadiness::from_value(entry).map_err(WorkError::store))
             .collect()
     }
 

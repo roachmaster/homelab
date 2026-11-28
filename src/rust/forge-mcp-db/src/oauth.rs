@@ -101,9 +101,7 @@ pub fn s256(verifier: &str) -> String {
 fn split_url(uri: &str) -> Option<(String, String, String)> {
     // (scheme, netloc, path) for an absolute URI, fragment excluded.
     let (scheme, rest) = uri.split_once("://")?;
-    let netloc_end = rest
-        .find(|c| c == '/' || c == '?')
-        .unwrap_or(rest.len());
+    let netloc_end = rest.find(['/', '?']).unwrap_or(rest.len());
     let netloc = &rest[..netloc_end];
     let after = &rest[netloc_end..];
     let path = after.split('?').next().unwrap_or_default();
@@ -116,9 +114,7 @@ pub fn redirect_uri_allowed(uri: &str, prefixes: &[String]) -> bool {
     if uri.len() > 2048 {
         return false;
     }
-    if uri
-        .chars()
-        .any(|c| (c as u32) < 0x21 || (c as u32) > 0x7e)
+    if uri.chars().any(|c| (c as u32) < 0x21 || (c as u32) > 0x7e)
         || uri.contains('\\')
         || uri.contains('#')
     {
@@ -161,7 +157,7 @@ pub fn read_private_json(
 ) -> Result<(Value, Signature), OAuthFileError> {
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
-    let mut file = std::fs::OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
         .read(true)
         // O_NOFOLLOW | O_CLOEXEC
         .custom_flags(0o400000 | 0o2000000)
@@ -197,9 +193,7 @@ pub fn read_private_json(
     let data: Value = serde_json::from_slice(&raw)
         .map_err(|_| OAuthFileError(format!("{label} is not valid JSON")))?;
     if !data.is_object() || data.get("version").and_then(Value::as_i64) != Some(FILE_VERSION) {
-        return Err(OAuthFileError(format!(
-            "{label} has an unsupported layout"
-        )));
+        return Err(OAuthFileError(format!("{label} has an unsupported layout")));
     }
     Ok((
         data,
@@ -230,7 +224,10 @@ pub fn validate_clients(data: &Value) -> Result<Value, OAuthFileError> {
     };
     let mut seen = std::collections::HashSet::new();
     for client in clients {
-        let client_id = client.get("client_id").and_then(Value::as_str).unwrap_or("");
+        let client_id = client
+            .get("client_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         if !client.is_object() || !is_client_id(client_id) {
             return Err(error("client record has an invalid client_id".to_string()));
         }
@@ -296,7 +293,11 @@ pub fn validate_operator(data: &Value) -> Result<Value, OAuthFileError> {
     }
     use base64::Engine;
     for key in ["salt", "hash"] {
-        let text = record.unwrap().get(key).and_then(Value::as_str).unwrap_or("");
+        let text = record
+            .unwrap()
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("");
         if base64::engine::general_purpose::STANDARD
             .decode(text)
             .is_err()
@@ -327,9 +328,7 @@ fn pbkdf2_sha256(password: &[u8], salt: &[u8], out: &mut [u8]) {
 fn salsa208(block: &mut [u8; 64]) {
     let mut words = [0u32; 16];
     for (index, word) in words.iter_mut().enumerate() {
-        *word = u32::from_le_bytes(
-            block[index * 4..index * 4 + 4].try_into().unwrap(),
-        );
+        *word = u32::from_le_bytes(block[index * 4..index * 4 + 4].try_into().unwrap());
     }
     let original = words;
     for _ in 0..4 {
@@ -430,7 +429,11 @@ pub fn scrypt(
     let mut b = vec![0u8; block_size * p as usize];
     pbkdf2_sha256(password, salt, &mut b);
     for index in 0..p as usize {
-        romix(&mut b[index * block_size..(index + 1) * block_size], n as usize, r as usize);
+        romix(
+            &mut b[index * block_size..(index + 1) * block_size],
+            n as usize,
+            r as usize,
+        );
     }
     let mut out = vec![0u8; dklen];
     pbkdf2_sha256(password, &b, &mut out);
@@ -440,15 +443,8 @@ pub fn scrypt(
 pub fn hash_password(password: &str) -> Value {
     use base64::Engine;
     let salt = crate::util::random_bytes(16);
-    let digest = scrypt(
-        password.as_bytes(),
-        &salt,
-        SCRYPT_N,
-        SCRYPT_R,
-        SCRYPT_P,
-        32,
-    )
-    .expect("fixed scrypt parameters");
+    let digest = scrypt(password.as_bytes(), &salt, SCRYPT_N, SCRYPT_R, SCRYPT_P, 32)
+        .expect("fixed scrypt parameters");
     serde_json::json!({
         "n": SCRYPT_N, "r": SCRYPT_R, "p": SCRYPT_P,
         "salt": base64::engine::general_purpose::STANDARD.encode(&salt),
@@ -472,8 +468,7 @@ pub fn verify_password(record: &Value, password: &str) -> bool {
     ) else {
         return false;
     };
-    let (Ok(n), Ok(r), Ok(p)) = (u32::try_from(n), u32::try_from(r), u32::try_from(p))
-    else {
+    let (Ok(n), Ok(r), Ok(p)) = (u32::try_from(n), u32::try_from(r), u32::try_from(p)) else {
         return false;
     };
     match scrypt(password.as_bytes(), &salt, n, r, p, 32) {
@@ -594,10 +589,7 @@ impl OAuthStore {
         // Python creates the database under umask 0o077.
         if store.path.exists() {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                &store.path,
-                std::fs::Permissions::from_mode(0o600),
-            );
+            let _ = std::fs::set_permissions(&store.path, std::fs::Permissions::from_mode(0o600));
         }
         Ok(store)
     }
@@ -642,11 +634,21 @@ impl OAuthStore {
         let now = self.now();
         let hash = sha256_hex(code.as_bytes());
         self.transaction(|tx| {
-            tx.execute("DELETE FROM codes WHERE expires < ?1", rusqlite::params![now - 86400.0])
-                .map_err(db)?;
+            tx.execute(
+                "DELETE FROM codes WHERE expires < ?1",
+                rusqlite::params![now - 86400.0],
+            )
+            .map_err(db)?;
             tx.execute(
                 "INSERT INTO codes VALUES (?1,?2,?3,?4,?5,?6,NULL,NULL)",
-                rusqlite::params![hash, client_id, redirect_uri, challenge, scope, now + ttl as f64],
+                rusqlite::params![
+                    hash,
+                    client_id,
+                    redirect_uri,
+                    challenge,
+                    scope,
+                    now + ttl as f64
+                ],
             )
             .map_err(db)?;
             Ok(())
@@ -665,16 +667,27 @@ impl OAuthStore {
         let refresh = format!("{REFRESH_PREFIX}{}", token_urlsafe(32));
         tx.execute(
             "INSERT INTO tokens VALUES (?1,?2,'access',?3,NULL,NULL)",
-            rusqlite::params![sha256_hex(access.as_bytes()), grant_id, now + access_ttl as f64],
+            rusqlite::params![
+                sha256_hex(access.as_bytes()),
+                grant_id,
+                now + access_ttl as f64
+            ],
         )
         .map_err(db)?;
         tx.execute(
             "INSERT INTO tokens VALUES (?1,?2,'refresh',?3,NULL,NULL)",
-            rusqlite::params![sha256_hex(refresh.as_bytes()), grant_id, now + refresh_ttl as f64],
+            rusqlite::params![
+                sha256_hex(refresh.as_bytes()),
+                grant_id,
+                now + refresh_ttl as f64
+            ],
         )
         .map_err(db)?;
-        tx.execute("DELETE FROM tokens WHERE expires < ?1", rusqlite::params![now - 86400.0])
-            .map_err(db)?;
+        tx.execute(
+            "DELETE FROM tokens WHERE expires < ?1",
+            rusqlite::params![now - 86400.0],
+        )
+        .map_err(db)?;
         Ok((access, refresh))
     }
 
@@ -809,8 +822,7 @@ impl OAuthStore {
         refresh_ttl: i64,
     ) -> Result<(String, String, String), StoreError> {
         let invalid = |message: &str| StoreError::OAuth(OAuthError::new("invalid_grant", message));
-        let Some(refresh_token) = refresh_token
-            .filter(|token| token.starts_with(REFRESH_PREFIX))
+        let Some(refresh_token) = refresh_token.filter(|token| token.starts_with(REFRESH_PREFIX))
         else {
             return Err(invalid("unknown refresh token"));
         };
@@ -978,7 +990,11 @@ impl OAuthStore {
         let now = self.now();
         self.transaction(|tx| {
             let ids: Vec<String> = if let Some(grant_id) = grant_id {
-                collect_ids(tx, "SELECT grant_id FROM grants WHERE grant_id=?1", grant_id)?
+                collect_ids(
+                    tx,
+                    "SELECT grant_id FROM grants WHERE grant_id=?1",
+                    grant_id,
+                )?
             } else {
                 collect_ids(
                     tx,
@@ -1090,15 +1106,15 @@ mod tests {
     }
 }
 
-    #[test]
-    fn scrypt_rfc7914_vector() {
-        let digest = scrypt(b"password", b"NaCl", 1024, 8, 16, 64).unwrap();
-        assert_eq!(
+#[test]
+fn scrypt_rfc7914_vector() {
+    let digest = scrypt(b"password", b"NaCl", 1024, 8, 16, 64).unwrap();
+    assert_eq!(
             crate::util::hex(&digest),
             "fdbabe1c9d3472007856e7190d01e9fe7c6ad7cbc8237830e77376634b3731622             eaf30d92e22a3886ff109279d9830dac727afb94a83ee6d8360cbdfa2cc0640"
                 .replace(char::is_whitespace, "")
         );
-    }
+}
 
 // --- The authorization server --------------------------------------
 
@@ -1240,14 +1256,13 @@ impl OAuthServer {
 
     pub fn find_client(&self, client_id: &str) -> Option<Value> {
         let (data, _) = self.clients.get();
-        data?.get("clients")?
+        data?
+            .get("clients")?
             .as_array()?
             .iter()
             .find(|client| {
                 client.get("client_id").and_then(Value::as_str) == Some(client_id)
-                    && client
-                        .get("revoked_at")
-                        .is_none_or(|value| value.is_null())
+                    && client.get("revoked_at").is_none_or(|value| value.is_null())
             })
             .cloned()
     }
@@ -1257,16 +1272,12 @@ impl OAuthServer {
         headers: &[(String, String)],
         form: &BTreeMap<String, String>,
     ) -> Result<Value, OAuthError> {
-        let mut client_id: Option<String> = None;
-        let mut secret: Option<String> = None;
-        let mut used_basic = false;
         let authorization = header_get(headers, "Authorization")
             .unwrap_or_default()
             .to_string();
-        if authorization.len() >= 6
+        let (client_id, secret, used_basic) = if authorization.len() >= 6
             && authorization[..6].eq_ignore_ascii_case("basic ")
         {
-            used_basic = true;
             if form.contains_key("client_secret") {
                 return Err(OAuthError::new(
                     "invalid_request",
@@ -1274,11 +1285,8 @@ impl OAuthServer {
                 ));
             }
             let malformed = || {
-                let mut error = OAuthError::with_status(
-                    "invalid_client",
-                    "malformed Basic credentials",
-                    401,
-                );
+                let mut error =
+                    OAuthError::with_status("invalid_client", "malformed Basic credentials", 401);
                 error.basic = true;
                 error
             };
@@ -1288,8 +1296,8 @@ impl OAuthServer {
                 .map_err(|_| malformed())?;
             let text = String::from_utf8(decoded).map_err(|_| malformed())?;
             let (id, password) = text.split_once(':').ok_or_else(malformed)?;
-            client_id = Some(unquote_plus(id));
-            secret = Some(unquote_plus(password));
+            let client_id = Some(unquote_plus(id));
+            let secret = Some(unquote_plus(password));
             if let Some(form_id) = form.get("client_id") {
                 if Some(form_id) != client_id.as_ref() {
                     return Err(OAuthError::new(
@@ -1298,14 +1306,23 @@ impl OAuthServer {
                     ));
                 }
             }
+            (client_id, secret, true)
         } else {
-            client_id = form.get("client_id").cloned();
-            secret = form.get("client_secret").cloned();
-        }
+            (
+                form.get("client_id").cloned(),
+                form.get("client_secret").cloned(),
+                false,
+            )
+        };
         let client = client_id.as_deref().and_then(|id| self.find_client(id));
         let expected = client
             .as_ref()
-            .and_then(|client| client.get("secret_sha256").and_then(Value::as_str).map(str::to_string))
+            .and_then(|client| {
+                client
+                    .get("secret_sha256")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| "0".repeat(64));
         let valid = secret.as_deref().is_some_and(|secret| {
             constant_time_eq(
@@ -1314,11 +1331,8 @@ impl OAuthServer {
             )
         });
         if client.is_none() || secret.as_deref().is_none_or(str::is_empty) || !valid {
-            let mut error = OAuthError::with_status(
-                "invalid_client",
-                "client authentication failed",
-                401,
-            );
+            let mut error =
+                OAuthError::with_status("invalid_client", "client authentication failed", 401);
             error.basic = used_basic;
             return Err(error);
         }
@@ -1344,8 +1358,7 @@ impl OAuthServer {
                     .collect()
             })
             .unwrap_or_default();
-        let Some(redirect_uri) = redirect_uri
-            .filter(|uri| redirect_uri_allowed(uri, &prefixes))
+        let Some(redirect_uri) = redirect_uri.filter(|uri| redirect_uri_allowed(uri, &prefixes))
         else {
             return Err("redirect_uri is not registered for this client.".to_string());
         };
@@ -1357,10 +1370,7 @@ impl OAuthServer {
             client,
             redirect_uri: redirect_uri.clone(),
             state,
-            challenge: params
-                .get("code_challenge")
-                .cloned()
-                .unwrap_or_default(),
+            challenge: params.get("code_challenge").cloned().unwrap_or_default(),
             scope: "read".to_string(),
         };
         if params.get("response_type").map(String::as_str) != Some("code") {
@@ -1445,7 +1455,11 @@ impl OAuthServer {
         format!(
             "{}{}{}",
             request.redirect_uri,
-            if request.redirect_uri.contains('?') { "&" } else { "?" },
+            if request.redirect_uri.contains('?') {
+                "&"
+            } else {
+                "?"
+            },
             urlencode_pairs(&pairs)
         )
     }
@@ -1469,15 +1483,19 @@ impl OAuthServer {
         Ok(format!(
             "{}{}{}",
             request.redirect_uri,
-            if request.redirect_uri.contains('?') { "&" } else { "?" },
+            if request.redirect_uri.contains('?') {
+                "&"
+            } else {
+                "?"
+            },
             urlencode_pairs(&pairs)
         ))
     }
 
     pub fn check_password(&self, password: Option<&str>) -> bool {
         let (data, _) = self.operator.get();
-        let password_ok = password
-            .is_some_and(|password| !password.is_empty() && password.len() <= 1024);
+        let password_ok =
+            password.is_some_and(|password| !password.is_empty() && password.len() <= 1024);
         let Some(data) = data.filter(|_| password_ok) else {
             let _ = hash_password("x");
             return false;
@@ -1485,11 +1503,7 @@ impl OAuthServer {
         verify_password(&data["scrypt"], password.unwrap())
     }
 
-    pub fn csrf_value(
-        &self,
-        cookie: &str,
-        params: &BTreeMap<String, String>,
-    ) -> String {
+    pub fn csrf_value(&self, cookie: &str, params: &BTreeMap<String, String>) -> String {
         let binding = serde_json::to_string(&serde_json::json!([
             params.get("client_id"),
             params.get("redirect_uri"),
@@ -1582,12 +1596,9 @@ font-size:1rem;box-sizing:border-box}}button{{padding:.55rem 1rem;font-size:1rem
             .and_then(|data| data.get("clients"))
             .and_then(Value::as_array)
         {
-            let mut origins: std::collections::BTreeSet<String> =
-                std::collections::BTreeSet::new();
+            let mut origins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
             for client in clients {
-                if let Some(prefixes) =
-                    client.get("redirect_prefixes").and_then(Value::as_array)
-                {
+                if let Some(prefixes) = client.get("redirect_prefixes").and_then(Value::as_array) {
                     for prefix in prefixes.iter().filter_map(Value::as_str) {
                         if let Some((scheme, netloc, _)) = split_url(prefix) {
                             origins.insert(format!("{scheme}://{netloc}"));

@@ -20,9 +20,9 @@ use crate::pinned_recipe::{
 };
 use crate::retry_policy::AGENT_RETRY_LIMIT;
 use crate::validation::is_identifier;
+use crate::work_error::WorkError;
 use crate::workflow::NATIVE_POLICY_DIGESTS;
 use crate::workflow_policy::{CatalogProfile, ProjectWorkflowPolicy, WorkflowCatalog};
-use crate::work_error::WorkError;
 
 pub const CONFIG_ENV_VAR: &str = "FORGE_RUNNER_WORK_CONFIG";
 pub const USAGE_CONFIG_ENV_VAR: &str = "FORGE_RUNNER_USAGE_CONFIG";
@@ -192,7 +192,7 @@ pub fn canonical_profile_slug(profile_alias: &str) -> Result<String, String> {
         return Err("Invalid canonical profile slug".to_string());
     }
     let truncated: String = slug.chars().take(64).collect();
-    let slug = truncated.trim_end_matches(|c| c == '.' || c == '_' || c == '-');
+    let slug = truncated.trim_end_matches(['.', '_', '-']);
     if slug.is_empty()
         || slug.len() > 64
         || !slug
@@ -209,18 +209,13 @@ pub fn canonical_profile_slug(profile_alias: &str) -> Result<String, String> {
     Ok(slug.to_string())
 }
 
-pub fn validate_persistent_branch(
-    branch: &str,
-    allow_non_forge: bool,
-) -> Result<String, String> {
+pub fn validate_persistent_branch(branch: &str, allow_non_forge: bool) -> Result<String, String> {
     let validated = validate_git_branch_name(branch)?;
     if validated == "main" {
         return Err("Persistent agent branch cannot be main".to_string());
     }
     if validated.starts_with("forge/task-") {
-        return Err(
-            "Persistent agent branch cannot use ephemeral forge/task-* prefix".to_string(),
-        );
+        return Err("Persistent agent branch cannot use ephemeral forge/task-* prefix".to_string());
     }
     if !allow_non_forge && !is_forge_branch(&validated) {
         return Err("Native persistent agent branch must be under forge/*".to_string());
@@ -295,7 +290,9 @@ impl ApiProfile {
             return Err("Invalid work profile model".to_string());
         }
         if backup_models.len() > 4
-            || backup_models.iter().any(|m| m.trim().is_empty() || !is_printable_ascii_128(m))
+            || backup_models
+                .iter()
+                .any(|m| m.trim().is_empty() || !is_printable_ascii_128(m))
             || backup_models.iter().collect::<BTreeSet<_>>().len() != backup_models.len()
             || backup_models.iter().any(|m| m == model)
             || (!backup_models.is_empty() && backend != "antigravity")
@@ -324,24 +321,17 @@ impl ApiProfile {
             model: model.to_string(),
             resource_profile: resource_profile.to_string(),
             label,
-            execution_enabled: execution_enabled
-                .unwrap_or(!matches!(backend, "grok" | "muse")),
+            execution_enabled: execution_enabled.unwrap_or(!matches!(backend, "grok" | "muse")),
             backup_models,
             quota_handoff_profile,
             branch: String::new(),
         };
-        if profile.is_external()
-            && (profile.backend != "muse" || profile.model != EXTERNAL_MODEL)
-        {
+        if profile.is_external() && (profile.backend != "muse" || profile.model != EXTERNAL_MODEL) {
             return Err("Invalid external database work profile".to_string());
         }
         let resolved_branch = match branch {
             None => default_agent_branch(alias)?,
-            Some(branch) => validate_profile_branch(
-                alias,
-                &branch,
-                profile.is_external(),
-            )?,
+            Some(branch) => validate_profile_branch(alias, &branch, profile.is_external())?,
         };
         Ok(ApiProfile {
             branch: resolved_branch,
@@ -502,9 +492,8 @@ impl WorkApiConfig {
             });
         }
         if native_policy_digest(&profile.resource_profile, &profile.backend).is_some() {
-            let policy_digest =
-                native_policy_digest(&profile.resource_profile, &profile.backend)
-                    .expect("native checked");
+            let policy_digest = native_policy_digest(&profile.resource_profile, &profile.backend)
+                .expect("native checked");
             let payload = json!({
                 "version": 2,
                 "backend": profile.backend,
@@ -696,49 +685,25 @@ fn require_workflow_submission(
     current_identity: &dyn Fn() -> Option<Value>,
 ) -> Result<(), WorkError> {
     if mode != "plan" {
-        return Err(rejected_reason(
-            409,
-            "result_mismatch",
-            "workflow_mode",
-        ));
+        return Err(rejected_reason(409, "result_mismatch", "workflow_mode"));
     }
     if profile != author_profile {
-        return Err(rejected_reason(
-            409,
-            "result_mismatch",
-            "workflow_profile",
-        ));
+        return Err(rejected_reason(409, "result_mismatch", "workflow_profile"));
     }
     if digest.is_none() && policy_id.is_none() {
-        return Err(rejected_reason(
-            409,
-            "result_mismatch",
-            "policy_missing",
-        ));
+        return Err(rejected_reason(409, "result_mismatch", "policy_missing"));
     }
     if let Some(digest) = digest {
         if digest != current_digest {
-            return Err(rejected_reason(
-                409,
-                "result_mismatch",
-                "policy_stale",
-            ));
+            return Err(rejected_reason(409, "result_mismatch", "policy_stale"));
         }
     }
     if let Some(policy_id) = policy_id {
         let Some(identity) = current_identity() else {
-            return Err(rejected_reason(
-                409,
-                "result_mismatch",
-                "policy_missing",
-            ));
+            return Err(rejected_reason(409, "result_mismatch", "policy_missing"));
         };
         if identity["policy_id"].as_str() != Some(policy_id.to_string().as_str()) {
-            return Err(rejected_reason(
-                409,
-                "result_mismatch",
-                "policy_stale",
-            ));
+            return Err(rejected_reason(409, "result_mismatch", "policy_stale"));
         }
     }
     Ok(())
@@ -774,7 +739,7 @@ impl WorkflowCatalog for WorkApiConfig {
         &self,
         alias: &str,
         mode: &str,
-        _native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        _native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Option<PinnedRecipe> {
         self.resolve_recipe(alias, mode)
     }
@@ -784,7 +749,7 @@ impl WorkflowCatalog for WorkApiConfig {
         alias: &str,
         mode: &str,
         model: &str,
-        _native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        _native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Option<PinnedRecipe> {
         self.resolve_backup_recipe(alias, mode, model)
     }
@@ -859,9 +824,7 @@ fn freeze_workflows(
                 .iter()
                 .all(|mode| config.allowed_modes.iter().any(|allowed| allowed == mode))
         {
-            return Err(
-                "Workflow requires granted project and all execution modes".to_string(),
-            );
+            return Err("Workflow requires granted project and all execution modes".to_string());
         }
         let raw_object = raw
             .as_object()
@@ -876,7 +839,9 @@ fn freeze_workflows(
         ];
         if !raw_object.contains_key("author_profile")
             || !raw_object.contains_key("reviewer_profile")
-            || raw_object.keys().any(|key| !allowed.contains(&key.as_str()))
+            || raw_object
+                .keys()
+                .any(|key| !allowed.contains(&key.as_str()))
         {
             return Err("Invalid project workflow policy".to_string());
         }
@@ -891,9 +856,7 @@ fn freeze_workflows(
         }
         let max_plan_revisions = match raw_object.get("max_plan_revisions") {
             None => AGENT_RETRY_LIMIT,
-            Some(number) if crate::validation::is_int(number) => {
-                number.as_i64().unwrap_or(-1)
-            }
+            Some(number) if crate::validation::is_int(number) => number.as_i64().unwrap_or(-1),
             Some(_) => return Err("Invalid workflow revision policy".to_string()),
         };
         let auto_merge = match raw_object.get("auto_merge") {
@@ -1015,13 +978,17 @@ pub fn parse_work_config(raw: &Value) -> Result<WorkApiConfig, String> {
             spec["backend"].as_str().unwrap_or_default(),
             spec["model"].as_str().unwrap_or_default(),
             spec["resource_profile"].as_str().unwrap_or_default(),
-            spec.get("label").and_then(Value::as_str).map(str::to_string),
+            spec.get("label")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             execution_enabled,
             backup_models,
             spec.get("quota_handoff_profile")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-            spec.get("branch").and_then(Value::as_str).map(str::to_string),
+            spec.get("branch")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         )?);
     }
     profiles.sort_by(|a, b| a.alias.cmp(&b.alias));
@@ -1109,9 +1076,7 @@ pub fn parse_work_config(raw: &Value) -> Result<WorkApiConfig, String> {
                 && native_policy_digest(&target.resource_profile, &target.backend).is_some()
         });
         if !valid {
-            return Err(
-                "Quota handoff requires an enabled native Codex profile".to_string(),
-            );
+            return Err("Quota handoff requires an enabled native Codex profile".to_string());
         }
         for mode in ["plan", "implement"] {
             let recipe = config.resolve_recipe(target_alias, mode);
@@ -1124,9 +1089,7 @@ pub fn parse_work_config(raw: &Value) -> Result<WorkApiConfig, String> {
                     )
             });
             if !valid {
-                return Err(
-                    "Quota handoff requires current immutable execution policy".to_string(),
-                );
+                return Err("Quota handoff requires current immutable execution policy".to_string());
             }
         }
     }
@@ -1144,8 +1107,11 @@ pub fn parse_work_config(raw: &Value) -> Result<WorkApiConfig, String> {
     }
     if let Some(external) = object.get("external_workflows") {
         let projects: BTreeSet<String> = config.allowed_projects.iter().cloned().collect();
-        let profile_names: BTreeSet<String> =
-            config.profiles.iter().map(|profile| profile.alias.clone()).collect();
+        let profile_names: BTreeSet<String> = config
+            .profiles
+            .iter()
+            .map(|profile| profile.alias.clone())
+            .collect();
         let modes: BTreeSet<String> = config.allowed_modes.iter().cloned().collect();
         let frozen = freeze_external_workflows(
             external,
@@ -1183,10 +1149,18 @@ pub fn parse_work_config(raw: &Value) -> Result<WorkApiConfig, String> {
     for alias in &delivery_repair_projects {
         let policy = config
             .project_workflow(alias)
-            .map(|policy| (policy.author_profile.clone(), policy.reviewer_profile.clone()))
+            .map(|policy| {
+                (
+                    policy.author_profile.clone(),
+                    policy.reviewer_profile.clone(),
+                )
+            })
             .or_else(|| {
                 config.external_workflow(alias).map(|policy| {
-                    (policy.author_profile.clone(), policy.reviewer_profile.clone())
+                    (
+                        policy.author_profile.clone(),
+                        policy.reviewer_profile.clone(),
+                    )
                 })
             });
         let valid = policy.is_some_and(|(author, reviewer)| {
@@ -1199,8 +1173,7 @@ pub fn parse_work_config(raw: &Value) -> Result<WorkApiConfig, String> {
         });
         if !valid {
             return Err(
-                "Delivery repair requires current enabled author and reviewer policy"
-                    .to_string(),
+                "Delivery repair requires current enabled author and reviewer policy".to_string(),
             );
         }
     }
@@ -1241,9 +1214,15 @@ mod tests {
             .resolve_recipe("codex-author", "plan")
             .expect("native recipe");
         assert_eq!(native.version, 2);
-        assert_eq!(native.policy_digest.as_deref(), Some(NATIVE_POLICY_DIGESTS[0]));
+        assert_eq!(
+            native.policy_digest.as_deref(),
+            Some(NATIVE_POLICY_DIGESTS[0])
+        );
         // The digest is the canonical sha256 of the recipe document.
-        assert_eq!(native.digest, sha256_hex(canonical_json(&native.to_dict()).as_bytes()));
+        assert_eq!(
+            native.digest,
+            sha256_hex(canonical_json(&native.to_dict()).as_bytes())
+        );
         let plain = config.resolve_recipe("plain", "plan").expect("v1 recipe");
         assert_eq!(plain.version, 1);
         assert!(plain.policy_digest.is_none());

@@ -349,14 +349,12 @@ fn run() -> Result<(), String> {
             let listener =
                 TcpListener::bind(("127.0.0.1", config_port(&config, "preview_port", 18086)?))
                     .map_err(|error| error.to_string())?;
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                    if let Some(request) = read_request(&mut stream) {
-                        if request.method == "GET" || request.method == "HEAD" {
-                            preview_handle(&server, &request, &mut stream);
-                        }
+            for mut stream in listener.incoming().flatten() {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+                if let Some(request) = read_request(&mut stream) {
+                    if request.method == "GET" || request.method == "HEAD" {
+                        preview_handle(&server, &request, &mut stream);
                     }
                 }
             }
@@ -412,14 +410,12 @@ fn run() -> Result<(), String> {
             let listener =
                 TcpListener::bind(("127.0.0.1", config_port(&config, "api_port", 18085)?))
                     .map_err(|error| error.to_string())?;
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                    if let Some(request) = read_request(&mut stream) {
-                        if request.method == "POST" {
-                            api_handle(&server, &request, &mut stream);
-                        }
+            for mut stream in listener.incoming().flatten() {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+                if let Some(request) = read_request(&mut stream) {
+                    if request.method == "POST" {
+                        api_handle(&server, &request, &mut stream);
                     }
                 }
             }

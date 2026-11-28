@@ -120,19 +120,33 @@ impl Default for LifecycleEventParams {
 pub fn build_lifecycle_event(params: LifecycleEventParams) -> Result<JenkinsEventEmit, String> {
     let summary = match params.event_kind {
         JenkinsEventKind::BuildQueued => {
-            format!("Jenkins verification queued (queue #{})", params.queue_id.map(|value| value.to_string()).unwrap_or_else(|| "None".to_string()))
+            format!(
+                "Jenkins verification queued (queue #{})",
+                params
+                    .queue_id
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "None".to_string())
+            )
         }
         JenkinsEventKind::BuildStarted => {
-            format!("Jenkins build #{} started", params.build_number.map(|value| value.to_string()).unwrap_or_else(|| "None".to_string()))
+            format!(
+                "Jenkins build #{} started",
+                params
+                    .build_number
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "None".to_string())
+            )
         }
         _ => format!(
             "Jenkins build #{} completed: {}",
-            params.build_number.map(|value| value.to_string()).unwrap_or_else(|| "None".to_string()),
+            params
+                .build_number
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "None".to_string()),
             params.build_result.as_deref().unwrap_or("None")
         ),
     };
-    let action_uuid = if params.action_id.len() == 36
-        && params.action_id.matches('-').count() == 4
+    let action_uuid = if params.action_id.len() == 36 && params.action_id.matches('-').count() == 4
     {
         Some(params.action_id.clone())
     } else {
@@ -308,8 +322,7 @@ impl LifecycleTracker {
             if let Ok(rows) = lookup(&self.project_alias, &self.job_name, &self.commit_sha) {
                 for row in rows {
                     if row.is_object()
-                        && LIFECYCLE_KINDS
-                            .contains(&row["event_kind"].as_str().unwrap_or_default())
+                        && LIFECYCLE_KINDS.contains(&row["event_kind"].as_str().unwrap_or_default())
                     {
                         delivered.insert(
                             row["event_kind"].as_str().unwrap_or_default().to_string(),
@@ -370,9 +383,7 @@ impl LifecycleTracker {
                 JenkinsBuildResult::Failure
             });
         }
-        receipt["result"]
-            .as_str()
-            .and_then(jenkins_result_to_event)
+        receipt["result"].as_str().and_then(jenkins_result_to_event)
     }
 
     /// Record intents for transitions newly observed in a
@@ -428,12 +439,10 @@ impl LifecycleTracker {
                             // event is recorded.
                         }
                         Some(build_result) => {
-                            let mut params =
-                                tracker.base_params(JenkinsEventKind::BuildCompleted);
+                            let mut params = tracker.base_params(JenkinsEventKind::BuildCompleted);
                             params.queue_id = queue_id;
                             params.build_number = Some(build);
-                            params.build_result =
-                                Some(build_result.value().to_string());
+                            params.build_result = Some(build_result.value().to_string());
                             let event = tracker.event(params)?;
                             recorded.push(tracker.record(&event)?);
                         }
@@ -572,10 +581,8 @@ impl IntentDrain {
             }
             counts.pending += 1;
             let event = read_private(&path, 65536, Some(self.owner))
-                .map_err(|error| error)
                 .and_then(|raw| {
-                    serde_json::from_slice::<Value>(&raw)
-                        .map_err(|error| error.to_string())
+                    serde_json::from_slice::<Value>(&raw).map_err(|error| error.to_string())
                 })
                 .and_then(|payload| JenkinsEventEmit::from_payload(&payload));
             let event = match event {
@@ -591,7 +598,11 @@ impl IntentDrain {
             }
             counts.delivered += 1;
             counts.pending -= 1;
-            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             let marker = path.with_file_name(format!(
                 "{}{}",
                 DELIVERED_PREFIX,
@@ -640,9 +651,9 @@ mod tests {
         }
     }
 
-    fn tracker(root: &PathBuf) -> LifecycleTracker {
+    fn tracker(root: &Path) -> LifecycleTracker {
         LifecycleTracker::new(
-            root.clone(),
+            root.to_path_buf(),
             "123e4567-e89b-12d3-a456-426614174000",
             "homelab",
             "main",
@@ -683,16 +694,24 @@ mod tests {
             .is_empty());
         // The drain sweeps action directories under its
         // root; stage this binding as its only child.
-        let actions_root = std::env::temp_dir().join(format!("forge-actions-{}", std::process::id()));
+        let actions_root =
+            std::env::temp_dir().join(format!("forge-actions-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&actions_root);
         let binding = actions_root.join("binding");
         std::fs::create_dir_all(&binding).unwrap();
         for kind in LIFECYCLE_KINDS {
-            std::fs::copy(root.join(intent_filename(kind)), binding.join(intent_filename(kind))).unwrap();
+            std::fs::copy(
+                root.join(intent_filename(kind)),
+                binding.join(intent_filename(kind)),
+            )
+            .unwrap();
         }
         let mut drain = IntentDrain::new(
             actions_root.clone(),
-            Box::new(MemoryEmitter { events: Vec::new(), fail: false }),
+            Box::new(MemoryEmitter {
+                events: Vec::new(),
+                fail: false,
+            }),
             0.1,
         );
         let counts = drain.sweep_once(None);
@@ -775,13 +794,13 @@ pub fn map_stage_status(returncode: i64) -> &'static str {
     }
 }
 
-/// Producer delivery id: "<action_id>:<kind>" (plain form; the tracker
+/// Producer delivery id: `<action_id>:<kind>` (plain form; the tracker
 /// path above uses the digest form).
 pub fn producer_lifecycle_delivery_id(action_id: &str, kind: &str) -> String {
     format!("{action_id}:{kind}")
 }
 
-/// Producer stage delivery id: "<action_id>:<kind>:<index>".
+/// Producer stage delivery id: `<action_id>:<kind>:<index>`.
 pub fn producer_stage_delivery_id(action_id: &str, kind: &str, index: i64) -> String {
     format!("{action_id}:{kind}:{index}")
 }
@@ -825,9 +844,7 @@ pub fn iso_from_epoch(epoch_seconds: f64) -> String {
     let (year, month, day) = civil_from_days(days);
     let (hour, minute, second) = (rem / 3600, (rem % 3600) / 60, rem % 60);
     if micros != 0 {
-        format!(
-            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{micros:06}Z"
-        )
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{micros:06}Z")
     } else {
         format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
     }
@@ -848,7 +865,10 @@ pub fn parse_iso_epoch(value: Option<&Value>) -> Option<f64> {
     }
     let (hms, micros) = match time.split_once('.') {
         Some((hms, fraction)) => {
-            if fraction.is_empty() || fraction.len() > 6 || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+            if fraction.is_empty()
+                || fraction.len() > 6
+                || !fraction.bytes().all(|b| b.is_ascii_digit())
+            {
                 return None;
             }
             let scaled = format!("{fraction:0<6}");
@@ -864,10 +884,7 @@ pub fn parse_iso_epoch(value: Option<&Value>) -> Option<f64> {
         return None;
     }
     let days = days_from_civil(year, month, day);
-    Some(
-        (days * 86_400 + hour * 3600 + minute * 60 + second) as f64
-            + micros as f64 / 1_000_000.0,
-    )
+    Some((days * 86_400 + hour * 3600 + minute * 60 + second) as f64 + micros as f64 / 1_000_000.0)
 }
 
 // -- small state-file helpers -------------------------------------------------
@@ -984,11 +1001,9 @@ fn display_value(value: &Value) -> String {
     }
 }
 
-fn json_i64(value: Option<&Value>) -> Option<i64> {
-    value.and_then(Value::as_i64)
-}
-
 // -- the producer ---------------------------------------------------------------
+
+type ProgressRecords = Vec<(i64, serde_json::Map<String, Value>)>;
 
 struct ProducerIdentity {
     project_alias: Option<Value>,
@@ -1023,9 +1038,7 @@ pub fn create_lifecycle_producer(
         return Ok(None);
     };
     let Some(jenkins_config) = jenkins_config else {
-        return Err(
-            "lifecycle producer requires a Jenkins event configuration".to_string(),
-        );
+        return Err("lifecycle producer requires a Jenkins event configuration".to_string());
     };
     let origin = jenkins_config.instance_origin(&instance).ok_or_else(|| {
         format!("lifecycle producer Jenkins instance is not admitted: {instance}")
@@ -1037,8 +1050,7 @@ pub fn create_lifecycle_producer(
         .is_some_and(|normalized| normalized == origin);
     if !endpoint_ok {
         return Err(
-            "lifecycle producer Jenkins origin does not match the delivery client"
-                .to_string(),
+            "lifecycle producer Jenkins origin does not match the delivery client".to_string(),
         );
     }
     let Some(store) = store else {
@@ -1086,7 +1098,11 @@ impl LifecycleProducer {
     /// Resolve the event identity from the binding and the journal.
     /// The journaled instance wins over the delivery config. Returns
     /// None when no Jenkins instance can be established (fail closed).
-    fn identity(&self, binding: &Value, journal: &serde_json::Map<String, Value>) -> Option<ProducerIdentity> {
+    fn identity(
+        &self,
+        binding: &Value,
+        journal: &serde_json::Map<String, Value>,
+    ) -> Option<ProducerIdentity> {
         let request = binding
             .get("request")
             .and_then(Value::as_object)
@@ -1096,9 +1112,7 @@ impl LifecycleProducer {
         let config_instance = self.config.jenkins_instance.as_deref();
         let instance = journal_instance.or(config_instance)?.to_string();
         if let Some(config) = &self.jenkins_config {
-            if config.instance_origin(&instance).is_none() {
-                return None;
-            }
+            config.instance_origin(&instance)?;
         }
         let origin = self
             .jenkins_config
@@ -1114,7 +1128,11 @@ impl LifecycleProducer {
         })
     }
 
-    fn build_url(&self, identity: &ProducerIdentity, build_number: Option<&Value>) -> Option<String> {
+    fn build_url(
+        &self,
+        identity: &ProducerIdentity,
+        build_number: Option<&Value>,
+    ) -> Option<String> {
         let origin = identity.origin.as_ref()?;
         let build_number = build_number?;
         let job_name = identity.job_name.as_ref()?.as_str()?;
@@ -1127,16 +1145,16 @@ impl LifecycleProducer {
         self.config.state_root.join("actions").join(action_id)
     }
 
-    fn load_state(
-        &self,
-        directory: &Path,
-        filename: &str,
-    ) -> serde_json::Map<String, Value> {
+    fn load_state(&self, directory: &Path, filename: &str) -> serde_json::Map<String, Value> {
         read_json_file(&directory.join(filename)).unwrap_or_default()
     }
 
     fn save_state(&self, directory: &Path, filename: &str, value: &serde_json::Map<String, Value>) {
-        let _ = durable_json(&directory.join(filename), &Value::Object(value.clone()), 0o600);
+        let _ = durable_json(
+            &directory.join(filename),
+            &Value::Object(value.clone()),
+            0o600,
+        );
     }
 
     fn read_journal(&self, directory: &Path) -> serde_json::Map<String, Value> {
@@ -1185,7 +1203,10 @@ impl LifecycleProducer {
             let journal_value = journal.get(key);
             let receipt_value = receipt.get(key);
             if let (Some(journal_value), Some(receipt_value)) = (journal_value, receipt_value) {
-                if !journal_value.is_null() && !receipt_value.is_null() && journal_value != receipt_value {
+                if !journal_value.is_null()
+                    && !receipt_value.is_null()
+                    && journal_value != receipt_value
+                {
                     return false;
                 }
             }
@@ -1203,10 +1224,16 @@ impl LifecycleProducer {
         ) {
             return Some("finished");
         }
-        if receipt.get("build_number").is_some_and(|value| !value.is_null()) {
+        if receipt
+            .get("build_number")
+            .is_some_and(|value| !value.is_null())
+        {
             return Some("building");
         }
-        if receipt.get("queue_id").is_some_and(|value| !value.is_null()) {
+        if receipt
+            .get("queue_id")
+            .is_some_and(|value| !value.is_null())
+        {
             return Some("queued");
         }
         None
@@ -1220,25 +1247,30 @@ impl LifecycleProducer {
         identity: &ProducerIdentity,
         kind: &str,
         occurred_at: &str,
-        build_number: Option<&Value>,
-        queue_id: Option<&Value>,
-        build_result: Option<&str>,
+        build: (Option<&Value>, Option<&Value>, Option<&str>),
         backfilled: bool,
     ) -> serde_json::Map<String, Value> {
+        let (build_number, queue_id, build_result) = build;
         let summary = if kind == "build_queued" {
             format!(
                 "Build queued as queue entry {}",
-                queue_id.map(display_value).unwrap_or_else(|| "None".to_string())
+                queue_id
+                    .map(display_value)
+                    .unwrap_or_else(|| "None".to_string())
             )
         } else if kind == "build_started" {
             format!(
                 "Build #{} started",
-                build_number.map(display_value).unwrap_or_else(|| "None".to_string())
+                build_number
+                    .map(display_value)
+                    .unwrap_or_else(|| "None".to_string())
             )
         } else {
             format!(
                 "Build #{} completed: {}",
-                build_number.map(display_value).unwrap_or_else(|| "None".to_string()),
+                build_number
+                    .map(display_value)
+                    .unwrap_or_else(|| "None".to_string()),
                 build_result.unwrap_or("None")
             )
         };
@@ -1363,10 +1395,10 @@ impl LifecycleProducer {
         binding: &Value,
         journal: &serde_json::Map<String, Value>,
         observation: Option<&Value>,
-        new_state: &str,
-        source: &str,
+        transition: (&str, &str),
         now: f64,
     ) -> Vec<serde_json::Map<String, Value>> {
+        let (new_state, source) = transition;
         let mut history = read_history(directory);
         if history.is_empty() {
             history = self.init_history(directory, journal);
@@ -1379,7 +1411,10 @@ impl LifecycleProducer {
             .and_then(|record| record.get("state"))
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let last_index = LIFECYCLE_ORDER.iter().position(|state| *state == last).unwrap_or(0);
+        let last_index = LIFECYCLE_ORDER
+            .iter()
+            .position(|state| *state == last)
+            .unwrap_or(0);
         let target_index = LIFECYCLE_ORDER
             .iter()
             .position(|state| *state == new_state)
@@ -1424,9 +1459,7 @@ impl LifecycleProducer {
                         &identity,
                         kind,
                         &submitted_at,
-                        None,
-                        Some(queue),
-                        None,
+                        (None, Some(queue), None),
                         false,
                     )
                 });
@@ -1455,9 +1488,7 @@ impl LifecycleProducer {
                         &identity,
                         kind,
                         &occurred_at,
-                        Some(number),
-                        queue_id.as_ref(),
-                        None,
+                        (Some(number), queue_id.as_ref(), None),
                         backfilled,
                     )
                 });
@@ -1486,9 +1517,7 @@ impl LifecycleProducer {
                         &identity,
                         kind,
                         &occurred_at,
-                        Some(number),
-                        queue_id.as_ref(),
-                        Some(result),
+                        (Some(number), queue_id.as_ref(), Some(result)),
                         any_backfilled,
                     )),
                     _ => None,
@@ -1611,7 +1640,7 @@ impl LifecycleProducer {
         &self,
         binding: &Value,
         state: &ProgressState,
-    ) -> (Vec<(i64, serde_json::Map<String, Value>)>, ProgressState) {
+    ) -> (ProgressRecords, ProgressState) {
         let action_id = binding
             .get("request")
             .and_then(|request| request.get("action_id"))
@@ -1652,10 +1681,7 @@ impl LifecycleProducer {
             return (Vec::new(), new_state);
         }
         let mut raw = Vec::new();
-        if file
-            .read_to_end(&mut raw)
-            .is_err()
-        {
+        if file.read_to_end(&mut raw).is_err() {
             return (Vec::new(), new_state);
         }
         let raw = &raw[..(info.len() as i64 - offset).min(raw.len() as i64) as usize];
@@ -1688,9 +1714,7 @@ impl LifecycleProducer {
                 continue;
             }
             if let Some(record_action) = record.get("action_id") {
-                if !record_action.is_null()
-                    && record_action.as_str() != Some(action_id.as_str())
-                {
+                if !record_action.is_null() && record_action.as_str() != Some(action_id.as_str()) {
                     continue;
                 }
             }
@@ -1737,7 +1761,10 @@ impl LifecycleProducer {
             .to_string();
         for (record_offset, record) in &records {
             let index = record.get("index").and_then(Value::as_i64).unwrap_or(0);
-            let kind = record.get("kind").and_then(Value::as_str).unwrap_or_default();
+            let kind = record
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             if kind == STAGE_STARTED {
                 let key = index.to_string();
                 let delivery_id = producer_stage_delivery_id(&action_id, STAGE_STARTED, index);
@@ -1765,7 +1792,8 @@ impl LifecycleProducer {
                     .unwrap_or_default()
                     .to_string();
                 if !emitted.contains_key(&delivery_id) && !intents.contains_key(&delivery_id) {
-                    let Some(build_number) = journal.get("build_number").filter(|v| !v.is_null()) else {
+                    let Some(build_number) = journal.get("build_number").filter(|v| !v.is_null())
+                    else {
                         continue;
                     };
                     let payload = self.stage_payload(
@@ -1799,10 +1827,7 @@ impl LifecycleProducer {
                         "monotonic_ms".to_string(),
                         record.get("monotonic_ms").cloned().unwrap_or(Value::Null),
                     );
-                    completion.insert(
-                        "observed_at".to_string(),
-                        json!(iso_from_epoch(now)),
-                    );
+                    completion.insert("observed_at".to_string(), json!(iso_from_epoch(now)));
                     new_state.completions.insert(key, Value::Object(completion));
                 }
             }
@@ -1829,7 +1854,10 @@ impl LifecycleProducer {
         let summary = if kind == STAGE_STARTED {
             format!("Check {index} started")
         } else {
-            format!("Check {index} completed: {}", stage_status.unwrap_or("None"))
+            format!(
+                "Check {index} completed: {}",
+                stage_status.unwrap_or("None")
+            )
         };
         let correlation = identity
             .correlation_id
@@ -1975,26 +2003,29 @@ impl LifecycleProducer {
                 .map(map_stage_status);
             let start_at = progress.starts.get(&key).and_then(Value::as_str);
             let (outcome, reason, payload);
-            if let (Some(receipt_status), Some(progress_status)) = (receipt_status, progress_status) {
+            if let (Some(receipt_status), Some(progress_status)) = (receipt_status, progress_status)
+            {
                 if receipt_status == progress_status {
                     outcome = "eligible";
                     reason = "progress and receipt agree".to_string();
-                    payload = Some(self.stage_payload(
-                        &identity,
-                        STAGE_COMPLETED,
-                        index,
-                        completion
-                            .and_then(|entry| entry.get("observed_at"))
-                            .and_then(Value::as_str)
-                            .unwrap_or_default(),
-                        Some(receipt_status),
-                        build_number.as_ref(),
-                        queue_id.as_ref(),
-                        false,
-                        false,
-                        false,
-                        None,
-                    ));
+                    payload = Some(
+                        self.stage_payload(
+                            &identity,
+                            STAGE_COMPLETED,
+                            index,
+                            completion
+                                .and_then(|entry| entry.get("observed_at"))
+                                .and_then(Value::as_str)
+                                .unwrap_or_default(),
+                            Some(receipt_status),
+                            build_number.as_ref(),
+                            queue_id.as_ref(),
+                            false,
+                            false,
+                            false,
+                            None,
+                        ),
+                    );
                 } else {
                     outcome = "suppressed_conflict";
                     reason = format!(
@@ -2002,7 +2033,8 @@ impl LifecycleProducer {
                     );
                     payload = None;
                 }
-            } else if receipt_status.is_some() && progress_status.is_none() && completion.is_none() {
+            } else if receipt_status.is_some() && progress_status.is_none() && completion.is_none()
+            {
                 if start_at.is_some() {
                     outcome = "eligible";
                     reason = "start observed, no progress completion; receipt decides, completion time estimated".to_string();
@@ -2021,7 +2053,8 @@ impl LifecycleProducer {
                     ));
                 } else {
                     outcome = "eligible";
-                    reason = "receipt entry with no progress record; reconciled at terminal time".to_string();
+                    reason = "receipt entry with no progress record; reconciled at terminal time"
+                        .to_string();
                     payload = Some(self.stage_payload(
                         &identity,
                         STAGE_COMPLETED,
@@ -2036,7 +2069,8 @@ impl LifecycleProducer {
                         None,
                     ));
                 }
-            } else if receipt_status.is_some() && progress_status.is_none() && completion.is_some() {
+            } else if receipt_status.is_some() && progress_status.is_none() && completion.is_some()
+            {
                 outcome = "eligible";
                 reason = "progress completion without a mappable rc; receipt decides".to_string();
                 payload = Some(self.stage_payload(
@@ -2054,7 +2088,8 @@ impl LifecycleProducer {
                 ));
             } else if receipt_status.is_none() && progress_status.is_some() {
                 outcome = "suppressed_conflict";
-                reason = "progress completion with no receipt entry; receipt wins, no event".to_string();
+                reason =
+                    "progress completion with no receipt entry; receipt wins, no event".to_string();
                 payload = None;
             } else {
                 // A start with no receipt entry gets no decision yet.
@@ -2114,8 +2149,12 @@ fn payload_to_emit(payload: &serde_json::Map<String, Value>) -> Result<JenkinsEv
     let mut params = JenkinsEventEmitParams::default();
     for (key, value) in payload {
         match key.as_str() {
-            "project_alias" => params.project_alias = value.as_str().unwrap_or_default().to_string(),
-            "jenkins_instance" => params.jenkins_instance = value.as_str().unwrap_or_default().to_string(),
+            "project_alias" => {
+                params.project_alias = value.as_str().unwrap_or_default().to_string()
+            }
+            "jenkins_instance" => {
+                params.jenkins_instance = value.as_str().unwrap_or_default().to_string()
+            }
             "job_name" => params.job_name = value.as_str().unwrap_or_default().to_string(),
             "delivery_id" => params.delivery_id = value.as_str().unwrap_or_default().to_string(),
             "event_kind" => params.event_kind = value.as_str().unwrap_or_default().to_string(),
@@ -2200,9 +2239,10 @@ impl LifecycleProducer {
         };
         let result = match self.store.emit(&event) {
             Ok(result) => result,
-            Err(JenkinsStoreError::Rejected { status: 409, ref code })
-                if code == "idempotency_conflict" =>
-            {
+            Err(JenkinsStoreError::Rejected {
+                status: 409,
+                ref code,
+            }) if code == "idempotency_conflict" => {
                 let mut intents = self.load_state(directory, INTENTS_FILE);
                 if let Some(current) = intents.get_mut(delivery_id).and_then(Value::as_object_mut) {
                     current.insert("undeliverable".to_string(), json!(true));
@@ -2227,10 +2267,7 @@ impl LifecycleProducer {
         );
         entry.insert(
             "payload_sha256".to_string(),
-            result
-                .get("payload_sha256")
-                .cloned()
-                .unwrap_or(Value::Null),
+            result.get("payload_sha256").cloned().unwrap_or(Value::Null),
         );
         emitted.insert(delivery_id.to_string(), Value::Object(entry));
         self.save_state(directory, EMITTED_FILE, &emitted);
@@ -2257,10 +2294,7 @@ impl LifecycleProducer {
             .and_then(Value::as_i64)
             .unwrap_or(0);
         current.insert("attempt_count".to_string(), json!(attempts + 1));
-        current.insert(
-            "last_attempt_at".to_string(),
-            json!(iso_from_epoch(now)),
-        );
+        current.insert("last_attempt_at".to_string(), json!(iso_from_epoch(now)));
         self.save_state(directory, INTENTS_FILE, &intents);
     }
 
@@ -2282,16 +2316,14 @@ impl LifecycleProducer {
             let Some(intent_object) = intent.as_object() else {
                 continue;
             };
-            if intent_object
-                .get("undeliverable")
-                .and_then(Value::as_bool)
-                == Some(true)
-            {
+            if intent_object.get("undeliverable").and_then(Value::as_bool) == Some(true) {
                 continue;
             }
             if let Some(created) = parse_iso_epoch(intent_object.get("created_at")) {
                 if now - created > MAX_INTENT_AGE_SECONDS {
-                    if let Some(current) = intents.get_mut(delivery_id).and_then(Value::as_object_mut) {
+                    if let Some(current) =
+                        intents.get_mut(delivery_id).and_then(Value::as_object_mut)
+                    {
                         current.insert("undeliverable".to_string(), json!(true));
                         current.insert(
                             "undeliverable_reason".to_string(),
@@ -2393,7 +2425,9 @@ impl LifecycleProducer {
         observation: Option<Value>,
     ) -> bool {
         let directory = self.directory(action_id);
-        let is_real_dir = std::fs::metadata(&directory).map(|meta| meta.is_dir()).unwrap_or(false)
+        let is_real_dir = std::fs::metadata(&directory)
+            .map(|meta| meta.is_dir())
+            .unwrap_or(false)
             && !std::fs::symlink_metadata(&directory)
                 .map(|meta| meta.file_type().is_symlink())
                 .unwrap_or(true);
@@ -2432,7 +2466,14 @@ impl LifecycleProducer {
             }
         }
         if let Some(state) = self.lifecycle_state(observation.as_ref()) {
-            self.advance_history(&directory, &binding, &journal, observation.as_ref(), state, source, now);
+            self.advance_history(
+                &directory,
+                &binding,
+                &journal,
+                observation.as_ref(),
+                (state, source),
+                now,
+            );
         }
         self.tail_progress(&directory, &binding, &journal, now);
         // A terminal observation (live or from disk) reconciles stages.
@@ -2462,7 +2503,9 @@ impl LifecycleProducer {
         names.sort();
         for name in names {
             let path = actions_root.join(&name);
-            let is_real_dir = std::fs::metadata(&path).map(|meta| meta.is_dir()).unwrap_or(false)
+            let is_real_dir = std::fs::metadata(&path)
+                .map(|meta| meta.is_dir())
+                .unwrap_or(false)
                 && !std::fs::symlink_metadata(&path)
                     .map(|meta| meta.file_type().is_symlink())
                     .unwrap_or(true);
@@ -2479,7 +2522,9 @@ impl LifecycleProducer {
 #[cfg(test)]
 mod producer_tests {
     use super::*;
-    use forge_jenkins::events::{JenkinsBuildResult, JenkinsEventEmit, JenkinsEventKind, JenkinsEventRecord};
+    use forge_jenkins::events::{
+        JenkinsBuildResult, JenkinsEventEmit, JenkinsEventKind, JenkinsEventRecord,
+    };
     use forge_jenkins::store::{JenkinsListener, JenkinsStoreError};
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex as StdMutex};
@@ -2524,8 +2569,13 @@ mod producer_tests {
             Ok(json!({"payload_sha256": event.payload_sha256()}))
         }
         fn list_events(
-            &mut self, _p: &str, _a: i64, _l: i64, _j: Option<&str>,
-            _k: Option<JenkinsEventKind>, _c: Option<&str>,
+            &mut self,
+            _p: &str,
+            _a: i64,
+            _l: i64,
+            _j: Option<&str>,
+            _k: Option<JenkinsEventKind>,
+            _c: Option<&str>,
         ) -> Result<Value, JenkinsStoreError> {
             unreachable!()
         }
@@ -2533,32 +2583,69 @@ mod producer_tests {
             unreachable!()
         }
         fn list_deliveries(
-            &mut self, _p: &str, _c: Option<&str>, _s: Option<&str>, _a: i64,
-            _ac: Option<&str>, _l: i64,
+            &mut self,
+            _p: &str,
+            _c: Option<&str>,
+            _s: Option<&str>,
+            _a: i64,
+            _ac: Option<&str>,
+            _l: i64,
         ) -> Result<Value, JenkinsStoreError> {
             unreachable!()
         }
         fn claim_next(
-            &mut self, _n: &[String], _w: &str, _l: Option<i64>,
-        ) -> Result<Option<(JenkinsEventRecord, forge_jenkins::events::JenkinsDeliveryRecord)>, JenkinsStoreError> {
+            &mut self,
+            _n: &[String],
+            _w: &str,
+            _l: Option<i64>,
+        ) -> Result<
+            Option<(
+                JenkinsEventRecord,
+                forge_jenkins::events::JenkinsDeliveryRecord,
+            )>,
+            JenkinsStoreError,
+        > {
             unreachable!()
         }
-        fn renew_lease(&mut self, _r: &str, _t: &str, _l: Option<i64>) -> Result<bool, JenkinsStoreError> {
+        fn renew_lease(
+            &mut self,
+            _r: &str,
+            _t: &str,
+            _l: Option<i64>,
+        ) -> Result<bool, JenkinsStoreError> {
             unreachable!()
         }
-        fn complete_delivery(&mut self, _r: &str, _t: &str, _d: &str) -> Result<bool, JenkinsStoreError> {
+        fn complete_delivery(
+            &mut self,
+            _r: &str,
+            _t: &str,
+            _d: &str,
+        ) -> Result<bool, JenkinsStoreError> {
             unreachable!()
         }
         fn fail_delivery(
-            &mut self, _r: &str, _t: &str, _e: &str, _retry: bool, _b: Option<i64>, _m: Option<i64>,
+            &mut self,
+            _r: &str,
+            _t: &str,
+            _e: &str,
+            _retry: bool,
+            _b: Option<i64>,
+            _m: Option<i64>,
         ) -> Result<Option<String>, JenkinsStoreError> {
             unreachable!()
         }
-        fn upsert_observation(&mut self, _e: &JenkinsEventRecord) -> Result<Value, JenkinsStoreError> {
+        fn upsert_observation(
+            &mut self,
+            _e: &JenkinsEventRecord,
+        ) -> Result<Value, JenkinsStoreError> {
             unreachable!()
         }
         fn get_observation(
-            &mut self, _p: &str, _i: &str, _j: &str, _k: &str,
+            &mut self,
+            _p: &str,
+            _i: &str,
+            _j: &str,
+            _k: &str,
         ) -> Result<Option<Value>, JenkinsStoreError> {
             unreachable!()
         }
@@ -2576,8 +2663,13 @@ mod producer_tests {
             self.0.lock().expect("lock").emit(event)
         }
         fn list_events(
-            &mut self, p: &str, a: i64, l: i64, j: Option<&str>,
-            k: Option<JenkinsEventKind>, c: Option<&str>,
+            &mut self,
+            p: &str,
+            a: i64,
+            l: i64,
+            j: Option<&str>,
+            k: Option<JenkinsEventKind>,
+            c: Option<&str>,
         ) -> Result<Value, JenkinsStoreError> {
             self.0.lock().expect("lock").list_events(p, a, l, j, k, c)
         }
@@ -2585,32 +2677,75 @@ mod producer_tests {
             self.0.lock().expect("lock").get_event(p, e)
         }
         fn list_deliveries(
-            &mut self, p: &str, c: Option<&str>, s: Option<&str>, a: i64,
-            ac: Option<&str>, l: i64,
+            &mut self,
+            p: &str,
+            c: Option<&str>,
+            s: Option<&str>,
+            a: i64,
+            ac: Option<&str>,
+            l: i64,
         ) -> Result<Value, JenkinsStoreError> {
-            self.0.lock().expect("lock").list_deliveries(p, c, s, a, ac, l)
+            self.0
+                .lock()
+                .expect("lock")
+                .list_deliveries(p, c, s, a, ac, l)
         }
         fn claim_next(
-            &mut self, n: &[String], w: &str, l: Option<i64>,
-        ) -> Result<Option<(JenkinsEventRecord, forge_jenkins::events::JenkinsDeliveryRecord)>, JenkinsStoreError> {
+            &mut self,
+            n: &[String],
+            w: &str,
+            l: Option<i64>,
+        ) -> Result<
+            Option<(
+                JenkinsEventRecord,
+                forge_jenkins::events::JenkinsDeliveryRecord,
+            )>,
+            JenkinsStoreError,
+        > {
             self.0.lock().expect("lock").claim_next(n, w, l)
         }
-        fn renew_lease(&mut self, r: &str, t: &str, l: Option<i64>) -> Result<bool, JenkinsStoreError> {
+        fn renew_lease(
+            &mut self,
+            r: &str,
+            t: &str,
+            l: Option<i64>,
+        ) -> Result<bool, JenkinsStoreError> {
             self.0.lock().expect("lock").renew_lease(r, t, l)
         }
-        fn complete_delivery(&mut self, r: &str, t: &str, d: &str) -> Result<bool, JenkinsStoreError> {
+        fn complete_delivery(
+            &mut self,
+            r: &str,
+            t: &str,
+            d: &str,
+        ) -> Result<bool, JenkinsStoreError> {
             self.0.lock().expect("lock").complete_delivery(r, t, d)
         }
         fn fail_delivery(
-            &mut self, r: &str, t: &str, e: &str, retry: bool, b: Option<i64>, m: Option<i64>,
+            &mut self,
+            r: &str,
+            t: &str,
+            e: &str,
+            retry: bool,
+            b: Option<i64>,
+            m: Option<i64>,
         ) -> Result<Option<String>, JenkinsStoreError> {
-            self.0.lock().expect("lock").fail_delivery(r, t, e, retry, b, m)
+            self.0
+                .lock()
+                .expect("lock")
+                .fail_delivery(r, t, e, retry, b, m)
         }
-        fn upsert_observation(&mut self, e: &JenkinsEventRecord) -> Result<Value, JenkinsStoreError> {
+        fn upsert_observation(
+            &mut self,
+            e: &JenkinsEventRecord,
+        ) -> Result<Value, JenkinsStoreError> {
             self.0.lock().expect("lock").upsert_observation(e)
         }
         fn get_observation(
-            &mut self, p: &str, i: &str, j: &str, k: &str,
+            &mut self,
+            p: &str,
+            i: &str,
+            j: &str,
+            k: &str,
         ) -> Result<Option<Value>, JenkinsStoreError> {
             self.0.lock().expect("lock").get_observation(p, i, j, k)
         }
@@ -2641,10 +2776,7 @@ mod producer_tests {
 
     #[test]
     fn producer_walks_the_lifecycle_and_emits_each_transition() {
-        let root = std::env::temp_dir().join(format!(
-            "forge-producer-test-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("forge-producer-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let action_id = "123e4567-e89b-42d3-a456-426614174000";
         let directory = root.join("actions").join(action_id);
@@ -2688,8 +2820,7 @@ mod producer_tests {
         // Building observation (journal learns the build number).
         std::fs::write(
             directory.join("jenkins.json"),
-            json!({"jenkins_instance": "primary", "queue_id": 7, "build_number": 42})
-                .to_string(),
+            json!({"jenkins_instance": "primary", "queue_id": 7, "build_number": 42}).to_string(),
         )
         .expect("journal 2");
         assert!(producer.process_action(
@@ -2708,12 +2839,12 @@ mod producer_tests {
         ));
 
         let emitted = &store.lock().expect("lock").emitted;
-        let kinds: Vec<&str> = emitted.iter().map(|event| event.event_kind.value()).collect();
+        let kinds: Vec<&str> = emitted
+            .iter()
+            .map(|event| event.event_kind.value())
+            .collect();
         assert_eq!(kinds, ["build_queued", "build_started", "build_completed"]);
-        assert_eq!(
-            emitted[0].delivery_id,
-            format!("{action_id}:build_queued")
-        );
+        assert_eq!(emitted[0].delivery_id, format!("{action_id}:build_queued"));
         assert_eq!(emitted[2].build_result, Some(JenkinsBuildResult::Success));
         let history = read_history(&directory);
         let states: Vec<&str> = history

@@ -75,12 +75,14 @@ pub(crate) fn review_decide(
         let task = control_task(
             tx,
             store,
-            &request.project_alias,
-            request.task_id,
-            request.expected_revision,
-            &request.idempotency_key,
-            "review_decide",
-            &intent,
+            crate::work_control::ControlRequest {
+                project_alias: &request.project_alias,
+                task_id: request.task_id,
+                expected_revision: request.expected_revision,
+                key: &request.idempotency_key,
+                action: "review_decide",
+                intent: &intent,
+            },
         )?;
         if let Some(replay) = &task.replay {
             let revision = replay

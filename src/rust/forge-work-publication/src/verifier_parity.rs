@@ -116,7 +116,9 @@ impl VerifierAstPort for PythonAstPort {
 // AST helpers
 
 fn ntype(node: &Value) -> &str {
-    node.get("_type").and_then(|value| value.as_str()).unwrap_or("")
+    node.get("_type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
 }
 
 fn field<'a>(node: &'a Value, name: &str) -> &'a Value {
@@ -239,7 +241,9 @@ fn literal_eval(node: &Value) -> Result<PVal, ()> {
 fn eval_pure_constant(node: &Value) -> Result<PVal, ()> {
     if ntype(node) == "Call"
         && is_name(field(node, "func"), "frozenset")
-        && field(node, "args").as_array().is_some_and(|args| args.len() == 1)
+        && field(node, "args")
+            .as_array()
+            .is_some_and(|args| args.len() == 1)
         && field(node, "keywords")
             .as_array()
             .is_some_and(|keywords| keywords.is_empty())
@@ -275,9 +279,7 @@ fn pval_str_set(value: &PVal) -> Option<HashSet<String>> {
 fn commands_pval(rows: &[Vec<String>]) -> PVal {
     PVal::Tuple(
         rows.iter()
-            .map(|row| {
-                PVal::Tuple(row.iter().map(|item| PVal::Str(item.clone())).collect())
-            })
+            .map(|row| PVal::Tuple(row.iter().map(|item| PVal::Str(item.clone())).collect()))
             .collect(),
     )
 }
@@ -300,7 +302,9 @@ fn literal_str_set(node: &Value) -> Option<HashSet<String>> {
     let mut node = node;
     if ntype(node) == "Call" {
         if !is_name(field(node, "func"), "frozenset")
-            || !field(node, "args").as_array().is_some_and(|args| args.len() == 1)
+            || !field(node, "args")
+                .as_array()
+                .is_some_and(|args| args.len() == 1)
             || !field(node, "keywords")
                 .as_array()
                 .is_some_and(|keywords| keywords.is_empty())
@@ -358,14 +362,22 @@ fn literal_feature_variants(node: &Value) -> Option<Vec<(String, String, String,
             Value::Bool(flag) if ntype(&elts[3]) == "Constant" => *flag,
             _ => return None,
         };
-        variants.push((strings[0].clone(), strings[1].clone(), strings[2].clone(), lint));
+        variants.push((
+            strings[0].clone(),
+            strings[1].clone(),
+            strings[2].clone(),
+            lint,
+        ));
     }
     Some(variants)
 }
 
 /// Parse installed verifier policy declarations without executing
 /// verifier code.
-pub fn extract_verifier_policy(source: &[u8], port: &dyn VerifierAstPort) -> Result<VerifierPolicy, String> {
+pub fn extract_verifier_policy(
+    source: &[u8],
+    port: &dyn VerifierAstPort,
+) -> Result<VerifierPolicy, String> {
     if std::str::from_utf8(source).is_err() {
         return Err("Installed verifier source is not valid UTF-8 Python".to_string());
     }
@@ -387,19 +399,11 @@ pub fn extract_verifier_policy(source: &[u8], port: &dyn VerifierAstPort) -> Res
             let value = field(statement, "value");
             match name {
                 "CHECKS" => policy.checks = literal_commands(value),
-                "SCOPED_BRANCH_CHECKS" => {
-                    policy.scoped_branch_checks = literal_commands(value)
-                }
+                "SCOPED_BRANCH_CHECKS" => policy.scoped_branch_checks = literal_commands(value),
                 "SCOPED_MAIN_CHECKS" => policy.scoped_main_checks = literal_commands(value),
-                "V2_PROTECTED_PATHS" => {
-                    policy.v2_protected_paths = literal_str_set(value)
-                }
-                "V3_PROTECTED_PATHS" => {
-                    policy.v3_protected_paths = literal_str_set(value)
-                }
-                "FEATURE_VARIANTS" => {
-                    policy.feature_variants = literal_feature_variants(value)
-                }
+                "V2_PROTECTED_PATHS" => policy.v2_protected_paths = literal_str_set(value),
+                "V3_PROTECTED_PATHS" => policy.v3_protected_paths = literal_str_set(value),
+                "FEATURE_VARIANTS" => policy.feature_variants = literal_feature_variants(value),
                 _ => {}
             }
         } else if ntype(statement) == "FunctionDef"
@@ -417,9 +421,7 @@ pub fn extract_verifier_policy(source: &[u8], port: &dyn VerifierAstPort) -> Res
                         .as_array()
                         .is_some_and(|comparators| comparators.len() == 1)
                 {
-                    if let Some(extracted) =
-                        literal_str_set(&field(node, "comparators")[0])
-                    {
+                    if let Some(extracted) = literal_str_set(&field(node, "comparators")[0]) {
                         extracted_paths.push(extracted);
                     }
                 } else if ntype(node) == "Call"
@@ -594,11 +596,9 @@ fn is_event_profile_guard(node: &Value) -> bool {
     }
     let left = field(node, "left");
     let right = &field(node, "comparators")[0];
-    let is_event = |side: &Value| {
-        is_name(side, "EVENT_PROFILE") || const_str(side) == Some(EVENT_PROFILE)
-    };
-    (is_name(left, "profile") && is_event(right))
-        || (is_name(right, "profile") && is_event(left))
+    let is_event =
+        |side: &Value| is_name(side, "EVENT_PROFILE") || const_str(side) == Some(EVENT_PROFILE);
+    (is_name(left, "profile") && is_event(right)) || (is_name(right, "profile") && is_event(left))
 }
 
 fn extract_event_gate_policy(
@@ -615,19 +615,17 @@ fn extract_event_gate_policy(
         }
     });
     for boolop in &boolops {
-        let has_guard = field(boolop, "values")
-            .as_array()
-            .is_some_and(|values| {
-                values.iter().any(|value| {
-                    let mut guard = false;
-                    walk_nodes(value, &mut |part| {
-                        if is_event_profile_guard(part) {
-                            guard = true;
-                        }
-                    });
-                    guard
-                })
-            });
+        let has_guard = field(boolop, "values").as_array().is_some_and(|values| {
+            values.iter().any(|value| {
+                let mut guard = false;
+                walk_nodes(value, &mut |part| {
+                    if is_event_profile_guard(part) {
+                        guard = true;
+                    }
+                });
+                guard
+            })
+        });
         if !has_guard {
             continue;
         }
@@ -656,7 +654,9 @@ fn extract_event_gate_policy(
             let resolved = if is_name(rhs, "V3_PROTECTED_PATHS") {
                 constants.get("V3_PROTECTED_PATHS").and_then(pval_str_set)
             } else {
-                eval_pure_constant(rhs).ok().and_then(|value| pval_str_set(&value))
+                eval_pure_constant(rhs)
+                    .ok()
+                    .and_then(|value| pval_str_set(&value))
             };
             paths.extend(resolved?);
         }
@@ -818,18 +818,13 @@ fn eval_from_pval(value: &PVal) -> EVal {
         PVal::Float(float) => EVal::Float(*float),
         PVal::Bool(flag) => EVal::Bool(*flag),
         PVal::None => EVal::None,
-        PVal::Tuple(items) => {
-            EVal::Tuple(items.iter().map(eval_from_pval).collect())
-        }
+        PVal::Tuple(items) => EVal::Tuple(items.iter().map(eval_from_pval).collect()),
         PVal::List(items) => EVal::List(items.iter().map(eval_from_pval).collect()),
         PVal::Set(items) => EVal::Set(items.iter().map(eval_from_pval).collect()),
     }
 }
 
-fn build_ci_phase(
-    positional: Vec<EVal>,
-    keywords: Vec<(String, EVal)>,
-) -> Result<CiPhase, String> {
+fn build_ci_phase(positional: Vec<EVal>, keywords: Vec<(String, EVal)>) -> Result<CiPhase, String> {
     const NAMES: [&str; 4] = ["phase_id", "kind", "argv", "logical_gate"];
     if positional.len() > NAMES.len() {
         return Err("Invalid CiPhase arguments in verifier policy".to_string());
@@ -898,18 +893,14 @@ impl PhaseEvaluator<'_> {
     fn tick(&mut self) -> Result<(), String> {
         self.steps += 1;
         if self.steps > 4096 {
-            return Err(
-                "Verifier event phase evaluation exceeded its step budget".to_string(),
-            );
+            return Err("Verifier event phase evaluation exceeded its step budget".to_string());
         }
         Ok(())
     }
 
     fn checked_collection(items: Vec<EVal>) -> Result<Vec<EVal>, String> {
         if items.len() > 256 {
-            return Err(
-                "Verifier event phase collection exceeded its bound".to_string(),
-            );
+            return Err("Verifier event phase collection exceeded its bound".to_string());
         }
         Ok(items)
     }
@@ -932,9 +923,7 @@ impl PhaseEvaluator<'_> {
 
     fn bind(&mut self, name: &str, value: EVal) -> Result<(), String> {
         if name == self.param || name == "CiPhase" || name == "tuple" {
-            return Err(
-                "Illegal assignment target in verifier event_phases_for_scope".to_string(),
-            );
+            return Err("Illegal assignment target in verifier event_phases_for_scope".to_string());
         }
         self.env.insert(name.to_string(), value);
         Ok(())
@@ -943,9 +932,7 @@ impl PhaseEvaluator<'_> {
     fn truth(value: EVal) -> Result<bool, String> {
         match value {
             EVal::Bool(flag) => Ok(flag),
-            _ => Err(
-                "Unsupported truth value in verifier event_phases_for_scope".to_string(),
-            ),
+            _ => Err("Unsupported truth value in verifier event_phases_for_scope".to_string()),
         }
     }
 
@@ -958,17 +945,14 @@ impl PhaseEvaluator<'_> {
                     Value::String(text) => Ok(EVal::Str(text.clone())),
                     Value::Bool(flag) => Ok(EVal::Bool(*flag)),
                     Value::Null => Ok(EVal::None),
-                    Value::Number(number) => match number.as_i64() {
-                        Some(int) => Ok(EVal::Int(int)),
-                        None => Err(
-                            "Unsupported constant in verifier event_phases_for_scope"
-                                .to_string(),
-                        ),
-                    },
-                    _ => Err(
-                        "Unsupported constant in verifier event_phases_for_scope"
-                            .to_string(),
-                    ),
+                    Value::Number(number) => {
+                        match number.as_i64() {
+                            Some(int) => Ok(EVal::Int(int)),
+                            None => Err("Unsupported constant in verifier event_phases_for_scope"
+                                .to_string()),
+                        }
+                    }
+                    _ => Err("Unsupported constant in verifier event_phases_for_scope".to_string()),
                 }
             }
             "Name" => self.lookup(field(node, "id").as_str().unwrap_or_default()),
@@ -977,9 +961,7 @@ impl PhaseEvaluator<'_> {
                 for element in field(node, "elts").as_array().cloned().unwrap_or_default() {
                     if ntype(&element) == "Starred" {
                         match self.eval_expr(field(&element, "value"))? {
-                            EVal::Tuple(values) | EVal::List(values) => {
-                                items.extend(values)
-                            }
+                            EVal::Tuple(values) | EVal::List(values) => items.extend(values),
                             _ => {
                                 return Err(
                                     "Unsupported starred value in verifier event_phases_for_scope"
@@ -1013,8 +995,7 @@ impl PhaseEvaluator<'_> {
                         let joined = format!("{a}{b}");
                         if joined.len() > 4096 {
                             return Err(
-                                "Verifier string concatenation exceeded its bound"
-                                    .to_string(),
+                                "Verifier string concatenation exceeded its bound".to_string()
                             );
                         }
                         Ok(EVal::Str(joined))
@@ -1045,8 +1026,10 @@ impl PhaseEvaluator<'_> {
             }
             "BoolOp" => {
                 let is_and = ntype(field(node, "op")) == "And";
-                for value_node in
-                    field(node, "values").as_array().cloned().unwrap_or_default()
+                for value_node in field(node, "values")
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
                 {
                     let value = Self::truth(self.eval_expr(&value_node)?)?;
                     if is_and && !value {
@@ -1068,9 +1051,7 @@ impl PhaseEvaluator<'_> {
                 }
             }
             "Call" => self.eval_call(node),
-            _ => Err(
-                "Unsupported expression in verifier event_phases_for_scope".to_string(),
-            ),
+            _ => Err("Unsupported expression in verifier event_phases_for_scope".to_string()),
         }
     }
 
@@ -1081,9 +1062,7 @@ impl PhaseEvaluator<'_> {
             .cloned()
             .unwrap_or_default();
         if ops.len() != 1 || comparators.len() != 1 {
-            return Err(
-                "Unsupported comparison in verifier event_phases_for_scope".to_string(),
-            );
+            return Err("Unsupported comparison in verifier event_phases_for_scope".to_string());
         }
         let op = ntype(&ops[0]).to_string();
         let left_node = field(node, "left").clone();
@@ -1124,11 +1103,10 @@ impl PhaseEvaluator<'_> {
             "NotEq" => Ok(EVal::Bool(left != right)),
             "In" | "NotIn" => {
                 let found = match (&left, &right) {
-                    (EVal::Str(needle), EVal::Str(haystack)) => {
-                        haystack.contains(needle.as_str())
+                    (EVal::Str(needle), EVal::Str(haystack)) => haystack.contains(needle.as_str()),
+                    (_, EVal::Tuple(items)) | (_, EVal::List(items)) | (_, EVal::Set(items)) => {
+                        items.contains(&left)
                     }
-                    (_, EVal::Tuple(items)) | (_, EVal::List(items))
-                    | (_, EVal::Set(items)) => items.contains(&left),
                     _ => {
                         return Err(
                             "Unsupported membership test in verifier event_phases_for_scope"
@@ -1138,17 +1116,13 @@ impl PhaseEvaluator<'_> {
                 };
                 Ok(EVal::Bool(if op == "In" { found } else { !found }))
             }
-            _ => Err(
-                "Unsupported comparison in verifier event_phases_for_scope".to_string(),
-            ),
+            _ => Err("Unsupported comparison in verifier event_phases_for_scope".to_string()),
         }
     }
 
     fn eval_call(&mut self, node: &Value) -> Result<EVal, String> {
         if ntype(field(node, "func")) != "Name" {
-            return Err(
-                "Unsupported call in verifier event_phases_for_scope".to_string(),
-            );
+            return Err("Unsupported call in verifier event_phases_for_scope".to_string());
         }
         let name = field(field(node, "func"), "id")
             .as_str()
@@ -1165,8 +1139,7 @@ impl PhaseEvaluator<'_> {
                 for arg in &args {
                     if ntype(arg) == "Starred" {
                         return Err(
-                            "Unsupported CiPhase argument unpacking in verifier policy"
-                                .to_string(),
+                            "Unsupported CiPhase argument unpacking in verifier policy".to_string()
                         );
                     }
                     positional.push(self.eval_expr(arg)?);
@@ -1175,8 +1148,7 @@ impl PhaseEvaluator<'_> {
                 for keyword in &keywords {
                     let Some(arg_name) = field(keyword, "arg").as_str() else {
                         return Err(
-                            "Unsupported CiPhase keyword unpacking in verifier policy"
-                                .to_string(),
+                            "Unsupported CiPhase keyword unpacking in verifier policy".to_string()
                         );
                     };
                     let value = self.eval_expr(field(keyword, "value"))?;
@@ -1187,22 +1159,18 @@ impl PhaseEvaluator<'_> {
             "tuple" => {
                 if args.len() != 1 || !keywords.is_empty() || ntype(&args[0]) == "Starred" {
                     return Err(
-                        "Unsupported tuple call in verifier event_phases_for_scope"
-                            .to_string(),
+                        "Unsupported tuple call in verifier event_phases_for_scope".to_string()
                     );
                 }
                 match self.eval_expr(&args[0])? {
                     EVal::List(items) => Ok(EVal::Tuple(items)),
                     value @ EVal::Tuple(_) => Ok(value),
                     _ => Err(
-                        "Unsupported tuple argument in verifier event_phases_for_scope"
-                            .to_string(),
+                        "Unsupported tuple argument in verifier event_phases_for_scope".to_string(),
                     ),
                 }
             }
-            _ => Err(
-                "Unsupported call in verifier event_phases_for_scope".to_string(),
-            ),
+            _ => Err("Unsupported call in verifier event_phases_for_scope".to_string()),
         }
     }
 
@@ -1228,8 +1196,7 @@ impl PhaseEvaluator<'_> {
                         .unwrap_or_default();
                     if targets.len() != 1 || ntype(&targets[0]) != "Name" {
                         return Err(
-                            "Unsupported assignment in verifier event_phases_for_scope"
-                                .to_string(),
+                            "Unsupported assignment in verifier event_phases_for_scope".to_string()
                         );
                     }
                     let value = self.eval_expr(field(statement, "value"))?;
@@ -1271,8 +1238,7 @@ impl PhaseEvaluator<'_> {
                         .to_string();
                     let argument = self.eval_expr(&field(call, "args")[0])?;
                     let target = self.env.get_mut(&target_name).ok_or_else(|| {
-                        "Unsupported list mutation in verifier event_phases_for_scope"
-                            .to_string()
+                        "Unsupported list mutation in verifier event_phases_for_scope".to_string()
                     })?;
                     let EVal::List(items) = target else {
                         return Err(
@@ -1284,9 +1250,7 @@ impl PhaseEvaluator<'_> {
                         items.push(argument);
                     } else {
                         match argument {
-                            EVal::Tuple(values) | EVal::List(values) => {
-                                items.extend(values)
-                            }
+                            EVal::Tuple(values) | EVal::List(values) => items.extend(values),
                             _ => {
                                 return Err(
                                     "Unsupported list mutation in verifier event_phases_for_scope"
@@ -1310,16 +1274,13 @@ impl PhaseEvaluator<'_> {
                     let iterable = match self.eval_expr(field(statement, "iter"))? {
                         EVal::Tuple(items) | EVal::List(items) => items,
                         _ => {
-                            return Err(
-                                "Unsupported iterable in verifier event_phases_for_scope"
-                                    .to_string(),
-                            )
+                            return Err("Unsupported iterable in verifier event_phases_for_scope"
+                                .to_string())
                         }
                     };
                     if iterable.len() > 256 {
                         return Err(
-                            "Verifier event phase collection exceeded its bound"
-                                .to_string(),
+                            "Verifier event phase collection exceeded its bound".to_string()
                         );
                     }
                     let target = field(statement, "target").clone();
@@ -1345,8 +1306,7 @@ impl PhaseEvaluator<'_> {
                                     EVal::Tuple(values) | EVal::List(values) => values,
                                     _ => {
                                         return Err(
-                                            "Invalid verifier event phase unpacking"
-                                                .to_string(),
+                                            "Invalid verifier event phase unpacking".to_string()
                                         )
                                     }
                                 };
@@ -1354,15 +1314,12 @@ impl PhaseEvaluator<'_> {
                                     || elts.iter().any(|elt| ntype(elt) != "Name")
                                 {
                                     return Err(
-                                        "Invalid verifier event phase unpacking"
-                                            .to_string(),
+                                        "Invalid verifier event phase unpacking".to_string()
                                     );
                                 }
                                 for (elt, value) in elts.iter().zip(values) {
-                                    let name = field(elt, "id")
-                                        .as_str()
-                                        .unwrap_or_default()
-                                        .to_string();
+                                    let name =
+                                        field(elt, "id").as_str().unwrap_or_default().to_string();
                                     self.bind(&name, value)?;
                                 }
                             }
@@ -1394,16 +1351,14 @@ impl PhaseEvaluator<'_> {
                     let value = field(statement, "value");
                     if value.is_null() {
                         return Err(
-                            "Unsupported return in verifier event_phases_for_scope"
-                                .to_string(),
+                            "Unsupported return in verifier event_phases_for_scope".to_string()
                         );
                     }
                     return Ok(Some(self.eval_expr(value)?));
                 }
                 _ => {
                     return Err(
-                        "Unsupported statement in verifier event_phases_for_scope"
-                            .to_string(),
+                        "Unsupported statement in verifier event_phases_for_scope".to_string()
                     )
                 }
             }
@@ -1420,8 +1375,7 @@ fn evaluate_verifier_event_phases(
     if ntype(function_node) != "FunctionDef" {
         return Err(MISMATCH.to_string());
     }
-    let signature_error =
-        || "Unsupported verifier event_phases_for_scope signature".to_string();
+    let signature_error = || "Unsupported verifier event_phases_for_scope signature".to_string();
     if !field(function_node, "decorator_list")
         .as_array()
         .is_some_and(|decorators| decorators.is_empty())
@@ -1544,9 +1498,7 @@ pub fn verify_contract_policy_parity(
         }
     });
     if contract.profile == LEGACY_PROFILE {
-        if constants.get("CHECKS") == Some(&commands_pval(&legacy_checks()))
-            && has_contract_path
-        {
+        if constants.get("CHECKS") == Some(&commands_pval(&legacy_checks())) && has_contract_path {
             return Ok(());
         }
         return Err(mismatch());
@@ -1565,10 +1517,8 @@ pub fn verify_contract_policy_parity(
         return Err(mismatch());
     }
     if contract.profile == SCOPED_PROFILE {
-        if constants.get("SCOPED_BRANCH_CHECKS")
-            == Some(&commands_pval(&scoped_branch_checks()))
-            && constants.get("SCOPED_MAIN_CHECKS")
-                == Some(&commands_pval(&scoped_main_checks()))
+        if constants.get("SCOPED_BRANCH_CHECKS") == Some(&commands_pval(&scoped_branch_checks()))
+            && constants.get("SCOPED_MAIN_CHECKS") == Some(&commands_pval(&scoped_main_checks()))
         {
             return Ok(());
         }
@@ -1640,9 +1590,7 @@ mod tests {
         for profile in [LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE] {
             verify_source_policy_parity(&source, profile, &port)
                 .unwrap_or_else(|error| panic!("source parity {profile}: {error}"));
-            let contract = CiGateContractFactory::new(profile)
-                .unwrap()
-                .create();
+            let contract = CiGateContractFactory::new(profile).unwrap().create();
             verify_verifier_policy_parity_contract(&contract, &source, &port)
                 .unwrap_or_else(|error| panic!("contract parity {profile}: {error}"));
         }
@@ -1666,10 +1614,13 @@ mod tests {
             );
         assert_ne!(skewed, text);
         let port = PythonAstPort;
-        let error = verify_source_policy_parity(skewed.as_bytes(), EVENT_PROFILE, &port)
-            .unwrap_err();
+        let error =
+            verify_source_policy_parity(skewed.as_bytes(), EVENT_PROFILE, &port).unwrap_err();
         assert!(error.contains("work_external_plan_override.py"), "{error}");
-        assert!(error.contains("0038_external_plan_approve_override.sql"), "{error}");
+        assert!(
+            error.contains("0038_external_plan_approve_override.sql"),
+            "{error}"
+        );
         assert!(error.contains(
             "setup-ci.py --native-only --execute --verification-profile forge-sdlc-jenkins-v3"
         ));
@@ -1681,20 +1632,12 @@ mod tests {
     fn detects_legacy_checks_skew_and_unparseable_source() {
         let source = verifier_source();
         let text = String::from_utf8(source).unwrap();
-        let skewed = text.replace(
-            "('/usr/bin/make', 'ci'),",
-            "('/usr/bin/make', 'check'),",
-        );
+        let skewed = text.replace("('/usr/bin/make', 'ci'),", "('/usr/bin/make', 'check'),");
         assert_ne!(skewed, text);
         let port = PythonAstPort;
-        let error = verify_source_policy_parity(skewed.as_bytes(), LEGACY_PROFILE, &port)
-            .unwrap_err();
+        let error =
+            verify_source_policy_parity(skewed.as_bytes(), LEGACY_PROFILE, &port).unwrap_err();
         assert!(error.contains("legacy CHECKS differ"), "{error}");
-        assert!(verify_source_policy_parity(
-            b"def broken(:\n",
-            LEGACY_PROFILE,
-            &port
-        )
-        .is_err());
+        assert!(verify_source_policy_parity(b"def broken(:\n", LEGACY_PROFILE, &port).is_err());
     }
 }

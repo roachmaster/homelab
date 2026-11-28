@@ -4,7 +4,7 @@
 //! and session identity.
 
 use crate::cli_argv::{blocked_outcomes, provider_error};
-use crate::cli_transport::{parse_record, record_sha256, CliTransportError};
+use crate::cli_transport::{parse_record, record_sha256};
 use crate::error::WorkerError;
 use crate::provider_events::{GrokEvents, MuseEvents};
 use crate::quota::quota_diagnostic;
@@ -399,12 +399,12 @@ impl CliParser {
                         })?;
                         self.response = text.to_string();
                     }
-                    Some("command_execution") => {
-                        if item.get("status").and_then(|v| v.as_str()) == Some("declined") {
-                            self.denied = true;
-                            self.observed_blocked
-                                .insert("blocked_permission".to_string());
-                        }
+                    Some("command_execution")
+                        if item.get("status").and_then(|v| v.as_str()) == Some("declined") =>
+                    {
+                        self.denied = true;
+                        self.observed_blocked
+                            .insert("blocked_permission".to_string());
                     }
                     _ => {}
                 }

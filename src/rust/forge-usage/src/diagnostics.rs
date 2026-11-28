@@ -103,9 +103,7 @@ fn reset_parts(text: &str) -> Option<Vec<(i64, u8)>> {
     let mut search = 0;
     while search < bytes.len() {
         // Find the next "reset" at a word boundary.
-        let Some(found) = text[search..].find("reset") else {
-            return None;
-        };
+        let found = text[search..].find("reset")?;
         let start = search + found;
         search = start + 1;
         if start > 0 && is_word_char(bytes[start - 1]) {
@@ -115,7 +113,7 @@ fn reset_parts(text: &str) -> Option<Vec<(i64, u8)>> {
         if index < bytes.len() && bytes[index] == b's' {
             index += 1;
         }
-        let mut whitespace = |index: &mut usize| {
+        let whitespace = |index: &mut usize| {
             let begin = *index;
             while *index < bytes.len() && (bytes[*index] as char).is_whitespace() {
                 *index += 1;
@@ -197,9 +195,7 @@ fn validate_diagnostic(value: &Value) -> Result<(String, Option<i64>), String> {
     let retry = match &object["retry_after_seconds"] {
         Value::Null => None,
         other => {
-            let value = other
-                .as_i64()
-                .or_else(|| other.as_u64().map(|v| v as i64));
+            let value = other.as_i64().or_else(|| other.as_u64().map(|v| v as i64));
             match value {
                 Some(value) if (1..=MAX_RESET_SECONDS).contains(&value) => Some(value),
                 _ => return Err("Invalid safe quota diagnostic".to_string()),
@@ -324,8 +320,8 @@ mod tests {
             .expect("quota diagnostic");
         assert_eq!(found["retry_after_seconds"], json!(5400));
         assert_eq!(found["code"], json!("provider_quota_exhausted"));
-        let account = quota_diagnostic("Your individual quota reached for today")
-            .expect("account quota");
+        let account =
+            quota_diagnostic("Your individual quota reached for today").expect("account quota");
         assert_eq!(account["retry_after_seconds"], Value::Null);
     }
 

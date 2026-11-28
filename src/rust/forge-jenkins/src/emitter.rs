@@ -51,9 +51,9 @@ impl std::error::Error for JenkinsEmitterError {}
 pub fn request_id_valid(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-'))
 }
 
 /// The service surface the in-process emitter delegates to
@@ -111,11 +111,7 @@ pub struct TcpDispatchConnection {
 }
 
 impl TcpDispatchConnection {
-    pub fn connect(
-        host: &str,
-        port: u16,
-        timeout: Duration,
-    ) -> Result<Self, JenkinsEmitterError> {
+    pub fn connect(host: &str, port: u16, timeout: Duration) -> Result<Self, JenkinsEmitterError> {
         let address = format!("{host}:{port}");
         let mut last_error = None;
         for socket in address
@@ -254,12 +250,7 @@ pub struct HttpDispatchJenkinsEmitter {
 }
 
 impl HttpDispatchJenkinsEmitter {
-    pub fn new(
-        token: &str,
-        host: &str,
-        port: u16,
-        timeout_seconds: f64,
-    ) -> Result<Self, String> {
+    pub fn new(token: &str, host: &str, port: u16, timeout_seconds: f64) -> Result<Self, String> {
         Self::with_factory(
             token,
             host,
@@ -317,15 +308,20 @@ impl HttpDispatchJenkinsEmitter {
         }
         let payload = canonical_json_bytes(&event.to_wire_dict(&correlation));
         let headers = vec![
-            ("Authorization".to_string(), format!("Bearer {}", self.token)),
+            (
+                "Authorization".to_string(),
+                format!("Bearer {}", self.token),
+            ),
             ("Content-Type".to_string(), "application/json".to_string()),
             ("Forge-Envelope-Version".to_string(), "1".to_string()),
             ("Forge-Contract-Version".to_string(), "1".to_string()),
-            ("Forge-Destination".to_string(), EMIT_DESTINATION.to_string()),
+            (
+                "Forge-Destination".to_string(),
+                EMIT_DESTINATION.to_string(),
+            ),
             ("Forge-Request-Id".to_string(), correlation.clone()),
         ];
-        let mut connection =
-            (self.connection_factory)(&self.host, self.port, self.timeout)?;
+        let mut connection = (self.connection_factory)(&self.host, self.port, self.timeout)?;
         let (status, raw) = connection.post(DISPATCH_PATH, &payload, &headers)?;
         if raw.len() > MAX_RESPONSE_BYTES {
             return Err(JenkinsEmitterError::with_status(
@@ -333,9 +329,8 @@ impl HttpDispatchJenkinsEmitter {
                 status,
             ));
         }
-        let parsed: Value = serde_json::from_slice(&raw).map_err(|_| {
-            JenkinsEmitterError::with_status("invalid_runner_response", status)
-        })?;
+        let parsed: Value = serde_json::from_slice(&raw)
+            .map_err(|_| JenkinsEmitterError::with_status("invalid_runner_response", status))?;
         if !parsed.is_object() {
             return Err(JenkinsEmitterError::with_status(
                 "invalid_runner_response",
@@ -366,10 +361,7 @@ impl HttpDispatchJenkinsEmitter {
                 status,
             ));
         }
-        let mut receipt = envelope
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let mut receipt = envelope.as_object().cloned().unwrap_or_default();
         receipt.remove("kind");
         receipt.remove("request_id");
         Ok(Value::Object(receipt))
@@ -397,9 +389,11 @@ mod tests {
         .expect("event")
     }
 
+    type DispatchRequests = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+
     struct StubConnection {
         response: (i64, Vec<u8>),
-        seen: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+        seen: DispatchRequests,
     }
 
     impl DispatchConnection for StubConnection {

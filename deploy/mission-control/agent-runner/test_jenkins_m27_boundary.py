@@ -1193,22 +1193,26 @@ CODEX_AUTHOR_HANDOFF_CONTEXT_SHA256 = {'AGENT_WORK.md': '0618692a67377f33869343d
 # agent_feature_branches): stage gates, proxy coordinator reads and
 # owner-control guards),
 # so this context heads the qualification chain for exactly those files.
+# Reviewed correction47938954 advances only the proxy stage guards to54/55;
+# these seven management-file pins name those independently tested bytes.
+# Historical migration pins, the context path set and authority AST pins remain
+# the accepted qualification scopes above.
 PG_PROXY_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_terminal_projection_settlement.py': '97348b5db6d9c5eac164bb54e5c6c134ba6a61116e108595fcc56f95a1a16535',
     'deploy/mission-control/agent-runner/test_work_event_attribution.py': 'e04fac9c6f834da5b80b2c9b5bff89cee26a4ebb9c7054af7703a40153486f72',
     'deploy/mission-control/agent-runner/work_owner_control.py': '38a3edda0caec8f079deb6533592f48786254038f3016423754b15ff652185a0',
     'deploy/mission-control/agent-runner/work_owner_reverification.py': '28c6f3314a4f93ab007299cca3234452bc84f0de72022c9726506930b3bd11b6',
-    'deploy/mission-control/agent-runner/work_publication.py': '0f6970d7f82cfb0721f1d36accdd741ef19c5a67291aaac0713f45f88ecc75f7',
+    'deploy/mission-control/agent-runner/work_publication.py': 'a4a860ff776c5b10de883be2e496c13fc0231057cc5024db58cdc928238a4f55',
     'deploy/mission-control/agent-runner/work_publication_config.py': '7f9bbc43dcad9c2e272f2bc2d5f8d193ac63a4b241e29b806d32ed7e41bc9440',
     'deploy/mission-control/agent-runner/work_worker.py': 'd2d3c638ec1ebc4dbd110313a04e2c906b93be0825cc570b5c87622805ac0090',
     'deploy/mission-control/agent-runner/work_worker_config.py': '9b35997fbd2e78ecfe0cddf15bbaec7dd4e2eb63453d780edba02cd3592db70e',
-    'deploy/mission-control/sql/management/grant-external-workflows.sql': '4dec068db6250819e1388ec4d2c6c60a2557d98ee36778156959e67eaf489a67',
-    'deploy/mission-control/sql/management/grant-runner.sql': 'b3c42606e1d2717cfb0f8e08cf336483331087838ce92cc1268c7d0304f4163f',
-    'deploy/mission-control/sql/management/verify-external-agent.sql': '18149b72731e222fb78953f8657f302d7669095785e5ad1eb6887b378dee66db',
-    'deploy/mission-control/sql/management/verify-external-workflows.sql': '2ef0c8e66bd26b9639e064302fa8b074e2f9e9f5790df971ca11f688e38b4144',
-    'deploy/mission-control/sql/management/verify-jenkins-events.sql': 'd04d4d8a26af204f5c8070c665bad3e0c28bf39f15faee01456510092258359a',
-    'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '7910216fd4c2adb94056b707dfd7a38122d2bdad1874ef3e4fe0b723f8632e2c',
-    'deploy/mission-control/sql/management/verify-task-events.sql': '153e806769fad9ad8bc471fbc5ca568c7d436e4e7e6edbb80f52c43fad996487',
+    'deploy/mission-control/sql/management/grant-external-workflows.sql': '34cb1c67c1ed1b12fc132d0a5292f06d60af4f54977e628213ea1887a5dd817f',
+    'deploy/mission-control/sql/management/grant-runner.sql': '4ea6c6c7467c9c49d4a36ff6fb4416c15c55575b4451c712142f5b7783feeccd',
+    'deploy/mission-control/sql/management/verify-external-agent.sql': '5308fe990b388586dbab8da30dcf3478bf3822b3746f7e5789526468f623c2f6',
+    'deploy/mission-control/sql/management/verify-external-workflows.sql': '432950c57802f7e72d850daf2e4999f877fda60c479ce084edb7fa894922811b',
+    'deploy/mission-control/sql/management/verify-jenkins-events.sql': 'd8bf06dd226650ede891e6fedd9561d4a113330b814d4bbdc40158764222b0bb',
+    'deploy/mission-control/sql/management/verify-superseding-reviews.sql': '1965a0203fa0ac60cb990b811d68f56c8f7d262fe7c5bb20c2959351413ae3b3',
+    'deploy/mission-control/sql/management/verify-task-events.sql': 'c201720c081807ae31c1d1f567d6be07b3c214650964d93f4b5520e447fe52cc',
 }
 PG_PROXY_GUARD_AST_SHA256 = {
     'work_owner_control.py::_owner_source_history': 'f71a44834f5108ae24224c80f74f9f1d469b619356ef74618ff55e60657f5493',

@@ -122,7 +122,10 @@ impl VerificationIdentity {
             return Err("Invalid verification generation".to_string());
         }
         Ok(Self {
-            artifact_id: object["artifact_id"].as_str().unwrap_or_default().to_string(),
+            artifact_id: object["artifact_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             policy_sha256: object["policy_sha256"]
                 .as_str()
                 .unwrap_or_default()
@@ -192,11 +195,9 @@ pub fn validate_content_identity(value: &Value) -> Result<Value, String> {
             return Err("Invalid external content digest".to_string());
         }
     }
-    let verification_id = object["verification_id"]
-        .as_str()
-        .ok_or_else(|| {
-            "External verification identity differs from saved content or policy".to_string()
-        })?;
+    let verification_id = object["verification_id"].as_str().ok_or_else(|| {
+        "External verification identity differs from saved content or policy".to_string()
+    })?;
     if verification.artifact_id != object["artifact_id"].as_str().unwrap_or_default()
         || verification.policy_sha256 != policy_sha
         || !verification.matches_id(verification_id)

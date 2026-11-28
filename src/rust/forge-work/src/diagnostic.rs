@@ -104,14 +104,19 @@ fn bearer_match(rest: &str) -> Option<usize> {
     let prefix = lower.strip_prefix("authorization")?;
     let mut pos = "authorization".len();
     let skip_ws = |text: &str, mut index: usize| {
-        while text[index..].chars().next().map(|c| c.is_whitespace()).unwrap_or(false) {
+        while text[index..]
+            .chars()
+            .next()
+            .map(|c| c.is_whitespace())
+            .unwrap_or(false)
+        {
             index += text[index..].chars().next().unwrap().len_utf8();
         }
         index
     };
     let _ = prefix;
     pos = skip_ws(rest, pos);
-    if rest[pos..].chars().next() != Some(':') {
+    if !rest[pos..].starts_with(':') {
         return None;
     }
     pos += 1;
@@ -179,7 +184,10 @@ mod tests {
 
     #[test]
     fn bearer_and_token_shapes_are_redacted() {
-        let value = "Authorization: Bearer abc123token and ghp_abcdefghijklmnopqrstuvwxyz0123456789 done";
+        let value = concat!(
+            "Authorization: Bearer abc123token and ghp_",
+            "abcdefghijklmnopqrstuvwxyz0123456789 done"
+        );
         let out = diagnostic_text(value, 65536);
         assert!(!out.contains("abc123token"), "{out}");
         assert!(!out.contains("ghp_"), "{out}");

@@ -37,6 +37,7 @@ from work_post_merge import PostMergeWorker
 from work_post_merge_provider import PostMergeProviderFactory
 from work_delivery_ops import SourceObserverFactory, ReleaseProviderFactory
 from work_delivery_worker import DeliveryVerificationStore, ReleaseWorker
+from work_delivery_batch import ReleaseBatch
 
 LOG = logging.getLogger("forge-publication")
 
@@ -381,7 +382,8 @@ class PublicationWorkerFactory:
         if jenkins_read_observer_factory is not None and config.hosted_provider != 'jenkins':
             raise ValueError('A Jenkins observer requires a selected Jenkins delivery consumer')
         self.jenkins_read_observer_factory = jenkins_read_observer_factory
-        self.config, self.store_factory, self.stop = config, store_factory, stop
+        self.config, self.store_factory = config, store_factory
+        self.stop = stop if stop is not None else threading.Event()
         self.workspace_factory, self.snapshot_factory, self.git_factory = workspace_factory, snapshot_factory, git_factory
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None else
                                    lambda config: SystemdSupervisor(config,
@@ -538,8 +540,9 @@ class PublicationWorkerFactory:
         if self.config.source_observation_enabled:
             source_observer = self.source_observer_factory(self.config, store, delivery=provider.delivery).create()
         if self.config.release_enabled:
-            release = self.release_worker_factory(self.config, store,
+            ready_release = self.release_worker_factory(self.config, store,
                 self.release_provider_factory(self.config).create(), stop=self.stop)
+            release = ReleaseBatch(ready_release, stop=self.stop)
         return PublicationWorker(self.config, store, snapshots, git, checks,
                                  pulls, candidates=candidates,
                                  reviewer=reviewer, merger=merger, stop=self.stop, native_ci=native_ci,

@@ -11,13 +11,6 @@ fn req_str(payload: &Value, field: &str) -> Result<String, AdapterError> {
         .ok_or_else(|| AdapterError::Protocol(format!("{field} missing")))
 }
 
-fn opt_str(payload: &Value, field: &str) -> Option<String> {
-    payload
-        .get(field)
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-}
-
 fn req_uuid(payload: &Value, field: &str) -> Result<Uuid, AdapterError> {
     let text = req_str(payload, field)?;
     Uuid::parse_str(&text).map_err(|_| AdapterError::Protocol(format!("{field} invalid")))

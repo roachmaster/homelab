@@ -13,10 +13,9 @@ use std::cell::RefCell;
 
 use forge_usage::collector::UsagePollStore;
 use forge_usage::store::{
-    ActiveRow, AttemptRow, OverviewData, ReadinessRow, RefreshOutcome, SnapshotRow,
-    StoreResult, UsageStoreError, UsageStorePort, USAGE_ADVISORY_LOCK_SALT,
-    USAGE_REFRESH_NOTIFY_CHANNEL, WORKER_FRESHNESS_SECONDS, validate_provider_snapshot,
-    validate_safe_error_code,
+    validate_provider_snapshot, validate_safe_error_code, ActiveRow, AttemptRow, OverviewData,
+    ReadinessRow, RefreshOutcome, SnapshotRow, StoreResult, UsageStoreError, UsageStorePort,
+    USAGE_ADVISORY_LOCK_SALT, USAGE_REFRESH_NOTIFY_CHANNEL, WORKER_FRESHNESS_SECONDS,
 };
 use serde_json::Value;
 use tokio_postgres::types::ToSql;
@@ -138,11 +137,13 @@ impl UsageStorePort for PgUsageStore {
                 .unwrap_or_default()
         };
         let text = |row: &Value, key: &str| -> String {
-            row.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+            row.get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
         };
-        let epoch = |row: &Value, key: &str| -> Option<f64> {
-            row.get(key).and_then(Value::as_f64)
-        };
+        let epoch =
+            |row: &Value, key: &str| -> Option<f64> { row.get(key).and_then(Value::as_f64) };
         Ok(OverviewData {
             db_now: doc.get("db_now").and_then(Value::as_f64).unwrap_or(0.0),
             snapshots: array("snapshots")
@@ -158,10 +159,7 @@ impl UsageStorePort for PgUsageStore {
                         .and_then(Value::as_str)
                         .map(str::to_string),
                     allowance: row.get("allowance").cloned().unwrap_or(Value::Null),
-                    account_activity: row
-                        .get("account_activity")
-                        .cloned()
-                        .unwrap_or(Value::Null),
+                    account_activity: row.get("account_activity").cloned().unwrap_or(Value::Null),
                 })
                 .collect(),
             readiness: array("readiness")
@@ -334,7 +332,12 @@ impl UsagePollStore for PgUsagePollStore {
         session
             .call_bool(
                 "SELECT forge_coding_worker_api.record_usage($1, $2, $3, $4)",
-                &[&profile_alias, &generation, &configuration_epoch, &sanitized],
+                &[
+                    &profile_alias,
+                    &generation,
+                    &configuration_epoch,
+                    &sanitized,
+                ],
             )
             .map_err(|error| error.to_string())
     }

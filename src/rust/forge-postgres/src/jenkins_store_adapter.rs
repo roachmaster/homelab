@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use forge_jenkins::config::JenkinsConfig;
 use forge_jenkins::events::{
-    parse_utc_timestamp, validate_build_url, validate_identifier, validate_int_range,
-    validate_job_name, validate_commit_sha, validate_sha256, JenkinsDeliveryRecord,
+    parse_utc_timestamp, validate_build_url, validate_commit_sha, validate_identifier,
+    validate_int_range, validate_job_name, validate_sha256, JenkinsDeliveryRecord,
     JenkinsEventEmit, JenkinsEventKind, JenkinsEventRecord, VALID_DELIVERY_STATUSES,
 };
 use forge_jenkins::store::{
@@ -105,8 +105,7 @@ impl PgJenkinsStore {
         &self,
         f: impl FnOnce(&mut Tx) -> Result<T, JenkinsStoreError>,
     ) -> Result<T, JenkinsStoreError> {
-        let mut session =
-            PgSession::connect(self.pg_config.clone()).map_err(unavailable)?;
+        let mut session = PgSession::connect(self.pg_config.clone()).map_err(unavailable)?;
         let parked: RefCell<Option<JenkinsStoreError>> = RefCell::new(None);
         let result = session.in_tx(|tx| {
             let park = |error: JenkinsStoreError| {
@@ -160,9 +159,9 @@ impl JenkinsStorePort for PgJenkinsStore {
             event.build_url.as_deref(),
         )?;
         let digest = event.payload_sha256();
-        let subscribers =
-            self.config
-                .subscribed_consumers(&event.project_alias, event.event_kind);
+        let subscribers = self
+            .config
+            .subscribed_consumers(&event.project_alias, event.event_kind);
         let config = &self.config;
         self.transact(|tx| {
             // Capacity is owner-wide. Always take this before the project sequence lock.
@@ -310,7 +309,12 @@ impl JenkinsStorePort for PgJenkinsStore {
         if !self.config.allowed_projects.contains(project_alias) {
             return Err(JenkinsStoreError::rejected(403, "denied"));
         }
-        validate_int_range(after_sequence, 0, forge_jenkins::events::MAX_SEQUENCE, "after_sequence")?;
+        validate_int_range(
+            after_sequence,
+            0,
+            forge_jenkins::events::MAX_SEQUENCE,
+            "after_sequence",
+        )?;
         validate_int_range(limit, 1, EVENTS_MAX_LIMIT, "limit")?;
         let mut builder = SqlBuilder::default();
         let p_owner = builder.param(SqlValue::Text(self.config.owner.clone()));
@@ -415,7 +419,12 @@ impl JenkinsStorePort for PgJenkinsStore {
         if !self.config.allowed_projects.contains(project_alias) {
             return Err(JenkinsStoreError::rejected(403, "denied"));
         }
-        validate_int_range(after_sequence, 0, forge_jenkins::events::MAX_SEQUENCE, "after_sequence")?;
+        validate_int_range(
+            after_sequence,
+            0,
+            forge_jenkins::events::MAX_SEQUENCE,
+            "after_sequence",
+        )?;
         if let Some(after_consumer) = after_consumer {
             validate_identifier(after_consumer, "after_consumer")?;
             if after_sequence == 0 {
@@ -475,7 +484,9 @@ impl JenkinsStorePort for PgJenkinsStore {
         } else if after_sequence > 0 {
             (
                 json!(after_sequence),
-                after_consumer.map(|name| json!(name)).unwrap_or(Value::Null),
+                after_consumer
+                    .map(|name| json!(name))
+                    .unwrap_or(Value::Null),
             )
         } else {
             (Value::Null, Value::Null)
@@ -675,11 +686,9 @@ impl JenkinsStorePort for PgJenkinsStore {
         backoff_seconds: Option<i64>,
         max_backoff_seconds: Option<i64>,
     ) -> Result<Option<String>, JenkinsStoreError> {
-        let sanitized =
-            forge_jenkins::events::sanitize_error_message(error_message);
+        let sanitized = forge_jenkins::events::sanitize_error_message(error_message);
         let base_backoff = backoff_seconds.unwrap_or(self.config.backoff_seconds);
-        let cap_backoff =
-            max_backoff_seconds.unwrap_or(self.config.max_backoff_seconds);
+        let cap_backoff = max_backoff_seconds.unwrap_or(self.config.max_backoff_seconds);
         let row_uuid = Uuid::parse_str(delivery_row_id)
             .map_err(|_| JenkinsStoreError::Value("Invalid delivery_row_id".to_string()))?;
         let token_uuid = Uuid::parse_str(lease_token)
@@ -711,9 +720,9 @@ impl JenkinsStorePort for PgJenkinsStore {
             let attempt_count: i64 = row.get("attempt_count");
             let max_attempts: i64 = row.get("max_attempts");
             if retryable && attempt_count < max_attempts {
-                let exponent = (attempt_count - 1).max(0).min(40);
-                let delay = ((base_backoff as i128) * (1i128 << exponent))
-                    .min(cap_backoff as i128) as i64;
+                let exponent = (attempt_count - 1).clamp(0, 40);
+                let delay =
+                    ((base_backoff as i128) * (1i128 << exponent)).min(cap_backoff as i128) as i64;
                 db(tx.execute_count(
                     "UPDATE forge_agent.jenkins_event_deliveries \
                      SET status = 'failed', worker_id = NULL, lease_token = NULL, \
@@ -832,7 +841,13 @@ impl JenkinsStorePort for PgJenkinsStore {
                 "SELECT to_jsonb(o) AS j FROM forge_agent.jenkins_observations o \
                  WHERE owner_id = $1 AND project_alias = $2 AND jenkins_instance = $3 \
                    AND job_name = $4 AND observation_key = $5",
-                &[&owner, &project_alias, &jenkins_instance, &job_name, &observation_key],
+                &[
+                    &owner,
+                    &project_alias,
+                    &jenkins_instance,
+                    &job_name,
+                    &observation_key,
+                ],
             ))
         })?;
         let Some(row) = rows.first() else {
@@ -893,9 +908,7 @@ impl PgJenkinsListener {
                         let _ = sender.send(());
                     }
                     Poll::Ready(Some(Ok(_))) => continue,
-                    Poll::Ready(Some(Err(_))) | Poll::Ready(None) => {
-                        return Poll::Ready(())
-                    }
+                    Poll::Ready(Some(Err(_))) | Poll::Ready(None) => return Poll::Ready(()),
                     Poll::Pending => return Poll::Pending,
                 }
             })

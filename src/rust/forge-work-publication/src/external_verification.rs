@@ -63,21 +63,20 @@ impl ExternalVerificationPort for CiGateVerification {
             && is_hex64(&receipt["check_receipt_sha256"]);
         if !bound {
             return Err(
-                "Retry stage receipt is not bound to the exact stopped delivery source"
-                    .to_string(),
+                "Retry stage receipt is not bound to the exact stopped delivery source".to_string(),
             );
         }
         let profile = receipt["verification_profile"]
             .as_str()
             .ok_or_else(|| "Unsupported Jenkins verification profile".to_string())?;
-        let plan = CiGateContractFactory::new(profile)?
-            .create()
-            .plan(
-                candidate["branch_scope"]
-                    .as_str()
-                    .ok_or_else(|| "Invalid CI branch scope".to_string())?,
-            )?;
-        if !is_int(&receipt["version"]) || receipt["version"].as_i64() != Some(plan.result_version()) {
+        let plan = CiGateContractFactory::new(profile)?.create().plan(
+            candidate["branch_scope"]
+                .as_str()
+                .ok_or_else(|| "Invalid CI branch scope".to_string())?,
+        )?;
+        if !is_int(&receipt["version"])
+            || receipt["version"].as_i64() != Some(plan.result_version())
+        {
             return Err(
                 "Retry stage receipt wire version does not match its selected gate contract"
                     .to_string(),
@@ -88,8 +87,7 @@ impl ExternalVerificationPort for CiGateVerification {
                 || receipt["result_version"].as_i64() != Some(plan.result_version()))
         {
             return Err(
-                "Retry stage result version does not match its selected gate contract"
-                    .to_string(),
+                "Retry stage result version does not match its selected gate contract".to_string(),
             );
         }
         let digest = receipt["check_receipt_sha256"].as_str().unwrap();
@@ -104,13 +102,9 @@ impl ExternalVerificationPort for CiGateVerification {
                 "stage_evidence_digest": digest,
             }));
         }
-        let observation = protected_retry_observation(
-            &plan.profile,
-            &plan.scope,
-            Some(receipt),
-            Some(digest),
-        )?
-        .ok_or_else(|| "Protected retry observation changed".to_string())?;
+        let observation =
+            protected_retry_observation(&plan.profile, &plan.scope, Some(receipt), Some(digest))?
+                .ok_or_else(|| "Protected retry observation changed".to_string())?;
         if observation != receipt["retry_observation"] {
             return Err("Protected retry observation changed".to_string());
         }

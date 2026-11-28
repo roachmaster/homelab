@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import psycopg2
 
+from forge_pg_proxy import READ_QUERIES
+
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE, SQL_DIR
 from test_work_policy_upgrade import historical_registry, PreUpgradeCluster
 import test_work_workflow as workflows
@@ -41,6 +43,18 @@ class SupersedingReviewSchemaTest(unittest.TestCase):
             try:
                 cluster._run('psql', '-h', cluster.root, '-U', 'postgres', '-X', '-v', 'ON_ERROR_STOP=1',
                     '-d', 'forge_agent', '-c', 'SET ROLE forge_agent_owner', '-f', SQL_DIR / 'management/grant-runner.sql')
+                # This historical-only adapter must not fabricate later main
+                # bindings, and must disappear once the actual columns exist.
+                query = READ_QUERIES["jenkins_events_for_family"][0]
+                parameters = dict(owner_id='mission-control', project_alias='homelab',
+                    correlation_ids=[], commit_shas=[], main_action=None, main_commit=None)
+                with closing(cluster.connect('postgres')) as legacy, legacy.cursor() as cursor:
+                    cursor.execute(query, parameters)
+                    self.assertEqual(cursor.fetchall(), [])
+                    self.assertEqual(legacy.jenkins_projection_count, 1)
+                    self.assertNotIn('action_id', [column.name for column in cursor.description])
+                    with self.assertRaises(ValueError):
+                        cursor.execute(query, {**parameters, 'main_action':str(uuid4())})
                 self.malformed_review(cluster)
                 names = self.rows(cluster, "SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN('forge_agent','forge_external_workflow','forge_external_agent') AND c.relkind='r' AND c.relname<>'schema_migrations' ORDER BY 1,2")
                 def historical_rows(schema, name):
@@ -63,7 +77,13 @@ class SupersedingReviewSchemaTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(), before)
-                self.assertEqual(self.rows(cluster, 'SELECT max(version) FROM forge_agent.schema_migrations'), [(53,)])
+                self.assertEqual(self.rows(cluster, 'SELECT max(version) FROM forge_agent.schema_migrations'), [(54,)])
+                with closing(cluster.connect('postgres')) as current, current.cursor() as cursor:
+                    cursor.execute(query, parameters)
+                    self.assertEqual(cursor.fetchall(), [])
+                    self.assertEqual(current.jenkins_projection_count, 0)
+                    self.assertIn('action_id', [column.name for column in cursor.description])
+                    self.assertIn('branch_scope', [column.name for column in cursor.description])
                 self.assertEqual(self.rows(cluster, 'SELECT DISTINCT review_generation,supersedes_review_id,diagnostics,supersedes_workflow_review_id FROM forge_agent.coding_workflow_reviews'), [(0, None, None, None)])
             finally:
                 cluster.stop()

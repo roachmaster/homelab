@@ -17,7 +17,12 @@ pub const MAX_SUMMARY_BYTES: usize = 4096;
 pub fn validate_timestamp(value: &str) -> Result<&str, String> {
     let invalid = || "Invalid external timestamp".to_string();
     let bytes = value.as_bytes();
-    let digit = |index: usize| bytes.get(index).map(|b| b.is_ascii_digit()).unwrap_or(false);
+    let digit = |index: usize| {
+        bytes
+            .get(index)
+            .map(|b| b.is_ascii_digit())
+            .unwrap_or(false)
+    };
     let base_ok = bytes.len() >= 20
         && (0..4).all(&digit)
         && bytes[4] == b'-'
@@ -155,12 +160,12 @@ pub fn validate_external_artifact(value: &Value) -> Result<Value, String> {
                 .all(|key| object.contains_key(*key))
         })
         .ok_or_else(|| "Invalid external artifact fields".to_string())?;
-    if !is_canonical_uuid(&object["assignment_id"]) || object["provider"].as_str() != Some("muse-db")
+    if !is_canonical_uuid(&object["assignment_id"])
+        || object["provider"].as_str() != Some("muse-db")
     {
         return Err("Invalid external artifact identity".to_string());
     }
-    let (Some(content), Some(summary)) =
-        (object["content"].as_str(), object["summary"].as_str())
+    let (Some(content), Some(summary)) = (object["content"].as_str(), object["summary"].as_str())
     else {
         return Err("Invalid external artifact content".to_string());
     };
@@ -168,9 +173,8 @@ pub fn validate_external_artifact(value: &Value) -> Result<Value, String> {
         && !content.contains('\0')
         && !content.is_empty()
         && content.len() <= MAX_CONTENT_BYTES;
-    let summary_ok = !summary.trim().is_empty()
-        && !summary.contains('\0')
-        && summary.len() <= MAX_SUMMARY_BYTES;
+    let summary_ok =
+        !summary.trim().is_empty() && !summary.contains('\0') && summary.len() <= MAX_SUMMARY_BYTES;
     if !content_ok || !summary_ok {
         return Err("Invalid external artifact content".to_string());
     }

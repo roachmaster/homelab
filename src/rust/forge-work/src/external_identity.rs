@@ -47,9 +47,9 @@ pub fn validate_content_identity(value: &Value) -> Result<Value, String> {
     }
     // verification_id is the typed UUID or the legacy hex of the
     // same identity.
-    let verification_id = object["verification_id"]
-        .as_str()
-        .ok_or_else(|| "External verification identity differs from saved content or policy".to_string())?;
+    let verification_id = object["verification_id"].as_str().ok_or_else(|| {
+        "External verification identity differs from saved content or policy".to_string()
+    })?;
     if verification.artifact_id != object["artifact_id"].as_str().unwrap_or_default()
         || verification.policy_sha256 != policy.policy_sha256()
         || !verification.matches_id(verification_id)

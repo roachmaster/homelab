@@ -21,6 +21,7 @@
 //!   the publication composition.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Map, Value};
@@ -986,7 +987,7 @@ fn pg_workflow_tx_factory(config: &WorkApiConfig, pg: &PgConfig) -> PgWorkflowTx
 fn build_workflow_store(
     config: &WorkApiConfig,
     pg: &PgConfig,
-) -> Result<Arc<forge_work::workflow::WorkflowStore>, WorkError> {
+) -> Result<Rc<forge_work::workflow::WorkflowStore>, WorkError> {
     let handoff = forge_work::agent_handoff::AgentHandoffProvider::new(
         Box::new(pg_workflow_tx_factory(config, pg)),
         Box::new(config.clone()),
@@ -1194,7 +1195,7 @@ impl RunOnceHook for ExternalMaintenance {
 }
 
 struct ExternalPass {
-    store: Arc<ExternalWorkflowStore>,
+    store: Rc<ExternalWorkflowStore>,
 }
 
 impl ExternalWorkflowHook for ExternalPass {
@@ -1248,7 +1249,7 @@ impl WorkflowThreadStart {
 fn build_external_store(
     config: &WorkApiConfig,
     pg: &PgConfig,
-) -> Result<Option<Arc<ExternalWorkflowStore>>, WorkError> {
+) -> Result<Option<Rc<ExternalWorkflowStore>>, WorkError> {
     if config.external_workflows.is_empty() {
         return Ok(None);
     }
@@ -1272,7 +1273,7 @@ fn build_external_store(
         .collect();
     let policies: BTreeMap<String, ExternalWorkflowPolicy> =
         config.external_workflows.iter().cloned().collect();
-    Ok(Some(Arc::new(ExternalWorkflowStore::new(
+    Ok(Some(Rc::new(ExternalWorkflowStore::new(
         config.owner.clone(),
         policies,
         Arc::new(config.clone()),
@@ -1299,7 +1300,7 @@ fn workflow_thread_main(
     } = start;
     let external_store = build_external_store(&config, &pg)?;
     let workflow_store = build_workflow_store(&config, &pg)?;
-    let correction = Arc::new(ReviewerCorrectionProvider::new(Arc::clone(&workflow_store)));
+    let correction = Rc::new(ReviewerCorrectionProvider::new(Rc::clone(&workflow_store)));
     let owner_control = OwnerControlProvider::new(workflow_store, Some(correction));
     let external_maintenance: Option<Box<dyn RunOnceHook>> =
         if config.profiles.iter().any(|p| p.is_external()) {
@@ -1315,7 +1316,7 @@ fn workflow_thread_main(
     let external_workflow: Option<Box<dyn ExternalWorkflowHook>> =
         external_store.as_ref().map(|store| {
             Box::new(ExternalPass {
-                store: Arc::clone(store),
+                store: Rc::clone(store),
             }) as Box<dyn ExternalWorkflowHook>
         });
     let delivery_repair: Option<Box<dyn ExternalWorkflowHook>> =

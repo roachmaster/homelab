@@ -4,7 +4,6 @@
 /// idempotency_key), exactly as the admission writers are.
 pub trait WorkDecisionPort {
     /// plan_decide - decide one exact immutable plan (WorkStore.plan_decide).
-
     fn plan_decide(
         &self,
         request: &crate::decision_requests::PlanDecideRequest,

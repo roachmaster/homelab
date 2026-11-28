@@ -8,7 +8,7 @@
 
 use serde_json::Value;
 
-use crate::publication_clients::{PublicationError, ProviderError};
+use crate::publication_clients::{ProviderError, PublicationError};
 
 /// The lease guard providers invoke before each effect
 /// (Python's require_lease closure).
@@ -36,7 +36,12 @@ pub trait MergeStorePort: Send + Sync {
     fn merge_claim(&self, worker_id: &str) -> Result<Option<Value>, ProviderError>;
     fn merge_renew(&self, job: &Value) -> Result<bool, ProviderError>;
     fn merge_intent(&self, job: &Value, intent: &Value) -> Result<Value, ProviderError>;
-    fn merge_finish(&self, job: &Value, status: &str, receipt: &Value) -> Result<Value, ProviderError>;
+    fn merge_finish(
+        &self,
+        job: &Value,
+        status: &str,
+        receipt: &Value,
+    ) -> Result<Value, ProviderError>;
     fn native_merge_failure(
         &self,
         job: &Value,
@@ -72,7 +77,8 @@ pub trait DeliveryStorePort: Send + Sync {
     fn delivery_release_claim(&self, worker_id: &str) -> Result<Option<Value>, ProviderError>;
     fn delivery_release_renew(&self, job: &Value) -> Result<bool, ProviderError>;
     fn delivery_release_start_allowed(&self, job: &Value) -> Result<bool, ProviderError>;
-    fn delivery_release_checkpoint(&self, job: &Value, plan: &Value) -> Result<bool, ProviderError>;
+    fn delivery_release_checkpoint(&self, job: &Value, plan: &Value)
+        -> Result<bool, ProviderError>;
     fn delivery_release_finish(
         &self,
         job: &Value,
@@ -110,7 +116,10 @@ impl PostMergeStorePort for DeliveryVerificationStore {
             // Retain the actual nullable workflow_id in the
             // durable record. This private view exists solely
             // for the already-versioned Jenkins request.
-            let transport = job.get("transport_scope_id").cloned().unwrap_or(Value::Null);
+            let transport = job
+                .get("transport_scope_id")
+                .cloned()
+                .unwrap_or(Value::Null);
             job["workflow_id"] = transport;
             job
         }))

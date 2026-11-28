@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 use std::sync::Arc;
 
 use crate::store::{RejectedError, UsageConfig, UsageReadStore, UsageStoreError};
-use crate::types::{InvalidUsage, MAX_PROVIDERS, ProviderUsage, exact, identifier, is_uuid36};
+use crate::types::{exact, identifier, is_uuid36, InvalidUsage, ProviderUsage, MAX_PROVIDERS};
 
 pub const MAX_REQUEST_BYTES: usize = 8192;
 
@@ -51,9 +51,17 @@ pub fn destination(value: &str) -> Result<UsageDestination, RejectedError> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UsageCommand {
-    Overview { project_alias: String },
-    Detail { project_alias: String, agent_profile: String },
-    Refresh { project_alias: String, agent_profile: Option<String> },
+    Overview {
+        project_alias: String,
+    },
+    Detail {
+        project_alias: String,
+        agent_profile: String,
+    },
+    Refresh {
+        project_alias: String,
+        agent_profile: Option<String>,
+    },
 }
 
 impl UsageCommand {
@@ -73,25 +81,38 @@ pub fn decode(
 ) -> Result<UsageCommand, RejectedError> {
     let invalid = || RejectedError::new(400, "invalid_request");
     let parsed = (|| -> Result<UsageCommand, InvalidUsage> {
-        let object = body.as_object().ok_or(InvalidUsage("invalid usage fields"))?;
+        let object = body
+            .as_object()
+            .ok_or(InvalidUsage("invalid usage fields"))?;
         if object.get("request_id").and_then(Value::as_str) != Some(correlation) {
             return Err(InvalidUsage("invalid request correlation"));
         }
         let project = identifier(object.get("project_alias").unwrap_or(&Value::Null))?;
         let common = ["kind", "request_id", "project_alias"];
         match route {
-            UsageDestination::Overview if object.get("kind").and_then(Value::as_str) == Some("usage_overview") => {
+            UsageDestination::Overview
+                if object.get("kind").and_then(Value::as_str) == Some("usage_overview") =>
+            {
                 exact(body, &common)?;
-                Ok(UsageCommand::Overview { project_alias: project })
+                Ok(UsageCommand::Overview {
+                    project_alias: project,
+                })
             }
-            UsageDestination::Detail if object.get("kind").and_then(Value::as_str) == Some("usage_detail") => {
-                exact(body, &["kind", "request_id", "project_alias", "agent_profile"])?;
+            UsageDestination::Detail
+                if object.get("kind").and_then(Value::as_str) == Some("usage_detail") =>
+            {
+                exact(
+                    body,
+                    &["kind", "request_id", "project_alias", "agent_profile"],
+                )?;
                 Ok(UsageCommand::Detail {
                     project_alias: project,
                     agent_profile: identifier(&object["agent_profile"])?,
                 })
             }
-            UsageDestination::Refresh if object.get("kind").and_then(Value::as_str) == Some("usage_refresh") => {
+            UsageDestination::Refresh
+                if object.get("kind").and_then(Value::as_str) == Some("usage_refresh") =>
+            {
                 let keys: std::collections::HashSet<&str> =
                     object.keys().map(String::as_str).collect();
                 let common_set: std::collections::HashSet<&str> = common.iter().copied().collect();
@@ -118,10 +139,7 @@ pub fn decode(
 pub fn envelope(kind: &str, correlation: &str, fields: Value) -> Value {
     let mut event = Map::new();
     event.insert("kind".into(), Value::String(kind.to_string()));
-    event.insert(
-        "request_id".into(),
-        Value::String(correlation.to_string()),
-    );
+    event.insert("request_id".into(), Value::String(correlation.to_string()));
     if let Value::Object(extra) = fields {
         for (key, value) in extra {
             event.insert(key, value);
@@ -141,7 +159,10 @@ pub struct UsageService {
 }
 
 impl UsageService {
-    pub fn new(config: UsageConfig, store: Arc<dyn UsageReadStore>) -> Result<UsageService, String> {
+    pub fn new(
+        config: UsageConfig,
+        store: Arc<dyn UsageReadStore>,
+    ) -> Result<UsageService, String> {
         if config.profiles.len() > MAX_PROVIDERS {
             return Err("Too many configured usage profiles".to_string());
         }
@@ -149,7 +170,12 @@ impl UsageService {
     }
 
     fn profiles(&self, project: &str, profile: Option<&str>) -> Result<Vec<String>, RejectedError> {
-        if !self.config.allowed_projects.iter().any(|item| item == project) {
+        if !self
+            .config
+            .allowed_projects
+            .iter()
+            .any(|item| item == project)
+        {
             return Err(RejectedError::new(403, "denied"));
         }
         if let Some(profile) = profile {
@@ -231,9 +257,7 @@ impl UsageService {
                 .as_array()
                 .ok_or(InvalidUsage("invalid usage refresh receipt"))?;
             let profiles_ok = profiles.len() == aliases.len()
-                && profiles
-                    .iter()
-                    .all(|item| item.is_string())
+                && profiles.iter().all(|item| item.is_string())
                 && profiles
                     .iter()
                     .filter_map(Value::as_str)
@@ -247,27 +271,27 @@ impl UsageService {
                 return Err(InvalidUsage("invalid usage refresh receipt"));
             }
             let mut out = object.clone();
-            out.insert(
-                "profiles".into(),
-                Value::Array(profiles.iter().map(|item| item.clone()).collect()),
-            );
+            out.insert("profiles".into(), Value::Array(profiles.to_vec()));
             Ok(Value::Object(out))
         })();
         verified.map_err(|_| UsageStoreError::Rejected(RejectedError::new(503, "unavailable")))
     }
 }
 
+/// Selected, thread-safe acquisition of the usage read store.
+pub type UsageStoreFactory = Arc<dyn Fn(&UsageConfig) -> Arc<dyn UsageReadStore> + Send + Sync>;
+
 /// Stages config and a selected store factory without opening
 /// resources (UsageServiceFactory in usage_api.py).
 pub struct UsageServiceFactory {
     config: Option<UsageConfig>,
-    store_factory: Option<Arc<dyn Fn(&UsageConfig) -> Arc<dyn UsageReadStore> + Send + Sync>>,
+    store_factory: Option<UsageStoreFactory>,
 }
 
 impl UsageServiceFactory {
     pub fn new(
         config: Option<UsageConfig>,
-        store_factory: Option<Arc<dyn Fn(&UsageConfig) -> Arc<dyn UsageReadStore> + Send + Sync>>,
+        store_factory: Option<UsageStoreFactory>,
     ) -> Result<UsageServiceFactory, String> {
         if config.is_some() && store_factory.is_none() {
             return Err("UsageServiceFactory requires an injected store factory".to_string());
@@ -305,7 +329,10 @@ pub fn failed(correlation: Option<&str>, error: &RejectedError) -> (u16, Value) 
     };
     let mut fields = Map::new();
     fields.insert("code".into(), Value::String(code.to_string()));
-    (status, envelope("usage_failed", correlation, Value::Object(fields)))
+    (
+        status,
+        envelope("usage_failed", correlation, Value::Object(fields)),
+    )
 }
 
 pub fn dispatch(
@@ -329,7 +356,11 @@ pub fn dispatch(
         }
         (UsageDestination::Refresh, UsageCommand::Refresh { .. }) => Ok((
             202,
-            envelope("usage_refresh_queued", correlation, service.refresh(command)?),
+            envelope(
+                "usage_refresh_queued",
+                correlation,
+                service.refresh(command)?,
+            ),
         )),
         _ => Err(RejectedError::new(400, "invalid_request").into()),
     }
@@ -428,13 +459,8 @@ mod tests {
         let refresh_body = json!({"kind": "usage_refresh", "request_id": "req-2",
                                   "project_alias": "homelab"});
         let command = decode(UsageDestination::Refresh, "req-2", &refresh_body).unwrap();
-        let (status, body) = dispatch(
-            UsageDestination::Refresh,
-            "req-2",
-            &command,
-            Some(&service),
-        )
-        .unwrap();
+        let (status, body) =
+            dispatch(UsageDestination::Refresh, "req-2", &command, Some(&service)).unwrap();
         assert_eq!(status, 202);
         assert_eq!(body["event"]["kind"], json!("usage_refresh_queued"));
         assert_eq!(body["event"]["coalesced"], json!(true));

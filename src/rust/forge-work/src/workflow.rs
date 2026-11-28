@@ -16,7 +16,7 @@
 //! back, converging with Python's outcome.
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -519,28 +519,24 @@ impl BoundDelegatedAuthority {
     }
 }
 
-/// The native-policy predicate the store consults.
-pub type NativePolicyMatcher =
-    Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>;
-
 /// A sub-port's handle to the store it serves.
 ///
 /// The store's default sub-ports are created with the store itself
-/// (`Arc::new_cyclic`), so they hold a weak handle: the store owns its
+/// (`Rc::new_cyclic`), so they hold a weak handle: the store owns its
 /// hooks and the hooks never keep the store alive (no reference cycle).
 /// A provider built around an existing store holds a strong handle.
 #[derive(Clone)]
 pub enum StoreRef {
-    Strong(Arc<WorkflowStore>),
-    Weak(std::sync::Weak<WorkflowStore>),
+    Strong(Rc<WorkflowStore>),
+    Weak(std::rc::Weak<WorkflowStore>),
 }
 
 impl StoreRef {
     /// The store. A weak handle is only consulted from the store's own
     /// methods, so the store is alive whenever it is read.
-    pub fn get(&self) -> Arc<WorkflowStore> {
+    pub fn get(&self) -> Rc<WorkflowStore> {
         match self {
-            StoreRef::Strong(store) => Arc::clone(store),
+            StoreRef::Strong(store) => Rc::clone(store),
             StoreRef::Weak(store) => store
                 .upgrade()
                 .expect("a store's sub-port is only called while the store is alive"),
@@ -554,7 +550,7 @@ pub struct WorkflowStore {
     catalog: Box<dyn WorkflowCatalog>,
     tx_factory: Box<dyn WorkflowTxFactory>,
     decisions: Box<dyn WorkflowDecisionPort>,
-    native_policy_matches: NativePolicyMatcher,
+    native_policy_matches: crate::workflow_policy::SharedNativePolicyMatcher,
     /// Mirrors Python's `self.retry_events is not None`: the
     /// transaction itself implements RetryEvents; this flag says
     /// the durable retry-event accounting is engaged (vs. the
@@ -603,7 +599,7 @@ impl WorkflowStore {
         catalog: Box<dyn WorkflowCatalog>,
         tx_factory: Box<dyn WorkflowTxFactory>,
         decisions: Box<dyn WorkflowDecisionPort>,
-        native_policy_matches: NativePolicyMatcher,
+        native_policy_matches: crate::workflow_policy::SharedNativePolicyMatcher,
         retry_events_enabled: bool,
     ) -> WorkflowStore {
         WorkflowStore::with_hooks(
@@ -625,7 +621,7 @@ impl WorkflowStore {
         catalog: Box<dyn WorkflowCatalog>,
         tx_factory: Box<dyn WorkflowTxFactory>,
         decisions: Box<dyn WorkflowDecisionPort>,
-        native_policy_matches: NativePolicyMatcher,
+        native_policy_matches: crate::workflow_policy::SharedNativePolicyMatcher,
         retry_events_enabled: bool,
         hooks: StoreHooks,
     ) -> WorkflowStore {
@@ -689,7 +685,7 @@ impl WorkflowStore {
         self.config.repair_policy[key].as_i64().unwrap_or(0)
     }
 
-    pub(crate) fn native(&self) -> &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool {
+    pub(crate) fn native(&self) -> &crate::workflow_policy::NativePolicyMatcher<'_> {
         &*self.native_policy_matches
     }
 
@@ -2259,7 +2255,7 @@ impl WorkflowStore {
                 "enabled": workflow["enabled"],
                 "escalation_reason": workflow["escalation_reason"],
             });
-            match self.revive_in_tx(tx, &workflow, &prior, &key, &intent, note, &actor) {
+            match self.revive_in_tx(tx, &workflow, &prior, (&key, &intent), note, &actor) {
                 Ok(receipt) => Ok(receipt),
                 Err(RevivalError::Refused(refused)) => {
                     refusal = Some(refused);
@@ -2310,11 +2306,11 @@ impl WorkflowStore {
         tx: &mut dyn WorkflowTx,
         workflow: &Value,
         prior: &Value,
-        key: &str,
-        intent: &Value,
+        continuation: (&str, &Value),
         note: &str,
         actor: &Actor,
     ) -> Result<Value, RevivalError> {
+        let (key, intent) = continuation;
         let workflow_id = uuid_of(workflow, "workflow_id");
         let project = text(workflow, "project_alias");
         if bool_of(workflow, "enabled") || text(workflow, "phase") != "escalated" {
@@ -2502,7 +2498,7 @@ impl WorkflowStore {
 /// and thread lifecycle are host concerns (S7); the pass-through
 /// ingresses are the store's own methods (F4d).
 pub struct WorkflowCoordinator {
-    pub store: Arc<WorkflowStore>,
+    pub store: Rc<WorkflowStore>,
     pub worker_id: String,
     pub interval_seconds: u64,
     external_maintenance: Box<dyn RunOnceHook>,
@@ -2550,7 +2546,7 @@ impl ExternalWorkflowHook for NoExternalPass {
 
 impl WorkflowCoordinator {
     pub fn new(
-        store: Arc<WorkflowStore>,
+        store: Rc<WorkflowStore>,
         worker_id: &str,
         interval_seconds: u64,
         hooks: CoordinatorHooks,

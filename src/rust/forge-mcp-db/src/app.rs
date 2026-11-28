@@ -555,11 +555,9 @@ impl McpApp {
         loop {
             let more = has_more || size_cut;
             let following = offset + data.len() as i64;
-            let cursor = if more && binding.is_some() && following <= self.config.max_offset {
-                Some(self.make_cursor(binding.unwrap(), following))
-            } else {
-                None
-            };
+            let cursor = binding
+                .filter(|_| more && following <= self.config.max_offset)
+                .map(|binding| self.make_cursor(binding, following));
             let payload = json!({
                 "columns": columns,
                 "rows": data,

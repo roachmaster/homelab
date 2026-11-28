@@ -45,7 +45,7 @@ const OPTIONAL: [&str; 2] = ["discovering_task_id", "discovering_workflow_id"];
 const SEVERITIES: [&str; 4] = ["low", "medium", "high", "critical"];
 
 fn invalid(field: &str) -> WorkError {
-    WorkError::rejected(400, &format!("invalid_request:defect.{field}"))
+    WorkError::rejected(400, format!("invalid_request:defect.{field}"))
 }
 
 /// The bounded defect text rule: a non-blank string within
@@ -58,15 +58,15 @@ fn text_ok(value: &Value, maximum: usize) -> bool {
     };
     !text.trim().is_empty()
         && text.len() <= maximum
-        && !text.chars().any(|c| {
-            (c < ' ' && c != '\t' && c != '\n') || ('\u{7f}'..='\u{9f}').contains(&c)
-        })
+        && !text
+            .chars()
+            .any(|c| (c < ' ' && c != '\t' && c != '\n') || ('\u{7f}'..='\u{9f}').contains(&c))
 }
 
 /// validate_defect: the validated defect document (a deep
 /// copy, as Python's JSON round-trip returns), or None for a
 /// feature task. Every rejection is 400 invalid_request with
-/// the defect.<field> reason.
+/// the `defect.<field>` reason.
 pub fn validate_defect(
     task_kind: &str,
     defect: Option<&Value>,
@@ -316,8 +316,7 @@ mod tests {
             "invalid_request:defect.discovering_task_id"
         );
         let mut good_discoverer = good_defect();
-        good_discoverer["discovering_task_id"] =
-            json!("11111111-1111-1111-1111-111111111111");
+        good_discoverer["discovering_task_id"] = json!("11111111-1111-1111-1111-111111111111");
         assert!(validate_defect("defect", Some(&good_discoverer)).is_ok());
     }
 

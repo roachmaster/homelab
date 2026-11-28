@@ -83,10 +83,7 @@ pub trait ExternalDeliveryStorePort {
         worker_id: &str,
     ) -> Result<Option<ExternalDeliveryLease>, DeliveryStoreError>;
 
-    fn renew(
-        &mut self,
-        lease: &ExternalDeliveryLease,
-    ) -> Result<Value, DeliveryStoreError>;
+    fn renew(&mut self, lease: &ExternalDeliveryLease) -> Result<Value, DeliveryStoreError>;
 
     fn checkpoint(
         &mut self,
@@ -94,6 +91,10 @@ pub trait ExternalDeliveryStorePort {
         result: &Value,
     ) -> Result<Value, DeliveryStoreError>;
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Frozen external branch reservation SQL port preserves every workflow/root/task identity field. "
+    )]
     fn agent_branch_acquire(
         &mut self,
         project_alias: &str,
@@ -122,6 +123,10 @@ pub trait ExternalDeliveryStorePort {
         upsert: &BranchUpsert,
     ) -> Result<Value, DeliveryStoreError>;
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Frozen branch release SQL port preserves ownership epoch, close proof and exact merge identity. "
+    )]
     fn agent_branch_release(
         &mut self,
         project_alias: &str,

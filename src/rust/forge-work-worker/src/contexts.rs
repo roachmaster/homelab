@@ -193,7 +193,9 @@ pub fn validate_target(raw: &str, digest: &str) -> Result<serde_json::Value, Str
                 return Err("Missing frozen content protocol".to_string());
             }
             let identity = crate::external_identity::validate_content_identity(
-                candidate.get("content_identity").unwrap_or(&serde_json::Value::Null),
+                candidate
+                    .get("content_identity")
+                    .unwrap_or(&serde_json::Value::Null),
             )?;
             if identity["verification"]["generation"].as_str()
                 != candidate.get("prepare_action_id").and_then(|v| v.as_str())
@@ -203,7 +205,11 @@ pub fn validate_target(raw: &str, digest: &str) -> Result<serde_json::Value, Str
                 );
             }
         } else if candidate.contains_key("content_identity")
-            || candidate.get("identity_protocol").and_then(|v| v.as_str()).unwrap_or("legacy-v1") != "legacy-v1"
+            || candidate
+                .get("identity_protocol")
+                .and_then(|v| v.as_str())
+                .unwrap_or("legacy-v1")
+                != "legacy-v1"
         {
             return Err("Legacy target cannot reinterpret content identity".to_string());
         }
@@ -293,22 +299,20 @@ fn validate_source_integration(
         }
     }
     let lost = || "External review integration lost its immutable author source".to_string();
-    let authored = crate::cli_transport::parse_record(text.as_bytes(), "external")
-        .map_err(|_| lost())?;
+    let authored =
+        crate::cli_transport::parse_record(text.as_bytes(), "external").map_err(|_| lost())?;
     let authored = authored.as_object().ok_or_else(lost)?;
     let matches = integration["prepare_action_id"].as_str()
         == candidate["prepare_action_id"].as_str()
         && integration["source_base_revision"].as_str() == map["source_base_revision"].as_str()
         && integration["source_base_revision"].as_str() == authored["base_revision"].as_str()
-        && integration["source_candidate_commit"].as_str()
-            == authored["candidate_commit"].as_str()
+        && integration["source_candidate_commit"].as_str() == authored["candidate_commit"].as_str()
         && integration["source_candidate_commit"].as_str()
             == candidate["author_candidate_commit"].as_str()
         && integration["source_candidate_tree"].as_str() == authored["candidate_tree"].as_str()
         && integration["integration_base"].as_str() == candidate["integration_base"].as_str()
         && integration["candidate_tree"].as_str() == candidate["candidate_tree"].as_str()
-        && integration["integration_base"].as_str()
-            != integration["source_base_revision"].as_str();
+        && integration["integration_base"].as_str() != integration["source_base_revision"].as_str();
     if !matches {
         return Err(lost());
     }
@@ -481,7 +485,10 @@ mod target_tail_tests {
         // A v2 target without a content identity is refused by name.
         let mut v2 = target.clone();
         v2["version"] = serde_json::json!(2);
-        v2["candidate"].as_object_mut().unwrap().remove("source_integration");
+        v2["candidate"]
+            .as_object_mut()
+            .unwrap()
+            .remove("source_integration");
         v2["candidate"]["identity_protocol"] = serde_json::json!("content-v2");
         let raw = serde_json::to_string(&v2).unwrap();
         assert_eq!(

@@ -16,7 +16,7 @@ use nix::errno::Errno;
 use nix::fcntl::{openat, Flock, FlockArg, OFlag};
 use nix::sys::stat::{fstat, mkdirat, Mode};
 use nix::unistd::{fsync, geteuid};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::config::WorkerConfig;
@@ -94,20 +94,16 @@ impl ProviderCooldown {
                 }
                 Err(_) => return Err(protocol("Unsafe provider state root or ancestor")),
             };
-            let info = fstat(&current)
-                .map_err(|_| protocol("Unsafe provider state root or ancestor"))?;
+            let info =
+                fstat(&current).map_err(|_| protocol("Unsafe provider state root or ancestor"))?;
             let writable = info.st_mode & 0o022 != 0;
-            let sticky_parent =
-                !final_part && info.st_uid == 0 && info.st_mode & 0o1000 != 0;
+            let sticky_parent = !final_part && info.st_uid == 0 && info.st_mode & 0o1000 != 0;
             let owner_ok = if final_part {
                 info.st_uid == euid
             } else {
                 info.st_uid == 0 || info.st_uid == euid
             };
-            if info.st_mode & 0o170000 != 0o040000
-                || !owner_ok
-                || (writable && !sticky_parent)
-            {
+            if info.st_mode & 0o170000 != 0o040000 || !owner_ok || (writable && !sticky_parent) {
                 return Err(protocol("Unsafe provider state root or ancestor"));
             }
             directory = current;
@@ -118,7 +114,11 @@ impl ProviderCooldown {
     fn locked(&self) -> Result<LockedState, WorkerError> {
         let euid = geteuid().as_raw();
         let state = self.state_directory()?;
-        match mkdirat(&state, "provider-cooldowns", Mode::from_bits_truncate(0o700)) {
+        match mkdirat(
+            &state,
+            "provider-cooldowns",
+            Mode::from_bits_truncate(0o700),
+        ) {
             Ok(()) => {
                 let _ = fsync(&state);
             }
@@ -133,8 +133,7 @@ impl ProviderCooldown {
         )
         .map_err(|_| protocol("Unsafe provider cooldown directory"))?;
         drop(state);
-        let info = fstat(&directory)
-            .map_err(|_| protocol("Unsafe provider cooldown directory"))?;
+        let info = fstat(&directory).map_err(|_| protocol("Unsafe provider cooldown directory"))?;
         if info.st_mode & 0o170000 != 0o040000
             || info.st_uid != euid
             || info.st_mode & 0o777 != 0o700
@@ -222,8 +221,8 @@ fn read_state(directory: &OwnedFd, euid: u32) -> Result<Value, WorkerError> {
         .take((MAX_BYTES + 1) as u64)
         .read_to_end(&mut raw)
         .map_err(|_| protocol("Unsafe provider cooldown state"))?;
-    let value: Value = serde_json::from_slice(&raw)
-        .map_err(|_| protocol("Invalid provider cooldown state"))?;
+    let value: Value =
+        serde_json::from_slice(&raw).map_err(|_| protocol("Invalid provider cooldown state"))?;
     validate_state(&value)?;
     Ok(value)
 }
@@ -267,9 +266,15 @@ fn validate_state(value: &Value) -> Result<(), WorkerError> {
             .as_object()
             .ok_or_else(|| protocol("Invalid provider cooldown entry"))?;
         if item.len() != 5
-            || !["profile", "model", "attempt_id", "blocked_until", "diagnostic"]
-                .iter()
-                .all(|key| item.contains_key(*key))
+            || ![
+                "profile",
+                "model",
+                "attempt_id",
+                "blocked_until",
+                "diagnostic",
+            ]
+            .iter()
+            .all(|key| item.contains_key(*key))
         {
             return Err(protocol("Invalid provider cooldown entry"));
         }
@@ -321,8 +326,7 @@ impl CooldownPort for ProviderCooldown {
 
 impl ProviderCooldown {
     fn record_inner(&self, lease: &Lease, diagnostic: &Value) -> Result<(), WorkerError> {
-        forge_usage::diagnostics::quota_summary(diagnostic)
-            .map_err(|error| WorkerError::protocol(error))?;
+        forge_usage::diagnostics::quota_summary(diagnostic).map_err(WorkerError::protocol)?;
         let profile = &lease.agent_profile;
         let model = lease
             .recipe
@@ -344,8 +348,14 @@ impl ProviderCooldown {
             .map(|id| id.to_string())
             .map_err(|_| protocol("Invalid provider cooldown entry"))?;
         let mut locked = self.locked()?;
-        let entries = locked.value["entries"].as_array().cloned().unwrap_or_default();
-        if entries.iter().any(|item| item["attempt_id"] == json!(attempt)) {
+        let entries = locked.value["entries"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if entries
+            .iter()
+            .any(|item| item["attempt_id"] == json!(attempt))
+        {
             return Ok(());
         }
         let now = (self.clock)();
@@ -447,11 +457,7 @@ fn write_state(locked: &mut LockedState, payload: &[u8]) -> Result<(), WorkerErr
         let fd = openat(
             &locked.directory,
             name.as_str(),
-            OFlag::O_WRONLY
-                | OFlag::O_CREAT
-                | OFlag::O_EXCL
-                | OFlag::O_NOFOLLOW
-                | OFlag::O_CLOEXEC,
+            OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
             Mode::from_bits_truncate(0o600),
         )
         .map_err(|_| protocol("Unsafe provider cooldown state"))?;
@@ -583,7 +589,10 @@ mod tests {
         assert_eq!(advertised.len(), 1);
         cooldown.record_inner(&lease(), &diagnostic()).unwrap();
         let (allowed, advertised) = cooldown.selection_inner().unwrap();
-        assert!(allowed.is_empty(), "blocked profile is withheld: {allowed:?}");
+        assert!(
+            allowed.is_empty(),
+            "blocked profile is withheld: {allowed:?}"
+        );
         assert!(advertised.is_empty());
         // Recording the same attempt again is a no-op.
         cooldown.record(&lease(), &diagnostic());

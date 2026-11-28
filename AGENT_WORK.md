@@ -1,3 +1,359 @@
+## MCP host library ownership — isolated correction, 2026-11-28
+
+The incoming MCP host library defined Backend and input_schema directly in its
+crate root, violating the existing R3 declaration-only root rule. Both existing
+bodies now live unchanged in private owned backend/schema modules. Root public
+re-exports preserve Backend, input_schema, FakePort, LivePort, McpServer and
+ServerHandler; existing public modules and feature/dependency selection remain
+unchanged. No checker exemption or additional helper visibility was introduced.
+
+Validation: all 129 Rust-script tests; whole-workspace imports/core-layer,
+dependency, rustfmt and portal-style checks; strict all-target/all-feature MCP
+host Clippy; six MCP host unit tests; and its existing external scene BDD feature
+all passed. Moved enum/trait implementation and schema body compare byte-for-byte
+against the base. Evidence: /mnt/data/homelab-build/mcp-host-r3-evidence-20261128.
+No live configuration, SQL, CI policy, service or remote Git state changed.
+
+## Main-stage evidence and failure-tail projection — 2026-11-28
+
+DeliveryVerificationStore now delegates the existing typed main-stage evidence
+port to its selected reconciler store. PostMergeWorker uses that port directly;
+it no longer silently looks for a nonexistent adapter `_store` field. Evidence
+requires the Root-owned protected receipt and log, exact request/source identity,
+matching receipt/log checksums, and a current lease before each write. Native
+branch persistence, SQL grants, task-log authorization and CI plans are unchanged.
+
+Failed main checks retain a bounded labeled diagnostic tail and the verified
+action/check/exit header. Redaction precedes UTF-8 suffix selection; the stored
+summary stays within 2048 bytes. Generic diagnostic_text retains its head
+semantics and non-check failures keep their previous projection.
+
+The old composed adapter deterministically persisted zero of 46 main stages.
+The corrected composition passes 60 focused memory tests plus three real owned
+PostgreSQL tests covering terminal main persistence and existing exact-action /
+commit/correlation task-log authorization. No operator UUID receives task-log
+ownership, and changed receipts/logs/identities, symlinks and lost leases cannot
+persist evidence. Private logs: /mnt/data/homelab-build/main-stage-tail-evidence-20261128.
+No runtime, database, CI selector or remote branch was changed.
+
+## Repair-only author selection — isolated follow-up, 2026-11-28
+
+Based on preserved source49efdebb, the Python API accepts optional typed
+`delivery_repair_authors` with per-native-project author aliases. The configured
+profile must be enabled, distinct from the independent reviewer and bound to its
+owned feature branch. Frozen-role compatibility is required. A pure derived
+WorkflowPolicy changes only the author and its Plan/implementation recipes;
+normal project author defaults, reviewer, revision allowances and existing frozen
+workflows remain unchanged. Existing public WorkConfig positional fields retain
+their ordering; the optional field is appended and absent by default.
+
+The normal DeliveryRepairConsumerFactory freezes this derived snapshot/digest
+for new repair requests. WorkService selects it only for the private
+WorkSubmit.delivery_admission path; WorkStore's existing atomic leased operation
+and stored-intent check runs first. No HTTP field or new authority is introduced.
+An already saved exact old normal-policy request can complete normal admission
+without rewriting its checkpoint, source identity or spent lineage budget.
+
+All61 tests across four unchanged normal MainProcessProvider module runs pass,
+with zero skips/errors/failures: new repair selector7, existing delivery21,
+frozen-role compatibility6 and API27. New actual disposable PostgreSQL checks
+use content-v2 identities and follow Plan publication, independent Plan approval,
+Codex implementation claim, local checks, independent code review and publication
+claim. They preserve an ordinary Grok workflow and both frozen snapshots, reject
+public override/changed command/fake lease and exercise saved-old-request replay.
+Artifacts and model/check providers are fixtures; no model, GitHub or deployment
+proof is claimed. Package/source syntax and diff checks pass; no SQL migration,
+helper policy path set, runtime source closure, live state or service changed.
+
+A root-private unselected API draft adds only the repair selector while keeping
+normal Grok and the current empty repair-admission project list. Its config hash
+and manifest transition must be reviewed against the incoming major source change
+before selection. The Rust runtime does not yet implement this new Python-only
+selector and must not be selected with it. This isolated commit is not pushed or
+deployed; the orchestrator owns incoming-main reconciliation and qualification.
+
+## Bounded eager release turns — 2026-11-28
+
+A pending release requeues after five seconds. The publisher's required yield
+followed by its idle five-second wait can repeatedly choose the same oldest
+unresolved release before newer verified work. A ready release-only adapter now
+runs at most eight sequential normal release turns before yielding; it stops
+on idle or cancellation and propagates errors. Each ordinary worker turn ends
+before the next lease is acquired. Source observation and its idle policy are
+unchanged; release-disabled publication constructs no release adapter/provider.
+
+A shared factory-owned stop event covers the selected worker, adapter and host.
+No claim/finish, actor, cleanup, journal, retry budget, scope or SQL contract is
+changed. Historical unresolved rollback remains pending; no terminal cleanup
+or supersession is invented. The eight-turn bound handles the measured one
+poison/three stale/fresh queue, including stale turns longer than five seconds;
+it is not a global fairness guarantee for an arbitrarily large poison backlog.
+The independent unstarted-supersession SQL-port test does not claim the existing
+ReleaseWorker skips Root reconciliation for those rows. That remains separate.
+
+Tests include deterministic old starvation versus new bounded progress, normal
+ReleaseWorker plus memory store, real disposable PostgreSQL claim/finish ports,
+shared cancellation, idle/exception bounds and ready factory selection. Only
+the current reviewed publication-context SHA is renewed for this composition;
+historical literal maps and authority AST pins remain unchanged. Evidence:
+/mnt/data/homelab-build/codex-release-fairness-20261128-evidence/.
+Private four-row release isolation remains a separately reviewed operator;
+no live service, claim, journal, SQL or publication action was executed here.
+
+## Disposable database scope — 2026-11-28
+
+All disposable PostgreSQL tests must honor the shared `PG16_AVAILABLE` selection,
+including tests that create their own clusters. Branch backend checks set
+`FORGE_DISABLE_DISPOSABLE_POSTGRES=1` and must never start PostgreSQL. Main checks
+reject that disabled selection and require the complete database inventory with
+zero skips. Owning a private fixture does not exempt it from this scope contract.
+
+## Runtime and rollout boundary — 2026-11-28
+
+The production runtime remains the Python API, native workers and publisher,
+with a matched portal host/assets/WASM/actor release. The Rust ports are compiled
+and tested source components; their presence on main does not activate a Rust
+worker or authorize a PostgreSQL proxy cutover. Persistent feature-branch
+ownership and independent Plan/code review still apply to every implementation.
+
+Migration54 is additive proxy preparation. Its new roles, fixed entry points,
+read grants and preparation authentication preserve the existing direct callers.
+Deploy this phase with database proxy transport disabled. Migration55 remains a
+separate guarded cutover; all seven unmigrated caller groups still block it.
+The deferred digest-column drop also retains its separate owner-review boundary.
+Never rewrite applied migrations, historical results, receipts or retry budgets.
+
+Normal delivery must distinguish source preparation from Jenkins execution.
+Permanent, exact source rejection ends verification with actionable paths;
+transient observations retain their reconciliation path. Defect discovery and
+retry/claim adapters use closed owner/project-scoped queries and existing atomic
+operations, retaining direct predecessor behavior and spent retry history.
+Runtime selectors and durable deployment receipts, rather than source presence,
+determine what is live. Preserve the operational evidence for each transition.
+
+## Closed proxy adapters for coordinator reads and claim — 2026-11-28
+
+The actual PostgreSQL proxy tests exposed unwired Python coordinator paths:
+M53 defect discovery still emitted a correlated raw SELECT, retry allowance
+updates emitted unsupported SAVEPOINTs, and claim/recovery still emitted raw
+joins and row-lock SQL despite existing closed ports. The coordinator now uses
+the existing named recovery/allowance/workflow reads and M54 atomic allowance
+and lease composites. Direct predecessor connections retain their original
+savepoint error isolation and lease locking. Action JSON restores only known
+UUID and timezone-aware timestamp fields; opaque receipts remain unchanged.
+
+Four new closed reads cover the two exact defect-discovery variants and the
+two retained-source projections. They remain coordinator-only and bind the
+configured owner plus project; retained-source reads also bind workflow and
+keep the two immutable completion/prefix predicates. Defect reads preserve
+root filtering, workflow membership, external visibility, ordering and the
+50-row ceiling. Historical pre-M53 fixtures project only the exact new defect
+read identities when those columns are genuinely absent. Existing migration
+SQL, all historical pins, authority-method AST guards, parser rejection of
+SAVEPOINT and the seven blocked cutover groups remain unchanged. The exact
+method inventory drops only the eight newly wired methods; other coordinator
+mutators and M55 cutover are still held.
+
+All four original failures were reproduced before the fix and pass afterward.
+Validation includes real disposable PostgreSQL proxy and direct workflow/
+retained-source/budget/legacy contracts, negative owner/caller/extra-argument
+checks, immutable receipt/counter assertions, source-boundary checks and the
+264-test preflight with zero skips. Private logs are under
+/mnt/data/homelab-build/codex-proxy-runtime-20261128-evidence/.
+No remote publication or live database/service change was made here.
+
+## Bounded PostgreSQL adapter lint correction — 2026-11-28
+
+The isolated feature/codex correction based on e41d45df makes forge-postgres pass
+Rust 1.97.1 Clippy across all targets and features with warnings denied. Three
+private helper boundaries now group existing request fields; four frozen public
+SQL adapter boundaries retain their signatures with explicitly approved, local
+lint expectations. Unused stored control fields are removed while retaining the
+original typed row-decoding checks. The external workflow store uses Rc only
+inside its existing owning workflow thread; channel and global Send boundaries
+remain unchanged. Other changes preserve existing expressions and timeout behavior.
+
+A real context validation defect was exposed by the lint gate: shifting a signed
+i64 by 63 made the positive Jenkins counter range empty. Build and non-null queue
+IDs now accept positive i64 values and reject zero, negatives, floats, booleans,
+and JSON integers at or above 2^63. Existing missing-field and null queue handling
+is unchanged. The boundary regression covers 1, i64::MAX, -1, 0 and oversized JSON
+integers. All 508 SQL-bearing Rust string tokens match the base source exactly;
+SQL files, other crates, lockfiles, permissions and public signatures are untouched.
+
+All 36 unit tests and the actual disposable PostgreSQL 16 schema/grant smoke test
+pass with zero failures or ignored tests. The latter ran as UID 1000 with the
+PostgreSQL-disable variable unset and completed in 4.19 seconds. Selected package
+formatting and diff checks pass. Evidence logs are outside source under
+/mnt/data/homelab-build/cohort54-forward-20261128/postgres-*.log, with an owned
+external Cargo target directory. This is package qualification; full workspace CI
+and production operations remain with the orchestrator. No push, live SQL,
+service/config change or model call was performed.
+
+## Jenkins and usage lint qualification — 2026-11-28
+
+The incoming Rust Jenkins/usage ports failed the unchanged warnings-as-errors
+gate. Narrow corrections use equivalent character/Option/vector idioms, named
+factory/HTTP response/test-record aliases and test-scoped imports. The private
+usage snapshot helper groups its source/version provenance without changing any
+public provider call or snapshot field. Jenkins' private relay error removes an
+unused detail payload while retaining the same redacted invalid-request output.
+An unused test setup helper is removed; all test cases and assertions remain.
+
+The public owned JenkinsCommand variants retain their existing constructors and
+payload types. The coordinating agent reviewed the one declaration-scoped
+large_enum_variant expectation at that bounded decode boundary. No global lint
+allowance, threshold change, dependency, lockfile, SQL or other crate edit is
+included. Both packages pass full-feature/all-target Clippy with warnings denied
+and selected formatting. All86 full-feature unit/integration/documentation tests
+pass with zero ignored cases using the pinnedRust1.97.1 toolchain and the validated
+incoming-lock registry. The owned target cache is outside source; the warm source
+cache was copied without sharing writable files. Private evidence is under
+/mnt/data/homelab-build/codex-clippy-services-20261128-evidence/.
+Source publication and live operations remain with the orchestrator.
+
+## Bounded Rust adapter lint correction — 2026-11-28
+
+On isolated feature/codex based at437c0030, the assigned MCP DB, portal release
+actor, agent driver and Studio crates now pass Rust1.97.1 Clippy across all targets
+and features with warnings denied. Existing API/JSON fields, authentication
+checks, permission bounds and receipt booleans are unchanged. Private actor
+receipt flags are grouped into a named proof value; OAuth credential branches
+produce the same values without overwritten initial assignments. Studio's public
+eight-argument submit contract has one explicitly approved targeted lint expect
+with a reason; no blanket allow or gate change was added. Previously masked
+Studio binary iterator warnings are fixed with equivalent error-discarding loops.
+
+All33 selected package tests pass with zero failures/ignored tests, and selected
+package formatting plus diff checks pass. Cargo uses the validated incoming-lock
+registry with an owned external target directory; lockfiles and other crates are
+untouched. Logs are outside source under
+/mnt/data/homelab-build/cohort54-forward-20261128/adapters-*.log. This is bounded
+package qualification, not full-workspace or production runtime proof. No source
+push, deployment, live database/config/service change or model call was performed.
+
+## Reviewed proxy context pin renewal — 2026-11-28
+
+Jenkins146 reproduced the exact PG proxy context test failure after the reviewed
+47938954 migration-stage correction. Seven management SQL files now use54/55
+instead of the stale52/53 proxy stage numbers. Their context pins now name the
+exact SQL bytes already reviewed and exercised by the20 real PostgreSQL checks.
+A Git-object comparison binds every renewed value directly to47938954. The
+context path set, historical migration pins and authority AST assertions retain
+their prior scope. All35 boundary tests and264 ci-preflight tests pass with
+zero skips using the validated incoming-lock Cargo cache and pinnedRust1.97.1.
+An AST comparison proves the boundary module changes only those seven literal
+values; all existing test methods and other pin maps remain identical. Private
+proof: /mnt/data/homelab-build/codex-proxy-pins-20261128-evidence/.
+
+## Incoming Rust formatting checkpoint — 2026-11-28
+
+PR32 advanced main during the qualified ABI19/schema53 rollout. Its new Rust
+sources fail the existing workspace formatting gate. The pinned CI Rust1.97.1
+formatter has now formatted 178 files, all belonging to that incoming change.
+A whitespace-only empty line in workflow_decision.rs had to be removed before
+rustfmt could complete. No dependency, SQL, application algorithm or gate was
+changed by this formatting checkpoint. Full corrected-source CI remains required.
+
+The previous schema53 proof and failed/stopped-runtime activation receipts remain
+historical evidence; they do not qualify schema54. The portal is available through
+the old qualified API with repair admission held. Model workers remain stopped
+until a reviewed current-main successor and its additive M54 preparation are
+qualified. The separate M55 proxy cutover remains disabled.
+
+## Historical upgrade boundaries after proxy preparation — 2026-11-28
+
+The default registry now stops at proxy preparation54. Current-runtime AGY,
+policy, Muse, author-handoff and independent-review fixtures retain their actual
+latest apply/replay and original receipt/counter/history assertions, with54 as
+the expected endpoint. Exact pre-proxy ACL preservation remains separately pinned
+to53 using a test-only registry copy and the unchanged current grant/verifier
+surface; no applied migration or production fixture implementation is modified.
+
+The historical read adapter handles only the exact named Jenkins-family query
+when the real pre-M39 binding columns are absent. It rejects invented main-action
+authority and disappears when actual columns exist. Its real M32-to54 test proves
+both sides while retaining all old review/history checks. Owner-fence checks keep
+private-helper and write denials, assert the exact54 read grant, and reproduce the
+original SELECT denial on an owned53 fixture. The HBA test now selects the actual
+legacy and preparation setup checks, preserving every original invalid Muse rule
+case and restoring both owned HBA and ident files without reload or service I/O.
+
+Four focused real-PostgreSQL boundary regressions pass. The complete nine-module
+qualification passes all94 tests with zero skips:32 policy/AGY,40 independent
+review/superseding/handoff/intake, and22 schema/owner/Muse-reader tests. Final logs
+are under /mnt/data/homelab-build/codex-legacy54-fixtures-20261128-evidence.
+No live SQL, source push, deployment, budget reset or historical receipt rewrite
+was performed.
+
+## Proxy migration renumbering correction — 2026-11-28
+
+PR32 added proxy preparation/cutover as migrations 54/55, after the already
+applied continuation-lineage 52 and defect-task 53. Its management stage guards
+still tested 52/53: isolated preparation failed strict verification, and the
+real cutover entry point silently skipped 55 because defect migration 53 existed.
+This correction changes only those proxy stage references and related fixture
+stages/documentation; all migration file bytes are preserved. Two missing
+END IF terminators in the merged feedback verifier are restored so the M51/M53
+normalizations remain independent of the M55 ACL branch. Proxy tests now
+use the actual apply-cutover.sql instead of a copied guard. The production
+UNMIGRATED_CALLERS refusal remains intact: this does not authorize cutover.
+
+The accidentally tracked test bytecode is removed without relaxing source
+artifact admission. Disposable PostgreSQL results and source review follow below;
+no live SQL, provisioning, service change, push or historical receipt rewrite.
+
+Twenty focused checks pass on disposable PostgreSQL16: strict verification at
+53, default apply/replay stopping at 54, runtime privilege checks at 54/55,
+actual explicit cutover/replay preserving the existing 53 record and 55 timestamp,
+negative write/catalog checks, preparation HBA/peer/TCP behavior, and the unchanged
+unmigrated-caller guard inventory. The peer fixture restores its ident file after
+its own temporary mappings. Logs are private under
+/mnt/data/homelab-build/grok-permission-matcher-20261128/proxy-renumber-*.log.
+The full tracked-source artifact audit still flags four synthetic Rust test
+literals; the web helper owns their separate eligibility correction. No claim
+of a clean complete candidate or full-main qualification is made here.
+
+## Source-admissible Rust security fixtures — 2026-11-28
+
+Four newly merged Rust files embedded complete fake credential/key test strings
+which the unchanged source artifact guard correctly rejected. Only fixture
+literal spelling now uses concat!: every runtime test string is byte-for-byte
+identical and every existing redaction/rejection assertion remains unchanged.
+No credential detector, real credential handling, production algorithm or grant
+changed. Actual artifact_guard rejects all four predecessor source files and
+accepts all four corrected files; an independent literal comparison confirms
+identical fixture bytes. Both dependency-free diagnostic modules compile using
+the pinned Rust1.97.1 and pass all six real unit cases.
+
+Whole-package tests cannot resolve new-main uuid1.29.3 in the existing default
+offline index; no dependency fetch/install was attempted. Read-only rustfmt1.9.0
+reports 100 existing formatting files across these three newly merged crates.
+The exact list is retained in the private codex-main-source-rejection-20261128
+-evidence directory. No broad formatting is included in this narrow correction;
+root owns final merged formatting/package qualification. No push/live action.
+
+## Permanent main source-preparation rejection — 2026-11-28
+
+PostMergeWorker previously retried a typed permanent SourceArtifactRejected as
+an unavailable observation before submission. It now terminates only the exact
+unsubmitted main preparation: candidate commit, candidate tree and prepared tree
+must match the leased main identity. The existing bounded structured rejection
+receipt retains paths/codes and process_started=false. No Jenkins request, CI
+result, cleanup claim, public DTO or schema is invented. Transient errors and
+already-checkpointed requests retain their existing reconciliation behavior.
+
+A real owned Git fixture tracks __pycache__/cache.pyc and exercises the normal
+PostMergeVerificationProvider through PostMergeWorker. Original e7 source fails
+the new terminal assertion (pending); the correction passes without a binding,
+spool submission, remote mutation or subsequent claim. Negative cases cover all
+three source identities, lost lease/start permission, cancellation, saved request
+and the existing 65KiB worker receipt bound, measured as Unicode UTF8 rather
+than ASCII escape spelling. All 32 maximum-size legal Unicode paths remain
+terminal; genuinely oversized mutated receipts fail closed. SQL has a separate
+262144-byte jsonb bound. All55 focused post-merge/provider/delivery tests pass.
+No production action or source push occurred.
+
 ## Grok ACP progress and permission separation — 2026-11-28
 
 This correction is based exactly on reviewed main f5e057c1. The new automatic
@@ -2705,3 +3061,65 @@ recipe catalog document, addressed by digest in forge-work).
 forge-postgres 16/16 unit tests, fmt + check-deps green. Next per the
 full-migration map (~/workspace/deploy-design/full-migration-map.yaml):
 S2 forge-work-worker.
+
+## Proxy-client test cleanup — 2026-11-28
+
+The fake CursorTest connection now registers close as a unittest cleanup. Its
+LISTEN test verifies cleanup stops the actual polling thread and closes both
+notification pipe handles. Previously the immediate-empty fake long poll left a
+daemon spinning through all later backend modules. A bounded isolated
+reproduction left that thread alive and consumed 255ms CPU in 250ms idle time;
+explicit close stopped it. All 70 proxy-client tests pass after the fix. Runtime
+transport, production polling, database scope and CI gates are unchanged.
+
+Jenkins153 is superseded through its normal cancellation/cleanup port; its
+partial results do not qualify this successor. Evidence is retained privately
+under /mnt/data/homelab-build/codex-j153-latency-20261128/.
+
+The defect persistence fixture now uses the same PG16_AVAILABLE selection as
+the PostgreSQL setup it borrows. Branch selection passes five memory cases and
+excludes the one database case; normal main selection runs that real database
+case successfully. Jenkins154 was cancelled through its normal trusted cleanup
+port before qualifying the corrected successor. No database test is removed.
+
+The branch runner also requires that the declaring module expose its canonical
+PG16_AVAILABLE flag. The defect fixture imports it directly; a regression runs
+the actual branch runner and proves executed=5, db_not_run=1 and no unexpected
+skips. Proxy-client and backend-scope suites pass all 86 tests. A read-only
+inventory checks all setup-owning, inherited and per-method database fixtures.
+Jenkins155 was normally cancelled before its backend gate; no pass is claimed.
+
+## Identity snapshot lock release — 2026-11-28
+
+Jenkins156 genuinely failed release check22: a changed identity was reported as
+Busy after prior writes. No cancellation or successful qualification is claimed.
+The Rust snapshot port only dropped its lock File after publishing; a concurrent
+fork can retain the shared open file description until exec, keeping flock held.
+A deterministic owned fork reproduction demonstrates that lifetime. Exact old
+source plus the actual strict JSON parser reproduces Busy under concurrent spawn;
+the fixed source passes 25 equivalent runs. This is a lifecycle correction, not
+an assertion relaxation or a retry allowance change.
+
+The snapshot port now explicitly unlocks after publishing on both success and
+returned failure. The original write failure takes precedence; unlock failure
+cannot return success. Private-file validation, nonblocking exclusive admission,
+identity comparison, atomic rename, fsync and source authority remain unchanged.
+A deterministic duplicate-descriptor regression proves exclusion during the
+write and immediate reacquisition after either result while a shared descriptor
+remains alive. Three focused release tests, strict all-target/all-feature Clippy
+and formatting pass. Full normal qualification is still required. Evidence:
+/mnt/data/homelab-build/identity-lock-j156-20261128/.
+
+The complete publication crate also passes all 78 release tests concurrently
+under the pinned Rust1.97.1 toolchain after this correction.
+
+## Release batch installer payload — 2026-11-28
+
+The complete branch backend run executed1446 memory tests with759 declared
+database exclusions and no unexpected skips. Its sole failure was the existing
+transitive-import installer check: work_publication imports work_delivery_batch,
+but setup-runner.sh had omitted that required payload. The installer now publishes
+the owned module with its other delivery modules. The unchanged import-closure
+regression and shell syntax check pass. No installer was executed live. Jenkins157
+was superseded through the normal cancellation/cleanup port; it is not qualified.
+The complete corrected branch suite must pass before another Jenkins submission.

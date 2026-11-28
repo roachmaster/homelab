@@ -11,29 +11,29 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use forge_usage::collector::{
-    UsageCollector, UsageCollectorFactory, UsagePollStore, read_hmac_key, system_monotonic,
+    read_hmac_key, system_monotonic, UsageCollector, UsageCollectorFactory, UsagePollStore,
 };
 use forge_usage::muse_process::{AuthLease as UsageAuthLease, AuthStageFailure, AuthStager};
 use forge_usage::provider::{
-    AdapterVersions, MuseProcessDeps, UsageProviderConfig, UsageProviderFactory, system_clock,
+    system_clock, AdapterVersions, MuseProcessDeps, UsageProviderConfig, UsageProviderFactory,
 };
 use forge_usage::rpc::{
     GroupSignal, HostSystem, MetadataProcess, MetadataProcessConfig, MetadataProcessFactory,
     ProcessPorts, ProviderFailure, ProviderResult, SpawnSpec, StreamEvent, StreamKind,
 };
 use forge_usage::store::{UsageConfig, UsageProfileInfo};
-use nix::sys::signal::{Signal, killpg};
-use nix::unistd::{Gid, Pid, Uid, getegid, geteuid, getpgrp, getpid};
+use nix::sys::signal::{killpg, Signal};
+use nix::unistd::{getegid, geteuid, getpgrp, getpid, Gid, Pid, Uid};
 
 use crate::config::WorkerConfig;
 use crate::config_profile::AccountConfig;
 use crate::native_auth::AuthLease;
-use crate::provider_auth::{StageFailure, stage_muse_auth};
+use crate::provider_auth::{stage_muse_auth, StageFailure};
 use crate::runner::MUSE_BINARY_SHA256;
 
 struct StdProcess {
@@ -75,7 +75,7 @@ impl MetadataProcess for StdProcess {
                 Ok(Some(status)) => {
                     return Ok(status
                         .code()
-                        .unwrap_or_else(|| status.signal().map(|s| -(s as i32)).unwrap_or(-1)));
+                        .unwrap_or_else(|| status.signal().map(|s| -s).unwrap_or(-1)));
                 }
                 Ok(None) => {
                     if Instant::now() >= deadline {
@@ -347,8 +347,16 @@ pub fn create_worker_usage_collector(
                 } else {
                     None
                 },
-                if ports.euid == 0 { Some(account.uid) } else { None },
-                if ports.euid == 0 { Some(account.gid) } else { None },
+                if ports.euid == 0 {
+                    Some(account.uid)
+                } else {
+                    None
+                },
+                if ports.euid == 0 {
+                    Some(account.gid)
+                } else {
+                    None
+                },
                 15.0,
             )?)
         } else {
@@ -372,6 +380,47 @@ pub fn create_worker_usage_collector(
         system_monotonic(),
     )?;
     factory.create()
+}
+
+/// UsageCollectorPort adapter over forge-usage's UsageCollector:
+/// the collector reports per-poll outcomes as a bool internally;
+/// the worker port surface is fallible-only, so the bool is
+/// discarded (Python's collector likewise swallows poll failures).
+pub struct WorkerUsageCollector {
+    inner: UsageCollector,
+}
+
+impl WorkerUsageCollector {
+    pub fn new(inner: UsageCollector) -> WorkerUsageCollector {
+        WorkerUsageCollector { inner }
+    }
+}
+
+impl crate::ports_worker::UsageCollectorPort for WorkerUsageCollector {
+    fn run_once(&mut self) -> Result<(), crate::error::WorkerError> {
+        let _ = self.inner.run_once();
+        Ok(())
+    }
+}
+
+/// The CollectorFactory product for the host: builds the poll store
+/// through the injected store factory (the factory receives only
+/// the config, so the store is composed per call, as in Python).
+pub type UsagePollStoreFactory =
+    Arc<dyn Fn(&WorkerConfig) -> Arc<dyn UsagePollStore> + Send + Sync>;
+
+pub fn usage_collector_factory(
+    store_factory: UsagePollStoreFactory,
+) -> crate::worker::CollectorFactory {
+    Box::new(move |config: &WorkerConfig| {
+        let store = store_factory(config);
+        match create_worker_usage_collector(config, store) {
+            Ok(Some(collector)) => Ok(Some(Box::new(WorkerUsageCollector::new(collector))
+                as Box<dyn crate::ports_worker::UsageCollectorPort>)),
+            Ok(None) => Ok(None),
+            Err(message) => Err(crate::error::WorkerError::protocol(message)),
+        }
+    })
 }
 
 #[cfg(test)]
@@ -399,10 +448,7 @@ mod tests {
         let factory = StdProcessFactory;
         let mut process = factory
             .spawn(&SpawnSpec {
-                argv: vec![
-                    "/bin/echo".to_string(),
-                    "codex-cli 1.2.3".to_string(),
-                ],
+                argv: vec!["/bin/echo".to_string(), "codex-cli 1.2.3".to_string()],
                 env: Vec::new(),
                 run_uid: None,
                 run_gid: None,
@@ -420,42 +466,4 @@ mod tests {
         }
         assert_eq!(String::from_utf8(text).unwrap(), "codex-cli 1.2.3\n");
     }
-}
-
-/// UsageCollectorPort adapter over forge-usage's UsageCollector:
-/// the collector reports per-poll outcomes as a bool internally;
-/// the worker port surface is fallible-only, so the bool is
-/// discarded (Python's collector likewise swallows poll failures).
-pub struct WorkerUsageCollector {
-    inner: UsageCollector,
-}
-
-impl WorkerUsageCollector {
-    pub fn new(inner: UsageCollector) -> WorkerUsageCollector {
-        WorkerUsageCollector { inner }
-    }
-}
-
-impl crate::ports_worker::UsageCollectorPort for WorkerUsageCollector {
-    fn run_once(&mut self) -> Result<(), crate::error::WorkerError> {
-        let _ = self.inner.run_once();
-        Ok(())
-    }
-}
-
-/// The CollectorFactory product for the host: builds the poll store
-/// through the injected store factory (the factory receives only
-/// the config, so the store is composed per call, as in Python).
-pub fn usage_collector_factory(
-    store_factory: Arc<dyn Fn(&WorkerConfig) -> Arc<dyn UsagePollStore> + Send + Sync>,
-) -> crate::worker::CollectorFactory {
-    Box::new(move |config: &WorkerConfig| {
-        let store = store_factory(config);
-        match create_worker_usage_collector(config, store) {
-            Ok(Some(collector)) => Ok(Some(Box::new(WorkerUsageCollector::new(collector))
-                as Box<dyn crate::ports_worker::UsageCollectorPort>)),
-            Ok(None) => Ok(None),
-            Err(message) => Err(crate::error::WorkerError::protocol(message)),
-        }
-    })
 }

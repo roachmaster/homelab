@@ -193,6 +193,10 @@ impl Store {
         Store { dsn }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the public Studio submission contract and its callers"
+    )]
     pub fn submit(
         &self,
         project: &(String, String),
@@ -293,7 +297,7 @@ impl Store {
         let dsn = self.dsn.clone();
         block_on(async move {
             let mut client = connect(&dsn).await?;
-            let mut tx = begin_tx(&mut client, false).await?;
+            let tx = begin_tx(&mut client, false).await?;
             let result = async {
                 let id = Uuid::parse_str(&claim.build_id)
                     .map_err(|error| StoreError::Db(error.to_string()))?;

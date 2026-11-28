@@ -8,9 +8,9 @@ builds the cluster from initdb (trust auth for the functional
 cluster; the admission cluster installs the real HBA template),
 applies provision.sql + migrations to a target version, and tears
 the cluster down afterwards. The suite runs inside the
-py-agent-runner gate (unittest discover); the
-disposable-Postgres flag does not affect it (this suite owns its
-cluster, it does not use the shared fixture).
+py-agent-runner gate (unittest discover). It owns its cluster but
+honors the shared PG16 availability policy: branch scope declares
+these database tests not run; main scope executes them with zero skips.
 """
 
 import http.client
@@ -30,6 +30,7 @@ import psycopg2.extras
 
 import forge_pg_proxy as proxy
 import proxy_verify
+from work_pg_fixture import PG16_AVAILABLE
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
@@ -56,12 +57,9 @@ def _free_port():
 def _parse_apply_sql():
     """(version, filename, name) triples from apply.sql, in order.
 
-    apply.sql stops at the preparation migration (51); cutover (52)
-    applies only via apply-cutover.sql, so the count is not pinned
-    to 50 — assert the files and values agree and the versions
-    increase from 1 with no skip (the merged chain is contiguous:
-    backup/main's consolidation took 41-49 and the proxy pair was
-    renumbered 42/43 to 50/51)."""
+    apply.sql stops at preparation 54; cutover 55 is explicit. Verify the
+    merged migration chain remains contiguous without hard-coded old numbers.
+    """
     with open(os.path.join(SQL_DIR, "apply.sql"),
                encoding="utf-8") as handle:
         text = handle.read()
@@ -87,7 +85,7 @@ def _normalize(sql):
 
 
 def _parse_cutover_sql():
-    """(version, filename, name) for the cutover migration (52) from
+    """(version, filename, name) for the cutover migration (55) from
     apply-cutover.sql: the only path that applies it."""
     with open(os.path.join(SQL_DIR, "apply-cutover.sql"),
                encoding="utf-8") as handle:
@@ -262,32 +260,13 @@ class ScratchCluster:
                   "GRANT CONNECT ON DATABASE forge_agent TO muse_events")
 
     def apply_cutover(self):
-        """Apply ONLY migration 52 via apply-cutover.sql's model, as
-        forge_agent_owner, in one transaction: the cutover guard
-        (39 applied) plus the migration and its schema_migrations
-        row. The caller re-runs apply_grant_files() afterwards, the
-        way setup-postgres.sh does (the grant files re-apply the
-        cutover revocation when 52 is recorded)."""
-        version, filename, name = _parse_cutover_sql()
-        path = os.path.join(SQL_DIR, "migrations", filename)
-        script = os.path.join(self.root, "apply-cutover.sql")
-        with open(script, "w", encoding="utf-8") as handle:
-            handle.write("\n".join([
-                "\\set ON_ERROR_STOP on",
-                "BEGIN ISOLATION LEVEL READ COMMITTED;",
-                "SELECT pg_catalog.pg_advisory_xact_lock(20261111, 1);",
-                "DO $cutover_guard$ BEGIN IF NOT EXISTS("
-                "SELECT 1 FROM forge_agent.schema_migrations"
-                " WHERE version = 54 AND name = 'pg_proxy_preparation'"
-                ") THEN RAISE EXCEPTION 'cutover requires the"
-                " preparation migration (51) first'; END IF; END"
-                " $cutover_guard$;",
-                f"\\ir {path}",
-                "INSERT INTO forge_agent.schema_migrations"
-                f" (version, name) VALUES ({version}, '{name}');",
-                "COMMIT;",
-            ]) + "\n")
-        self.psql_file("forge_agent", script,
+        """Exercise the real explicit cutover entry point, not a copied guard.
+
+        This fixture is isolated: production still refuses cutover while the
+        inventoried unmigrated callers remain. The real script must distinguish
+        existing M53 defect metadata from the independent M55 cutover record.
+        """
+        self.psql_file("forge_agent", os.path.join(SQL_DIR, "apply-cutover.sql"),
                        role="postgres", set_role="forge_agent_owner")
 
     def apply_grant_files(self):
@@ -310,6 +289,7 @@ class ScratchCluster:
         return result.returncode == 0, result.stdout + result.stderr
 
 
+@unittest.skipUnless(PG16_AVAILABLE, "Requires owned PostgreSQL16")
 class ProxyDbTestCase(unittest.TestCase):
     """Base: one scratch cluster per test class, at M50 + grants."""
 
@@ -323,7 +303,7 @@ class ProxyDbTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls.cluster = ScratchCluster()
         cls.cluster.start()
-        cls.cluster.apply_migrations(51)
+        cls.cluster.apply_migrations(54)
         cls.cluster.apply_grant_files()
         cls.proxy_port = _free_port()
         cls.tokens = {}
@@ -1549,6 +1529,44 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
             [("queued", 1)])
         self.assertEqual(record["next_sequence"], 1)
 
+    def test_retained_incident_named_read_preserves_binding_and_scope(self):
+        from work_workflow_continuation import retained_sources
+        task = self.insert_task()
+        self._task_ids.append(task)
+        workflow = self._insert_workflow(task)
+        binding = {'id':task, 'revision':'1', 'status':'failed', 'latest_attempt_id':None}
+        self.fixture_sql("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,finish_receipt) VALUES(%s,'mission-control','homelab','decide','policy-continuation:retained-proof','completed',%s)",
+                         (workflow, json.dumps({'receipt':{'retained_sources':[binding]}})))
+        with self.store._transaction(read_only=True) as cursor:
+            self.assertEqual(retained_sources(cursor,workflow,owner='mission-control',project='homelab'), [binding])
+            self.assertEqual(retained_sources(cursor,workflow,owner='mission-control',project='other'), [])
+            with self.assertRaises(ValueError):
+                retained_sources(cursor,workflow,owner='mission-control')
+
+    def test_filed_defect_named_reads_preserve_discovery_scope(self):
+        from test_work_defect import defect
+        from uuid import UUID
+        discovered = self.insert_task()
+        unrelated = self.insert_task()
+        filed = self.insert_task()
+        self._task_ids.extend([discovered, unrelated, filed])
+        payload = {**defect(), 'discovering_task_id':discovered}
+        self.fixture_sql("UPDATE forge_agent.coding_tasks SET task_kind='defect',defect=%s,title='Scoped defect' WHERE id=%s",
+                         (json.dumps(payload), filed))
+        def read(name, args):
+            from proxy_client import run_read_query
+            with self.store._transaction(read_only=True) as cursor:
+                return run_read_query(cursor, name, args)
+        for name in ('filed_defects', 'external_filed_defects'):
+            args = {'owner_id':'mission-control', 'project_alias':'homelab',
+                    'task_id':discovered, 'workflow_id':None}
+            rows = read(name, args)
+            self.assertEqual(rows, [{'task_id':filed,'title':'Scoped defect','severity':'high'}])
+            self.assertEqual(read(name,{**args,'task_id':unrelated}), [])
+            self.assertEqual(read(name,{**args,'project_alias':'elsewhere'}), [])
+        detail = self.store.get(project_alias='homelab', task_id=UUID(discovered))
+        self.assertEqual(detail['filed_defects'], [{'task_id':filed,'title':'Scoped defect','severity':'high'}])
+
     def test_get_read_through_the_proxy(self):
         from uuid import UUID
         task_id = self.insert_task()
@@ -1872,13 +1890,20 @@ class MigratedCoordinatorDbTest(ProxyDbTestCase, FixtureMixin):
             project_workflows={"homelab": _ClaimPolicy()},
             allowed_modes={"plan", "review", "implement"},
             profiles={})
+        self.fixture_sql("UPDATE forge_agent.coding_review_budget SET repair_rounds=2,stagnant_rounds=1 WHERE root_task_id=%s", (task_id,))
+        prior_events = self.fixture_sql("SELECT sequence,event_kind,payload FROM forge_agent.coding_events WHERE task_id=%s ORDER BY sequence", (task_id,))
         flow = WorkflowStore(config, None, self.store)
         with self.store._transaction() as cursor:
+            flow._amend_retry_allowance(cursor, "homelab", task_id)
             flow._amend_retry_allowance(cursor, "homelab", task_id)
         rows = self.fixture_sql(
             "SELECT policy FROM forge_agent.coding_review_budget"
             " WHERE root_task_id = %s", (task_id,))
         self.assertEqual(rows[0][0]["max_rounds"], AGENT_RETRY_LIMIT)
+        self.assertEqual(self.fixture_sql("SELECT repair_rounds,stagnant_rounds FROM forge_agent.coding_review_budget WHERE root_task_id=%s", (task_id,)), [(2,1)])
+        after_events = self.fixture_sql("SELECT sequence,event_kind,payload FROM forge_agent.coding_events WHERE task_id=%s ORDER BY sequence", (task_id,))
+        self.assertEqual(after_events[:len(prior_events)], prior_events)
+        self.assertEqual(len(after_events), len(prior_events)+1)
 
     def test_cancel_workflow_through_the_proxy(self):
         from uuid import UUID
@@ -1954,10 +1979,30 @@ class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
             "SELECT version FROM forge_agent.schema_migrations"
             " ORDER BY version")
         versions = [row[0] for row in rows]
-        self.assertEqual(versions[-1], 51)
-        self.assertNotIn(52, versions)
+        self.assertEqual(versions[-1], 54)
+        self.assertNotIn(55, versions)
         version, _, name = _parse_cutover_sql()
         self.assertEqual((version, name), (55, "pg_proxy_cutover"))
+
+    def test_real_default_apply_replay_stays_at_preparation(self):
+        self.cluster.psql_file("forge_agent", os.path.join(SQL_DIR, "apply.sql"),
+                               set_role="forge_agent_owner")
+        self.assertEqual(self.fixture_sql(
+            "SELECT version,name FROM forge_agent.schema_migrations"
+            " WHERE version>=53 ORDER BY version"),
+            [(53, "defect_tasks"), (54, "pg_proxy_preparation")])
+
+    def test_previous_defect53_stage_still_verifies(self):
+        cluster = ScratchCluster()
+        try:
+            cluster.start()
+            cluster.apply_migrations(53)
+            cluster.apply_grant_files()
+            ok, output = cluster.run_verifier(
+                os.path.join(SQL_DIR, "management", "verify.sql"))
+            self.assertTrue(ok, output)
+        finally:
+            cluster.stop()
 
     def test_verify_sql_passes_at_preparation(self):
         ok, output = self.cluster.run_verifier(
@@ -1975,7 +2020,7 @@ class MigrationStageTest(ProxyDbTestCase, FixtureMixin):
         cluster = ScratchCluster()
         try:
             cluster.start()
-            cluster.apply_migrations(39)
+            cluster.apply_migrations(53)
             with self.assertRaises(AssertionError):
                 cluster.apply_cutover()
         finally:
@@ -1988,11 +2033,11 @@ class CutoverStageTest(ProxyDbTestCase, FixtureMixin):
 
     @classmethod
     def setUpClass(cls):
-        # Like ProxyDbTestCase but at M51: preparation, cutover,
+        # Like ProxyDbTestCase but at M54: preparation, cutover,
         # then the grant files again (the cutover re-revocation).
         cls.cluster = ScratchCluster()
         cls.cluster.start()
-        cls.cluster.apply_migrations(51)
+        cls.cluster.apply_migrations(54)
         cls.cluster.apply_grant_files()
         cls.cluster.apply_cutover()
         cls.cluster.apply_grant_files()
@@ -2009,6 +2054,22 @@ class CutoverStageTest(ProxyDbTestCase, FixtureMixin):
         return self.cluster.run_verifier(
             os.path.join(SQL_DIR, "management", name),
             set_role=set_role)
+
+    def test_real_cutover_is_independent_of_defect53_and_replays(self):
+        expected = [(53, "defect_tasks"), (54, "pg_proxy_preparation"),
+                    (55, "pg_proxy_cutover")]
+        statement = ("SELECT version,name FROM forge_agent.schema_migrations"
+                     " WHERE version>=53 ORDER BY version")
+        self.assertEqual(self.fixture_sql(statement), expected)
+        stamp = self.fixture_sql(
+            "SELECT applied_at FROM forge_agent.schema_migrations WHERE version=55")
+        self.cluster.apply_cutover()
+        self.cluster.apply_grant_files()
+        self.assertEqual(self.fixture_sql(statement), expected)
+        self.assertEqual(self.fixture_sql(
+            "SELECT applied_at FROM forge_agent.schema_migrations WHERE version=55"), stamp)
+        ok, output = self._verify("verify.sql")
+        self.assertTrue(ok, output)
 
     def test_verify_sql_passes_post_cutover(self):
         ok, output = self._verify("verify.sql")
@@ -2098,6 +2159,7 @@ class CutoverStageTest(ProxyDbTestCase, FixtureMixin):
         self.assertTrue(ok, output)
 
 
+@unittest.skipUnless(PG16_AVAILABLE, "Requires owned PostgreSQL16")
 class AdmissionTest(unittest.TestCase):
     """Finding 11: the real HBA templates admit and refuse on real
     TCP (SCRAM) and local (peer) connections."""
@@ -2107,7 +2169,7 @@ class AdmissionTest(unittest.TestCase):
         cls.cluster = ScratchCluster()
         cls.port = _free_port()
         cls.cluster.start(tcp_port=cls.port)
-        cls.cluster.apply_migrations(51)
+        cls.cluster.apply_migrations(54)
         cls.cluster.apply_grant_files()
         cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
         cls.cluster.install_hba("postgres-worker-hba.conf")
@@ -2164,6 +2226,7 @@ class AdmissionTest(unittest.TestCase):
                 self.cluster.connect("forge_agent", user)
 
 
+@unittest.skipUnless(PG16_AVAILABLE, "Requires owned PostgreSQL16")
 class PreparationAdmissionTest(unittest.TestCase):
     """Finding 3: the preparation HBA template admits the proxy OS
     user as each caller role via local peer auth (six peer rules +
@@ -2193,7 +2256,7 @@ class PreparationAdmissionTest(unittest.TestCase):
         cls.cluster = ScratchCluster()
         cls.port = _free_port()
         cls.cluster.start(tcp_port=cls.port)
-        cls.cluster.apply_migrations(51)
+        cls.cluster.apply_migrations(54)
         cls.cluster.apply_grant_files()
         cls.cluster.set_password("forge_gpu_worker", GPU_PASSWORD)
         cls.cluster.set_password("muse_events", MUSE_EVENTS_PASSWORD)
@@ -2274,24 +2337,31 @@ class PreparationAdmissionTest(unittest.TestCase):
         import pwd
         me = pwd.getpwuid(os.getuid()).pw_name
         ident_path = os.path.join(self.cluster.data, "pg_ident.conf")
-        with open(ident_path, "a", encoding="utf-8") as handle:
-            handle.write(f"\nforge-preparation {me} forge_agent\n")
-            handle.write(
-                f"forge-preparation {me} forge_coding_worker\n")
-        self.cluster.reload()
-        for user in ("forge_agent", "forge_coding_worker"):
-            conn = self.cluster.connect("forge_agent", user)
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT current_user")
-                self.assertEqual(cur.fetchone()[0], user)
-            finally:
-                conn.close()
-        # A role this OS user is not mapped to is refused by the
-        # first matching peer rule: peer failure does not fall
-        # through to the fixture's trailing trust line.
-        with self.assertRaises(psycopg2.OperationalError):
-            self.cluster.connect("forge_agent", "forge_gpu_worker")
+        with open(ident_path, encoding="utf-8") as handle:
+            original_ident = handle.read()
+        try:
+            with open(ident_path, "a", encoding="utf-8") as handle:
+                handle.write(f"\nforge-preparation {me} forge_agent\n")
+                handle.write(
+                    f"forge-preparation {me} forge_coding_worker\n")
+            self.cluster.reload()
+            for user in ("forge_agent", "forge_coding_worker"):
+                conn = self.cluster.connect("forge_agent", user)
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT current_user")
+                    self.assertEqual(cur.fetchone()[0], user)
+                finally:
+                    conn.close()
+            # A role this OS user is not mapped to is refused by the
+            # first matching peer rule: peer failure does not fall
+            # through to the fixture's trailing trust line.
+            with self.assertRaises(psycopg2.OperationalError):
+                self.cluster.connect("forge_agent", "forge_gpu_worker")
+        finally:
+            with open(ident_path, "w", encoding="utf-8") as handle:
+                handle.write(original_ident)
+            self.cluster.reload()
 
     def test_preparation_preserves_direct_tcp_access(self):
         for user, password in (("forge_gpu_worker", GPU_PASSWORD),

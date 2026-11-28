@@ -21,9 +21,7 @@ use crate::external_workflow::{
     denied, mismatch, not_reviewable, opt_uuid, reconcile_required, ExternalWorkflowStore,
 };
 use crate::model_route::format_iso;
-use crate::operator_dtos::{
-    ExternalPlanApproveOverride, ExternalRetryPolicyContinuation,
-};
+use crate::operator_dtos::{ExternalPlanApproveOverride, ExternalRetryPolicyContinuation};
 use crate::retry_policy::AGENT_RETRY_LIMIT;
 use crate::work_error::WorkError;
 use crate::workflow::{actor_json, int_of, operator_actor, text, uuid_of};
@@ -55,12 +53,10 @@ pub(crate) fn verify_plan_bindings(
     let bindings_ok = target["workflow_id"].as_str()
         == Some(&uuid_of(w, "workflow_id").to_string())
         && target["review_id"].as_str() == Some(&uuid_of(review, "review_id").to_string())
-        && target["reviewer_task_id"].as_str()
-            == Some(&uuid_of(&critic, "id").to_string())
+        && target["reviewer_task_id"].as_str() == Some(&uuid_of(&critic, "id").to_string())
         && target["reviewer_profile"].as_str() == Some(text(w, "reviewer_profile"))
         && target["source_task_id"].as_str() == Some(&uuid_of(&source, "id").to_string())
-        && target["source_assignment_id"].as_str()
-            == review["source_assignment_id"].as_str()
+        && target["source_assignment_id"].as_str() == review["source_assignment_id"].as_str()
         && target["source_sha256"] == review["source_sha256"]
         && target["target_kind"].as_str() == Some("plan");
     let deep_ok = uuid_of(w, "active_task_id") == uuid_of(&source, "id")
@@ -107,11 +103,11 @@ pub(crate) fn verify_plan_result(
     tx: &mut dyn ExternalTx,
     w: &Value,
     review: &Value,
-    target: &Value,
-    critic: &Value,
+    participants: (&Value, &Value),
     evidence: &mut dyn EvidenceLock,
     mismatch_on_validation: bool,
 ) -> Result<(Value, Value, Value), WorkError> {
+    let (target, critic) = participants;
     let receipt = &review["receipt"];
     if !receipt.is_object() || receipt["decision"].as_str() != Some("revise") {
         return Err(mismatch());
@@ -122,19 +118,21 @@ pub(crate) fn verify_plan_result(
         critic_attempt,
         opt_uuid(receipt, "reconciliation_receipt_id"),
     ) {
-        (Some(attempt_id), Some(receipt_id)) => tx.reconciliation_by(
-            project,
-            uuid_of(critic, "id"),
-            attempt_id,
-            receipt_id,
-        )?,
+        (Some(attempt_id), Some(receipt_id)) => {
+            tx.reconciliation_by(project, uuid_of(critic, "id"), attempt_id, receipt_id)?
+        }
         _ => None,
     };
     let Some(reconciliation) = reconciliation else {
         return Err(reconcile_required());
     };
     let result = store
-        .native_artifact(tx, w, critic, Some(int_of(&reconciliation, "task_revision")))?
+        .native_artifact(
+            tx,
+            w,
+            critic,
+            Some(int_of(&reconciliation, "task_revision")),
+        )?
         .filter(|result| {
             result["attempt_id"] == review["reviewer_attempt_id"]
                 && result["sha256"] == review["reviewer_result_sha256"]
@@ -170,9 +168,8 @@ pub(crate) fn verify_plan_result(
         return Err(mismatch());
     }
     let proof = &reconciliation["stop_proof"];
-    let unit = critic_attempt.and_then(|attempt_id| {
-        tx.attempt_unit_name(attempt_id).ok().flatten()
-    });
+    let unit =
+        critic_attempt.and_then(|attempt_id| tx.attempt_unit_name(attempt_id).ok().flatten());
     if proof["scope_stopped"].as_bool() != Some(true)
         || proof["source"].as_str() != Some("systemd")
         || unit.is_none()
@@ -202,8 +199,7 @@ pub(crate) fn bound_artifact(
             artifact["assignment_id"] == review["source_assignment_id"]
                 && artifact["sha256"] == review["source_sha256"]
                 && artifact["content"] == target["source_content"]
-                && sha256_hex(text(artifact, "content").as_bytes())
-                    == text(artifact, "sha256")
+                && sha256_hex(text(artifact, "content").as_bytes()) == text(artifact, "sha256")
         })
         .ok_or_else(mismatch)?;
     Ok(artifact)
@@ -380,8 +376,7 @@ impl ExternalWorkflowStore {
                 tx,
                 &w,
                 &review,
-                &target,
-                &critic,
+                (&target, &critic),
                 &mut *evidence,
                 false,
             )?;
@@ -557,11 +552,8 @@ impl ExternalWorkflowStore {
                 return Err(denied());
             }
             if let Some(existing) = tx.existing_override(uuid_of(&w, "workflow_id"))? {
-                if existing["idempotency_key"].as_str()
-                    == Some(command.idempotency_key.as_str())
-                {
-                    if existing["intent_digest"].as_str() != Some(intent_digest.as_str())
-                    {
+                if existing["idempotency_key"].as_str() == Some(command.idempotency_key.as_str()) {
+                    if existing["intent_digest"].as_str() != Some(intent_digest.as_str()) {
                         return Err(WorkError::rejected(409, "idempotency_conflict"));
                     }
                     return Ok(existing["receipt"].clone());
@@ -607,8 +599,7 @@ impl ExternalWorkflowStore {
             let review = tx
                 .review_row(command.source_review_id, LockMode::Update)?
                 .filter(|review| {
-                    text(review, "target_kind") == "plan"
-                        && text(review, "status") == "revise"
+                    text(review, "target_kind") == "plan" && text(review, "status") == "revise"
                 })
                 .ok_or_else(not_reviewable)?;
             if uuid_of(&review, "source_assignment_id") != command.plan_assignment_id
@@ -616,20 +607,16 @@ impl ExternalWorkflowStore {
             {
                 return Err(mismatch());
             }
-            let target = validate_target(
-                text(&review, "target_json"),
-                text(&review, "target_sha256"),
-            )
-            .map_err(|_| mismatch())?;
-            let (root, source, critic) =
-                verify_plan_bindings(self, tx, &w, &review, &target)?;
+            let target =
+                validate_target(text(&review, "target_json"), text(&review, "target_sha256"))
+                    .map_err(|_| mismatch())?;
+            let (root, source, critic) = verify_plan_bindings(self, tx, &w, &review, &target)?;
             let (_result, verdict, _reconciliation) = verify_plan_result(
                 self,
                 tx,
                 &w,
                 &review,
-                &target,
-                &critic,
+                (&target, &critic),
                 &mut *evidence,
                 true,
             )?;
@@ -644,10 +631,8 @@ impl ExternalWorkflowStore {
                 "source_sha256": artifact["sha256"],
                 "feedback": verdict,
             }));
-            let exhausted = evidence.exhausted_planning_event(
-                uuid_of(&review, "review_id"),
-                &evidence_digest,
-            )?;
+            let exhausted = evidence
+                .exhausted_planning_event(uuid_of(&review, "review_id"), &evidence_digest)?;
             let retry_event_id: Option<Uuid> = match &exhausted {
                 Some(event) => {
                     if escalation_reason != PLANNING_EXHAUSTION_REASON {

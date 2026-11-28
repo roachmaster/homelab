@@ -11,7 +11,7 @@
 //! `run()` and drives shutdown through the shared stop flag plus
 //! `close()`'s quiescence checks.
 
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use crate::config::JenkinsConfig;
 use crate::events::{
-    sanitize_error_message, sanitize_error_message_fallback, sha256_canonical,
-    ConsumptionReceipt, JenkinsDeliveryRecord, JenkinsEventRecord,
+    sanitize_error_message, sanitize_error_message_fallback, sha256_canonical, ConsumptionReceipt,
+    JenkinsDeliveryRecord, JenkinsEventRecord,
 };
 use crate::store::{JenkinsStoreError, JenkinsStorePort};
 
@@ -234,12 +234,7 @@ impl JenkinsEventConsumer {
             .push(heartbeat);
         let result = handler.handle(&mut *self.store, event, delivery);
         let _ = done_tx.send(());
-        let handle = self
-            .shared
-            .lock()
-            .expect("shared lock")
-            .heartbeats
-            .pop();
+        let handle = self.shared.lock().expect("shared lock").heartbeats.pop();
         if let Some(handle) = handle {
             let deadline = Instant::now() + Duration::from_secs_f64(HEARTBEAT_STOP_SECONDS);
             while !handle.is_finished() && Instant::now() < deadline {
@@ -731,7 +726,10 @@ mod tests {
             ac: Option<&str>,
             l: i64,
         ) -> Result<Value, JenkinsStoreError> {
-            self.0.lock().expect("lock").list_deliveries(p, c, s, a, ac, l)
+            self.0
+                .lock()
+                .expect("lock")
+                .list_deliveries(p, c, s, a, ac, l)
         }
         fn claim_next(
             &mut self,
@@ -740,7 +738,10 @@ mod tests {
             lease: Option<i64>,
         ) -> Result<Option<(JenkinsEventRecord, JenkinsDeliveryRecord)>, JenkinsStoreError>
         {
-            self.0.lock().expect("lock").claim_next(names, worker, lease)
+            self.0
+                .lock()
+                .expect("lock")
+                .claim_next(names, worker, lease)
         }
         fn renew_lease(
             &mut self,

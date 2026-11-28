@@ -132,16 +132,6 @@ fn read_json(path: &Path, owner: Option<u32>) -> Result<Value, PublicationError>
     serde_json::from_slice(&raw).map_err(|_| err("invalid_json"))
 }
 
-fn read_json_max(
-    path: &Path,
-    maximum: usize,
-    owner: Option<u32>,
-) -> Result<Value, PublicationError> {
-    let raw =
-        read_private(path, maximum, owner).map_err(|message| PublicationError::new(&message))?;
-    serde_json::from_slice(&raw).map_err(|_| err("invalid_json"))
-}
-
 fn write_json(path: &Path, value: &Value) -> Result<(), PublicationError> {
     durable_json(path, value, 0o600).map_err(|message| PublicationError::new(&message))
 }
@@ -932,7 +922,7 @@ impl NativeJenkinsVerification {
 }
 
 /// Object-safe view of the worker's generic
-/// AgentBranchProvider<S> for composition.
+/// `AgentBranchProvider<S>` for composition.
 pub trait BranchProviderObject: Send {
     fn persistent_enabled(&self) -> bool;
     fn acquire(
@@ -1347,10 +1337,11 @@ impl NativeJenkinsVerification {
             for known in [
                 &reservation.head_commit_sha,
                 &reservation.active_candidate_commit,
-            ] {
-                if let Some(known) = known {
-                    allowed.push(Some(known.clone()));
-                }
+            ]
+            .into_iter()
+            .flatten()
+            {
+                allowed.push(Some(known.clone()));
             }
             if !allowed.contains(&remote) {
                 return Err(err("native_branch_identity_changed"));
@@ -2050,17 +2041,18 @@ impl NativeJenkinsVerification {
         }
         let scoped_profile =
             self.contract.profile == SCOPED_PROFILE || self.contract.profile == EVENT_PROFILE;
-        let source_branch: Option<String> = if scoped_profile && publication.is_some() {
-            Some(text(publication.as_ref().expect("checked"), "branch").to_string())
-        } else if let Some(branch) = &persistent_branch {
-            Some(branch.clone())
-        } else if head == expected_main {
-            Some("main".to_string())
-        } else {
-            publication
-                .as_ref()
-                .map(|receipt| text(receipt, "branch").to_string())
-        };
+        let source_branch: Option<String> =
+            if let Some(receipt) = publication.as_ref().filter(|_| scoped_profile) {
+                Some(text(receipt, "branch").to_string())
+            } else if let Some(branch) = &persistent_branch {
+                Some(branch.clone())
+            } else if head == expected_main {
+                Some("main".to_string())
+            } else {
+                publication
+                    .as_ref()
+                    .map(|receipt| text(receipt, "branch").to_string())
+            };
         let branch_scope = derive_branch_scope(&head, &expected_main, source_branch.as_deref())
             .map_err(|error| PublicationError::new(&error.to_string()))?;
         let has_snapshot = self.identities.snapshot_exists(text(job, "review_id"));
@@ -2741,7 +2733,7 @@ impl NativeJenkinsVerification {
                         }
                         if !report.checks_passed {
                             return Err(NativeRunError::Failure(VerificationFailure {
-                                report: report.into_data(),
+                                report: Box::new(report.into_data()),
                             }));
                         }
                         let plan = self.plan(binding).map_err(NativeRunError::Publication)?;
@@ -2780,7 +2772,7 @@ impl NativeJenkinsVerification {
                         )
                         .map_err(NativeRunError::Publication)?;
                     return Err(NativeRunError::Failure(VerificationFailure {
-                        report: report.into_data(),
+                        report: Box::new(report.into_data()),
                     }));
                 }
             }
@@ -2807,7 +2799,7 @@ impl NativeJenkinsVerification {
             )
             .map_err(NativeRunError::Publication)?;
         Err(NativeRunError::Failure(VerificationFailure {
-            report: report.into_data(),
+            report: Box::new(report.into_data()),
         }))
     }
 
@@ -2909,7 +2901,7 @@ impl NativeJenkinsVerification {
         // The source fence defers its cancellation to just after
         // the observation aborts, matching the durable outcome of
         // the Python closure (cancel intent + no observation).
-        let mut store = self.take_store();
+        let store = self.take_store();
         let result = {
             use std::cell::Cell;
             let inactive = Cell::new(false);
@@ -2917,7 +2909,7 @@ impl NativeJenkinsVerification {
             let store_cell = std::cell::RefCell::new(store);
             let require_source = || -> Result<(), DeliveryError> {
                 let mut store = store_cell.borrow_mut();
-                match self_current(&mut *store, binding_ref) {
+                match self_current(&mut store, binding_ref) {
                     Ok(true) => Ok(()),
                     Ok(false) => {
                         inactive.set(true);
@@ -3296,8 +3288,7 @@ pub fn create_native_jenkins(
         .jenkins_delivery_config
         .clone()
         .ok_or_else(|| "Native Jenkins delivery configuration is unavailable".to_string())?;
-    let raw =
-        read_private(&config_path, 65_536, Some(effective_uid())).map_err(|message| message)?;
+    let raw = read_private(&config_path, 65_536, Some(effective_uid()))?;
     let raw: Value =
         serde_json::from_slice(&raw).map_err(|_| "Invalid delivery configuration".to_string())?;
     let mut selected = DeliveryConfig::parse(&raw).map_err(|error| error.to_string())?;
@@ -3310,7 +3301,7 @@ pub fn create_native_jenkins(
     } else {
         "detached"
     };
-    let expected_plan = contract.plan(expected_scope).map_err(|message| message)?;
+    let expected_plan = contract.plan(expected_scope)?;
     let legacy_logical_ok = {
         let names: std::collections::HashSet<&str> = config
             .required_hosted_checks
@@ -3411,7 +3402,7 @@ impl ChecksPort for NativeJenkinsVerification {
             Ok(report) => Ok(report.into_data()),
             Err(NativeRunError::Failure(failure)) => Err(failure),
             Err(NativeRunError::Publication(error)) => Err(VerificationFailure {
-                report: funnel_report(error.code()).into_data(),
+                report: Box::new(funnel_report(error.code()).into_data()),
             }),
         }
     }

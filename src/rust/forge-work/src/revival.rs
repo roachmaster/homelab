@@ -6,8 +6,8 @@
 
 use serde_json::Value;
 
-use crate::work_error::WorkError;
 use crate::retry_events::is_id;
+use crate::work_error::WorkError;
 
 pub const REVIVAL_POLICY: &str = "forge-native-revival-v1";
 pub const REVIVAL_SOURCE_PREFIX: &str = "native-revival:";
@@ -46,8 +46,13 @@ impl Refused {
 /// updated_at).
 pub fn superseded_by_revival(task: &Value, floor: Option<&str>) -> bool {
     let Some(floor) = floor else { return false };
-    matches!(task["status"].as_str(), Some("cancelled") | Some("cancel_requested"))
-        && task["updated_at"].as_str().map(|at| at <= floor).unwrap_or(false)
+    matches!(
+        task["status"].as_str(),
+        Some("cancelled") | Some("cancel_requested")
+    ) && task["updated_at"]
+        .as_str()
+        .map(|at| at <= floor)
+        .unwrap_or(false)
 }
 
 /// The revive_workflow argument validation (_validate): the note
@@ -85,11 +90,20 @@ mod tests {
     #[test]
     fn superseded_only_before_the_floor() {
         let task = json!({"status": "cancelled", "updated_at": "2026-11-20T10:00:00+00:00"});
-        assert!(superseded_by_revival(&task, Some("2026-11-21T10:00:00+00:00")));
-        assert!(!superseded_by_revival(&task, Some("2026-11-19T10:00:00+00:00")));
+        assert!(superseded_by_revival(
+            &task,
+            Some("2026-11-21T10:00:00+00:00")
+        ));
+        assert!(!superseded_by_revival(
+            &task,
+            Some("2026-11-19T10:00:00+00:00")
+        ));
         assert!(!superseded_by_revival(&task, None));
         let queued = json!({"status": "queued", "updated_at": "2026-11-20T10:00:00+00:00"});
-        assert!(!superseded_by_revival(&queued, Some("2026-11-21T10:00:00+00:00")));
+        assert!(!superseded_by_revival(
+            &queued,
+            Some("2026-11-21T10:00:00+00:00")
+        ));
     }
 
     #[test]

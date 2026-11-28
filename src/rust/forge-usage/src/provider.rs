@@ -6,10 +6,12 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use crate::muse_process::MuseUsageProcess;
-use crate::rpc::{CodexMetadataRPC, MetadataProcessConfig, ProcessPorts, ProviderFailure, ProviderResult};
+use crate::rpc::{
+    CodexMetadataRPC, MetadataProcessConfig, ProcessPorts, ProviderFailure, ProviderResult,
+};
 use crate::types::{
-    InvalidUsage, MAX_BUCKETS, MAX_DAILY, UsageResult, account_activity, allowance, boolean,
-    counter, identifier, text, validate_snapshot,
+    account_activity, allowance, boolean, counter, identifier, text, validate_snapshot,
+    InvalidUsage, UsageResult, MAX_BUCKETS, MAX_DAILY,
 };
 
 /// A clock returning the current UTC instant as an RFC3339 `Z` string.
@@ -70,11 +72,15 @@ fn empty_allowance(state: &str, reason: Option<&str>) -> Value {
     Value::Object(object)
 }
 
+struct SnapshotProvenance<'a> {
+    source: &'a str,
+    version: &'a str,
+}
+
 fn snapshot(
     snapshot_state: &str,
     observed_at: Option<String>,
-    source: &str,
-    version: &str,
+    provenance: SnapshotProvenance<'_>,
     last_error: Option<&str>,
     allowance: Value,
     activity: Value,
@@ -89,8 +95,14 @@ fn snapshot(
         "observed_at".into(),
         observed_at.map_or(Value::Null, Value::String),
     );
-    object.insert("source".into(), Value::String(source.to_string()));
-    object.insert("version".into(), Value::String(version.to_string()));
+    object.insert(
+        "source".into(),
+        Value::String(provenance.source.to_string()),
+    );
+    object.insert(
+        "version".into(),
+        Value::String(provenance.version.to_string()),
+    );
     object.insert(
         "last_error".into(),
         last_error.map_or(Value::Null, |value| Value::String(value.to_string())),
@@ -124,10 +136,8 @@ impl UsageProviderConfig {
         process: Option<MetadataProcessConfig>,
     ) -> Result<UsageProviderConfig, String> {
         identifier(&Value::String(alias.to_string())).map_err(|error| error.0.to_string())?;
-        text(&Value::String(label.to_string()), 128, false)
-            .map_err(|error| error.0.to_string())?;
-        text(&Value::String(model.to_string()), 128, false)
-            .map_err(|error| error.0.to_string())?;
+        text(&Value::String(label.to_string()), 128, false).map_err(|error| error.0.to_string())?;
+        text(&Value::String(model.to_string()), 128, false).map_err(|error| error.0.to_string())?;
         if !["antigravity", "codex", "grok", "muse"].contains(&provider) {
             return Err("Unknown usage provider".to_string());
         }
@@ -185,8 +195,10 @@ impl UsageProvider for AntigravityUsageProvider {
         snapshot(
             "unknown",
             Some((self.clock)()),
-            "agy-headless/allowance-capability",
-            "unknown",
+            SnapshotProvenance {
+                source: "agy-headless/allowance-capability",
+                version: "unknown",
+            },
             None,
             empty_allowance("unsupported", Some("unsupported_headless")),
             unknown_activity("unknown"),
@@ -215,8 +227,10 @@ impl UsageProvider for GrokUsageProvider {
         snapshot(
             "unknown",
             Some((self.clock)()),
-            "grok-headless/allowance-capability",
-            &self.version,
+            SnapshotProvenance {
+                source: "grok-headless/allowance-capability",
+                version: &self.version,
+            },
             None,
             empty_allowance("unsupported", Some("unsupported_headless")),
             unknown_activity("unknown"),
@@ -280,8 +294,10 @@ impl UsageProvider for MuseUsageProvider {
         snapshot(
             "fresh",
             Some((self.clock)()),
-            "muse-cli/usage-json-v1",
-            &self.version,
+            SnapshotProvenance {
+                source: "muse-cli/usage-json-v1",
+                version: &self.version,
+            },
             Some("setup_required"),
             empty_allowance("unsupported", Some("no_allowance")),
             unknown_activity("unknown"),
@@ -314,8 +330,8 @@ fn reset_time(value: &Value) -> UsageResult<Option<String>> {
     if value.is_null() {
         return Ok(None);
     }
-    let valid = (value.is_i64() || value.is_u64())
-        && crate::types::int_in_range(value, 0, 253_402_300_799);
+    let valid =
+        (value.is_i64() || value.is_u64()) && crate::types::int_in_range(value, 0, 253_402_300_799);
     if !valid {
         return Err(InvalidUsage("invalid quota reset"));
     }
@@ -328,11 +344,17 @@ fn quota_windows(raw: &Value) -> Result<Value, ProviderFailure> {
     let object = raw
         .as_object()
         .ok_or_else(|| ProviderFailure::new("malformed_metadata"))?;
-    let ordinary = object.get("ordinaryUsageAllowed").cloned().unwrap_or(Value::Null);
+    let ordinary = object
+        .get("ordinaryUsageAllowed")
+        .cloned()
+        .unwrap_or(Value::Null);
     if !ordinary.is_null() {
         boolean(&ordinary).map_err(invalid)?;
     }
-    let by_id = object.get("rateLimitsByLimitId").cloned().unwrap_or(Value::Null);
+    let by_id = object
+        .get("rateLimitsByLimitId")
+        .cloned()
+        .unwrap_or(Value::Null);
     if !by_id.is_null() && !by_id.is_object() {
         return Err(ProviderFailure::new("malformed_metadata"));
     }
@@ -464,7 +486,10 @@ fn activity_value(raw: Option<&Value>) -> UsageResult<Value> {
         .filter(|value| value.is_object())
         .ok_or(InvalidUsage("invalid account activity"))?;
     let lifetime = counter(&summary["lifetimeTokens"], true)?;
-    let daily_raw = object.get("dailyUsageBuckets").cloned().unwrap_or(Value::Null);
+    let daily_raw = object
+        .get("dailyUsageBuckets")
+        .cloned()
+        .unwrap_or(Value::Null);
     if !daily_raw.is_null() {
         match daily_raw.as_array() {
             Some(rows) if rows.len() <= 4096 => {}
@@ -479,9 +504,7 @@ fn activity_value(raw: Option<&Value>) -> UsageResult<Value> {
                 .as_object()
                 .ok_or(InvalidUsage("invalid account activity bucket"))?;
             let day = item.get("startDate").cloned().unwrap_or(Value::Null);
-            let valid_day = day
-                .as_str()
-                .is_some_and(crate::types::is_valid_day);
+            let valid_day = day.as_str().is_some_and(crate::types::is_valid_day);
             let tokens = counter(item.get("tokens").unwrap_or(&Value::Null), true)?;
             let day_text = day.as_str().unwrap_or_default().to_string();
             if !valid_day || !seen.insert(day_text.clone()) || tokens.is_none() {
@@ -571,8 +594,10 @@ impl UsageProvider for CodexUsageProvider {
             return snapshot(
                 "unknown",
                 Some((self.clock)()),
-                "codex-app-server/account-metadata",
-                &self.version,
+                SnapshotProvenance {
+                    source: "codex-app-server/account-metadata",
+                    version: &self.version,
+                },
                 None,
                 empty_allowance("unsupported", Some("unsupported_auth_mode")),
                 unknown_activity("unknown"),
@@ -587,8 +612,7 @@ impl UsageProvider for CodexUsageProvider {
         let next_identity = after.get("accountId").cloned().unwrap_or(Value::Null);
         for value in [&identity, &next_identity] {
             if !value.is_null() {
-                text(value, 256, false)
-                    .map_err(|_| ProviderFailure::new("malformed_metadata"))?;
+                text(value, 256, false).map_err(|_| ProviderFailure::new("malformed_metadata"))?;
             }
         }
         if identity != next_identity {
@@ -608,8 +632,10 @@ impl UsageProvider for CodexUsageProvider {
         snapshot(
             "fresh",
             Some((self.clock)()),
-            "codex-app-server/account-metadata",
-            &self.version,
+            SnapshotProvenance {
+                source: "codex-app-server/account-metadata",
+                version: &self.version,
+            },
             None,
             normalized,
             activity,
@@ -843,10 +869,7 @@ mod tests {
             clock: fixed_clock(),
             version: "1.0".to_string(),
         };
-        assert_eq!(
-            bad.read_snapshot().unwrap_err().code,
-            "malformed_metadata"
-        );
+        assert_eq!(bad.read_snapshot().unwrap_err().code, "malformed_metadata");
     }
 
     #[test]

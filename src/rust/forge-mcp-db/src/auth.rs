@@ -1,5 +1,5 @@
 //! Bearer-token authentication and failed-attempt rate limiting
-//! (mcp_auth.py). Tokens look like hmcp_<id>_<secret>; only the
+//! (mcp_auth.py). Tokens look like `hmcp_<id>_<secret>`; only the
 //! SHA-256 of the full token is stored.
 
 use std::collections::{BTreeSet, HashMap};
@@ -51,10 +51,7 @@ pub fn header_get<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a
 }
 
 /// All values of a header (Python's headers.get_all).
-pub fn header_get_all<'a>(
-    headers: &'a [(String, String)],
-    name: &str,
-) -> Vec<&'a str> {
+pub fn header_get_all<'a>(headers: &'a [(String, String)], name: &str) -> Vec<&'a str> {
     headers
         .iter()
         .filter(|(key, _)| key.eq_ignore_ascii_case(name))
@@ -163,9 +160,7 @@ pub fn validate_store(data: &Value) -> Result<(), TokenFileError> {
                     .as_str()
                     .is_some_and(|text| epoch_from_iso(text).is_some())
             {
-                return Err(error(format!(
-                    "token {token_id} has an invalid revoked_at"
-                )));
+                return Err(error(format!("token {token_id} has an invalid revoked_at")));
             }
         }
     }
@@ -199,7 +194,9 @@ pub fn read_store(
         .metadata()
         .map_err(|error| TokenFileError(format!("token file cannot be stat'ed: {error}")))?;
     if !info.is_file() {
-        return Err(TokenFileError("token file is not a regular file".to_string()));
+        return Err(TokenFileError(
+            "token file is not a regular file".to_string(),
+        ));
     }
     // S_IWGRP | S_IROTH | S_IWOTH
     if require_private && info.mode() & 0o026 != 0 {
@@ -285,10 +282,7 @@ impl BearerTokenAuth {
                     .unwrap_or_default()
                     .into_iter()
                     .filter_map(|record| {
-                        let id = record
-                            .get("id")
-                            .and_then(Value::as_str)
-                            .map(str::to_string);
+                        let id = record.get("id").and_then(Value::as_str).map(str::to_string);
                         id.map(|id| (id, record))
                     })
                     .collect();
@@ -334,7 +328,11 @@ impl BearerTokenAuth {
             .to_string();
         let valid = constant_time_eq(expected.as_bytes(), token_hash(credential).as_bytes());
         let record = record?;
-        if !valid || record.get("revoked_at").is_some_and(|value| !value.is_null()) {
+        if !valid
+            || record
+                .get("revoked_at")
+                .is_some_and(|value| !value.is_null())
+        {
             return None;
         }
         let expires = record.get("expires_at")?.as_str()?;
@@ -430,7 +428,9 @@ impl FailureLimiter {
             .collect();
         attempts.push(now);
         if attempts.len() as i64 >= self.failures {
-            state.locked_until.insert(key.to_string(), now + self.lockout);
+            state
+                .locked_until
+                .insert(key.to_string(), now + self.lockout);
             attempts = Vec::new();
         }
         state.attempts.insert(key.to_string(), attempts);

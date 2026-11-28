@@ -53,8 +53,8 @@ install_auth_files() {
     # Install the HBA template and ident map for the current stage.
     # Sets hba_changed=true when a file changed. The installed HBA
     # file keeps its name; only its contents are stage-dependent.
-    # Three stages: cutover (41) admits the proxy roles only via
-    # peer auth and rejects everything else; preparation (40, no 41)
+    # Three stages: cutover (55) admits the proxy roles only via
+    # peer auth and rejects everything else; preparation (54, no 55)
     # admits the caller roles via peer auth while preserving the
     # pre-existing local callers, so the proxy can run and be
     # verified before cutover; before preparation the original
@@ -377,7 +377,7 @@ IFS=: read -r _ _ uid gid _ home shell < <(getent passwd "$runner")
 psql_as postgres postgres -f "$directory/sql/provision.sql"
 psql_as postgres forge_agent -c 'SET ROLE forge_agent_owner' -f "$directory/sql/apply.sql" \
     -f "$directory/sql/management/grant-runner.sql"
-# apply.sql stops at the preparation migration (39); cutover (40)
+# apply.sql stops at the preparation migration (54); cutover (55)
 # applies only via proxy-cutover.sh. Re-select the auth files after
 # apply.sql so a post-cutover (or preparation-stage) re-provision
 # still installs the matching HBA template.

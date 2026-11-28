@@ -118,7 +118,6 @@ impl WorkflowDecisionPort for PgWorkflowDecisions {
                 let Some(task) = rows
                     .first()
                     .and_then(|row| row.get::<usize, Option<Value>>(0))
-                    
                 else {
                     return Ok(json!({"found": false, "valid": false}));
                 };

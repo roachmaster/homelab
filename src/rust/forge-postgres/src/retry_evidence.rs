@@ -6,8 +6,8 @@
 //! credentials, never the service's.
 
 use forge_core::provider::Factory;
-use forge_work::workflow_continuation::RetryEvidencePort;
 use forge_work::work_error::WorkError;
+use forge_work::workflow_continuation::RetryEvidencePort;
 use serde_json::Value;
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
@@ -26,12 +26,7 @@ impl PgRetryEvidence {
 }
 
 impl RetryEvidencePort for PgRetryEvidence {
-    fn read(
-        &self,
-        owner: &str,
-        project: &str,
-        workflow_id: Uuid,
-    ) -> Result<Vec<Value>, WorkError> {
+    fn read(&self, owner: &str, project: &str, workflow_id: Uuid) -> Result<Vec<Value>, WorkError> {
         let mut session = self.factory.create().map_err(work_err)?;
         let owner = owner.to_string();
         let project = project.to_string();

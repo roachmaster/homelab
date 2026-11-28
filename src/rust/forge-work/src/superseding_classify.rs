@@ -239,11 +239,7 @@ mod tests {
 
     #[test]
     fn correction_note_bounds() {
-        let note = correction_note(
-            &["f1".to_string()],
-            &["f1".to_string()],
-            &"a".repeat(64),
-        );
+        let note = correction_note(&["f1".to_string()], &["f1".to_string()], &"a".repeat(64));
         assert!(note.contains("Required IDs: f1. Missing IDs: f1."));
         let many: Vec<String> = (0..200).map(|i| format!("finding-{i:03}")).collect();
         let note = correction_note(&many, &many, &"a".repeat(64));

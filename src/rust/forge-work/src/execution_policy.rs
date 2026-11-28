@@ -111,9 +111,14 @@ impl ModelRouteEvidence {
         let invalid = || "Invalid trusted quota/model evidence".to_string();
         if source_revision < 1
             || model.is_empty()
-            || ![recipe_digest, source_config_sha256, error_sha256, audit_sha256]
-                .iter()
-                .all(|digest| is_digest(digest))
+            || ![
+                recipe_digest,
+                source_config_sha256,
+                error_sha256,
+                audit_sha256,
+            ]
+            .iter()
+            .all(|digest| is_digest(digest))
         {
             return Err(invalid());
         }
@@ -223,15 +228,18 @@ impl BinaryPinEvidence {
                 .and_then(|parent| parent.file_name())
                 .and_then(|name| name.to_str())
                 == Some(binary_version)
-            && !path
-                .components()
-                .any(|part| part.as_os_str() == "..");
+            && !path.components().any(|part| part.as_os_str() == "..");
         let activated_ok = (activated_at.ends_with('Z') || activated_at.ends_with("+00:00"))
             && activated_at.contains('T');
         if !(1..(1i64 << 53)).contains(&source_revision)
-            || ![recipe_digest, binary_sha256, source_config_sha256, manifest_sha256]
-                .iter()
-                .all(|digest| is_digest(digest))
+            || ![
+                recipe_digest,
+                binary_sha256,
+                source_config_sha256,
+                manifest_sha256,
+            ]
+            .iter()
+            .all(|digest| is_digest(digest))
             || !is_id(worker_id)
             || !version_ok
             || !path_ok
@@ -263,13 +271,11 @@ pub fn changed_snapshot(
     original: &Value,
     catalog: &dyn WorkflowCatalog,
     model: &str,
-    native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
 ) -> Result<Value, WorkError> {
     let denied = || WorkError::rejected(403, "denied");
     let mut selected = original.clone();
-    let alias = original["author_profile"]
-        .as_str()
-        .ok_or_else(denied)?;
+    let alias = original["author_profile"].as_str().ok_or_else(denied)?;
     for (key, mode) in [("author_plan", "plan"), ("author_implement", "implement")] {
         let old = &original["recipes"][key]["recipe"];
         let new = catalog
@@ -327,7 +333,7 @@ mod tests {
             &self,
             _alias: &str,
             _mode: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }
@@ -336,7 +342,7 @@ mod tests {
             _alias: &str,
             mode: &str,
             model: &str,
-            native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             let document = json!({
                 "version": 2, "backend": "antigravity", "model": model,
@@ -371,7 +377,10 @@ mod tests {
     #[test]
     fn changed_snapshot_swaps_only_author_recipes() {
         let changed = changed_snapshot(&snapshot(), &Catalog, "backup", &matches).unwrap();
-        assert_eq!(changed["recipes"]["author_plan"]["digest"], json!("backup-digest"));
+        assert_eq!(
+            changed["recipes"]["author_plan"]["digest"],
+            json!("backup-digest")
+        );
         assert_eq!(
             changed["recipes"]["reviewer_review"]["digest"],
             json!("primary-digest")
@@ -395,14 +404,34 @@ mod tests {
         assert!(ModelRoute::new("homelab", id, id, 1, id, "m", "key", "note").is_ok());
         assert!(ModelRoute::new("homelab", id, id, 0, id, "m", "key", "note").is_err());
         assert!(BinaryPinEvidence::new(
-            id, id, 1, id, &"a".repeat(64), "/opt/agy/1.2.3/agy", &"b".repeat(64),
-            "1.2.3", &"c".repeat(64), &"d".repeat(64), "worker-1", id,
+            id,
+            id,
+            1,
+            id,
+            &"a".repeat(64),
+            "/opt/agy/1.2.3/agy",
+            &"b".repeat(64),
+            "1.2.3",
+            &"c".repeat(64),
+            &"d".repeat(64),
+            "worker-1",
+            id,
             "2026-11-27T10:00:00Z",
         )
         .is_ok());
         assert!(BinaryPinEvidence::new(
-            id, id, 1, id, &"a".repeat(64), "/opt/agy/9.9.9/agy", &"b".repeat(64),
-            "1.2.3", &"c".repeat(64), &"d".repeat(64), "worker-1", id,
+            id,
+            id,
+            1,
+            id,
+            &"a".repeat(64),
+            "/opt/agy/9.9.9/agy",
+            &"b".repeat(64),
+            "1.2.3",
+            &"c".repeat(64),
+            &"d".repeat(64),
+            "worker-1",
+            id,
             "2026-11-27T10:00:00Z",
         )
         .is_err());

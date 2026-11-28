@@ -60,13 +60,20 @@ fn run() -> Result<String, String> {
         .truncate(false)
         .open(&lock_path)
         .map_err(|error| error.to_string())?;
-    std::fs::set_permissions(&lock_path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
-        .map_err(|error| error.to_string())?;
+    std::fs::set_permissions(
+        &lock_path,
+        std::os::unix::fs::PermissionsExt::from_mode(0o600),
+    )
+    .map_err(|error| error.to_string())?;
     let _lock = Flock::lock(lock_file, FlockArg::LockExclusiveNonblock)
         .map_err(|error| error.1.to_string())?;
     let job = object.get("job").cloned().unwrap_or(Value::Null);
     let plan = object.get("plan");
-    let plan = if plan == Some(&Value::Null) { None } else { plan };
+    let plan = if plan == Some(&Value::Null) {
+        None
+    } else {
+        plan
+    };
     let authority = object.get("authority");
     let outcome = actor.invoke(&args[0], &job, plan, authority)?;
     let mut line = canonical(&Value::Object(outcome));

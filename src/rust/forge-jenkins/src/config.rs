@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::events::{
-    coerce_event_kind, validate_identifier, validate_int_range, validate_job_name,
-    validate_origin, validate_owner, JenkinsEventKind,
+    coerce_event_kind, validate_identifier, validate_int_range, validate_job_name, validate_origin,
+    validate_owner, JenkinsEventKind,
 };
 use crate::strict_json::strict_parse;
 
@@ -145,11 +145,7 @@ pub struct JenkinsInstanceConfig {
 }
 
 impl JenkinsInstanceConfig {
-    pub fn new(
-        alias: &str,
-        origin: &str,
-        hmac_secret_env: Option<String>,
-    ) -> Result<Self, String> {
+    pub fn new(alias: &str, origin: &str, hmac_secret_env: Option<String>) -> Result<Self, String> {
         validate_identifier(alias, "instance alias")?;
         let origin = validate_origin(origin)?;
         if let Some(env) = &hmac_secret_env {
@@ -317,8 +313,18 @@ impl JenkinsConfig {
             MAX_MAX_PENDING_DELIVERIES,
             "max_pending_deliveries",
         )?;
-        validate_int_range(lease_seconds, MIN_LEASE_SECONDS, MAX_LEASE_SECONDS, "lease_seconds")?;
-        validate_int_range(renew_seconds, MIN_RENEW_SECONDS, MAX_RENEW_SECONDS, "renew_seconds")?;
+        validate_int_range(
+            lease_seconds,
+            MIN_LEASE_SECONDS,
+            MAX_LEASE_SECONDS,
+            "lease_seconds",
+        )?;
+        validate_int_range(
+            renew_seconds,
+            MIN_RENEW_SECONDS,
+            MAX_RENEW_SECONDS,
+            "renew_seconds",
+        )?;
         if renew_seconds >= lease_seconds {
             return Err("Jenkins renew_seconds must be less than lease_seconds".to_string());
         }
@@ -424,11 +430,7 @@ pub fn parse_jenkins_config(raw: &Value) -> Result<JenkinsConfig, String> {
         };
         allowed_instances.insert(
             alias.clone(),
-            JenkinsInstanceConfig::new(
-                alias,
-                &string_field(&spec["origin"])?,
-                hmac_secret_env,
-            )?,
+            JenkinsInstanceConfig::new(alias, &string_field(&spec["origin"])?, hmac_secret_env)?,
         );
     }
 
@@ -437,7 +439,12 @@ pub fn parse_jenkins_config(raw: &Value) -> Result<JenkinsConfig, String> {
         .as_object()
         .map(|object| object.keys().map(String::as_str).collect())
         .unwrap_or_default();
-    if job_keys != allowed_projects.iter().map(String::as_str).collect::<BTreeSet<_>>() {
+    if job_keys
+        != allowed_projects
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>()
+    {
         return Err("Jenkins allowed_jobs must match allowed_projects".to_string());
     }
     let mut allowed_jobs = BTreeMap::new();
@@ -499,9 +506,8 @@ pub fn parse_jenkins_config(raw: &Value) -> Result<JenkinsConfig, String> {
         };
         let max_attempts = match spec.get("max_attempts") {
             None => DEFAULT_MAX_ATTEMPTS,
-            Some(value) => {
-                int_field(value).ok_or_else(|| "Invalid Jenkins consumer max_attempts".to_string())?
-            }
+            Some(value) => int_field(value)
+                .ok_or_else(|| "Invalid Jenkins consumer max_attempts".to_string())?,
         };
         let enabled = match spec.get("enabled") {
             None => true,
@@ -521,9 +527,7 @@ pub fn parse_jenkins_config(raw: &Value) -> Result<JenkinsConfig, String> {
     let tuning = |key: &str, default: i64| -> Result<i64, String> {
         match raw.get(key) {
             None => Ok(default),
-            Some(value) => {
-                int_field(value).ok_or_else(|| format!("Invalid Jenkins {key}"))
-            }
+            Some(value) => int_field(value).ok_or_else(|| format!("Invalid Jenkins {key}")),
         }
     };
     JenkinsConfig::new(
@@ -549,7 +553,9 @@ pub fn load_jenkins_config(setting: Option<&str>) -> Result<Option<JenkinsConfig
     };
     if setting.trim().is_empty()
         || setting.contains('\0')
-        || setting.chars().any(|ch| (ch as u32) < 0x20 || ch as u32 == 0x7F)
+        || setting
+            .chars()
+            .any(|ch| (ch as u32) < 0x20 || ch as u32 == 0x7F)
     {
         return Err("Invalid Jenkins configuration path".to_string());
     }
@@ -570,8 +576,8 @@ pub fn load_jenkins_config(setting: Option<&str>) -> Result<Option<JenkinsConfig
         }
         Ok(data)
     })()?;
-    let parsed = strict_parse(&raw_bytes)
-        .map_err(|_| "Invalid Jenkins configuration JSON".to_string())?;
+    let parsed =
+        strict_parse(&raw_bytes).map_err(|_| "Invalid Jenkins configuration JSON".to_string())?;
     parse_jenkins_config(&parsed).map(Some)
 }
 

@@ -22,17 +22,27 @@ def task_binding(task):
             for key in ('id', 'revision', 'status', 'latest_attempt_id')}
 
 
-def retained_sources(cursor, workflow_id):
-    cursor.execute("""SELECT finish_receipt FROM forge_agent.coding_workflow_actions
-      WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s""",
-      (workflow_id, PREFIX + '%'))
-    bindings = [binding for row in cursor.fetchall()
-                for binding in row['finish_receipt']['receipt']['retained_sources']]
+def retained_sources(cursor, workflow_id, *, owner=None, project=None):
     from work_baseline_continuation import PREFIX as baseline_prefix, retained_bindings
-    cursor.execute("""SELECT intent,finish_receipt,source_key FROM forge_agent.coding_workflow_actions
-      WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s""",
-      (workflow_id, baseline_prefix + '%'))
-    for row in cursor.fetchall():
+    if owner is None:
+        cursor.execute("""SELECT finish_receipt FROM forge_agent.coding_workflow_actions
+          WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s""",
+          (workflow_id, PREFIX + '%'))
+        incident_rows = cursor.fetchall()
+        cursor.execute("""SELECT intent,finish_receipt,source_key FROM forge_agent.coding_workflow_actions
+          WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s""",
+          (workflow_id, baseline_prefix + '%'))
+        baseline_rows = cursor.fetchall()
+    else:
+        from proxy_client import run_read_query
+        if project is None:
+            raise ValueError("Named retained-source reads require an explicit project")
+        params = {"owner_id":owner, "project_alias":project, "workflow_id":workflow_id}
+        incident_rows = run_read_query(cursor, "retained_incident_sources", params)
+        baseline_rows = run_read_query(cursor, "retained_baseline_sources", params)
+    bindings = [binding for row in incident_rows
+                for binding in row['finish_receipt']['receipt']['retained_sources']]
+    for row in baseline_rows:
         bindings.extend(retained_bindings(row['intent'], (row['finish_receipt'] or {}).get('receipt'),
                                          workflow_id, row['source_key']))
     # Later continuations retain a superset of earlier immutable sources.

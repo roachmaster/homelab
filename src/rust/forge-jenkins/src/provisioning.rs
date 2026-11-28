@@ -214,8 +214,7 @@ pub fn write_new(path: &Path, content: &[u8], mode: u32) -> Result<(), String> {
     let mut file = options
         .open(&temporary)
         .map_err(|error| error.to_string())?;
-    file.write_all(content)
-        .map_err(|error| error.to_string())?;
+    file.write_all(content).map_err(|error| error.to_string())?;
     std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(mode))
         .map_err(|error| error.to_string())?;
     drop(file);
@@ -243,6 +242,9 @@ pub fn directory(path: &Path, owner: u32, group: u32, mode: u32) -> Result<(), S
     Ok(())
 }
 
+/// Status, headers and bytes from a bounded Jenkins response.
+pub type JenkinsHttpResponse = (u32, Vec<(String, String)>, Vec<u8>);
+
 /// Minimal Jenkins HTTP client over ureq: Basic auth, optional form
 /// body, no redirects, bounded response.
 pub struct JenkinsHttp {
@@ -252,15 +254,15 @@ pub struct JenkinsHttp {
 
 impl JenkinsHttp {
     pub fn new(base: &str, username: &str, secret: &str) -> JenkinsHttp {
-        let encoded = base64::engine::general_purpose::STANDARD
-            .encode(format!("{username}:{secret}"));
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode(format!("{username}:{secret}"));
         JenkinsHttp {
             base: base.to_string(),
             authorization: format!("Basic {encoded}"),
         }
     }
 
-    pub fn get(&self, path: &str) -> Result<(u32, Vec<(String, String)>, Vec<u8>), String> {
+    pub fn get(&self, path: &str) -> Result<JenkinsHttpResponse, String> {
         self.send("GET", path, None, &[])
     }
 
@@ -269,16 +271,10 @@ impl JenkinsHttp {
         path: &str,
         form: &[(&str, String)],
         extra_headers: &[(String, String)],
-    ) -> Result<(u32, Vec<(String, String)>, Vec<u8>), String> {
+    ) -> Result<JenkinsHttpResponse, String> {
         let body = form
             .iter()
-            .map(|(key, value)| {
-                format!(
-                    "{}={}",
-                    urlencoding(key),
-                    urlencoding(value)
-                )
-            })
+            .map(|(key, value)| format!("{}={}", urlencoding(key), urlencoding(value)))
             .collect::<Vec<_>>()
             .join("&");
         self.send("POST", path, Some(body.into_bytes()), extra_headers)
@@ -290,7 +286,7 @@ impl JenkinsHttp {
         path: &str,
         body: Option<Vec<u8>>,
         extra_headers: &[(String, String)],
-    ) -> Result<(u32, Vec<(String, String)>, Vec<u8>), String> {
+    ) -> Result<JenkinsHttpResponse, String> {
         let agent = ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
                 .http_status_as_error(false)
@@ -320,9 +316,7 @@ impl JenkinsHttp {
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .send(body)
                     .map_err(|error| error.to_string())?,
-                None => request
-                    .send_empty()
-                    .map_err(|error| error.to_string())?,
+                None => request.send_empty().map_err(|error| error.to_string())?,
             }
         };
         let status = response.status().as_u16() as u32;

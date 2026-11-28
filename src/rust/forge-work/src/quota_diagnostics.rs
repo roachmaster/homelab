@@ -246,9 +246,7 @@ pub fn quota_diagnostic(message: Option<&str>) -> Option<Value> {
     let text = String::from_utf8_lossy(raw).to_string();
     let lowered_text = text.to_lowercase();
     let lowered: Vec<char> = lowered_text.chars().collect();
-    let coded = QUOTA_CODES
-        .iter()
-        .any(|code| lowered_text.contains(code));
+    let coded = QUOTA_CODES.iter().any(|code| lowered_text.contains(code));
     if !coded && !account_quota(&lowered) {
         return None;
     }
@@ -262,11 +260,12 @@ pub fn quota_diagnostic(message: Option<&str>) -> Option<Value> {
             let total: i64 = groups
                 .iter()
                 .map(|(value, unit)| {
-                    value * match unit {
-                        'h' => 3600,
-                        'm' => 60,
-                        _ => 1,
-                    }
+                    value
+                        * match unit {
+                            'h' => 3600,
+                            'm' => 60,
+                            _ => 1,
+                        }
                 })
                 .sum();
             if (1..=MAX_RESET_SECONDS).contains(&total) {
@@ -313,20 +312,20 @@ mod tests {
         let diagnostic = quota_diagnostic(Some("quota_exceeded resets in 30m 1h")).expect("d");
         assert_eq!(diagnostic["retry_after_seconds"], Value::Null);
         assert_eq!(
-            quota_diagnostic(Some("third-party quota exhausted, resets in 1h"))
-                .unwrap()["retry_after_seconds"],
+            quota_diagnostic(Some("third-party quota exhausted, resets in 1h")).unwrap()
+                ["retry_after_seconds"],
             json!(3600)
         );
         // Backtracking: a longer duration whose lookahead
         // fails still matches on its valid prefix.
         assert_eq!(
-            quota_diagnostic(Some("quota_exceeded resets in 2h 30mx"))
-                .unwrap()["retry_after_seconds"],
+            quota_diagnostic(Some("quota_exceeded resets in 2h 30mx")).unwrap()
+                ["retry_after_seconds"],
             json!(7200)
         );
         assert_eq!(
-            quota_diagnostic(Some("quota_exceeded resets in 2h 123456s"))
-                .unwrap()["retry_after_seconds"],
+            quota_diagnostic(Some("quota_exceeded resets in 2h 123456s")).unwrap()
+                ["retry_after_seconds"],
             json!(7200)
         );
         assert!(quota_diagnostic(None).is_none());

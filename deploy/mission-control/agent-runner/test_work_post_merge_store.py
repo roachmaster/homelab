@@ -307,6 +307,52 @@ class PostMergeStoreTest(unittest.TestCase):
                     c.rollback()
         self.pg.run_sql_script(SQL_DIR / 'management/verify.sql').check_returncode()
 
+    def complete_historical_reviewed_merge(self, case):
+        from dataclasses import replace
+        from queue_store import Rejected
+        from test_work_execution_and_usage import make_submit
+        # Real pre-M28 setup uses the unchanged worker publication/merge APIs.
+        # The separate current-schema workflow test retains cancellation's M54
+        # composite and concurrency assertions. Historical schemas never install
+        # that function or fabricate its cancellation result merely for setup.
+        case.assertEqual(case.db.project_revisions(),{})
+        admitted,author,critic,checks=case.checked_implementation()
+        case.assertIsNone(case.db.publication_claim('publisher'))
+        case.publish(critic,case.verdict(critic));case.coordinator.run_once()
+        pub=case.db.publication_claim('publisher');case.assertIsNotNone(pub)
+        case.db.publication_finish(pub,'publishing','Checked',branch='forge/test',commit_sha='d'*40)
+        case.db.publication_finish(pub,'published','Draft PR',branch='forge/test',commit_sha='d'*40,pr_url='https://github.com/fixture/project/pull/1')
+        case.coordinator.run_once();case.assertEqual(case.get(author.task_id)['workflow']['phase'],'hosted');case.assertIsNone(case.db.merge_claim('merger'))
+        case.db.record_hosted_checks(pub['publication_id'],'d'*40,[{'name':name,'status':'success','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')])
+        case.coordinator.run_once();job=case.db.merge_claim('merger');case.assertIsNotNone(job);case.assertEqual(job['policy_digest'],case.config.project_workflows['homelab'].snapshot(case.config.catalog(),case.config.repair_policy)['policy_digest'])
+        case.cluster.admin_exec("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,source_publication_id) SELECT workflow_id,owner_id,project_alias,kind,'concurrent-merge-fixture',source_publication_id FROM forge_agent.coding_workflow_actions WHERE action_id='%s'"%job['merge_id'],owner=False)
+        case.assertIsNone(case.db.merge_claim('second-merger'))
+        intent={'version':1,'merge_id':job['merge_id'],'workflow_id':job['workflow_id'],'task_id':job['task_id'],'repository':'fixture/project','pr_url':job['pr_url'],'candidate_commit':'d'*40,'candidate_tree':'1'*40,'expected_main':'a'*40,'merge_commit':'2'*40,'review_id':job['review_id'],'gate_manifest_sha256':'e'*64,
+            'commit_payload':{'message':'Merge independently reviewed workflow','tree':'1'*40,'parents':['a'*40,'d'*40],'author':{'name':'Forge','email':'forge@example.test','date':'2026-11-20T00:00:00Z'},'committer':{'name':'Forge','email':'forge@example.test','date':'2026-11-20T00:00:00Z'}}}
+        case.assertEqual(case.db.merge_intent(job,intent),intent);case.assertEqual(case.db.merge_intent(job,intent),intent)
+        with case.assertRaises(ValueError):case.db.merge_finish(job,'invalid',{})
+        outcome={'candidate_commit':'d'*40,'merge_commit':'2'*40,'pr_url':job['pr_url'],'summary':'Merged exact reviewed tree.'}
+        import threading,time
+        from work_store import ADVISORY_LOCK_SALT
+        blocker=case.cluster.connect('postgres');blocker.autocommit=False
+        with blocker.cursor() as cursor:cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",('mission-control\nhomelab',ADVISORY_LOCK_SALT))
+        results=[];errors=[]
+        def acknowledge():
+         try:results.append(case.db.merge_finish(job,'merged',outcome))
+         except Exception as error:errors.append(error)
+        thread=threading.Thread(target=acknowledge);thread.start();time.sleep(.1);case.assertTrue(thread.is_alive())
+        blocker.rollback();blocker.close();thread.join(5);case.assertFalse(thread.is_alive());case.assertFalse(errors)
+        receipt=results[0];case.assertEqual(case.db.merge_finish(job,'merged',outcome),receipt)
+        case.assertEqual(case.get(admitted['task_id'])['workflow']['phase'],'completed');case.assertEqual(case.get(admitted['task_id'])['status'],'completed')
+        case.assertEqual(case.db.project_revisions(),{'homelab':'2'*40})
+        catalog=case.service.catalog();case.assertEqual(next(p for p in catalog['projects'] if p['alias']=='homelab')['base_revision'],'2'*40)
+        with case.assertRaises(Rejected):case.submit('stale-after-merge')
+        policy=case.config.project_workflows['homelab'].summary(case.config.catalog(),case.config.repair_policy)
+        next_command=replace(make_submit(agent_profile='agy-v2',idempotency_key='next-after-merge',base_revision='2'*40),workflow_policy_digest=policy['policy_digest'])
+        case.assertEqual(case.service.submit(next_command)['status'],'queued')
+        case.cluster.admin_exec("DELETE FROM forge_agent.coding_worker_grants WHERE project_alias='homelab'",owner=False)
+        case.assertEqual(case.db.project_revisions(),{})
+
     def test_actual_27_upgrade_never_backfills_completed_work_or_changes_merge_authority(self):
         from test_work_policy_upgrade import historical_registry, PreUpgradeCluster
         with TemporaryDirectory(prefix='forge-post-merge28-upgrade-', dir='/tmp') as directory:
@@ -321,7 +367,7 @@ class PostMergeStoreTest(unittest.TestCase):
                 case.cluster = pg
                 case.setUp()
                 self.assertFalse(case.db.post_merge_available())
-                case.test_code_peer_review_and_exact_head_hosted_gates_queue_immutable_merge()
+                self.complete_historical_reviewed_merge(case)
                 def snapshot():
                     with closing(pg.connect('postgres')) as c, c.cursor() as q:
                         q.execute("SELECT pg_get_functiondef('forge_coding_reconciler_api.merge_finish(uuid,uuid,text,jsonb)'::regprocedure)")

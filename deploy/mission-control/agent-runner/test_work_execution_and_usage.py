@@ -190,13 +190,28 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
         verify_script = SQL_DIR / "management/verify.sql"
         self.assert_sql_verify(verify_script)
 
-        # Coding worker cannot directly query any forge_agent table or invoke reconciler/internal helpers.
+        with closing(self.cluster.connect("postgres")) as conn, conn.cursor() as cur:
+            cur.execute("SELECT name FROM forge_agent.schema_migrations WHERE version=54")
+            self.assertEqual(cur.fetchall(), [("pg_proxy_preparation",)])
+        # M54 permits bounded direct reads during preparation, never direct writes.
+        for role, tables in (
+            ("forge_coding_worker", ("coding_tasks", "coding_attempts", "coding_worker_grants")),
+            ("forge_coding_reconciler", ("coding_tasks", "coding_attempts")),
+            ("forge_agent", ("coding_worker_grants",)),
+        ):
+            with closing(self.cluster.connect(role)) as conn, conn.cursor() as cur:
+                for table in tables:
+                    with self.subTest(role=role, table=table):
+                        cur.execute("SELECT count(*) FROM forge_agent." + table)
+                        self.assertIsInstance(cur.fetchone()[0], int)
+                        cur.execute("SELECT has_table_privilege(current_user,%s,'INSERT,UPDATE,DELETE,TRUNCATE')",
+                                    ("forge_agent." + table,))
+                        self.assertFalse(cur.fetchone()[0])
+
+        # Coding worker cannot read private usage identities or invoke reconciler/internal helpers.
         with closing(self.cluster.connect("forge_coding_worker")) as conn:
             with conn.cursor() as cur:
                 for sql in (
-                    "SELECT count(*) FROM forge_agent.coding_tasks",
-                    "SELECT count(*) FROM forge_agent.coding_attempts",
-                    "SELECT count(*) FROM forge_agent.coding_worker_grants",
                     "SELECT count(*) FROM forge_agent.coding_provider_usage_identities",
                     "SELECT forge_coding_reconciler_api.expire_leases()",
                     "SELECT forge_coding_reconciler_api.pending_reconciliations(10)",
@@ -207,12 +222,10 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
                         cur.execute(sql)
                     conn.rollback()
 
-        # Reconciler cannot directly query forge_agent tables or call worker claim/publish.
+        # Reconciler still cannot call worker claim/publish.
         with closing(self.cluster.connect("forge_coding_reconciler")) as conn:
             with conn.cursor() as cur:
                 for sql in (
-                    "SELECT count(*) FROM forge_agent.coding_tasks",
-                    "SELECT count(*) FROM forge_agent.coding_attempts",
                     "SELECT forge_coding_worker_api.next_refresh()",
                     "SELECT forge_agent_worker_api.claim('gpt-oss-20b')",
                 ):
@@ -220,11 +233,10 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
                         cur.execute(sql)
                     conn.rollback()
 
-        # Runner cannot read worker grants or internal HMAC account identities.
+        # Runner still cannot read internal HMAC account identities or call worker helpers.
         with closing(self.cluster.connect("forge_agent")) as conn:
             with conn.cursor() as cur:
                 for sql in (
-                    "SELECT count(*) FROM forge_agent.coding_worker_grants",
                     "SELECT count(*) FROM forge_agent.coding_provider_usage_identities",
                     "SELECT forge_coding_worker_api.next_refresh()",
                     "SELECT forge_coding_reconciler_api.expire_leases()",
@@ -244,17 +256,23 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
                 self.cluster.admin_exec(f"GRANT {inherited} TO {role} WITH INHERIT TRUE", owner=False)
                 try:
                     for grantee, err in ((role, expected_err), (inherited, expected_err), ("PUBLIC", "Unexpected PUBLIC privileges")):
-                        with self.subTest(role=role, grantee=grantee):
-                            try:
-                                self.cluster.admin_exec(
-                                    f"GRANT SELECT (attempt_token) ON forge_agent.coding_attempts TO {grantee}"
-                                )
-                                self.assert_sql_verify(verify_script, error=err)
-                            finally:
-                                self.cluster.admin_exec(
-                                    f"REVOKE SELECT (attempt_token) ON forge_agent.coding_attempts FROM {grantee}"
-                                )
-                            self.assert_sql_verify(verify_script)
+                        # A redundant column SELECT on coding_attempts is permitted
+                        # by M54. Private identity reads and any column writes are not.
+                        for privilege, table in (
+                            ("SELECT (account_identity)", "coding_provider_usage_identities"),
+                            ("UPDATE (attempt_token)", "coding_attempts"),
+                        ):
+                            with self.subTest(role=role, grantee=grantee, privilege=privilege):
+                                try:
+                                    self.cluster.admin_exec(
+                                        f"GRANT {privilege} ON forge_agent.{table} TO {grantee}"
+                                    )
+                                    self.assert_sql_verify(verify_script, error=err)
+                                finally:
+                                    self.cluster.admin_exec(
+                                        f"REVOKE {privilege} ON forge_agent.{table} FROM {grantee}"
+                                    )
+                                self.assert_sql_verify(verify_script)
                 finally:
                     self.cluster.admin_exec(f"REVOKE {inherited} FROM {role}", owner=False)
 

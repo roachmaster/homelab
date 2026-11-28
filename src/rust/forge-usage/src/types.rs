@@ -280,7 +280,13 @@ pub fn allowance(value: &Value) -> UsageResult<()> {
     for bucket in buckets {
         let bucket = exact(
             bucket,
-            &["key", "label", "used_percent", "window_minutes", "resets_at"],
+            &[
+                "key",
+                "label",
+                "used_percent",
+                "window_minutes",
+                "resets_at",
+            ],
         )?;
         let key = text(&bucket["key"], 128, false)?;
         if !keys.insert(key) {
@@ -479,7 +485,9 @@ impl ProviderUsage {
         );
         object.insert(
             "active_task_id".into(),
-            self.active_task_id.clone().map_or(Value::Null, Value::String),
+            self.active_task_id
+                .clone()
+                .map_or(Value::Null, Value::String),
         );
         object.insert(
             "snapshot_state".into(),
@@ -717,11 +725,11 @@ mod tests {
         assert!(!is_name("has space"));
         assert!(is_uuid36("123e4567-e89b-12d3-a456-426614174000"));
         assert!(!is_uuid36("123E4567-e89b-12d3-a456-426614174000"));
+        assert_eq!(counter(&json!(42), true).unwrap(), Some("42".to_string()));
         assert_eq!(
-            counter(&json!(42), true).unwrap(),
+            counter(&json!("42"), false).unwrap(),
             Some("42".to_string())
         );
-        assert_eq!(counter(&json!("42"), false).unwrap(), Some("42".to_string()));
         assert!(counter(&json!(4.5), true).is_err());
         assert!(counter(&json!(-1), true).is_err());
     }
@@ -741,7 +749,10 @@ mod tests {
     #[test]
     fn decimal_addition_beyond_u128() {
         let forty_nines = "9".repeat(40);
-        assert_eq!(add_decimal(&forty_nines, "1"), format!("1{}", "0".repeat(40)));
+        assert_eq!(
+            add_decimal(&forty_nines, "1"),
+            format!("1{}", "0".repeat(40))
+        );
         assert_eq!(
             sum_counters(&[&forty_nines, "0"]).as_deref(),
             Some(forty_nines.as_str())

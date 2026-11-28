@@ -83,14 +83,47 @@ pub const ESCALATION_CAUSES: [&str; 11] = [
 ];
 
 const ESCALATION_RULES: [(&str, &[&str]); 9] = [
-    ("retry_exhausted", &["retry attempts", "exhausted twenty attempts", "exhausted its twenty"]),
+    (
+        "retry_exhausted",
+        &[
+            "retry attempts",
+            "exhausted twenty attempts",
+            "exhausted its twenty",
+        ],
+    ),
     ("budget_exhausted", &["budget is exhausted"]),
-    ("grant_revoked", &["grant was revoked", "grant is no longer current"]),
+    (
+        "grant_revoked",
+        &["grant was revoked", "grant is no longer current"],
+    ),
     ("candidate_repeated", &["identical candidate"]),
     ("publication_failed", &["publication"]),
-    ("verification_failed", &["could not be verified", "trusted verification", "did not report success", "trusted source selection failed"]),
-    ("review_unavailable", &["reviewer", "peer review", "review_unavailable", "workspace_busy"]),
-    ("agent_stopped", &["agent stopped", "author cannot continue", "task was cancelled"]),
+    (
+        "verification_failed",
+        &[
+            "could not be verified",
+            "trusted verification",
+            "did not report success",
+            "trusted source selection failed",
+        ],
+    ),
+    (
+        "review_unavailable",
+        &[
+            "reviewer",
+            "peer review",
+            "review_unavailable",
+            "workspace_busy",
+        ],
+    ),
+    (
+        "agent_stopped",
+        &[
+            "agent stopped",
+            "author cannot continue",
+            "task was cancelled",
+        ],
+    ),
     ("handoff", &["handoff", "needs_reconcile", "revise_plan"]),
 ];
 
@@ -136,9 +169,7 @@ pub fn require_actor(
 /// require_cancel_cause: a possibly-absent cause resolves
 /// to 'operator_request'; a named cause must be in the
 /// frozen cancelled set.
-pub fn require_cancel_cause(
-    cause: Option<&str>,
-) -> Result<String, crate::work_error::WorkError> {
+pub fn require_cancel_cause(cause: Option<&str>) -> Result<String, crate::work_error::WorkError> {
     match cause {
         None => Ok("operator_request".to_string()),
         Some(cause) if CANCEL_CAUSES.contains(&cause) => Ok(cause.to_string()),

@@ -5,7 +5,7 @@
 //! original bytes stay immutable and a different read-only
 //! reviewer task must produce a genuinely bound result.
 
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -52,14 +52,14 @@ pub struct SupersedingReviewProvider {
 }
 
 impl SupersedingReviewProvider {
-    pub fn new(flow: Arc<WorkflowStore>) -> Self {
+    pub fn new(flow: Rc<WorkflowStore>) -> Self {
         Self {
             flow: StoreRef::Strong(flow),
         }
     }
 
     /// The store's own default sub-port, created with the store.
-    pub fn bound(flow: std::sync::Weak<WorkflowStore>) -> Self {
+    pub fn bound(flow: std::rc::Weak<WorkflowStore>) -> Self {
         Self {
             flow: StoreRef::Weak(flow),
         }

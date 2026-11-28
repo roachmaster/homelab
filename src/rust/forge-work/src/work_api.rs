@@ -30,10 +30,10 @@ use uuid::Uuid;
 
 use crate::catalog::WorkCatalog;
 use crate::decision_requests::{
-    PlanDecideRequest, PublicationRetryRequest, RepairRequest, ReviewDecideRequest,
-    ReviewDecision,
+    PlanDecideRequest, PublicationRetryRequest, RepairRequest, ReviewDecideRequest, ReviewDecision,
 };
 use crate::feedback::validate_findings;
+use crate::operator_dtos::MAX_REVISION;
 use crate::pinned_recipe::{PinnedRecipe, VALID_MODES};
 use crate::port_admission::WorkAdmissionPort;
 use crate::port_decision::WorkDecisionPort;
@@ -42,7 +42,6 @@ use crate::work_actors::{Actor, ActorKind, Cause};
 use crate::work_config::{rejected_reason, WorkApiConfig};
 use crate::work_error::WorkError;
 use crate::work_payload::{route_key, WorkPayload};
-use crate::operator_dtos::MAX_REVISION;
 use crate::work_requests::{
     AcceptRequest, CancelRequest, PlanDecision, ResumeRequest, SubmitRequest,
 };
@@ -235,9 +234,7 @@ const EXTENSION_HEADERS: [&str; 3] = [
 /// work_api.destination: validates the three extension versions
 /// first (a malformed one rejects before any effect), then the
 /// shared dispatch-destination rules over the remaining headers.
-pub fn destination(
-    headers: &Headers,
-) -> Result<(WorkDestination, ExtensionVersions), WorkError> {
+pub fn destination(headers: &Headers) -> Result<(WorkDestination, ExtensionVersions), WorkError> {
     let versions = ExtensionVersions {
         delivery: delivery_version(headers)?,
         retry_events: retry_events_version(headers)?,
@@ -245,9 +242,7 @@ pub fn destination(
     };
     let route_headers: Vec<(String, String)> = headers
         .iter()
-        .filter(|(key, _)| {
-            !EXTENSION_HEADERS.contains(&key.to_ascii_lowercase().as_str())
-        })
+        .filter(|(key, _)| !EXTENSION_HEADERS.contains(&key.to_ascii_lowercase().as_str()))
         .cloned()
         .collect();
     for (key, _) in &route_headers {
@@ -319,8 +314,7 @@ pub fn failed(correlation: Option<&str>, error: &WorkError) -> (u16, Value) {
     let reason = reason.filter(|reason| {
         (code == "result_mismatch" && SUBMIT_MISMATCH_REASONS.contains(reason))
             || (code == "denied" && SUBMIT_DENIED_REASONS.contains(reason))
-            || (code == "invalid_request"
-                && crate::defect::FAILURE_REASONS.contains(reason))
+            || (code == "invalid_request" && crate::defect::FAILURE_REASONS.contains(reason))
     });
     let mut fields = Map::new();
     fields.insert("code".to_string(), json!(code));
@@ -417,10 +411,7 @@ pub fn retry_events_response(response: (u16, Value), version: Option<i64>) -> (u
 }
 
 /// Strips per-event attribution unless version 1 negotiated.
-pub fn event_attribution_response(
-    response: (u16, Value),
-    version: Option<i64>,
-) -> (u16, Value) {
+pub fn event_attribution_response(response: (u16, Value), version: Option<i64>) -> (u16, Value) {
     if version == Some(1) {
         return response;
     }
@@ -547,7 +538,10 @@ impl<'a> Body<'a> {
     fn require_keys(&self, required: &[&str], optional: &[&str]) -> Result<(), WorkError> {
         let keys = self.keys();
         let required_set: BTreeSet<&str> = required.iter().copied().collect();
-        let allowed: BTreeSet<&str> = required_set.union(&optional.iter().copied().collect()).copied().collect();
+        let allowed: BTreeSet<&str> = required_set
+            .union(&optional.iter().copied().collect())
+            .copied()
+            .collect();
         if !required_set.is_subset(&keys) || !keys.is_subset(&allowed) {
             return Err(invalid_request());
         }
@@ -757,8 +751,7 @@ fn findings_field(body: &Body<'_>, required: bool) -> Result<Value, WorkError> {
             }
         }
         Some(value) => {
-            let validated =
-                validate_findings(value, true).map_err(|_| invalid_request())?;
+            let validated = validate_findings(value, true).map_err(|_| invalid_request())?;
             Ok(Value::Array(validated))
         }
     }
@@ -776,7 +769,10 @@ pub fn decode(
         return Err(invalid_request());
     }
     let body = Body { map };
-    let kind = map.get("kind").and_then(Value::as_str).ok_or_else(invalid_request)?;
+    let kind = map
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(invalid_request)?;
     match route {
         WorkDestination::Catalog => {
             if kind != "work_catalog" {
@@ -834,9 +830,7 @@ pub fn decode(
                 None => "feature".to_string(),
                 Some(value) => value
                     .as_str()
-                    .ok_or_else(|| {
-                        WorkError::rejected(400, "invalid_request:defect.task_kind")
-                    })?
+                    .ok_or_else(|| WorkError::rejected(400, "invalid_request:defect.task_kind"))?
                     .to_string(),
             };
             let defect = crate::defect::validate_defect(&task_kind, body.get("defect"))?;
@@ -973,7 +967,12 @@ pub fn decode(
         WorkDestination::Accept => {
             body.require_keys(
                 &BASE_KEYS,
-                &["task_id", "expected_revision", "idempotency_key", "review_note"],
+                &[
+                    "task_id",
+                    "expected_revision",
+                    "idempotency_key",
+                    "review_note",
+                ],
             )?;
             if !body.keys().contains("task_id")
                 || !body.keys().contains("expected_revision")
@@ -1088,7 +1087,13 @@ pub fn decode(
             required.extend(["task_id", "expected_revision", "idempotency_key", "note"]);
             body.require_keys(
                 &required,
-                &["review_id", "decision", "agent_profile", "findings", "verified_finding_ids"],
+                &[
+                    "review_id",
+                    "decision",
+                    "agent_profile",
+                    "findings",
+                    "verified_finding_ids",
+                ],
             )?;
             for key in ["review_id", "decision", "agent_profile"] {
                 if !body.keys().contains(key) {
@@ -1096,8 +1101,14 @@ pub fn decode(
                 }
             }
             let decision = body.identifier("decision")?;
-            if !["approve", "repair", "escalate", "retry_infrastructure", "cancel"]
-                .contains(&decision.as_str())
+            if ![
+                "approve",
+                "repair",
+                "escalate",
+                "retry_infrastructure",
+                "cancel",
+            ]
+            .contains(&decision.as_str())
             {
                 return Err(invalid_request());
             }
@@ -1208,12 +1219,7 @@ pub fn decode(
             }
             let cursor = match body.get("cursor") {
                 None | Some(Value::Null) => None,
-                Some(value) => Some(
-                    value
-                        .as_str()
-                        .ok_or_else(invalid_request)?
-                        .to_string(),
-                ),
+                Some(value) => Some(value.as_str().ok_or_else(invalid_request)?.to_string()),
             };
             let limit_bytes = match body.get("limit_bytes") {
                 None => 32768,
@@ -1267,8 +1273,7 @@ pub trait NativeControlPort {
 /// The store's workflow policy identity lookup; absent on stores
 /// without one (Python's getattr default is None).
 pub trait PolicyIdentityPort {
-    fn policy_identity(&self, project_alias: &str, kind: &str, snapshot: &Value)
-        -> Option<Value>;
+    fn policy_identity(&self, project_alias: &str, kind: &str, snapshot: &Value) -> Option<Value>;
 }
 
 pub struct NoPolicyIdentity;
@@ -1335,7 +1340,12 @@ impl WorkApiService {
     }
 
     fn require_project(&self, project_alias: &str) -> Result<(), WorkError> {
-        if self.config.allowed_projects.iter().any(|p| p == project_alias) {
+        if self
+            .config
+            .allowed_projects
+            .iter()
+            .any(|p| p == project_alias)
+        {
             Ok(())
         } else {
             Err(WorkError::rejected(403, "denied"))
@@ -1374,9 +1384,7 @@ impl WorkApiService {
                 DispatchError::Handler(error) => error,
                 DispatchError::Admission(_) => unavailable(),
                 DispatchError::UnknownRoute(_) => WorkError::rejected(404, "not_found"),
-                DispatchError::PayloadMismatch(_) => {
-                    WorkError::rejected(500, "payload_mismatch")
-                }
+                DispatchError::PayloadMismatch(_) => WorkError::rejected(500, "payload_mismatch"),
             })
     }
 
@@ -1389,10 +1397,7 @@ impl WorkApiService {
 
     /// Python's submit-time recipe closure semantics, resolved
     /// eagerly (see the module note).
-    fn resolve_for_submit(
-        &self,
-        command: &WorkSubmit,
-    ) -> Result<PinnedRecipe, WorkError> {
+    fn resolve_for_submit(&self, command: &WorkSubmit) -> Result<PinnedRecipe, WorkError> {
         let profile = self
             .config
             .profile(&command.agent_profile)
@@ -1412,11 +1417,7 @@ impl WorkApiService {
 
     /// The shared 403-denied recipe guard for resume/plan/review/
     /// repair: profile must exist, be enabled and be native.
-    fn resolve_guarded(
-        &self,
-        agent_profile: &str,
-        mode: &str,
-    ) -> Result<PinnedRecipe, WorkError> {
+    fn resolve_guarded(&self, agent_profile: &str, mode: &str) -> Result<PinnedRecipe, WorkError> {
         let denied = || WorkError::rejected(403, "denied");
         let profile = self.config.profile(agent_profile).ok_or_else(denied)?;
         if !profile.execution_enabled || profile.is_external() {
@@ -1442,7 +1443,13 @@ impl WorkApiService {
             (WorkDestination::Submit, WorkCommand::Submit(command)) => {
                 self.submit(correlation, &command)
             }
-            (WorkDestination::Get, WorkCommand::Get { project_alias, task_id }) => {
+            (
+                WorkDestination::Get,
+                WorkCommand::Get {
+                    project_alias,
+                    task_id,
+                },
+            ) => {
                 self.require_project(&project_alias)?;
                 match self.call(
                     correlation,
@@ -1496,8 +1503,7 @@ impl WorkApiService {
                     },
                 )? {
                     WorkResponse::Tasks(page) => {
-                        let tasks: Vec<Value> =
-                            page.items.iter().map(summary_dict).collect();
+                        let tasks: Vec<Value> = page.items.iter().map(summary_dict).collect();
                         Ok((
                             200,
                             envelope(
@@ -1534,8 +1540,7 @@ impl WorkApiService {
                     },
                 )? {
                     WorkResponse::Events(page) => {
-                        let events: Vec<Value> =
-                            page.items.iter().map(event_dict).collect();
+                        let events: Vec<Value> = page.items.iter().map(event_dict).collect();
                         Ok((
                             200,
                             envelope(
@@ -1712,10 +1717,7 @@ impl WorkApiService {
                     _ => Err(unavailable()),
                 }
             }
-            (
-                WorkDestination::PublicationRetry,
-                WorkCommand::PublicationRetry(command),
-            ) => {
+            (WorkDestination::PublicationRetry, WorkCommand::PublicationRetry(command)) => {
                 self.require_project(&command.project_alias)?;
                 match self.call(
                     correlation,
@@ -1787,11 +1789,7 @@ impl WorkApiService {
         }
     }
 
-    fn submit(
-        &self,
-        correlation: &str,
-        command: &WorkSubmit,
-    ) -> Result<(u16, Value), WorkError> {
+    fn submit(&self, correlation: &str, command: &WorkSubmit) -> Result<(u16, Value), WorkError> {
         self.require_project(&command.project_alias)?;
         if !self.config.allowed_modes.iter().any(|m| m == &command.mode) {
             return Err(rejected_reason(403, "denied", "mode_not_granted"));
@@ -1856,11 +1854,7 @@ impl WorkApiService {
         }
     }
 
-    fn resume(
-        &self,
-        correlation: &str,
-        command: &WorkResume,
-    ) -> Result<(u16, Value), WorkError> {
+    fn resume(&self, correlation: &str, command: &WorkResume) -> Result<(u16, Value), WorkError> {
         self.require_project(&command.project_alias)?;
         self.external_guard(&command.project_alias, command.task_id)?;
         if let Some(native) = &self.native_control {
@@ -1968,11 +1962,7 @@ impl WorkApiService {
                 fields.insert("mode".to_string(), json!(outcome.task.mode));
                 Ok((
                     status,
-                    envelope(
-                        "work_plan_decided",
-                        correlation,
-                        Value::Object(fields),
-                    ),
+                    envelope("work_plan_decided", correlation, Value::Object(fields)),
                 ))
             }
             _ => Err(unavailable()),
@@ -2001,7 +1991,10 @@ impl WorkApiService {
         // The store resolves an implement recipe only when the
         // verdict queues implementation (approve).
         let recipe_digest = if command.decision == "approve" {
-            Some(self.resolve_guarded(&command.agent_profile, "implement")?.digest)
+            Some(
+                self.resolve_guarded(&command.agent_profile, "implement")?
+                    .digest,
+            )
         } else {
             None
         };
@@ -2145,7 +2138,11 @@ mod tests {
     struct StubPorts;
 
     impl WorkReadPort for StubPorts {
-        fn get(&self, _project_alias: &str, _task_id: Uuid) -> Result<crate::work_types::TaskView, WorkError> {
+        fn get(
+            &self,
+            _project_alias: &str,
+            _task_id: Uuid,
+        ) -> Result<crate::work_types::TaskView, WorkError> {
             Ok(crate::work_types::TaskView {
                 summary: summary(),
                 projection: json!({"delivery": {"state": "queued"}, "progress": 3}),
@@ -2224,20 +2221,13 @@ mod tests {
         ) -> Result<PolicyIdentity, WorkError> {
             Err(WorkError::store("stub"))
         }
-        fn policy_drifted(
-            &self,
-            _workflow_id: Uuid,
-            _snapshot: &Value,
-        ) -> Result<bool, WorkError> {
+        fn policy_drifted(&self, _workflow_id: Uuid, _snapshot: &Value) -> Result<bool, WorkError> {
             Err(WorkError::store("stub"))
         }
     }
 
     impl WorkDecisionPort for StubPorts {
-        fn plan_decide(
-            &self,
-            _request: &PlanDecideRequest,
-        ) -> Result<ControlOutcome, WorkError> {
+        fn plan_decide(&self, _request: &PlanDecideRequest) -> Result<ControlOutcome, WorkError> {
             Err(WorkError::store("stub"))
         }
         fn review_decide(
@@ -2405,8 +2395,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .insert("note".to_string(), json!(""));
-        let command =
-            decode(WorkDestination::ReviewDecide, "req-1", &with_note).expect("decode");
+        let command = decode(WorkDestination::ReviewDecide, "req-1", &with_note).expect("decode");
         match command {
             WorkCommand::ReviewDecide(command) => {
                 assert_eq!(command.findings, json!([]));
@@ -2435,10 +2424,7 @@ mod tests {
         assert_eq!(body["event"]["code"], "denied");
         assert_eq!(body["event"]["reason"], "mode_not_granted");
 
-        let (status, body) = failed(
-            Some("req-1"),
-            &WorkError::rejected(403, "denied"),
-        );
+        let (status, body) = failed(Some("req-1"), &WorkError::rejected(403, "denied"));
         assert_eq!(status, 403);
         assert!(body["event"].get("reason").is_none());
 
@@ -2475,7 +2461,9 @@ mod tests {
             ),
         );
         let (_, stripped) = retry_events_response(events.clone(), None);
-        assert!(stripped["event"]["events"][0]["payload"].get("retry_event").is_none());
+        assert!(stripped["event"]["events"][0]["payload"]
+            .get("retry_event")
+            .is_none());
         let (_, stripped) = event_attribution_response(events, None);
         assert!(stripped["event"]["events"][0].get("attribution").is_none());
     }
@@ -2569,7 +2557,12 @@ mod tests {
         // Missing task_id, an unknown key, a malformed UUID and a
         // correlation mismatch are all invalid.
         assert_eq!(
-            decode(WorkDestination::Get, "req-1", &decode_body("work_get", json!({}))).err(),
+            decode(
+                WorkDestination::Get,
+                "req-1",
+                &decode_body("work_get", json!({}))
+            )
+            .err(),
             Some(invalid())
         );
         assert_eq!(
@@ -2886,5 +2879,4 @@ mod tests {
             Some(invalid())
         );
     }
-
 }

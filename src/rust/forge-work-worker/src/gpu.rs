@@ -393,7 +393,7 @@ impl ModelAdapterPort for HttpModelAdapter {
     }
 
     fn interrupt(&self) {
-        let mut slot = lock(&self.socket);
+        let slot = lock(&self.socket);
         if let Some(stream) = slot.as_ref() {
             let _ = stream.shutdown(Shutdown::Both);
         }

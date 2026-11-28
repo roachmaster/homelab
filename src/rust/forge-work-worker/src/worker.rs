@@ -783,7 +783,7 @@ impl CodingWorker {
         let mut manifest: Option<ResultManifest> = None;
         if outcome.status == "awaiting_review" {
             let chunks = crate::runner::utf8_chunks(&outcome.text, crate::runner::CHUNK_BYTES)
-                .map_err(|message| WorkerError::Protocol(message))?;
+                .map_err(WorkerError::Protocol)?;
             if chunks.len() > 1024 {
                 outcome.status = "failed".to_string();
                 outcome.text = String::new();

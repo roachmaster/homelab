@@ -57,7 +57,7 @@ class DeliveryRepairConsumer:
         project=job['project_alias']
         if project not in self.config.delivery_repair_projects:
             raise Rejected(403,'denied')
-        native=self.config.project_workflows.get(project)
+        native=self.config.delivery_repair_workflow(project)
         policy=native or self.config.external_workflows.get(project)
         if policy is None:
             raise Rejected(403,'denied')

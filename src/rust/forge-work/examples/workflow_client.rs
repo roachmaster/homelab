@@ -13,7 +13,6 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use forge_work::decision_requests::{PlanDecideRequest, ReviewDecideRequest};
 use forge_work::pinned_recipe::PinnedRecipe;
@@ -182,7 +181,7 @@ fn config() -> CoordinatorConfig {
     }
 }
 
-fn store() -> Arc<WorkflowStore> {
+fn store() -> Rc<WorkflowStore> {
     WorkflowStoreFactory {
         config: config(),
         catalog: Box::new(NoCatalog),
@@ -206,7 +205,7 @@ impl RunOnceHook for CountingMaintenance {
 fn main() -> Result<(), WorkError> {
     // 1. Lifecycle: the store owns its sub-ports, nothing keeps it alive.
     let built = store();
-    let weak = Arc::downgrade(&built);
+    let weak = Rc::downgrade(&built);
     drop(built);
     println!(
         "store released after last handle: {}",

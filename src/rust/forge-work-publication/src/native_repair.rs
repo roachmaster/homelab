@@ -114,7 +114,8 @@ impl BranchFirstRepairProvider {
             "current_main_commit": main,
         });
         let marker = directory.join("seed-intent.json");
-        std::fs::create_dir_all(directory).map_err(|error| ReviewError::other(error.to_string()))?;
+        std::fs::create_dir_all(directory)
+            .map_err(|error| ReviewError::other(error.to_string()))?;
         if is_symlink(directory) || is_symlink(&repository) {
             return code("native_repair_source_changed");
         }
@@ -136,12 +137,9 @@ impl BranchFirstRepairProvider {
             // Preserve a pre-receipt crash's private clone for
             // audit. Nothing from an incomplete seed may
             // masquerade as an admitted receipt.
-            let head_text = self.git.git_text(
-                Some(&repository),
-                &["rev-parse", "HEAD"],
-                false,
-                60.0,
-            )?;
+            let head_text =
+                self.git
+                    .git_text(Some(&repository), &["rev-parse", "HEAD"], false, 60.0)?;
             let review_id = Uuid::parse_str(text_of(job, "review_id"))
                 .map_err(|_| ReviewError::other("Invalid delivery identity"))?;
             let interrupted_name = format!(
@@ -195,7 +193,14 @@ impl BranchFirstRepairProvider {
             .git
             .git(
                 Some(&repository),
-                &["merge", "--no-edit", "--no-commit", "--no-ff", "--no-gpg-sign", main],
+                &[
+                    "merge",
+                    "--no-edit",
+                    "--no-commit",
+                    "--no-ff",
+                    "--no-gpg-sign",
+                    main,
+                ],
                 false,
                 60.0,
             )
@@ -225,7 +230,8 @@ impl BranchFirstRepairProvider {
         // Commit the honest unresolved work-in-progress, not
         // an assertion that either side won. The model
         // receives the markers and full main diff.
-        self.git.git(Some(&repository), &["add", "--all", "--", "."], false, 60.0)?;
+        self.git
+            .git(Some(&repository), &["add", "--all", "--", "."], false, 60.0)?;
         let message = "Unverified Forge delivery repair seed; resolve integration before review";
         if self
             .git
@@ -245,12 +251,9 @@ impl BranchFirstRepairProvider {
             if main == head {
                 return code("native_repair_identical_source");
             }
-            let tree = self.git.git_text(
-                Some(&repository),
-                &["write-tree"],
-                false,
-                60.0,
-            )?;
+            let tree = self
+                .git
+                .git_text(Some(&repository), &["write-tree"], false, 60.0)?;
             let seed_commit = self.git.git_text(
                 Some(&repository),
                 &["commit-tree", &tree, "-p", head, "-p", main, "-m", message],
@@ -271,12 +274,10 @@ impl BranchFirstRepairProvider {
                 60.0,
             )?;
         }
-        let candidate = sha(&self.git.git_text(
-            Some(&repository),
-            &["rev-parse", "HEAD"],
-            false,
-            60.0,
-        )?)?;
+        let candidate =
+            sha(&self
+                .git
+                .git_text(Some(&repository), &["rev-parse", "HEAD"], false, 60.0)?)?;
         let parents_text = self.git.git_text(
             Some(&repository),
             &["show", "-s", "--format=%P", &candidate],
@@ -288,17 +289,12 @@ impl BranchFirstRepairProvider {
             return code("native_repair_parent_changed");
         }
         self.git.verify(&repository, &candidate)?;
-        let tree = forge_work_worker::review_candidate::tree_map(
-            &mut self.git,
-            &repository,
-            &candidate,
-        )?;
+        let tree =
+            forge_work_worker::review_candidate::tree_map(&mut self.git, &repository, &candidate)?;
         let source_gate = gate_source_digest(&tree, &self.config.jenkins_verification_profile);
-        let canonical = crate::publication_clients::project_path(
-            &self.config,
-            text_of(job, "project_alias"),
-        )
-        .ok_or_else(|| ReviewError::other("unknown project"))?;
+        let canonical =
+            crate::publication_clients::project_path(&self.config, text_of(job, "project_alias"))
+                .ok_or_else(|| ReviewError::other("unknown project"))?;
         let lease = forge_work_worker::workspace::WorkspaceLease {
             path: repository.clone(),
             repository: canonical,
@@ -392,7 +388,8 @@ impl BranchFirstRepairProvider {
         let build = self.native_ci.build_reference(job)?;
         let merge_id = Uuid::parse_str(text_of(job, "merge_id"))
             .map_err(|_| ReviewError::other("Invalid delivery identity"))?;
-        let review_id = Uuid::new_v5(&merge_id, "branch-first-repair-source-v1".as_bytes()).to_string();
+        let review_id =
+            Uuid::new_v5(&merge_id, "branch-first-repair-source-v1".as_bytes()).to_string();
         let mut selected = job.clone();
         selected["review_id"] = json!(review_id);
         selected["attempt_id"] = original["attempt_id"].clone();
@@ -412,7 +409,10 @@ impl BranchFirstRepairProvider {
         let mut manifest = original.clone();
         if let Some(map) = manifest.as_object_mut() {
             map.insert("review_id".into(), json!(review_id));
-            map.insert("candidate_commit".into(), result["candidate_commit"].clone());
+            map.insert(
+                "candidate_commit".into(),
+                result["candidate_commit"].clone(),
+            );
             map.insert(
                 "candidate_workspace_digest".into(),
                 result["candidate_workspace_digest"].clone(),
@@ -420,8 +420,14 @@ impl BranchFirstRepairProvider {
             map.insert("integration_base".into(), json!(main));
             map.insert("repair_requires_new_workspace".into(), json!(true));
             map.insert("checks_passed".into(), json!(false));
-            map.insert("gate_manifest_sha256".into(), result["gate_manifest_sha256"].clone());
-            map.insert("gate_source_sha256".into(), result["gate_source_sha256"].clone());
+            map.insert(
+                "gate_manifest_sha256".into(),
+                result["gate_manifest_sha256"].clone(),
+            );
+            map.insert(
+                "gate_source_sha256".into(),
+                result["gate_source_sha256"].clone(),
+            );
             map.insert("delivery_failure".into(), details.clone());
             map.remove("native_ci");
         }
@@ -456,9 +462,8 @@ impl crate::merge::MergeRepairPort for BranchFirstRepairProvider {
         current_main: &str,
         require_lease: crate::delivery_stores::RequireLease,
     ) -> Result<Value, ProviderError> {
-        let mut lease = || {
-            require_lease().map_err(|error| ReviewError::other(error.code().to_string()))
-        };
+        let mut lease =
+            || require_lease().map_err(|error| ReviewError::other(error.code().to_string()));
         BranchFirstRepairProvider::prepare(self, job, current_main, &mut lease)
             .map_err(|error| ProviderError::Other(error.to_string()))
     }
@@ -488,7 +493,14 @@ impl RepairSourcesPort for BranchFirstRepairProvider {
                 parse_private_json(&seed_directory.join("seed-result.json"))?,
             )
         } else {
-            self.seed(job, repository, &head, &main, &seed_directory, require_lease)?
+            self.seed(
+                job,
+                repository,
+                &head,
+                &main,
+                &seed_directory,
+                require_lease,
+            )?
         };
         let intent = json!({
             "version": 1,

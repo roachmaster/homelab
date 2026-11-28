@@ -12,9 +12,7 @@ use uuid::Uuid;
 
 use crate::canonical::{canonical_json, sha256_hex};
 use crate::external_grants::EvidenceLock;
-use crate::external_overrides::{
-    bound_artifact, REVIEWER_EXHAUSTION_REASON,
-};
+use crate::external_overrides::{bound_artifact, REVIEWER_EXHAUSTION_REASON};
 use crate::external_review::{parse_verdict, validate_target};
 use crate::external_tx::{ExternalTx, LockMode};
 use crate::external_workflow::{
@@ -39,8 +37,7 @@ impl ExternalWorkflowStore {
         let policy = &self.policies[&command.project_alias];
         let reviewer_profile = policy.reviewer_profile.clone();
         let author_profile = policy.author_profile.clone();
-        let intent_digest =
-            sha256_hex(canonical_json(&command.intent(&self.owner)).as_bytes());
+        let intent_digest = sha256_hex(canonical_json(&command.intent(&self.owner)).as_bytes());
         let grants = self.recovery_grants.as_ref().expect("checked above");
         let mut evidence = grants.acquire(
             &self.owner,
@@ -108,8 +105,7 @@ impl ExternalWorkflowStore {
             {
                 return Err(not_reviewable());
             }
-            let review_id = opt_uuid(&w["state"], "active_review_id")
-                .unwrap_or_default();
+            let review_id = opt_uuid(&w["state"], "active_review_id").unwrap_or_default();
             let review = tx.review_row(review_id, LockMode::Update)?;
             if let Some(review) = &review {
                 if text(review, "target_kind") == "code" {
@@ -151,36 +147,25 @@ impl ExternalWorkflowStore {
         intent_digest: &str,
         evidence: &mut dyn EvidenceLock,
     ) -> Result<Value, WorkError> {
-        let transport_exception =
-            int_of(&w["state"], "review_retries") == AGENT_RETRY_LIMIT;
+        let transport_exception = int_of(&w["state"], "review_retries") == AGENT_RETRY_LIMIT;
         let Some(review) = review.filter(|review| {
             text(review, "target_kind") == "plan"
                 && matches!(text(review, "status"), "reviewing" | "escalated")
-                && matches!(
-                    int_of(&w["state"], "review_retries"),
-                    1 | AGENT_RETRY_LIMIT
-                )
+                && matches!(int_of(&w["state"], "review_retries"), 1 | AGENT_RETRY_LIMIT)
         }) else {
             return Err(not_reviewable());
         };
-        let target = validate_target(
-            text(review, "target_json"),
-            text(review, "target_sha256"),
-        )
-        .map_err(WorkError::store)?;
+        let target = validate_target(text(review, "target_json"), text(review, "target_sha256"))
+            .map_err(WorkError::store)?;
         let critic = self.task(tx, w, Some(uuid_of(review, "reviewer_task_id")))?;
         let source = self.task(tx, w, Some(uuid_of(review, "source_task_id")))?;
         let bindings_ok = target["workflow_id"].as_str()
             == Some(&uuid_of(w, "workflow_id").to_string())
-            && target["review_id"].as_str()
-                == Some(&uuid_of(review, "review_id").to_string())
-            && target["reviewer_task_id"].as_str()
-                == Some(&uuid_of(&critic, "id").to_string())
+            && target["review_id"].as_str() == Some(&uuid_of(review, "review_id").to_string())
+            && target["reviewer_task_id"].as_str() == Some(&uuid_of(&critic, "id").to_string())
             && target["reviewer_profile"].as_str() == Some(text(w, "reviewer_profile"))
-            && target["source_task_id"].as_str()
-                == Some(&uuid_of(&source, "id").to_string())
-            && target["source_assignment_id"].as_str()
-                == review["source_assignment_id"].as_str()
+            && target["source_task_id"].as_str() == Some(&uuid_of(&source, "id").to_string())
+            && target["source_assignment_id"].as_str() == review["source_assignment_id"].as_str()
             && target["source_sha256"] == review["source_sha256"]
             && target["target_kind"].as_str() == Some("plan")
             && uuid_of(w, "active_task_id") == uuid_of(&source, "id");
@@ -226,16 +211,13 @@ impl ExternalWorkflowStore {
                 expected_summary,
             )?
             .ok_or_else(reconcile_required)?;
-        evidence.lock_review_evidence(
-            uuid_of(review, "review_id"),
-            uuid_of(&failed, "attempt_id"),
-        )?;
+        evidence
+            .lock_review_evidence(uuid_of(review, "review_id"), uuid_of(&failed, "attempt_id"))?;
         let mut retained_event = None;
         if transport_exception {
             let proof = &failed["stop_proof"];
             if !self.retry_events
-                || w["state"]["escalation_reason"].as_str()
-                    != Some(REVIEWER_EXHAUSTION_REASON)
+                || w["state"]["escalation_reason"].as_str() != Some(REVIEWER_EXHAUSTION_REASON)
                 || proof["scope_stopped"].as_bool() != Some(true)
                 || proof["source"].as_str() != Some("systemd")
                 || proof["unit_name"] != failed["unit_name"]
@@ -280,9 +262,7 @@ impl ExternalWorkflowStore {
                 continue;
             }
             seen.push(task_id);
-            if !task["latest_attempt_id"].is_null()
-                || text(task, "status") != "cancelled"
-            {
+            if !task["latest_attempt_id"].is_null() || text(task, "status") != "cancelled" {
                 return Err(not_reviewable());
             }
             tx.update_task_row(
@@ -351,7 +331,8 @@ impl ExternalWorkflowStore {
                 "Operator authorized one infrastructure review retry after deployed fix {}. ",
                 command.deployed_fix_revision
             )
-        } + "Selecting fresh trusted source; previous attempts and budgets remain preserved.";
+        }
+            + "Selecting fresh trusted source; previous attempts and budgets remain preserved.";
         self.save(
             tx,
             w,
@@ -380,16 +361,12 @@ impl ExternalWorkflowStore {
         if !self.retry_events
             || !matches!(text(review, "status"), "reviewing" | "escalated")
             || int_of(&w["state"], "review_retries") != AGENT_RETRY_LIMIT
-            || w["state"]["escalation_reason"].as_str()
-                != Some(REVIEWER_EXHAUSTION_REASON)
+            || w["state"]["escalation_reason"].as_str() != Some(REVIEWER_EXHAUSTION_REASON)
         {
             return Err(not_reviewable());
         }
-        let target = validate_target(
-            text(review, "target_json"),
-            text(review, "target_sha256"),
-        )
-        .map_err(WorkError::store)?;
+        let target = validate_target(text(review, "target_json"), text(review, "target_sha256"))
+            .map_err(WorkError::store)?;
         let critic = self.task(tx, w, Some(uuid_of(review, "reviewer_task_id")))?;
         let source = self.task(tx, w, Some(uuid_of(review, "source_task_id")))?;
         let candidate_source_ok = w["state"]["candidate_source"].as_object().map(|map| {
@@ -399,15 +376,11 @@ impl ExternalWorkflowStore {
         }) == Some(true);
         let bindings_ok = target["workflow_id"].as_str()
             == Some(&uuid_of(w, "workflow_id").to_string())
-            && target["review_id"].as_str()
-                == Some(&uuid_of(review, "review_id").to_string())
-            && target["reviewer_task_id"].as_str()
-                == Some(&uuid_of(&critic, "id").to_string())
+            && target["review_id"].as_str() == Some(&uuid_of(review, "review_id").to_string())
+            && target["reviewer_task_id"].as_str() == Some(&uuid_of(&critic, "id").to_string())
             && target["reviewer_profile"].as_str() == Some(text(w, "reviewer_profile"))
-            && target["source_task_id"].as_str()
-                == Some(&uuid_of(&source, "id").to_string())
-            && target["source_assignment_id"].as_str()
-                == review["source_assignment_id"].as_str()
+            && target["source_task_id"].as_str() == Some(&uuid_of(&source, "id").to_string())
+            && target["source_assignment_id"].as_str() == review["source_assignment_id"].as_str()
             && target["source_sha256"] == review["source_sha256"]
             && target["source_base_revision"] == source["base_revision"]
             && target["review_base_revision"] == critic["base_revision"]
@@ -441,11 +414,9 @@ impl ExternalWorkflowStore {
             || !source["latest_attempt_id"].is_null()
             || text(&source, "agent_profile") != text(w, "author_profile")
             || !matches!(text(&source, "status"), "cancelled" | "awaiting_review")
-            || source["recipe_digest"]
-                != snapshot["recipes"]["author_implement"]["digest"]
+            || source["recipe_digest"] != snapshot["recipes"]["author_implement"]["digest"]
             || int_of(&source, "revision")
-                != int_of(&target, "source_revision")
-                    + if source_cancelled { 1 } else { 0 }
+                != int_of(&target, "source_revision") + if source_cancelled { 1 } else { 0 }
             || !matches!(text(root, "status"), "cancelled" | "awaiting_review")
             || !root["latest_attempt_id"].is_null()
         {
@@ -476,10 +447,8 @@ impl ExternalWorkflowStore {
         let Some(failed) = failed.filter(|_| proof_ok) else {
             return Err(reconcile_required());
         };
-        evidence.lock_review_evidence(
-            uuid_of(review, "review_id"),
-            uuid_of(&failed, "attempt_id"),
-        )?;
+        evidence
+            .lock_review_evidence(uuid_of(review, "review_id"), uuid_of(&failed, "attempt_id"))?;
         let retained = evidence.exhausted_reviewer_event(
             uuid_of(review, "review_id"),
             uuid_of(&critic, "id"),
@@ -503,16 +472,13 @@ impl ExternalWorkflowStore {
         let artifact = bound_artifact(tx, w, review, &target, &source)?;
         let plan = w["state"]["plan_review"].clone();
         let approved = opt_uuid(&plan, "review_id")
-            .and_then(|review_id| {
-                tx.review_row(review_id, LockMode::Share).ok().flatten()
-            })
+            .and_then(|review_id| tx.review_row(review_id, LockMode::Share).ok().flatten())
             .filter(|approved| {
                 text(approved, "target_kind") == "plan"
                     && text(approved, "status") == "approved"
                     && approved["receipt"] == plan
                     && plan["decision"].as_str() == Some("approve")
-                    && approved["source_assignment_id"]
-                        == target["approved_plan"]["assignment_id"]
+                    && approved["source_assignment_id"] == target["approved_plan"]["assignment_id"]
                     && approved["source_sha256"] == target["approved_plan"]["sha256"]
             })
             .ok_or_else(mismatch)?;
@@ -546,8 +512,7 @@ impl ExternalWorkflowStore {
                     && prepared["result"]["receipt"] == candidate
                     && prepared["intent"]["source_task_id"].as_str()
                         == Some(&uuid_of(&source, "id").to_string())
-                    && prepared["intent"]["source_assignment_id"]
-                        == artifact["assignment_id"]
+                    && prepared["intent"]["source_assignment_id"] == artifact["assignment_id"]
                     && prepared["intent"]["source_sha256"] == artifact["sha256"]
             })
             .ok_or_else(mismatch)?;

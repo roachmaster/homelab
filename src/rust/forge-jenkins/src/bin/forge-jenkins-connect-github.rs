@@ -11,7 +11,7 @@ use std::process::ExitCode;
 
 use base64::Engine;
 use forge_jenkins::provisioning::{run, sha256_hex};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 const STATE: &str = "/var/lib/forge-provisioning/jenkins";
 const JENKINS_HOME: &str = "/var/lib/jenkins";
@@ -69,7 +69,9 @@ fn install_file_as(path: &Path, content: &[u8], mode: u32) -> Result<(), String>
         .create_new(true)
         .custom_flags(0o400000)
         .mode(mode);
-    let mut file = options.open(&temporary).map_err(|error| error.to_string())?;
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
     file.write_all(content).map_err(|error| error.to_string())?;
     file.sync_all().map_err(|error| error.to_string())?;
     drop(file);
@@ -218,8 +220,8 @@ fn main_inner() -> Result<Map<String, Value>, String> {
         return Err("Operator GitHub CLI account is not the expected repository owner".to_string());
     }
     let key = source_secret(&home.join(".ssh/id_ed25519"), operator.uid.as_raw())?;
-    let public_raw = std::fs::read(home.join(".ssh/id_ed25519.pub"))
-        .map_err(|error| error.to_string())?;
+    let public_raw =
+        std::fs::read(home.join(".ssh/id_ed25519.pub")).map_err(|error| error.to_string())?;
     if public_raw.len() > 65536 {
         return Err("Oversized operator GitHub source".to_string());
     }
@@ -288,15 +290,24 @@ fn main_inner() -> Result<Map<String, Value>, String> {
     let jenkins = PathBuf::from(JENKINS_HOME);
     let files: Vec<(String, Vec<u8>)> = vec![
         (
-            jenkins.join(".ssh/github_ed25519").to_string_lossy().into_owned(),
+            jenkins
+                .join(".ssh/github_ed25519")
+                .to_string_lossy()
+                .into_owned(),
             key,
         ),
         (
-            jenkins.join(".ssh/github_ed25519.pub").to_string_lossy().into_owned(),
+            jenkins
+                .join(".ssh/github_ed25519.pub")
+                .to_string_lossy()
+                .into_owned(),
             public,
         ),
         (
-            jenkins.join(".ssh/known_hosts").to_string_lossy().into_owned(),
+            jenkins
+                .join(".ssh/known_hosts")
+                .to_string_lossy()
+                .into_owned(),
             known_hosts,
         ),
         (
@@ -304,7 +315,10 @@ fn main_inner() -> Result<Map<String, Value>, String> {
             SSH_CONFIG.as_bytes().to_vec(),
         ),
         (
-            jenkins.join(".config/gh/hosts.yml").to_string_lossy().into_owned(),
+            jenkins
+                .join(".config/gh/hosts.yml")
+                .to_string_lossy()
+                .into_owned(),
             gh_bytes,
         ),
     ];
@@ -322,20 +336,23 @@ fn main_inner() -> Result<Map<String, Value>, String> {
             .ok()
             .flatten()
             .ok_or("jenkins account missing")?;
-        let mut child = std::process::Command::new(
-            std::env::current_exe().map_err(|error| error.to_string())?,
-        )
-        .arg("--as-jenkins-install")
-        .stdin(std::process::Stdio::piped())
-        .uid(jenkins_user.uid.as_raw())
-        .gid(jenkins_user.gid.as_raw())
-        .spawn()
-        .map_err(|error| error.to_string())?;
+        let mut child =
+            std::process::Command::new(std::env::current_exe().map_err(|error| error.to_string())?)
+                .arg("--as-jenkins-install")
+                .stdin(std::process::Stdio::piped())
+                .uid(jenkins_user.uid.as_raw())
+                .gid(jenkins_user.gid.as_raw())
+                .spawn()
+                .map_err(|error| error.to_string())?;
         child
             .stdin
             .take()
             .ok_or("child stdin")?
-            .write_all(serde_json::to_string(&bundle).unwrap_or_default().as_bytes())
+            .write_all(
+                serde_json::to_string(&bundle)
+                    .unwrap_or_default()
+                    .as_bytes(),
+            )
             .map_err(|error| error.to_string())?;
         let status = child.wait().map_err(|error| error.to_string())?;
         if !status.success() {

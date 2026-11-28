@@ -174,6 +174,10 @@ impl ReconcilerApi {
 
     /// Acquires the exclusive branch reservation for a scope
     /// (forge_coding_reconciler_api.agent_branch_acquire).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the frozen public SQL adapter contract and parameter order"
+    )]
     pub fn agent_branch_acquire(
         &mut self,
         project_alias: &str,
@@ -234,6 +238,10 @@ impl ReconcilerApi {
 
     /// Records a publication against the reservation
     /// (forge_coding_reconciler_api.agent_branch_record_publication).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the frozen public SQL adapter contract and parameter order"
+    )]
     pub fn agent_branch_record_publication(
         &mut self,
         project_alias: &str,
@@ -294,6 +302,10 @@ impl ReconcilerApi {
 
     /// Releases the reservation with a terminal reason
     /// (forge_coding_reconciler_api.agent_branch_release).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the frozen public SQL adapter contract and parameter order"
+    )]
     pub fn agent_branch_release(
         &mut self,
         project_alias: &str,

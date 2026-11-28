@@ -434,6 +434,10 @@ impl WorkerApi {
     /// DTO is owned by the usage slice (S6) and gets its typed form
     /// there; the manifest and stop proof are exact-key shapes and are
     /// typed now.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserve the frozen public SQL adapter contract and parameter order"
+    )]
     pub fn publish(
         &mut self,
         claim: &Claim,

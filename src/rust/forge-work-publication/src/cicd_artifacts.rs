@@ -165,10 +165,7 @@ fn find_key_marker(text: &str, from: usize, kind: &str) -> Option<(usize, usize)
 fn redact_private_keys(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
-    loop {
-        let Some((start, begin_end)) = find_key_marker(text, cursor, "BEGIN") else {
-            break;
-        };
+    while let Some((start, begin_end)) = find_key_marker(text, cursor, "BEGIN") {
         let Some((_end_start, end)) = find_key_marker(text, start, "END") else {
             // No closing marker: the begin marker stays literal and
             // the scan continues after it.
@@ -201,7 +198,11 @@ fn take_while_count(text: &str, start: usize, pred: impl Fn(char) -> bool) -> us
 fn token_match_at(text: &str, start: usize) -> Option<usize> {
     let rest = &text[start..];
     let alnum = |ch: char| ch.is_ascii_alphanumeric();
-    if rest.len() >= 5 && rest.as_bytes().starts_with(b"gh") && b"pousr".contains(&rest.as_bytes()[2]) && rest.as_bytes()[3] == b'_' {
+    if rest.len() >= 5
+        && rest.as_bytes().starts_with(b"gh")
+        && b"pousr".contains(&rest.as_bytes()[2])
+        && rest.as_bytes()[3] == b'_'
+    {
         let taken = take_while_count(text, start + 4, alnum);
         if text[start + 4..start + 4 + taken].chars().count() >= 20 {
             return Some(start + 4 + taken);
@@ -230,9 +231,8 @@ fn token_match_at(text: &str, start: usize) -> Option<usize> {
         let ws = take_while_count(after, 0, |ch: char| ch.is_whitespace());
         if ws > 0 {
             let token_start = start + 6 + ws;
-            let taken = take_while_count(text, token_start, |ch| {
-                alnum(ch) || "._~+/=-".contains(ch)
-            });
+            let taken =
+                take_while_count(text, token_start, |ch| alnum(ch) || "._~+/=-".contains(ch));
             if text[token_start..token_start + taken].chars().count() >= 16 {
                 return Some(token_start + taken);
             }
@@ -350,7 +350,10 @@ fn parse_end_marker_line(line: &[u8]) -> Option<i64> {
 }
 
 fn take_digits(text: &str) -> Option<(&str, &str)> {
-    let len = text.bytes().take_while(|byte| byte.is_ascii_digit()).count();
+    let len = text
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
     if len == 0 {
         None
     } else {
@@ -424,10 +427,7 @@ fn cargo_failed_names(text: &str) -> Vec<String> {
             continue;
         };
         let Some(rest) = skip_ws1(rest) else { continue };
-        let name_len = rest
-            .bytes()
-            .take_while(|byte| !is_py_space(*byte))
-            .count();
+        let name_len = rest.bytes().take_while(|byte| !is_py_space(*byte)).count();
         if name_len == 0 {
             continue;
         }
@@ -590,9 +590,7 @@ pub fn parse_test_summary(
                         };
                         if let Some(word_len) = word_len {
                             if let Some(after) = skip_ws1(&rest[word_len..]) {
-                                if after.starts_with("in")
-                                    && skip_ws1(&after[2..]).is_some()
-                                {
+                                if after.starts_with("in") && skip_ws1(&after[2..]).is_some() {
                                     ran_found = true;
                                     ran_total += count.parse::<i64>().unwrap_or(0);
                                 }
@@ -606,7 +604,10 @@ pub fn parse_test_summary(
             // plain OK without skipped count
         } else if let Some(rest) = line.strip_prefix("OK") {
             if let Some(rest) = skip_ws1(rest) {
-                if let Some(inner) = rest.strip_prefix("(skipped=").and_then(|r| r.strip_suffix(')')) {
+                if let Some(inner) = rest
+                    .strip_prefix("(skipped=")
+                    .and_then(|r| r.strip_suffix(')'))
+                {
                     if let Ok(value) = inner.parse::<i64>() {
                         ok_skipped += value;
                     }
@@ -789,9 +790,7 @@ pub fn extract_error_excerpt(text: &str, failed: bool) -> Option<String> {
 /// Split redacted stage console output into <=16 chunks of
 /// <=16 KiB each. Returns (full sha256, byte count, chunk count,
 /// chunk documents).
-pub fn chunk_stage_log(
-    redacted_text: &str,
-) -> (Option<String>, usize, usize, Vec<Value>) {
+pub fn chunk_stage_log(redacted_text: &str) -> (Option<String>, usize, usize, Vec<Value>) {
     if redacted_text.is_empty() {
         return (None, 0, 0, Vec::new());
     }
@@ -850,9 +849,10 @@ pub fn extract_stage_evidence_from_receipt(
     let Some(checks) = receipt.get("checks").and_then(|value| value.as_array()) else {
         return Vec::new();
     };
-    let spans = log_bytes.map(split_log_spans_from_bytes).unwrap_or_default();
-    let mut stage_meta: std::collections::HashMap<i64, Value> =
-        std::collections::HashMap::new();
+    let spans = log_bytes
+        .map(split_log_spans_from_bytes)
+        .unwrap_or_default();
+    let mut stage_meta: std::collections::HashMap<i64, Value> = std::collections::HashMap::new();
     if let Some(stages) = receipt.get("stages").and_then(|value| value.as_array()) {
         for row in stages {
             let Some(name) = row.get("name").and_then(|value| value.as_str()) else {
@@ -861,7 +861,7 @@ pub fn extract_stage_evidence_from_receipt(
             if !name.starts_with("check_") {
                 continue;
             }
-            let suffix = name.splitn(2, '_').nth(1).unwrap_or_default();
+            let suffix = name.split_once('_').map(|x| x.1).unwrap_or_default();
             if let Ok(idx) = suffix.trim().parse::<i64>() {
                 stage_meta.insert(idx, row.clone());
             }
@@ -907,20 +907,16 @@ pub fn extract_stage_evidence_from_receipt(
         };
         let meta = stage_meta.get(&idx).cloned().unwrap_or_else(|| json!({}));
         let duration_ms = meta.get("elapsed_ms").and_then(|value| value.as_i64());
-        let ui_qa_stages: Option<&Vec<Value>> = meta
-            .get("ui_qa_stages")
-            .and_then(|value| value.as_array());
+        let ui_qa_stages: Option<&Vec<Value>> =
+            meta.get("ui_qa_stages").and_then(|value| value.as_array());
 
         let (phase_id, phase_kind, logical_id, logical_label, label);
         match phase_by_index.get(&idx) {
             Some(PhaseInfo::Planned(phase)) => {
                 phase_id = phase.phase_id.clone();
                 phase_kind = phase.kind.clone();
-                let (id, label_text) = logical_stage_for_v3_phase(
-                    &phase_id,
-                    &phase_kind,
-                    &params.pipeline_scope,
-                );
+                let (id, label_text) =
+                    logical_stage_for_v3_phase(&phase_id, &phase_kind, &params.pipeline_scope);
                 logical_id = id;
                 logical_label = label_text;
                 label = phase_id.clone();
@@ -934,11 +930,8 @@ pub fn extract_stage_evidence_from_receipt(
                     Some(value) if py_truthy(Some(value)) => py_str(value),
                     _ => "verification".to_string(),
                 };
-                let (id, label_text) = logical_stage_for_v3_phase(
-                    &phase_id,
-                    &phase_kind,
-                    &params.pipeline_scope,
-                );
+                let (id, label_text) =
+                    logical_stage_for_v3_phase(&phase_id, &phase_kind, &params.pipeline_scope);
                 logical_id = id;
                 logical_label = label_text;
                 label = phase_id.clone();
@@ -1050,7 +1043,10 @@ mod tests {
 
     #[test]
     fn redaction_strips_secrets_and_controls() {
-        let text = "token ghp_abcdefghijklmnopqrstuvwxyz0123456789 here\x07\n-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----\n";
+        let text = concat!(
+            "token ghp_",
+            "abcdefghijklmnopqrstuvwxyz0123456789 here\x07\n-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----\n"
+        );
         let out = redact_console_str(text, MAX_STAGE_LOG_BYTES);
         assert!(out.contains("[REDACTED_TOKEN]"), "{out}");
         assert!(out.contains("[REDACTED_PRIVATE_KEY]"), "{out}");
@@ -1067,8 +1063,12 @@ mod tests {
             &log[start..end],
             b"test result: ok. 3 passed; 0 failed; 1 ignored;\n"
         );
-        let (passed, failed, skipped, summary) =
-            parse_test_summary("test result: ok. 3 passed; 0 failed; 1 ignored;\ntest alpha ... FAILED\n", "", "tests", None);
+        let (passed, failed, skipped, summary) = parse_test_summary(
+            "test result: ok. 3 passed; 0 failed; 1 ignored;\ntest alpha ... FAILED\n",
+            "",
+            "tests",
+            None,
+        );
         assert_eq!((passed, failed, skipped), (Some(3), Some(0), Some(1)));
         assert_eq!(summary["framework"], "cargo-test");
         assert_eq!(summary["cases"][0]["name"], "alpha");

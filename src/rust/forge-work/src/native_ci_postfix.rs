@@ -25,6 +25,7 @@ use crate::execution_policy::sha256_canonical;
 use crate::owner_reverification::SOURCE;
 use crate::pinned_recipe::PinnedRecipe;
 use crate::retry_policy::effective_repair_policy;
+use crate::work_error::WorkError;
 use crate::workflow::{
     bool_of, int_of, operator_actor, present, ready_for_recipe, text, uuid_of, WorkflowStore,
     NATIVE_POLICY_DIGESTS,
@@ -32,7 +33,6 @@ use crate::workflow::{
 use crate::workflow_continuation::recipe;
 use crate::workflow_ingress::BoundPreparationRetryAuthority;
 use crate::workflow_tx::{BusyCheck, WorkflowTx};
-use crate::work_error::WorkError;
 
 pub const POSTFIX_POLICY: &str = "forge-native-ci-postfix-m38-v1";
 pub const POSTFIX_REASON: &str = "infrastructure_retries_exhausted";
@@ -411,12 +411,7 @@ pub trait PostfixLedgerPort {
 /// reprepare recovery (NativeCiStoppedProof.acquire): the
 /// proof document, whose process_started must be false.
 pub trait ReprepareProofPort {
-    fn acquire(
-        &self,
-        task: &Value,
-        review: &Value,
-        workflow: &Value,
-    ) -> Result<Value, WorkError>;
+    fn acquire(&self, task: &Value, review: &Value, workflow: &Value) -> Result<Value, WorkError>;
 }
 
 /// The escalated-workflow gate shared by both recoveries:
@@ -478,13 +473,15 @@ fn grant_and_ready(
     workflow: &Value,
     snapshot: &Value,
     project: &str,
-    role: &str,
-    mode: &str,
-    entry: &str,
+    selection: (&str, &str, &str),
 ) -> Result<(), WorkError> {
+    let (role, mode, entry) = selection;
     let profile = text(snapshot, role);
     flow.grant(tx, workflow, profile, mode)?;
-    let digests: Vec<String> = NATIVE_POLICY_DIGESTS.iter().map(|d| d.to_string()).collect();
+    let digests: Vec<String> = NATIVE_POLICY_DIGESTS
+        .iter()
+        .map(|d| d.to_string())
+        .collect();
     let rows = tx.readiness(Some(&digests))?;
     let entry_recipe = recipe(flow, snapshot, entry)?;
     if !ready_for_recipe(&rows, project, profile, mode, &entry_recipe) {
@@ -579,7 +576,8 @@ impl NativeCiPostfixRecovery {
                 return Ok(prior["finish_receipt"]["receipt"].clone());
             }
             let workflow = tx.workflow(workflow_id, true)?;
-            let workflow = workflow_gate(workflow, &task, command.expected_revision, POSTFIX_REASON)?;
+            let workflow =
+                workflow_gate(workflow, &task, command.expected_revision, POSTFIX_REASON)?;
             let (snapshot, author) = author_recipe(flow, tx, &workflow, &task)?;
             let q = tx
                 .latest_review(&command.project_alias, command.task_id)?
@@ -604,8 +602,7 @@ impl NativeCiPostfixRecovery {
                 || q["base_revision"] != task["base_revision"]
                 || q["plan_decision_id"] != task["plan_decision_id"]
                 || q["scope_plan_decision_id"] != task["scope_plan_decision_id"]
-                || uuid_of(&q, "reconciliation_receipt_id")
-                    != command.reconciliation_receipt_id
+                || uuid_of(&q, "reconciliation_receipt_id") != command.reconciliation_receipt_id
                 || !present(&q, "finish_token")
                 || !present(&q, "candidate_commit")
                 || !present(&q, "gate_manifest_sha256")
@@ -681,17 +678,13 @@ impl NativeCiPostfixRecovery {
             if text(&plan, "decision") != "resume" || uuid_of(&plan, "task_id") != plan_task_id {
                 return Err(mismatch());
             }
-            let plan_artifact = tx.artifact(
-                uuid_of(&plan, "task_id"),
-                uuid_of(&plan, "plan_attempt_id"),
-            )?;
+            let plan_artifact =
+                tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
             if plan_artifact["result_sha256"] != plan["plan_sha256"] {
                 return Err(mismatch());
             }
-            let source_artifact = tx.artifact(
-                command.task_id,
-                uuid_of(&task, "latest_attempt_id"),
-            )?;
+            let source_artifact =
+                tx.artifact(command.task_id, uuid_of(&task, "latest_attempt_id"))?;
             if source_artifact["result_sha256"] != q["parent_result_sha256"] {
                 return Err(mismatch());
             }
@@ -727,9 +720,7 @@ impl NativeCiPostfixRecovery {
                 &workflow,
                 &snapshot,
                 &command.project_alias,
-                "reviewer_profile",
-                "review",
-                "reviewer_review",
+                ("reviewer_profile", "review", "reviewer_review"),
             )?;
             let authority = BoundPostfixVerificationAuthority::admit(
                 BoundPreparationRetryAuthority {
@@ -760,9 +751,7 @@ impl NativeCiPostfixRecovery {
             )?;
             let new_review_id = uuid_of(&receipt, "review_id");
             clear_review_fields(tx, new_review_id)?;
-            let new = tx
-                .review_row(new_review_id, false)?
-                .ok_or_else(mismatch)?;
+            let new = tx.review_row(new_review_id, false)?.ok_or_else(mismatch)?;
             if uuid_of(&new, "previous_review_id") != uuid_of(&q, "review_id")
                 || text(&new, "status") != "pending"
                 || int_of(&new, "infrastructure_retries") != 21
@@ -864,12 +853,12 @@ impl NativeCiReprepareRecovery {
             if !present(&task, "plan_decision_id") && !present(&task, "scope_plan_decision_id") {
                 return Err(mismatch());
             }
-            let effective = effective_repair_policy(
-                &snapshot["repair_policy"],
-                &flow.config().repair_policy,
-            )
-            .map_err(WorkError::store)?;
-            let repair_limit = effective["max_infrastructure_retries"].as_i64().unwrap_or(0);
+            let effective =
+                effective_repair_policy(&snapshot["repair_policy"], &flow.config().repair_policy)
+                    .map_err(WorkError::store)?;
+            let repair_limit = effective["max_infrastructure_retries"]
+                .as_i64()
+                .unwrap_or(0);
             let q = tx
                 .latest_review(&command.project_alias, command.task_id)?
                 .ok_or_else(not_reviewable)?;
@@ -945,15 +934,9 @@ impl NativeCiReprepareRecovery {
             }
             // The source artifact must exist and verify (the
             // Python flow fetches it and discards the value).
-            let _artifact = tx.artifact(
-                command.task_id,
-                uuid_of(&task, "latest_attempt_id"),
-            )?;
+            let _artifact = tx.artifact(command.task_id, uuid_of(&task, "latest_attempt_id"))?;
             let root_task_id = uuid_of(&workflow, "root_task_id");
-            if tx.cancel_receipt_exists(
-                &command.project_alias,
-                &[command.task_id, root_task_id],
-            )? {
+            if tx.cancel_receipt_exists(&command.project_alias, &[command.task_id, root_task_id])? {
                 return Err(not_reviewable());
             }
             if tx.workflow_busy(workflow_id, BusyCheck::NativeCiRecovery)? {
@@ -998,9 +981,7 @@ impl NativeCiReprepareRecovery {
                 &workflow,
                 &snapshot,
                 &command.project_alias,
-                "author_profile",
-                "implement",
-                "author_implement",
+                ("author_profile", "implement", "author_implement"),
             )?;
             grant_and_ready(
                 flow,
@@ -1008,9 +989,7 @@ impl NativeCiReprepareRecovery {
                 &workflow,
                 &snapshot,
                 &command.project_alias,
-                "reviewer_profile",
-                "review",
-                "reviewer_review",
+                ("reviewer_profile", "review", "reviewer_review"),
             )?;
             let authority = BoundPreparationRetryAuthority {
                 workflow_id,
@@ -1032,9 +1011,7 @@ impl NativeCiReprepareRecovery {
             )?;
             let new_review_id = uuid_of(&result, "review_id");
             clear_review_fields(tx, new_review_id)?;
-            let new = tx
-                .review_row(new_review_id, false)?
-                .ok_or_else(mismatch)?;
+            let new = tx.review_row(new_review_id, false)?.ok_or_else(mismatch)?;
             let identity_fields = [
                 "owner_id",
                 "project_alias",
@@ -1087,10 +1064,7 @@ impl NativeCiReprepareRecovery {
                     event["event_id"].clone(),
                 );
                 object.insert("infrastructure_used".to_string(), event["used"].clone());
-                object.insert(
-                    "infrastructure_status".to_string(),
-                    json!("resolved"),
-                );
+                object.insert("infrastructure_status".to_string(), json!("resolved"));
                 object.insert(
                     "source_attempt_id".to_string(),
                     json!(uuid_of(&task, "latest_attempt_id").to_string()),
@@ -1283,6 +1257,8 @@ mod tests {
             .is_err());
         let mut moved = task.clone();
         moved["project_alias"] = json!("other");
-        assert!(authority.validate_append_rows(&moved, &review, Some(7)).is_err());
+        assert!(authority
+            .validate_append_rows(&moved, &review, Some(7))
+            .is_err());
     }
 }

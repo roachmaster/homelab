@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wrap Forge Process Exec"
+  short_description: "Wrap subprocesses behind typed Forge execution ports"
+  default_prompt: "Use $wrap-forge-process-exec to replace this direct subprocess call with the appropriate typed Forge execution port while preserving its bounds and cleanup."

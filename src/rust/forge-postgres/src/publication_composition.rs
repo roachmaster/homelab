@@ -391,15 +391,17 @@ impl JenkinsEventEmitter for ServiceEmitter {
 
 /// _jenkins_events: build the validated emit-only Jenkins
 /// services for the lifecycle producer.
-fn jenkins_events(
-    config: &PublicationConfig,
-    selected: &JenkinsConfig,
-) -> FactoryResult<(
+type JenkinsEventPorts = (
     Box<dyn JenkinsEventEmitter>,
     Arc<SharedEventLookup>,
     String,
     Box<dyn JenkinsEventEmitter>,
-)> {
+);
+
+fn jenkins_events(
+    config: &PublicationConfig,
+    selected: &JenkinsConfig,
+) -> FactoryResult<JenkinsEventPorts> {
     let section = config
         .jenkins_events
         .as_ref()
@@ -419,8 +421,7 @@ fn jenkins_events(
         .jenkins_delivery_config
         .clone()
         .ok_or_else(|| "Jenkins delivery configuration is unavailable".to_string())?;
-    let raw =
-        read_private(&delivery_path, 65_536, Some(effective_uid())).map_err(|message| message)?;
+    let raw = read_private(&delivery_path, 65_536, Some(effective_uid()))?;
     let raw: Value =
         serde_json::from_slice(&raw).map_err(|_| "Invalid delivery configuration".to_string())?;
     let delivery = DeliveryConfig::parse(&raw).map_err(|error| error.to_string())?;
@@ -454,7 +455,7 @@ fn jenkins_events(
     let store_factory: forge_jenkins::consumer::StoreFactory = Arc::new(move || {
         Box::new(PgJenkinsStore::new(store_config.clone(), pg.clone())) as Box<dyn JenkinsStorePort>
     });
-    let mut build_service = || -> FactoryResult<JenkinsService> {
+    let build_service = || -> FactoryResult<JenkinsService> {
         create_jenkins_service(
             Some(selected.clone()),
             Arc::clone(&store_factory),
@@ -743,8 +744,7 @@ pub fn create_publication_worker(
                 .post_merge_jenkins_delivery_config
                 .clone()
                 .expect("validated when post-merge is enabled");
-            let raw = read_private(&delivery_path, 65_536, Some(effective_uid()))
-                .map_err(|message| message)?;
+            let raw = read_private(&delivery_path, 65_536, Some(effective_uid()))?;
             let raw: Value = serde_json::from_slice(&raw)
                 .map_err(|_| "Invalid delivery configuration".to_string())?;
             let mut selected = DeliveryConfig::parse(&raw).map_err(|error| error.to_string())?;
