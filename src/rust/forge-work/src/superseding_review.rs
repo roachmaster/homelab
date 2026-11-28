@@ -21,7 +21,7 @@ use crate::work_error::WorkError;
 use crate::workflow::{
     bool_of, coordinator_actor, denied, int_of, text, uuid_of, CorrectionContext,
     SupersedingHook, WorkflowStore, NATIVE_POLICY_DIGESTS,
-};
+StoreRef};
 use crate::workflow_ingress::parse_ts;
 use crate::workflow_tx::WorkflowTx;
 
@@ -50,19 +50,28 @@ fn peer_error() -> WorkError {
 }
 
 pub struct SupersedingReviewProvider {
-    flow: Arc<WorkflowStore>,
+    flow: StoreRef,
 }
 
 impl SupersedingReviewProvider {
     pub fn new(flow: Arc<WorkflowStore>) -> Self {
-        Self { flow }
+        Self {
+            flow: StoreRef::Strong(flow),
+        }
+    }
+
+    /// The store's own default sub-port, created with the store.
+    pub fn bound(flow: std::sync::Weak<WorkflowStore>) -> Self {
+        Self {
+            flow: StoreRef::Weak(flow),
+        }
     }
 
     /// _available: the retry-event surface plus the
     /// catalog-only schema probe (the application cannot
     /// read the migration ledger).
     fn available(&self, tx: &mut dyn WorkflowTx) -> Result<bool, WorkError> {
-        if !self.flow.retry_events_enabled() {
+        if !self.flow.get().retry_events_enabled() {
             return Ok(false);
         }
         tx.superseding_available()
@@ -178,7 +187,7 @@ impl SupersedingReviewProvider {
         result: &Value,
         legacy: bool,
     ) -> Result<Option<Value>, WorkError> {
-        let flow = &self.flow;
+        let flow = &self.flow.get();
         flow.current_policy(tx, w)?;
         let p = flow.snapshot_of(w)?;
         for profile in [
@@ -481,7 +490,7 @@ impl SupersedingReviewProvider {
         if !self.available(tx)? {
             return Ok(None);
         }
-        let flow = &self.flow;
+        let flow = &self.flow.get();
         let workflow_id = uuid_of(w, "workflow_id");
         let peer_id = uuid_of(peer, "workflow_review_id");
         let key = format!(
@@ -661,7 +670,7 @@ impl SupersedingReviewProvider {
     /// guard; the exact existing handoff remains available
     /// for audit.
     pub fn recover(&self) -> Result<bool, WorkError> {
-        let flow = &self.flow;
+        let flow = &self.flow.get();
         if !flow.retry_events_enabled() {
             return Ok(false);
         }

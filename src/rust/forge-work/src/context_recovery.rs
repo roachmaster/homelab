@@ -26,7 +26,7 @@ use crate::work_requests::ResumeRequest;
 use crate::workflow::{
     bool_of, denied, int_of, ready_for_recipe, text, uuid_of, RunOnceHook, WorkflowStore,
     NATIVE_POLICY_DIGESTS,
-};
+StoreRef};
 use crate::workflow_feedback::{validate_workflow_feedback, FeedbackContextInput};
 use crate::workflow_ingress::{parse_ts, workflow_in_project, BoundNativeRetryAuthority};
 use crate::workflow_tx::WorkflowTx;
@@ -807,12 +807,21 @@ fn run_once(spec: &RecoverySpec, flow: &WorkflowStore) -> Result<(), WorkError> 
 
 /// work_context_recovery.FeedbackRecovery.
 pub struct FeedbackRecoveryProvider {
-    flow: Arc<WorkflowStore>,
+    flow: StoreRef,
 }
 
 impl FeedbackRecoveryProvider {
     pub fn new(flow: Arc<WorkflowStore>) -> Self {
-        Self { flow }
+        Self {
+            flow: StoreRef::Strong(flow),
+        }
+    }
+
+    /// The store's own default sub-port, created with the store.
+    pub fn bound(flow: std::sync::Weak<WorkflowStore>) -> Self {
+        Self {
+            flow: StoreRef::Weak(flow),
+        }
     }
 
     pub fn retry(
@@ -825,7 +834,7 @@ impl FeedbackRecoveryProvider {
     ) -> Result<Value, WorkError> {
         retry(
             &BASE_SPEC,
-            &self.flow,
+            &self.flow.get(),
             project,
             task_id,
             expected_revision,
@@ -837,7 +846,7 @@ impl FeedbackRecoveryProvider {
 
 impl RunOnceHook for FeedbackRecoveryProvider {
     fn run_once(&self) -> Result<(), WorkError> {
-        run_once(&BASE_SPEC, &self.flow)
+        run_once(&BASE_SPEC, &self.flow.get())
     }
 }
 
@@ -845,12 +854,21 @@ impl RunOnceHook for FeedbackRecoveryProvider {
 /// same engine, the linked-child classifier, and a hard
 /// dependency on the canonical retry-event provider.
 pub struct PeerFeedbackRecoveryProvider {
-    flow: Arc<WorkflowStore>,
+    flow: StoreRef,
 }
 
 impl PeerFeedbackRecoveryProvider {
     pub fn new(flow: Arc<WorkflowStore>) -> Self {
-        Self { flow }
+        Self {
+            flow: StoreRef::Strong(flow),
+        }
+    }
+
+    /// The store's own default sub-port, created with the store.
+    pub fn bound(flow: std::sync::Weak<WorkflowStore>) -> Self {
+        Self {
+            flow: StoreRef::Weak(flow),
+        }
     }
 
     pub fn retry(
@@ -863,7 +881,7 @@ impl PeerFeedbackRecoveryProvider {
     ) -> Result<Value, WorkError> {
         retry(
             &PEER_SPEC,
-            &self.flow,
+            &self.flow.get(),
             project,
             task_id,
             expected_revision,
@@ -875,7 +893,7 @@ impl PeerFeedbackRecoveryProvider {
 
 impl RunOnceHook for PeerFeedbackRecoveryProvider {
     fn run_once(&self) -> Result<(), WorkError> {
-        run_once(&PEER_SPEC, &self.flow)
+        run_once(&PEER_SPEC, &self.flow.get())
     }
 }
 

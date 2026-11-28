@@ -30,7 +30,7 @@ use crate::work_requests::ResumeRequest;
 use crate::workflow::{
     bool_of, denied, int_of, operator_actor, text, uuid_of, CorrectionContext,
     ReviewerCorrectionHook, WorkflowStore, NATIVE_POLICY_DIGESTS,
-};
+StoreRef};
 use crate::workflow_ingress::parse_ts;
 use crate::workflow_tx::WorkflowTx;
 
@@ -156,12 +156,21 @@ fn valid_key(key: &str) -> bool {
 }
 
 pub struct ReviewerCorrectionProvider {
-    flow: Arc<WorkflowStore>,
+    flow: StoreRef,
 }
 
 impl ReviewerCorrectionProvider {
     pub fn new(flow: Arc<WorkflowStore>) -> Self {
-        Self { flow }
+        Self {
+            flow: StoreRef::Strong(flow),
+        }
+    }
+
+    /// The store's own default sub-port, created with the store.
+    pub fn bound(flow: std::sync::Weak<WorkflowStore>) -> Self {
+        Self {
+            flow: StoreRef::Weak(flow),
+        }
     }
 
     /// _source: every binding is rechecked before an
@@ -178,7 +187,7 @@ impl ReviewerCorrectionProvider {
         result: &Value,
         error: &IncompleteApproval,
     ) -> Result<PinnedRecipe, WorkError> {
-        let flow = &self.flow;
+        let flow = &self.flow.get();
         let p = flow.snapshot_of(w)?;
         let recipe = PinnedRecipe::from_snapshot(&p, "reviewer_review", flow.native())
             .map_err(WorkError::store)?;
@@ -440,7 +449,7 @@ impl ReviewerCorrectionProvider {
         action: Option<&Value>,
         command: Option<&ReviewerCorrectionResume>,
     ) -> Result<Value, WorkError> {
-        let flow = &self.flow;
+        let flow = &self.flow.get();
         let manual = command.is_some();
         flow.current_policy(tx, w)?;
         let recipe = self.source_validated(tx, w, peer, source, critic, result, error)?;
@@ -718,7 +727,7 @@ impl ReviewerCorrectionProvider {
         &self,
         command: &ReviewerCorrectionResume,
     ) -> Result<Option<Value>, WorkError> {
-        let flow = &self.flow;
+        let flow = &self.flow.get();
         flow.require_project(&command.project_alias)?;
         let project = command.project_alias.clone();
         let owner = flow.config().owner.clone();

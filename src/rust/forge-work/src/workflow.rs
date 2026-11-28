@@ -451,6 +451,31 @@ impl BoundDelegatedAuthority {
     }
 }
 
+/// A sub-port's handle to the store it serves.
+///
+/// The store's default sub-ports are created with the store itself
+/// (`Arc::new_cyclic`), so they hold a weak handle: the store owns its
+/// hooks and the hooks never keep the store alive (no reference cycle).
+/// A provider built around an existing store holds a strong handle.
+#[derive(Clone)]
+pub enum StoreRef {
+    Strong(Arc<WorkflowStore>),
+    Weak(std::sync::Weak<WorkflowStore>),
+}
+
+impl StoreRef {
+    /// The store. A weak handle is only consulted from the store's own
+    /// methods, so the store is alive whenever it is read.
+    pub fn get(&self) -> Arc<WorkflowStore> {
+        match self {
+            StoreRef::Strong(store) => Arc::clone(store),
+            StoreRef::Weak(store) => store
+                .upgrade()
+                .expect("a store's sub-port is only called while the store is alive"),
+        }
+    }
+}
+
 /// WorkflowStore: the coordinator service.
 pub struct WorkflowStore {
     config: CoordinatorConfig,
