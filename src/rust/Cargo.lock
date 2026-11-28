@@ -791,10 +791,12 @@ dependencies = [
  "forge-foundation",
  "forge-jobs",
  "forge-template",
+ "forge-work",
  "forge-work-worker",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "uuid",
 ]
 
 [[package]]

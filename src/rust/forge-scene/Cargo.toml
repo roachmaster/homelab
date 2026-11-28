@@ -24,3 +24,5 @@ forge-core.workspace = true
 forge-foundation.workspace = true
 forge-jobs = { path = "../forge-jobs" }
 forge-work-worker = { path = "../forge-work-worker" }
+forge-work = { path = "../forge-work" }
+uuid = { version = "1", features = ["v4", "v5"] }

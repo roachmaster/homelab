@@ -22,7 +22,7 @@ ALLOWED = {
     "forge-core": set(),
     "forge-foundation": {("forge-core", "normal")},
     "forge-scene": {("forge-template", "normal")} | {(name, "dev") for name in
-                    ("forge-core", "forge-foundation", "forge-jobs", "forge-work-worker")},
+                    ("forge-core", "forge-foundation", "forge-jobs", "forge-work-worker", "forge-work")},
     "forge-agent": {(name,"normal") for name in ("forge-core","forge-system","forge-ide","forge-remote","forge-remote-https")},
     "forge-remote": {("forge-core", "normal")},
     "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-core", "forge-ide")} | {("forge-system", "dev"), ("forge-core", "dev")},
@@ -41,7 +41,7 @@ ALLOWED = {
     "forge-work-publication": {("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-jenkins", "normal")},
     "forge-host": {(name, "normal") for name in ("forge-core", "forge-work", "forge-work-worker", "forge-work-publication", "forge-jenkins", "forge-usage", "forge-postgres")},
 }
-EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
+EXTERNAL_DEV = {"forge-scene": {"uuid"}, "forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
 EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
 EXTERNAL = {
     "forge-jenkins": {"serde", "serde_json", "sha2", "url", "base64", "ureq", "nix", "serde_yaml_ng"},
