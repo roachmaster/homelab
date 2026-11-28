@@ -3081,3 +3081,10 @@ the PostgreSQL setup it borrows. Branch selection passes five memory cases and
 excludes the one database case; normal main selection runs that real database
 case successfully. Jenkins154 was cancelled through its normal trusted cleanup
 port before qualifying the corrected successor. No database test is removed.
+
+The branch runner also requires that the declaring module expose its canonical
+PG16_AVAILABLE flag. The defect fixture imports it directly; a regression runs
+the actual branch runner and proves executed=5, db_not_run=1 and no unexpected
+skips. Proxy-client and backend-scope suites pass all 86 tests. A read-only
+inventory checks all setup-owning, inherited and per-method database fixtures.
+Jenkins155 was normally cancelled before its backend gate; no pass is claimed.

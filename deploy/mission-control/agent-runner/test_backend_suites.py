@@ -19,6 +19,16 @@ spec.loader.exec_module(backend_suites)
 
 
 class BackendSuitesTests(unittest.TestCase):
+    def test_borrowed_defect_database_fixture_is_a_declared_branch_exclusion(self):
+        env = dict(os.environ, FORGE_DISABLE_DISPOSABLE_POSTGRES='1')
+        code = backend_suites.BRANCH_RUNNER_CODE.replace(
+            '__PATTERN__', repr('test_work_defect.py'))
+        result = subprocess.run(
+            [sys.executable, '-B', '-c', code], cwd=Path(__file__).parent,
+            env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('MEMORY_SUMMARY executed=5 db_not_run=1 unexpected_skips=0', result.stdout)
+
     def test_workspace_database_fixture_obeys_the_selected_scope(self):
         code = '''
 import unittest

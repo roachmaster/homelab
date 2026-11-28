@@ -6,6 +6,7 @@ from uuid import UUID
 from queue_store import Rejected
 from work_defect import validate_defect, defect_context, validate_defect_context, TRIAGE
 from work_store import _submit_intent_digest
+from work_pg_fixture import PG16_AVAILABLE
 import work_api
 from test_work_api import submit_body, REQUEST_ID
 import test_work_store as store_tests
@@ -64,7 +65,7 @@ class DefectContractTest(unittest.TestCase):
         self.assertNotEqual(_submit_intent_digest(**args),_submit_intent_digest(**args,task_kind='defect',defect=defect()))
 
 
-@unittest.skipUnless(store_tests.PG16_AVAILABLE, 'disposable PostgreSQL unavailable or excluded')
+@unittest.skipUnless(PG16_AVAILABLE, 'disposable PostgreSQL unavailable or excluded')
 class DefectPersistenceTest(unittest.TestCase):
     setUpClass = classmethod(store_tests.WorkStorePostgresTest.setUpClass.__func__)
     setUp = store_tests.WorkStorePostgresTest.setUp
