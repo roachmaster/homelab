@@ -311,3 +311,55 @@ fn installed_interfaces_describe_but_never_admit_private_flags_or_unstaged_execu
         .unwrap();
     assert!(!private.status.success());
 }
+
+#[test]
+fn normal_producer_wire_envelopes_are_accepted_and_db_inputs_are_not_spool_requests() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../forge-work-publication/tests/fixtures/native_v4_wire.json"
+    ))
+    .unwrap();
+    let cases = fixture["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 2);
+    for case in cases {
+        let spool = &case["native_v4_public_spool"];
+        let request: ActionRequest = serde_json::from_value(spool.clone()).unwrap();
+        request.validate(&request.action_id, &config()).unwrap();
+        assert_eq!(spool.as_object().unwrap().len(), 12);
+        assert_eq!(
+            request.expected_main,
+            case["native_v4_input"]["integration_base"]
+        );
+        assert_eq!(
+            request.candidate_commit,
+            case["native_v4_input"]["candidate_commit"]
+        );
+        assert!(serde_json::from_value::<ActionRequest>(case["native_v4_input"].clone()).is_err());
+        let historical: ActionRequest =
+            serde_json::from_value(case["historical_public_spool"].clone()).unwrap();
+        assert!(historical
+            .validate(&historical.action_id, &config())
+            .is_err());
+        if case["scope"] == "main" {
+            assert_eq!(request.candidate_commit, request.expected_main);
+        } else {
+            assert_eq!(case["native_v4_input"]["source_branch"], "feature/codex");
+            assert!(request.branch_scope.starts_with("branch/feature-codex-"));
+        }
+        let raw = serde_json::to_vec(spool).unwrap();
+        let mut canonical_raw = raw;
+        canonical_raw.push(b'\n');
+        use sha2::Digest;
+        let expected = if case["scope"] == "main" {
+            "886684428c2402a36b63d6211e87992cbe68822a2ea305826a615e23fdc9c1d3"
+        } else {
+            "91dce480140e0f9e3f666177ad714374f8daca302923d0f2a44f9d7f28897f29"
+        };
+        assert_eq!(
+            format!("{:x}", sha2::Sha256::digest(&canonical_raw)),
+            expected,
+            "raw request receipt binding includes the producer newline"
+        );
+        let round_trip: ActionRequest = serde_json::from_slice(&canonical_raw).unwrap();
+        assert_eq!(round_trip.bundle_sha256, request.bundle_sha256);
+    }
+}
