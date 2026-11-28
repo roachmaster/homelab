@@ -542,13 +542,22 @@ mod tests {
         std::fs::write(&path, "ab".repeat(32)).unwrap();
         std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
             .unwrap();
-        let key = read_hmac_key(&path, 1000).unwrap();
+        let worker_uid = std::fs::metadata(&path).unwrap().uid();
+        let key = read_hmac_key(&path, worker_uid).unwrap();
         assert_eq!(key.len(), 32);
         assert_eq!(key[0], 0xab);
+        if worker_uid != 0 {
+            assert!(read_hmac_key(&path, worker_uid.wrapping_add(1)).is_err());
+        }
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o644))
+            .unwrap();
+        assert!(read_hmac_key(&path, worker_uid).is_err());
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .unwrap();
         std::fs::write(&path, vec![7u8; 32]).unwrap();
-        assert_eq!(read_hmac_key(&path, 1000).unwrap(), vec![7u8; 32]);
+        assert_eq!(read_hmac_key(&path, worker_uid).unwrap(), vec![7u8; 32]);
         std::fs::write(&path, b"short").unwrap();
-        assert!(read_hmac_key(&path, 1000).is_err());
+        assert!(read_hmac_key(&path, worker_uid).is_err());
         let _ = std::fs::remove_file(&path);
     }
 }
