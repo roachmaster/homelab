@@ -3,6 +3,8 @@
 mod admission;
 mod artifacts;
 mod assembly;
+pub mod cargo_cache;
+pub mod cargo_publication;
 mod child;
 mod filesystem;
 mod host;
