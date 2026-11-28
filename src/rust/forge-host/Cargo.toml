@@ -6,6 +6,7 @@ publish = false
 description = "Forge host composition binaries: the production process roots that wire the forge-* crates to PostgreSQL and the host (Rust port of the deploy/mission-control host entry points)."
 
 [dependencies]
+forge-core = { workspace = true }
 forge-postgres = { workspace = true }
 forge-work = { workspace = true }
 forge-work-publication = { workspace = true }

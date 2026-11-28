@@ -585,6 +585,7 @@ name = "forge-host"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
+ "forge-core",
  "forge-jenkins",
  "forge-postgres",
  "forge-usage",
