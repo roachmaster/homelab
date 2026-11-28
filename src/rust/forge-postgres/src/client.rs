@@ -78,6 +78,14 @@ impl PgSession {
     /// the Tx handle. An error from the closure or from any statement drops
     /// the transaction uncommitted, which rolls it back. The closure is
     /// synchronous and must only talk to the database through the handle.
+    /// Raw connection access for the crate's held-lock
+    /// adapter (the M38 ledger): the caller drives an
+    /// explicit BEGIN on this session's single connection
+    /// and is responsible for ending it.
+    pub(crate) fn raw(&mut self) -> (&mut Client, &Runtime) {
+        (&mut self.client, &self.rt)
+    }
+
     pub fn in_tx<T>(
         &mut self,
         f: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, AdapterError>,

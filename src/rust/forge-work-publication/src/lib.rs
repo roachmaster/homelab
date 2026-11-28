@@ -28,6 +28,7 @@ pub mod jenkins_observer;
 pub mod hosted_checks;
 pub mod identity_store;
 pub mod native_identity_provider;
+pub mod native_ci_proofs;
 pub mod native_jenkins;
 pub mod native_repair;
 pub mod post_merge;

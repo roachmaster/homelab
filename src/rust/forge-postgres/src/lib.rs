@@ -22,6 +22,7 @@ pub mod gpu_worker;
 pub mod jenkins_store_adapter;
 pub mod model_route_proofs;
 pub mod peer_validator;
+pub mod postfix_ledger;
 pub mod publication_store_adapter;
 pub mod reconciler;
 pub mod retry_evidence;
