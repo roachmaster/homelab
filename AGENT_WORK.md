@@ -3112,3 +3112,14 @@ and formatting pass. Full normal qualification is still required. Evidence:
 
 The complete publication crate also passes all 78 release tests concurrently
 under the pinned Rust1.97.1 toolchain after this correction.
+
+## Release batch installer payload — 2026-11-28
+
+The complete branch backend run executed1446 memory tests with759 declared
+database exclusions and no unexpected skips. Its sole failure was the existing
+transitive-import installer check: work_publication imports work_delivery_batch,
+but setup-runner.sh had omitted that required payload. The installer now publishes
+the owned module with its other delivery modules. The unchanged import-closure
+regression and shell syntax check pass. No installer was executed live. Jenkins157
+was superseded through the normal cancellation/cleanup port; it is not qualified.
+The complete corrected branch suite must pass before another Jenkins submission.
