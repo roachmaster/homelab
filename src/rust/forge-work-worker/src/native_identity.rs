@@ -33,11 +33,7 @@ pub struct NativeIdentityConfig {
 }
 
 impl NativeIdentityConfig {
-    pub fn new(
-        state_root: PathBuf,
-        protocol: &str,
-        after: Option<String>,
-    ) -> Result<Self, String> {
+    pub fn new(state_root: PathBuf, protocol: &str, after: Option<String>) -> Result<Self, String> {
         let invalid = || "Invalid native identity selection".to_string();
         if !state_root.is_absolute()
             || state_root
@@ -103,7 +99,10 @@ pub fn iso_epoch_seconds(value: &str) -> Option<f64> {
             let hours: i64 = parts.next()?.parse().ok()?;
             let minutes: i64 = parts.next().unwrap_or("0").parse().ok()?;
             let seconds: i64 = parts.next().unwrap_or("0").parse().ok()?;
-            (time_part, Some(sign * (hours * 3600 + minutes * 60 + seconds)))
+            (
+                time_part,
+                Some(sign * (hours * 3600 + minutes * 60 + seconds)),
+            )
         }
     } else {
         (time, None)
@@ -209,10 +208,12 @@ mod tests {
     fn config_selection_rules() {
         let root = PathBuf::from("/srv/state");
         assert!(NativeIdentityConfig::new(root.clone(), LEGACY, None).is_ok());
-        assert!(
-            NativeIdentityConfig::new(root.clone(), LEGACY, Some("2026-11-27T00:00:00Z".into()))
-                .is_err()
-        );
+        assert!(NativeIdentityConfig::new(
+            root.clone(),
+            LEGACY,
+            Some("2026-11-27T00:00:00Z".into())
+        )
+        .is_err());
         assert!(NativeIdentityConfig::new(root.clone(), PROTOCOL, None).is_err());
         assert!(NativeIdentityConfig::new(
             root.clone(),
@@ -220,8 +221,6 @@ mod tests {
             Some("2026-11-27T00:00:00Z".into())
         )
         .is_ok());
-        assert!(
-            NativeIdentityConfig::new(PathBuf::from("relative"), LEGACY, None).is_err()
-        );
+        assert!(NativeIdentityConfig::new(PathBuf::from("relative"), LEGACY, None).is_err());
     }
 }

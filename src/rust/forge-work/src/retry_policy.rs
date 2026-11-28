@@ -30,7 +30,8 @@ fn bound(value: &Value) -> Option<i64> {
 
 /// True only for a monotonic, budget-only owner policy amendment.
 pub fn budget_compatible_snapshot(frozen: &Value, current: &Value) -> bool {
-    let (Some(mut left), Some(mut right)) = (frozen.as_object().cloned(), current.as_object().cloned())
+    let (Some(mut left), Some(mut right)) =
+        (frozen.as_object().cloned(), current.as_object().cloned())
     else {
         return false;
     };
@@ -57,7 +58,10 @@ pub fn budget_compatible_snapshot(frozen: &Value, current: &Value) -> bool {
     if left.contains_key("repair_policy") != right.contains_key("repair_policy") {
         return false;
     }
-    if let (Some(l), Some(r)) = (left.get_mut("repair_policy"), right.get_mut("repair_policy")) {
+    if let (Some(l), Some(r)) = (
+        left.get_mut("repair_policy"),
+        right.get_mut("repair_policy"),
+    ) {
         let (Some(l), Some(r)) = (l.as_object_mut(), r.as_object_mut()) else {
             return false;
         };
@@ -79,7 +83,8 @@ pub fn budget_compatible_snapshot(frozen: &Value, current: &Value) -> bool {
 /// Compare repair allowance only; preserve version and
 /// hosted-check policy.
 pub fn budget_compatible_repair_policy(frozen: &Value, current: &Value) -> bool {
-    let (Some(mut left), Some(mut right)) = (frozen.as_object().cloned(), current.as_object().cloned())
+    let (Some(mut left), Some(mut right)) =
+        (frozen.as_object().cloned(), current.as_object().cloned())
     else {
         return false;
     };
@@ -94,9 +99,7 @@ pub fn budget_compatible_repair_policy(frozen: &Value, current: &Value) -> bool 
         }
         let checks_ok = value["required_hosted_checks"]
             .as_array()
-            .map(|checks| {
-                !checks.is_empty() && checks.iter().all(|item| item.is_string())
-            })
+            .map(|checks| !checks.is_empty() && checks.iter().all(|item| item.is_string()))
             .unwrap_or(false);
         if !checks_ok {
             return false;
@@ -176,13 +179,29 @@ mod tests {
     #[test]
     fn budget_widening_only() {
         let frozen = snapshot(5, "codex-author");
-        assert!(budget_compatible_snapshot(&frozen, &snapshot(9, "codex-author")));
-        assert!(!budget_compatible_snapshot(&frozen, &snapshot(4, "codex-author")));
-        assert!(!budget_compatible_snapshot(&frozen, &snapshot(9, "other-author")));
-        assert_eq!(effective_limit(&frozen, "max_plan_revisions", None).unwrap(), 5);
+        assert!(budget_compatible_snapshot(
+            &frozen,
+            &snapshot(9, "codex-author")
+        ));
+        assert!(!budget_compatible_snapshot(
+            &frozen,
+            &snapshot(4, "codex-author")
+        ));
+        assert!(!budget_compatible_snapshot(
+            &frozen,
+            &snapshot(9, "other-author")
+        ));
         assert_eq!(
-            effective_limit(&frozen, "max_plan_revisions", Some(&snapshot(9, "codex-author")))
-                .unwrap(),
+            effective_limit(&frozen, "max_plan_revisions", None).unwrap(),
+            5
+        );
+        assert_eq!(
+            effective_limit(
+                &frozen,
+                "max_plan_revisions",
+                Some(&snapshot(9, "codex-author"))
+            )
+            .unwrap(),
             9
         );
         assert!(effective_limit(&frozen, "bogus", None).is_err());

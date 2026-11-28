@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use forge_jenkins::provisioning::{
-    JenkinsHttp, directory, install_file, read_owned, run, sha256_hex,
+    directory, install_file, read_owned, run, sha256_hex, JenkinsHttp,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 const ENDPOINT: &str = "http://127.0.0.1:18084/";
 const SUDOERS_RULE: &str = "jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-ci-check *\n";
@@ -106,8 +106,7 @@ fn client(operator_home: &Path) -> Result<JenkinsHttp, String> {
         16384,
         0o077,
     )?;
-    let document: Value =
-        serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+    let document: Value = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
     if document.get("endpoint").and_then(Value::as_str) != Some(ENDPOINT) {
         return Err("Unexpected Jenkins endpoint in operator client config".to_string());
     }
@@ -157,8 +156,7 @@ fn request_json(
 fn root_readable_tree(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     fn walk(path: &Path) -> Result<(), String> {
-        let metadata =
-            std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+        let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
         if metadata.file_type().is_symlink() {
             return Ok(());
         }
@@ -227,20 +225,11 @@ fn qualify_remoting(jar: &Path, forge_ci: &nix::unistd::User) -> Result<(), Stri
 fn install_agent_restart_deferral() -> Result<Map<String, Value>, String> {
     directory(Path::new("/etc/needrestart/conf.d"), 0, 0, 0o755)?;
     let content = AGENT_RESTART_DEFERRAL_CONTENT.as_bytes();
-    install_file(
-        Path::new(AGENT_RESTART_DEFERRAL_PATH),
-        content,
-        0,
-        0,
-        0o644,
-    )?;
+    install_file(Path::new(AGENT_RESTART_DEFERRAL_PATH), content, 0, 0, 0o644)?;
     let mut receipt = Map::new();
     receipt.insert("path".to_string(), json!(AGENT_RESTART_DEFERRAL_PATH));
     receipt.insert("sha256".to_string(), json!(sha256_hex(content)));
-    receipt.insert(
-        "content".to_string(),
-        json!(AGENT_RESTART_DEFERRAL_CONTENT),
-    );
+    receipt.insert("content".to_string(), json!(AGENT_RESTART_DEFERRAL_CONTENT));
     receipt.insert("mode".to_string(), json!("0644"));
     receipt.insert("owner".to_string(), json!("root"));
     receipt.insert("group".to_string(), json!("root"));
@@ -291,12 +280,7 @@ fn ensure_forge_ci(operator: &nix::unistd::User) -> Result<nix::unistd::User, St
 
 fn groovy(http: &JenkinsHttp, source: &Path) -> Result<Value, String> {
     let script = std::fs::read_to_string(source).map_err(|error| error.to_string())?;
-    request_json(
-        http,
-        "POST",
-        "/scriptText",
-        Some(&[("script", script)]),
-    )
+    request_json(http, "POST", "/scriptText", Some(&[("script", script)]))
 }
 
 fn execute(operator_name: &str) -> Result<Map<String, Value>, String> {
@@ -313,7 +297,12 @@ fn execute(operator_name: &str) -> Result<Map<String, Value>, String> {
     let forge_ci_group = group("forge_ci")?;
     let jenkins = user("jenkins")?;
     let jenkins_group = group("jenkins")?;
-    directory(Path::new("/var/lib/forge-ci"), forge_ci.uid.as_raw(), forge_ci_group.gid.as_raw(), 0o750)?;
+    directory(
+        Path::new("/var/lib/forge-ci"),
+        forge_ci.uid.as_raw(),
+        forge_ci_group.gid.as_raw(),
+        0o750,
+    )?;
     // Toolchains copied only when the destination is absent.
     let opt = PathBuf::from("/opt/forge-ci");
     std::fs::create_dir_all(&opt).map_err(|error| error.to_string())?;
@@ -332,8 +321,8 @@ fn execute(operator_name: &str) -> Result<Map<String, Value>, String> {
     }
     root_readable_tree(&opt)?;
     // Verifier release.
-    let verifier = std::fs::read(exe_dir().join("verify-candidate.py"))
-        .map_err(|error| error.to_string())?;
+    let verifier =
+        std::fs::read(exe_dir().join("verify-candidate.py")).map_err(|error| error.to_string())?;
     let digest = sha256_hex(&verifier);
     let release = opt.join(format!("verifier-{}", &digest[..16]));
     directory(&release, 0, 0, 0o755)?;
@@ -352,8 +341,8 @@ fn execute(operator_name: &str) -> Result<Map<String, Value>, String> {
     )?;
     // The cache-clear helper installed from this package's sibling bin
     // (forge-ci-cache-clear, built beside this executable).
-    let cache_clear = std::fs::read(exe_dir().join("forge-ci-cache-clear"))
-        .map_err(|error| error.to_string())?;
+    let cache_clear =
+        std::fs::read(exe_dir().join("forge-ci-cache-clear")).map_err(|error| error.to_string())?;
     install_file(
         Path::new("/usr/local/sbin/forge-ci-cache-clear"),
         &cache_clear,
@@ -377,14 +366,34 @@ fn execute(operator_name: &str) -> Result<Map<String, Value>, String> {
     // Data directories.
     let data = PathBuf::from("/mnt/data/forge-homelab");
     for (path, owner, grp, mode) in [
-        ("ci-spool", forge_ci.uid.as_raw(), forge_ci_group.gid.as_raw(), 0o750),
-        ("ci-results", forge_ci.uid.as_raw(), forge_ci_group.gid.as_raw(), 0o750),
-        ("ci-work", forge_ci.uid.as_raw(), forge_ci_group.gid.as_raw(), 0o750),
+        (
+            "ci-spool",
+            forge_ci.uid.as_raw(),
+            forge_ci_group.gid.as_raw(),
+            0o750,
+        ),
+        (
+            "ci-results",
+            forge_ci.uid.as_raw(),
+            forge_ci_group.gid.as_raw(),
+            0o750,
+        ),
+        (
+            "ci-work",
+            forge_ci.uid.as_raw(),
+            forge_ci_group.gid.as_raw(),
+            0o750,
+        ),
         ("ci-cache", 0, 0, 0o700),
     ] {
         directory(&data.join(path), owner, grp, mode)?;
     }
-    directory(&data.join("ci-results/artifacts"), forge_ci.uid.as_raw(), forge_ci_group.gid.as_raw(), 0o750)?;
+    directory(
+        &data.join("ci-results/artifacts"),
+        forge_ci.uid.as_raw(),
+        forge_ci_group.gid.as_raw(),
+        0o750,
+    )?;
     // Pipeline config.
     directory(Path::new("/etc/forge-ci"), 0, 0, 0o755)?;
     let pipeline = render_pipeline_config("v2", false);
@@ -427,7 +436,13 @@ fn execute(operator_name: &str) -> Result<Map<String, Value>, String> {
         0,
         0o644,
     )?;
-    run(&["/usr/bin/systemctl".to_string(), "daemon-reload".to_string()], 30)?;
+    run(
+        &[
+            "/usr/bin/systemctl".to_string(),
+            "daemon-reload".to_string(),
+        ],
+        30,
+    )?;
     run(
         &[
             "/usr/bin/systemctl".to_string(),
@@ -467,8 +482,8 @@ fn native_installation_plan(pipeline: &Value, profile: &str) -> Result<(Value, V
     if matches!(profile, "v2" | "v3") {
         native["results_root"] = json!("/var/lib/forge-provisioning/delivery-ci-results");
     }
-    let verifier = std::fs::read(exe_dir().join("verify-candidate.py"))
-        .map_err(|error| error.to_string())?;
+    let verifier =
+        std::fs::read(exe_dir().join("verify-candidate.py")).map_err(|error| error.to_string())?;
     let text = String::from_utf8(verifier).map_err(|error| error.to_string())?;
     let needle = "CONFIG = Path('/etc/forge-ci/pipeline.json')";
     if text.matches(needle).count() != 1 {
@@ -484,7 +499,10 @@ fn native_installation_plan(pipeline: &Value, profile: &str) -> Result<(Value, V
 fn qualify_stage_token() -> Result<String, String> {
     let system_path = PathBuf::from("/run/credentials/forge-agent-runner.service/runner.token");
     let (source, raw) = if system_path.is_file() {
-        ("systemd", std::fs::read(&system_path).map_err(|e| e.to_string())?)
+        (
+            "systemd",
+            std::fs::read(&system_path).map_err(|e| e.to_string())?,
+        )
     } else {
         (
             "copy",
@@ -495,8 +513,7 @@ fn qualify_stage_token() -> Result<String, String> {
         .map_err(|error| error.to_string())?
         .trim()
         .to_string();
-    let valid = (32..=128).contains(&token.len())
-        && token.chars().all(|c| c.is_ascii_hexdigit());
+    let valid = (32..=128).contains(&token.len()) && token.chars().all(|c| c.is_ascii_hexdigit());
     if !valid {
         return Err("Runner stage token has an unexpected shape".to_string());
     }
@@ -522,7 +539,13 @@ fn execute_native(operator_name: &str) -> Result<Map<String, Value>, String> {
     let digest = sha256_hex(&verifier_bytes);
     let release = PathBuf::from(format!("/opt/forge-ci/native-verifier-{}", &digest[..16]));
     directory(&release, 0, 0, 0o755)?;
-    install_file(&release.join("verify-candidate.py"), &verifier_bytes, 0, 0, 0o755)?;
+    install_file(
+        &release.join("verify-candidate.py"),
+        &verifier_bytes,
+        0,
+        0,
+        0o755,
+    )?;
     install_file(
         Path::new("/usr/local/libexec/forge-native-ci-check"),
         format!(

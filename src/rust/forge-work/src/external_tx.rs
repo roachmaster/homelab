@@ -116,10 +116,7 @@ pub trait ExternalTx: RetryEvents {
     ) -> Result<Option<Value>, WorkError>;
     /// INSERT ... ON CONFLICT DO NOTHING RETURNING *, else
     /// the existing row: (row, created).
-    fn create_workflow(
-        &mut self,
-        row: &Value,
-    ) -> Result<(Value, bool), WorkError>;
+    fn create_workflow(&mut self, row: &Value) -> Result<(Value, bool), WorkError>;
     /// _save's revision-fenced UPDATE; returns the new
     /// revision, None when the fence lost.
     fn save_workflow(&mut self, w: &Value) -> Result<Option<i64>, WorkError>;
@@ -176,10 +173,7 @@ pub trait ExternalTx: RetryEvents {
     ) -> Result<u64, WorkError>;
     fn insert_task_row(&mut self, row: &Value) -> Result<(), WorkError>;
     /// _cancel_children's locked task set.
-    fn workflow_tasks_locked(
-        &mut self,
-        workflow_id: Uuid,
-    ) -> Result<Vec<Value>, WorkError>;
+    fn workflow_tasks_locked(&mut self, workflow_id: Uuid) -> Result<Vec<Value>, WorkError>;
     /// A live attempt exists for the task (phase not stopped
     /// or reservation active or lease present).
     fn task_attempt_active(&mut self, task_id: Uuid) -> Result<bool, WorkError>;
@@ -213,22 +207,11 @@ pub trait ExternalTx: RetryEvents {
 
     // -- reviews -------------------------------------------------
     fn insert_review_row(&mut self, row: &Value) -> Result<(), WorkError>;
-    fn review_row(
-        &mut self,
-        review_id: Uuid,
-        lock: LockMode,
-    ) -> Result<Option<Value>, WorkError>;
-    fn update_review_row(
-        &mut self,
-        review_id: Uuid,
-        set: &Value,
-    ) -> Result<u64, WorkError>;
+    fn review_row(&mut self, review_id: Uuid, lock: LockMode) -> Result<Option<Value>, WorkError>;
+    fn update_review_row(&mut self, review_id: Uuid, set: &Value) -> Result<u64, WorkError>;
     /// The DTO probe: the reviewer task of the workflow's
     /// currently-reviewing review.
-    fn reviewing_reviewer_task(
-        &mut self,
-        workflow_id: Uuid,
-    ) -> Result<Option<Uuid>, WorkError>;
+    fn reviewing_reviewer_task(&mut self, workflow_id: Uuid) -> Result<Option<Uuid>, WorkError>;
 
     // -- delivery actions -----------------------------------------
     fn action_by_key(
@@ -251,11 +234,7 @@ pub trait ExternalTx: RetryEvents {
     /// The verify actions _cancel_children cleans up.
     fn verify_actions(&mut self, workflow_id: Uuid) -> Result<Vec<Value>, WorkError>;
     /// _cancel_children's bulk failure of open actions.
-    fn fail_open_actions(
-        &mut self,
-        workflow_id: Uuid,
-        result: &Value,
-    ) -> Result<u64, WorkError>;
+    fn fail_open_actions(&mut self, workflow_id: Uuid, result: &Value) -> Result<u64, WorkError>;
 
     // -- native reviewer evidence ----------------------------------
     /// _native_artifact's attempt+receipt join: the stopped
@@ -299,10 +278,7 @@ pub trait ExternalTx: RetryEvents {
     fn attempt_unit_name(&mut self, attempt_id: Uuid) -> Result<Option<String>, WorkError>;
 
     // -- plan approve overrides -------------------------------------
-    fn existing_override(
-        &mut self,
-        workflow_id: Uuid,
-    ) -> Result<Option<Value>, WorkError>;
+    fn existing_override(&mut self, workflow_id: Uuid) -> Result<Option<Value>, WorkError>;
     fn insert_plan_override(&mut self, row: &Value) -> Result<(), WorkError>;
 }
 

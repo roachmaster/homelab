@@ -209,8 +209,7 @@ impl CommandRunnerProvider {
         grok_transport_factory: Option<Box<dyn crate::grok_acp::GrokTransportFactory>>,
         git: Box<dyn GitRunner>,
     ) -> Result<CommandRunnerProvider, WorkerError> {
-        if (config.grok_transport == crate::grok_acp::SELECTION)
-            != grok_transport_factory.is_some()
+        if (config.grok_transport == crate::grok_acp::SELECTION) != grok_transport_factory.is_some()
         {
             return Err(WorkerError::Protocol(
                 "Selected Grok transport requires an explicitly composed factory".to_string(),
@@ -832,7 +831,8 @@ impl CommandRunnerProvider {
                         .map_err(WorkerError::Protocol)?,
                 );
             }
-            let staged = self.stage_native(&scratch, true, &native, &prompt, transport.is_some())?;
+            let staged =
+                self.stage_native(&scratch, true, &native, &prompt, transport.is_some())?;
             native_auth = staged;
             let argv = if transport.is_some() {
                 crate::grok_acp::grok_acp_argv(&actual, &model, implement)
@@ -1531,8 +1531,7 @@ impl CommandRunnerProvider {
                                             activity();
                                         }
                                         if !stderr && invocation.transport.is_some() {
-                                            let transport =
-                                                invocation.transport.as_mut().unwrap();
+                                            let transport = invocation.transport.as_mut().unwrap();
                                             match transport.feed(&data) {
                                                 Ok(output) => {
                                                     if !output.is_empty() {
@@ -1548,8 +1547,7 @@ impl CommandRunnerProvider {
                                                     if let Some(diagnostic) =
                                                         transport.quota_diagnostic.clone()
                                                     {
-                                                        parser.quota_diagnostic =
-                                                            Some(diagnostic);
+                                                        parser.quota_diagnostic = Some(diagnostic);
                                                     }
                                                     let reply = transport.drain();
                                                     if !reply.is_empty() {

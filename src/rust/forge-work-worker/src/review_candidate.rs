@@ -6,10 +6,8 @@
 //! the preserved repository of an earlier review or by
 //! importing an owner-selected project commit.
 
-use crate::review_ports::{
-    ContentIdentityPort, ReviewError, ReviewGitPort, SnapshotFileData,
-};
 use crate::review_job::{canonical_uuid, gate_manifest_sha256, gate_source_digest};
+use crate::review_ports::{ContentIdentityPort, ReviewError, ReviewGitPort, SnapshotFileData};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -75,9 +73,7 @@ pub fn sha1_hex(data: &[u8]) -> String {
 
 /// _source_map: path -> (git mode, blob sha1) over snapshot
 /// file bytes.
-pub fn source_map(
-    files: &[SnapshotFileData],
-) -> BTreeMap<String, (String, String)> {
+pub fn source_map(files: &[SnapshotFileData]) -> BTreeMap<String, (String, String)> {
     files
         .iter()
         .map(|entry| {
@@ -190,8 +186,7 @@ impl ReviewedCandidateProvider {
     }
 
     pub fn directory(&self, review_id: &str) -> Result<PathBuf, ReviewError> {
-        let canonical = canonical_uuid(&json!(review_id))
-            .map_err(ReviewError::code)?;
+        let canonical = canonical_uuid(&json!(review_id)).map_err(ReviewError::code)?;
         let path = self.state_root.join(canonical);
         if is_symlink(&path) || is_symlink(&self.state_root) {
             return Err(ReviewError::code("review_candidate_changed"));
@@ -264,9 +259,7 @@ impl ReviewedCandidateProvider {
             return Err(unavailable());
         }
         let value: Value = serde_json::from_slice(&data).map_err(|_| unavailable())?;
-        if !value.is_object()
-            || value.get("review_id").and_then(Value::as_str) != Some(review_id)
-        {
+        if !value.is_object() || value.get("review_id").and_then(Value::as_str) != Some(review_id) {
             return Err(unavailable());
         }
         Ok(value)
@@ -291,10 +284,7 @@ impl ReviewedCandidateProvider {
             "gate_manifest_sha256": job.get("gate_manifest_sha256").cloned().unwrap_or(Value::Null),
             "checks_passed": true,
         });
-        for (key, value) in required
-            .as_object()
-            .expect("required is an object")
-        {
+        for (key, value) in required.as_object().expect("required is an object") {
             if manifest.get(key) != Some(value) {
                 return Err(ReviewError::code("review_authorization_changed"));
             }
@@ -336,10 +326,7 @@ impl ReviewedCandidateProvider {
         Ok((repository, candidate))
     }
 
-    pub fn retry(
-        &mut self,
-        job: &Value,
-    ) -> Result<(PathBuf, String, Value), ReviewError> {
+    pub fn retry(&mut self, job: &Value) -> Result<(PathBuf, String, Value), ReviewError> {
         let source_review_id = job
             .get("source_review_id")
             .and_then(Value::as_str)
@@ -372,9 +359,7 @@ impl ReviewedCandidateProvider {
             &directory,
             std::os::unix::fs::PermissionsExt::from_mode(0o700),
         )
-        .map_err(|error| {
-            ReviewError::other(format!("review directory mode failed: {error}"))
-        })?;
+        .map_err(|error| ReviewError::other(format!("review directory mode failed: {error}")))?;
         let repository = directory.join("repository");
         if is_symlink(&repository) {
             return Err(ReviewError::code("review_retry_candidate_exists"));
@@ -403,10 +388,7 @@ impl ReviewedCandidateProvider {
         Ok((repository, head, previous))
     }
 
-    pub fn import_source(
-        &mut self,
-        job: &Value,
-    ) -> Result<(PathBuf, String), ReviewError> {
+    pub fn import_source(&mut self, job: &Value) -> Result<(PathBuf, String), ReviewError> {
         let head = job
             .get("candidate_commit")
             .and_then(Value::as_str)
@@ -442,9 +424,7 @@ impl ReviewedCandidateProvider {
             &directory,
             std::os::unix::fs::PermissionsExt::from_mode(0o700),
         )
-        .map_err(|error| {
-            ReviewError::other(format!("review directory mode failed: {error}"))
-        })?;
+        .map_err(|error| ReviewError::other(format!("review directory mode failed: {error}")))?;
         let repository = directory.join("repository");
         if is_symlink(&repository) {
             return Err(ReviewError::code("owner_repair_source_changed"));
@@ -479,10 +459,7 @@ mod tests {
     #[test]
     fn sha1_vectors() {
         assert_eq!(sha1_hex(b""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
-        assert_eq!(
-            sha1_hex(b"abc"),
-            "a9993e364706816aba3e25717850c26c9cd0d89d"
-        );
+        assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
         assert_eq!(
             sha1_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
             "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
@@ -514,11 +491,17 @@ mod tests {
         let map = source_map(&files);
         assert_eq!(
             map["empty.txt"],
-            ("100644".to_string(), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391".to_string())
+            (
+                "100644".to_string(),
+                "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391".to_string()
+            )
         );
         assert_eq!(
             map["hello.txt"],
-            ("100755".to_string(), "ce013625030ba8dba906f756967f9e9ca394464a".to_string())
+            (
+                "100755".to_string(),
+                "ce013625030ba8dba906f756967f9e9ca394464a".to_string()
+            )
         );
         assert_eq!(map["link"].0, "120000");
     }

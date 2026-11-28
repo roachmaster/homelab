@@ -17,8 +17,8 @@ use crate::context_recovery::{FeedbackRecoveryProvider, PeerFeedbackRecoveryProv
 use crate::reviewer_correction::ReviewerCorrectionProvider;
 use crate::superseding_review::SupersedingReviewProvider;
 use crate::workflow::{
-    CoordinatorConfig, ExecutionPolicyHook, ExternalWorkflowHook, RunOnceHook,
-    WorkflowCoordinator, WorkflowDecisionPort, WorkflowStore,
+    CoordinatorConfig, ExecutionPolicyHook, ExternalWorkflowHook, RunOnceHook, WorkflowCoordinator,
+    WorkflowDecisionPort, WorkflowStore,
 };
 use crate::workflow_policy::WorkflowCatalog;
 use crate::workflow_tx::WorkflowTxFactory;
@@ -53,18 +53,14 @@ impl WorkflowStoreFactory {
             self.native_policy_matches,
             self.retry_events_enabled,
         ));
-        store.set_reviewer_correction(Box::new(ReviewerCorrectionProvider::new(
-            Arc::clone(&store),
-        )));
-        store.set_feedback_recovery(Box::new(FeedbackRecoveryProvider::new(Arc::clone(
+        store.set_reviewer_correction(Box::new(ReviewerCorrectionProvider::new(Arc::clone(
             &store,
         ))));
-        store.set_peer_feedback_recovery(Box::new(PeerFeedbackRecoveryProvider::new(
-            Arc::clone(&store),
-        )));
-        store.set_superseding_review(Box::new(SupersedingReviewProvider::new(Arc::clone(
+        store.set_feedback_recovery(Box::new(FeedbackRecoveryProvider::new(Arc::clone(&store))));
+        store.set_peer_feedback_recovery(Box::new(PeerFeedbackRecoveryProvider::new(Arc::clone(
             &store,
         ))));
+        store.set_superseding_review(Box::new(SupersedingReviewProvider::new(Arc::clone(&store))));
         if let Some(hook) = self.execution_policy {
             store.set_execution_policy(hook);
         }
@@ -86,7 +82,8 @@ pub struct WorkflowCoordinatorFactory {
 
 impl WorkflowCoordinatorFactory {
     pub fn create(self) -> WorkflowCoordinator {
-        let coordinator = WorkflowCoordinator::new(self.store, &self.worker_id, self.interval_seconds);
+        let coordinator =
+            WorkflowCoordinator::new(self.store, &self.worker_id, self.interval_seconds);
         if let Some(hook) = self.external_maintenance {
             coordinator.set_external_maintenance(hook);
         }
@@ -109,7 +106,7 @@ mod tests {
     use crate::work_requests::ResumeRequest;
     use crate::workflow_policy::CatalogProfile;
     use crate::workflow_tx::WorkflowTx;
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
     use uuid::Uuid;
 
     struct NoCatalog;

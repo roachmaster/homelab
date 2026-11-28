@@ -300,7 +300,9 @@ mod tests {
                     "acceptance_criteria": "ac", "idempotency_key": "k",
                     "workflow_policy_digest": "d"
                 }),
-                "forge.work_cancel" => json!({ "project_alias": "homelab", "task_id": "t1", "expected_revision": 3 }),
+                "forge.work_cancel" => {
+                    json!({ "project_alias": "homelab", "task_id": "t1", "expected_revision": 3 })
+                }
                 "forge.decide" => json!({
                     "project_alias": "homelab", "task_id": "t1", "expected_revision": 3,
                     "plan_attempt_id": "a1", "plan_sha256": "s", "agent_profile": "codex-primary",

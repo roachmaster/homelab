@@ -115,12 +115,17 @@ fn validate_inner(
     if !note.starts_with(RECOVERY_PREFIX)
         || note.len() > 2048
         || lease.get("mode").and_then(Value::as_str) != Some("implement")
-        || lease.get("workflow_id").map(|v| v.is_null()).unwrap_or(true)
+        || lease
+            .get("workflow_id")
+            .map(|v| v.is_null())
+            .unwrap_or(true)
         || !lease
             .get("workflow_review_id")
             .map(|v| v.is_null())
             .unwrap_or(true)
-        || feedback.get("workspace_digest_kind").and_then(Value::as_str)
+        || feedback
+            .get("workspace_digest_kind")
+            .and_then(Value::as_str)
             != Some("native_receipt")
     {
         return Some(false);
@@ -160,7 +165,10 @@ fn validate_inner(
         ("stopped_attempt_id", lease.get("resume_attempt_id")),
         ("feedback_id", lease.get("feedback_id")),
         ("feedback_sha256", lease.get("feedback_sha256")),
-        ("feedback_parent_attempt_id", feedback.get("parent_attempt_id")),
+        (
+            "feedback_parent_attempt_id",
+            feedback.get("parent_attempt_id"),
+        ),
         ("workspace_digest", lease.get("resume_workspace_digest")),
         ("base_revision", lease.get("base_revision")),
     ]
@@ -197,7 +205,10 @@ mod tests {
     #[test]
     fn note_bytes_match_the_python_value() {
         // Pinned against work_context_recovery_contract.make_recovery_note.
-        let note = make_recovery_note(ARGS[0], ARGS[1], ARGS[2], ARGS[3], ARGS[4], ARGS[5], ARGS[6], ARGS[7], ARGS[8]).unwrap();
+        let note = make_recovery_note(
+            ARGS[0], ARGS[1], ARGS[2], ARGS[3], ARGS[4], ARGS[5], ARGS[6], ARGS[7], ARGS[8],
+        )
+        .unwrap();
         assert_eq!(
             note,
             "FORGE_FEEDBACK_RECOVERY_V1:{\"base_revision\":\"cccccccccccccccccccccccccccccccccccccccc\",\"feedback_id\":\"44444444-4444-4444-4444-444444444444\",\"feedback_parent_attempt_id\":\"55555555-5555-5555-5555-555555555555\",\"feedback_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"policy\":\"forge-native-feedback-recovery-v1\",\"reconciliation_receipt_id\":\"66666666-6666-6666-6666-666666666666\",\"stopped_attempt_id\":\"33333333-3333-3333-3333-333333333333\",\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"workflow_id\":\"11111111-1111-1111-1111-111111111111\",\"workspace_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"
@@ -231,7 +242,10 @@ mod tests {
 
     #[test]
     fn note_validates_against_its_lease() {
-        let note = make_recovery_note(ARGS[0], ARGS[1], ARGS[2], ARGS[3], ARGS[4], ARGS[5], ARGS[6], ARGS[7], ARGS[8]).unwrap();
+        let note = make_recovery_note(
+            ARGS[0], ARGS[1], ARGS[2], ARGS[3], ARGS[4], ARGS[5], ARGS[6], ARGS[7], ARGS[8],
+        )
+        .unwrap();
         let (lease, feedback) = lease_and_feedback();
         let always = |_: Option<&str>, _: Option<&str>, _: Option<&str>| true;
         assert!(validate_recovery_note(&note, &lease, &feedback, &always));
@@ -239,10 +253,17 @@ mod tests {
         assert!(!validate_recovery_note(&note, &lease, &feedback, &never));
         // A tampered digest no longer reserializes to the same note.
         let tampered = note.replace("aaaa", "aaab");
-        assert!(!validate_recovery_note(&tampered, &lease, &feedback, &always));
+        assert!(!validate_recovery_note(
+            &tampered, &lease, &feedback, &always
+        ));
         // Wrong mode refuses.
         let mut wrong_mode = lease.clone();
         wrong_mode["mode"] = json!("plan");
-        assert!(!validate_recovery_note(&note, &wrong_mode, &feedback, &always));
+        assert!(!validate_recovery_note(
+            &note,
+            &wrong_mode,
+            &feedback,
+            &always
+        ));
     }
 }

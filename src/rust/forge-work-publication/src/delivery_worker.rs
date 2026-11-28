@@ -13,7 +13,7 @@ use uuid::Uuid;
 use forge_work_worker::diagnostic::{diagnostic_text, MAX_DIAGNOSTIC_BYTES};
 
 use crate::delivery_stores::{error_code, DeliveryStorePort, RequireLease};
-use crate::publication_clients::{PublicationError, ProviderError};
+use crate::publication_clients::{ProviderError, PublicationError};
 use crate::publication_config::PublicationConfig;
 
 pub const IDENTITY: [&str; 9] = [
@@ -86,13 +86,20 @@ pub fn validate_plan(identity: &Value, plan: &Value) -> Result<Value, String> {
     Ok(plan.clone())
 }
 
-pub fn validate_outcome(identity: &Value, plan: Option<&Value>, outcome: &Value) -> Result<Value, String> {
+pub fn validate_outcome(
+    identity: &Value,
+    plan: Option<&Value>,
+    outcome: &Value,
+) -> Result<Value, String> {
     let status = outcome["status"].as_str().unwrap_or_default();
     if !outcome.is_object()
         || !matches!(status, "pending" | "deployed" | "failed" | "superseded")
         || !outcome["receipt"].is_object()
         || !outcome["summary"].is_string()
-        || serde_json::to_string(outcome).map(|text| text.len()).unwrap_or(usize::MAX) > 65536
+        || serde_json::to_string(outcome)
+            .map(|text| text.len())
+            .unwrap_or(usize::MAX)
+            > 65536
     {
         return Err("Invalid release observation".to_string());
     }
@@ -110,7 +117,9 @@ pub fn validate_outcome(identity: &Value, plan: Option<&Value>, outcome: &Value)
         }
     }
     if status != "pending" {
-        let proof = receipt["activation_receipt_sha256"].as_str().unwrap_or_default();
+        let proof = receipt["activation_receipt_sha256"]
+            .as_str()
+            .unwrap_or_default();
         if receipt["unit"].as_str() != Some("homelab-web.service")
             || receipt["cleanup_confirmed"] != Value::Bool(true)
             || (status != "superseded" && receipt["health_confirmed"] != Value::Bool(true))
@@ -119,7 +128,9 @@ pub fn validate_outcome(identity: &Value, plan: Option<&Value>, outcome: &Value)
         {
             return Err("Release cleanup or health remains unconfirmed".to_string());
         }
-        if status == "deployed" && (plan.is_none() || receipt["rollback_confirmed"] != Value::Bool(false)) {
+        if status == "deployed"
+            && (plan.is_none() || receipt["rollback_confirmed"] != Value::Bool(false))
+        {
             return Err("Deployed release lacks its activation plan".to_string());
         }
     }
@@ -127,11 +138,7 @@ pub fn validate_outcome(identity: &Value, plan: Option<&Value>, outcome: &Value)
 }
 
 pub trait ReleaseProviderPort: Send {
-    fn plan(
-        &mut self,
-        job: &Value,
-        require_lease: RequireLease,
-    ) -> Result<Value, ProviderError>;
+    fn plan(&mut self, job: &Value, require_lease: RequireLease) -> Result<Value, ProviderError>;
     fn reconcile(
         &mut self,
         job: &Value,
@@ -182,7 +189,12 @@ impl ReleaseWorker {
         }
         let worker_id = format!(
             "{}-release",
-            self.config.worker.worker_id.chars().take(50).collect::<String>()
+            self.config
+                .worker
+                .worker_id
+                .chars()
+                .take(50)
+                .collect::<String>()
         );
         match self.store.delivery_release_claim(&worker_id)? {
             None => Ok(false),
@@ -218,19 +230,25 @@ impl ReleaseWorker {
         let heartbeat = std::thread::spawn(move || {
             // Python waits 10s before the first renewal.
             let start = Instant::now();
-            while start.elapsed() < Duration::from_secs(10) && !heartbeat_done.load(Ordering::SeqCst) {
+            while start.elapsed() < Duration::from_secs(10)
+                && !heartbeat_done.load(Ordering::SeqCst)
+            {
                 std::thread::sleep(Duration::from_millis(100));
             }
             while !heartbeat_done.load(Ordering::SeqCst) {
                 let renewed = !heartbeat_stop.load(Ordering::SeqCst)
                     && !heartbeat_lost.load(Ordering::SeqCst)
-                    && heartbeat_store.delivery_release_renew(&heartbeat_job).unwrap_or(false);
+                    && heartbeat_store
+                        .delivery_release_renew(&heartbeat_job)
+                        .unwrap_or(false);
                 if !renewed {
                     heartbeat_lost.store(true, Ordering::SeqCst);
                     return;
                 }
                 let start = Instant::now();
-                while start.elapsed() < Duration::from_secs(10) && !heartbeat_done.load(Ordering::SeqCst) {
+                while start.elapsed() < Duration::from_secs(10)
+                    && !heartbeat_done.load(Ordering::SeqCst)
+                {
                     std::thread::sleep(Duration::from_millis(100));
                 }
             }
@@ -250,7 +268,11 @@ impl ReleaseWorker {
         require_lease: &(dyn Fn() -> Result<(), PublicationError> + Send + Sync),
         lost: &Arc<AtomicBool>,
     ) -> Result<(), ProviderError> {
-        let mut plan: Option<Value> = if job.get("request").map(|value| value.is_null()).unwrap_or(true) {
+        let mut plan: Option<Value> = if job
+            .get("request")
+            .map(|value| value.is_null())
+            .unwrap_or(true)
+        {
             None
         } else {
             Some(job["request"].clone())
@@ -259,7 +281,10 @@ impl ReleaseWorker {
         let outcome = (|| -> Result<(), ProviderError> {
             let mut identity = serde_json::Map::new();
             for key in IDENTITY {
-                identity.insert(key.to_string(), job.get(key).cloned().unwrap_or(Value::Null));
+                identity.insert(
+                    key.to_string(),
+                    job.get(key).cloned().unwrap_or(Value::Null),
+                );
             }
             let identity = Value::Object(identity);
             if identity["owner_id"] != Value::String(self.config.worker.owner.clone())
@@ -269,11 +294,20 @@ impl ReleaseWorker {
                     .contains_key(identity["project_alias"].as_str().unwrap_or_default())
             {
                 lost.store(true, Ordering::SeqCst);
-                return Err(ProviderError::Other("Release owner/project mismatch".to_string()));
+                return Err(ProviderError::Other(
+                    "Release owner/project mismatch".to_string(),
+                ));
             }
-            for key in ["release_id", "verification_id", "ci_action_id", "lease_token"] {
+            for key in [
+                "release_id",
+                "verification_id",
+                "ci_action_id",
+                "lease_token",
+            ] {
                 let text = job[key].as_str().unwrap_or_default();
-                let valid = Uuid::parse_str(text).map(|parsed| parsed.to_string() == text).unwrap_or(false);
+                let valid = Uuid::parse_str(text)
+                    .map(|parsed| parsed.to_string() == text)
+                    .unwrap_or(false);
                 if !valid {
                     lost.store(true, Ordering::SeqCst);
                     return Err(ProviderError::Other("Invalid release identity".to_string()));
@@ -328,7 +362,9 @@ impl ReleaseWorker {
                 };
             } else if plan.is_none()
                 && outcome["receipt"].is_object()
-                && PLAN_KEYS.iter().all(|key| outcome["receipt"].get(key).is_some())
+                && PLAN_KEYS
+                    .iter()
+                    .all(|key| outcome["receipt"].get(key).is_some())
             {
                 let mut checkpointed = serde_json::Map::new();
                 for key in PLAN_KEYS {
@@ -350,7 +386,10 @@ impl ReleaseWorker {
                 job,
                 outcome["status"].as_str().unwrap_or_default(),
                 &outcome["receipt"],
-                &diagnostic_text(outcome["summary"].as_str().unwrap_or_default(), MAX_DIAGNOSTIC_BYTES),
+                &diagnostic_text(
+                    outcome["summary"].as_str().unwrap_or_default(),
+                    MAX_DIAGNOSTIC_BYTES,
+                ),
             )? {
                 return Err(ProviderError::Publication(PublicationError::Code(
                     "release_finish_lost".to_string(),
@@ -364,7 +403,10 @@ impl ReleaseWorker {
                 let mut receipt = plan.clone().unwrap_or_else(|| {
                     let mut identity = serde_json::Map::new();
                     for key in IDENTITY {
-                        identity.insert(key.to_string(), job.get(key).cloned().unwrap_or(Value::Null));
+                        identity.insert(
+                            key.to_string(),
+                            job.get(key).cloned().unwrap_or(Value::Null),
+                        );
                     }
                     Value::Object(identity)
                 });

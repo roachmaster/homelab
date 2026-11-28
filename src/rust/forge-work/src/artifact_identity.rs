@@ -186,7 +186,9 @@ pub fn json_bytes(raw: &[u8], maximum: usize) -> IdentityResult<Value> {
 /// The verification-policy value discipline: only JSON-shaped
 /// values, depth <= 32, at most MAX_FILES nodes.
 fn policy_value(value: &Value, depth: usize, remaining: &mut usize) -> IdentityResult<Value> {
-    *remaining = remaining.checked_sub(1).ok_or_else(|| err("Verification policy is too complex"))?;
+    *remaining = remaining
+        .checked_sub(1)
+        .ok_or_else(|| err("Verification policy is too complex"))?;
     if depth > 32 {
         return Err(err("Verification policy is too complex"));
     }

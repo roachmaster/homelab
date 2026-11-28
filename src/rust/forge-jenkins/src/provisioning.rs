@@ -214,8 +214,7 @@ pub fn write_new(path: &Path, content: &[u8], mode: u32) -> Result<(), String> {
     let mut file = options
         .open(&temporary)
         .map_err(|error| error.to_string())?;
-    file.write_all(content)
-        .map_err(|error| error.to_string())?;
+    file.write_all(content).map_err(|error| error.to_string())?;
     std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(mode))
         .map_err(|error| error.to_string())?;
     drop(file);
@@ -252,8 +251,8 @@ pub struct JenkinsHttp {
 
 impl JenkinsHttp {
     pub fn new(base: &str, username: &str, secret: &str) -> JenkinsHttp {
-        let encoded = base64::engine::general_purpose::STANDARD
-            .encode(format!("{username}:{secret}"));
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode(format!("{username}:{secret}"));
         JenkinsHttp {
             base: base.to_string(),
             authorization: format!("Basic {encoded}"),
@@ -272,13 +271,7 @@ impl JenkinsHttp {
     ) -> Result<(u32, Vec<(String, String)>, Vec<u8>), String> {
         let body = form
             .iter()
-            .map(|(key, value)| {
-                format!(
-                    "{}={}",
-                    urlencoding(key),
-                    urlencoding(value)
-                )
-            })
+            .map(|(key, value)| format!("{}={}", urlencoding(key), urlencoding(value)))
             .collect::<Vec<_>>()
             .join("&");
         self.send("POST", path, Some(body.into_bytes()), extra_headers)
@@ -320,9 +313,7 @@ impl JenkinsHttp {
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .send(body)
                     .map_err(|error| error.to_string())?,
-                None => request
-                    .send_empty()
-                    .map_err(|error| error.to_string())?,
+                None => request.send_empty().map_err(|error| error.to_string())?,
             }
         };
         let status = response.status().as_u16() as u32;

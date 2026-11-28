@@ -11,29 +11,29 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use forge_usage::collector::{
-    UsageCollector, UsageCollectorFactory, UsagePollStore, read_hmac_key, system_monotonic,
+    read_hmac_key, system_monotonic, UsageCollector, UsageCollectorFactory, UsagePollStore,
 };
 use forge_usage::muse_process::{AuthLease as UsageAuthLease, AuthStageFailure, AuthStager};
 use forge_usage::provider::{
-    AdapterVersions, MuseProcessDeps, UsageProviderConfig, UsageProviderFactory, system_clock,
+    system_clock, AdapterVersions, MuseProcessDeps, UsageProviderConfig, UsageProviderFactory,
 };
 use forge_usage::rpc::{
     GroupSignal, HostSystem, MetadataProcess, MetadataProcessConfig, MetadataProcessFactory,
     ProcessPorts, ProviderFailure, ProviderResult, SpawnSpec, StreamEvent, StreamKind,
 };
 use forge_usage::store::{UsageConfig, UsageProfileInfo};
-use nix::sys::signal::{Signal, killpg};
-use nix::unistd::{Gid, Pid, Uid, getegid, geteuid, getpgrp, getpid};
+use nix::sys::signal::{killpg, Signal};
+use nix::unistd::{getegid, geteuid, getpgrp, getpid, Gid, Pid, Uid};
 
 use crate::config::WorkerConfig;
 use crate::config_profile::AccountConfig;
 use crate::native_auth::AuthLease;
-use crate::provider_auth::{StageFailure, stage_muse_auth};
+use crate::provider_auth::{stage_muse_auth, StageFailure};
 use crate::runner::MUSE_BINARY_SHA256;
 
 struct StdProcess {
@@ -347,8 +347,16 @@ pub fn create_worker_usage_collector(
                 } else {
                     None
                 },
-                if ports.euid == 0 { Some(account.uid) } else { None },
-                if ports.euid == 0 { Some(account.gid) } else { None },
+                if ports.euid == 0 {
+                    Some(account.uid)
+                } else {
+                    None
+                },
+                if ports.euid == 0 {
+                    Some(account.gid)
+                } else {
+                    None
+                },
                 15.0,
             )?)
         } else {
@@ -399,10 +407,7 @@ mod tests {
         let factory = StdProcessFactory;
         let mut process = factory
             .spawn(&SpawnSpec {
-                argv: vec![
-                    "/bin/echo".to_string(),
-                    "codex-cli 1.2.3".to_string(),
-                ],
+                argv: vec!["/bin/echo".to_string(), "codex-cli 1.2.3".to_string()],
                 env: Vec::new(),
                 run_uid: None,
                 run_gid: None,

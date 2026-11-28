@@ -104,7 +104,12 @@ fn bearer_match(rest: &str) -> Option<usize> {
     let prefix = lower.strip_prefix("authorization")?;
     let mut pos = "authorization".len();
     let skip_ws = |text: &str, mut index: usize| {
-        while text[index..].chars().next().map(|c| c.is_whitespace()).unwrap_or(false) {
+        while text[index..]
+            .chars()
+            .next()
+            .map(|c| c.is_whitespace())
+            .unwrap_or(false)
+        {
             index += text[index..].chars().next().unwrap().len_utf8();
         }
         index

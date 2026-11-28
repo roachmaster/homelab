@@ -19,11 +19,7 @@ use crate::work_error::WorkError;
 pub trait EvidenceLock {
     /// Lock the review row's latest attempt and require a
     /// reconciliation receipt for it.
-    fn lock_review_evidence(
-        &mut self,
-        review_id: Uuid,
-        attempt_id: Uuid,
-    ) -> Result<(), WorkError>;
+    fn lock_review_evidence(&mut self, review_id: Uuid, attempt_id: Uuid) -> Result<(), WorkError>;
     /// The retained exhausted reviewer_correction event for
     /// one review (recovery paths), or None.
     fn exhausted_reviewer_event(

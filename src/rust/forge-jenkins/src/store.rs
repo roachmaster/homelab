@@ -99,7 +99,10 @@ fn origin_has_explicit_port(origin: &str) -> bool {
         .next()
         .unwrap_or_default();
     if let Some(rest) = authority.strip_prefix('[') {
-        return rest.split(']').nth(1).is_some_and(|tail| tail.starts_with(':'));
+        return rest
+            .split(']')
+            .nth(1)
+            .is_some_and(|tail| tail.starts_with(':'));
     }
     authority.contains(':')
 }
@@ -181,14 +184,18 @@ pub fn delivery_scope(
         .collect();
     let selected: Vec<String> = match consumer_names {
         None => {
-            let mut names: Vec<String> =
-                enabled.iter().map(|consumer| consumer.name.clone()).collect();
+            let mut names: Vec<String> = enabled
+                .iter()
+                .map(|consumer| consumer.name.clone())
+                .collect();
             names.sort();
             names
         }
         Some(names) => {
-            let enabled_names: Vec<&str> =
-                enabled.iter().map(|consumer| consumer.name.as_str()).collect();
+            let enabled_names: Vec<&str> = enabled
+                .iter()
+                .map(|consumer| consumer.name.as_str())
+                .collect();
             let mut seen = Vec::new();
             let valid = names.len() <= enabled.len()
                 && names.iter().all(|name| {
@@ -219,9 +226,7 @@ pub fn delivery_scope(
         let projects: Vec<String> = config
             .allowed_projects
             .iter()
-            .filter(|project| {
-                consumer.projects.is_empty() || consumer.projects.contains(project)
-            })
+            .filter(|project| consumer.projects.is_empty() || consumer.projects.contains(project))
             .cloned()
             .collect();
         let mut kinds: Vec<String> = [
@@ -283,19 +288,15 @@ pub fn row_to_event(row: &Value) -> Result<JenkinsEventRecord, String> {
     Ok(JenkinsEventRecord {
         event_id: text_field(row, "event_id").ok_or("event row missing event_id")?,
         owner_id: text_field(row, "owner_id").ok_or("event row missing owner_id")?,
-        project_alias: text_field(row, "project_alias")
-            .ok_or("event row missing project_alias")?,
+        project_alias: text_field(row, "project_alias").ok_or("event row missing project_alias")?,
         sequence: int_field(row, "sequence").ok_or("event row missing sequence")?,
         jenkins_instance: text_field(row, "jenkins_instance")
             .ok_or("event row missing jenkins_instance")?,
         job_name: text_field(row, "job_name").ok_or("event row missing job_name")?,
-        delivery_id: text_field(row, "delivery_id")
-            .ok_or("event row missing delivery_id")?,
+        delivery_id: text_field(row, "delivery_id").ok_or("event row missing delivery_id")?,
         event_kind: kind,
-        occurred_at: timestamp_field(row, "occurred_at")
-            .ok_or("event row missing occurred_at")?,
-        received_at: timestamp_field(row, "received_at")
-            .ok_or("event row missing received_at")?,
+        occurred_at: timestamp_field(row, "occurred_at").ok_or("event row missing occurred_at")?,
+        received_at: timestamp_field(row, "received_at").ok_or("event row missing received_at")?,
         summary: text_field(row, "summary").ok_or("event row missing summary")?,
         payload_sha256: text_field(row, "payload_sha256")
             .ok_or("event row missing payload_sha256")?,
@@ -336,8 +337,7 @@ pub fn row_to_delivery(row: &Value) -> Result<JenkinsDeliveryRecord, String> {
         status: text_field(row, "status").ok_or("delivery row missing status")?,
         attempt_count: int_field(row, "attempt_count")
             .ok_or("delivery row missing attempt_count")?,
-        max_attempts: int_field(row, "max_attempts")
-            .ok_or("delivery row missing max_attempts")?,
+        max_attempts: int_field(row, "max_attempts").ok_or("delivery row missing max_attempts")?,
         worker_id: text_field(row, "worker_id"),
         lease_token: text_field(row, "lease_token"),
         lease_expires_at: timestamp_field(row, "lease_expires_at"),
@@ -346,10 +346,8 @@ pub fn row_to_delivery(row: &Value) -> Result<JenkinsDeliveryRecord, String> {
         last_error: text_field(row, "last_error"),
         receipt_digest: text_field(row, "receipt_digest"),
         consumed_at: timestamp_field(row, "consumed_at"),
-        created_at: timestamp_field(row, "created_at")
-            .ok_or("delivery row missing created_at")?,
-        updated_at: timestamp_field(row, "updated_at")
-            .ok_or("delivery row missing updated_at")?,
+        created_at: timestamp_field(row, "created_at").ok_or("delivery row missing created_at")?,
+        updated_at: timestamp_field(row, "updated_at").ok_or("delivery row missing updated_at")?,
     })
 }
 
@@ -358,7 +356,9 @@ pub fn row_to_delivery(row: &Value) -> Result<JenkinsDeliveryRecord, String> {
 /// fields themselves, never the recorded payload digest.
 pub fn same_semantic_event(event: &JenkinsEventEmit, row: &Value) -> bool {
     let mut payload = event.semantic_payload();
-    let object = payload.as_object_mut().expect("semantic payload is an object");
+    let object = payload
+        .as_object_mut()
+        .expect("semantic payload is an object");
     object.entry("action_id".to_string()).or_insert(Value::Null);
     object
         .entry("branch_scope".to_string())
@@ -369,7 +369,9 @@ pub fn same_semantic_event(event: &JenkinsEventEmit, row: &Value) -> bool {
             let value_ts = if value.is_null() {
                 None
             } else {
-                value.as_str().and_then(|text| parse_utc_timestamp(text).ok())
+                value
+                    .as_str()
+                    .and_then(|text| parse_utc_timestamp(text).ok())
             };
             let stored_ts = if stored.is_null() {
                 None
@@ -515,8 +517,7 @@ mod tests {
             &SqlValue::TextList(vec!["build_completed".to_string()])
         );
         let mut builder = SqlBuilder::default();
-        let error = delivery_scope(&config, Some(&["nope".to_string()]), &mut builder)
-            .unwrap_err();
+        let error = delivery_scope(&config, Some(&["nope".to_string()]), &mut builder).unwrap_err();
         assert_eq!(
             error,
             JenkinsStoreError::Value(

@@ -20,8 +20,8 @@ use crate::post_merge::PostMergeProviderPort;
 use crate::publication_clients::{CommandExecutor, ProviderError};
 use crate::publication_config::PublicationConfig;
 use crate::trusted_delivery::{
-    canonical_bytes, contract_for_config, digest as validate_digest, gate_ref, sha,
-    validate_uid, DeliveryConfig, DeliveryError,
+    canonical_bytes, contract_for_config, digest as validate_digest, gate_ref, sha, validate_uid,
+    DeliveryConfig, DeliveryError,
 };
 use crate::trusted_delivery_provider::{DeliveryProviderFactory, TrustedDeliveryPort};
 
@@ -68,9 +68,7 @@ impl PostMergeVerificationProvider {
     fn scope(&self, job: &Value) -> Result<Value, ProviderError> {
         let denied = || ProviderError::Other("Post-merge verification scope denied".to_string());
         if !job.is_object()
-            || !IDENTITY
-                .iter()
-                .all(|key| job.get(*key).is_some())
+            || !IDENTITY.iter().all(|key| job.get(*key).is_some())
             || job["owner_id"].as_str() != Some(self.delivery.config.owner.as_str())
             || !self
                 .delivery
@@ -93,7 +91,10 @@ impl PostMergeVerificationProvider {
     }
 
     fn ids(scope: &Value) -> (String, String) {
-        let action = scope["post_merge_id"].as_str().unwrap_or_default().to_string();
+        let action = scope["post_merge_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let namespace = Uuid::parse_str(&action).unwrap_or_default();
         let prepare = Uuid::new_v5(&namespace, b"prepare-v1").to_string();
         (action, prepare)
@@ -159,8 +160,7 @@ impl PostMergeVerificationProvider {
         if !binding.is_object()
             || binding["version"].as_str() != Some(VERSION)
             || binding["scope"] != *scope
-            || binding["transport_sha256"].as_str()
-                != Some(self.transport_digest()?.as_str())
+            || binding["transport_sha256"].as_str() != Some(self.transport_digest()?.as_str())
         {
             return value_error("Post-merge verification binding changed");
         }
@@ -256,27 +256,31 @@ impl PostMergeProviderPort for PostMergeVerificationProvider {
         require_start_lease()?;
         let repository = self.delivery.config.projects
             [scope["project_alias"].as_str().unwrap_or_default()]
-            .canonical_repo
-            .clone();
-        let tree = sha(&self.delivery.git_text(
-            Some(&repository),
-            &[
-                "rev-parse",
-                "--verify",
-                &format!("{}^{{tree}}", scope["merge_commit"].as_str().unwrap_or_default()),
-            ],
-            None,
-            None,
-            45.0,
-        ).map_err(provider_error)?)
+        .canonical_repo
+        .clone();
+        let tree = sha(&self
+            .delivery
+            .git_text(
+                Some(&repository),
+                &[
+                    "rev-parse",
+                    "--verify",
+                    &format!(
+                        "{}^{{tree}}",
+                        scope["merge_commit"].as_str().unwrap_or_default()
+                    ),
+                ],
+                None,
+                None,
+                45.0,
+            )
+            .map_err(provider_error)?)
         .map_err(provider_error)?;
         if tree != scope["merge_tree"].as_str().unwrap_or_default() {
             return value_error("Post-merge immutable tree changed");
         }
         let (action, prepare) = Self::ids(&scope);
-        let lease = || {
-            require_start_lease().map_err(DeliveryError::Publication)
-        };
+        let lease = || require_start_lease().map_err(DeliveryError::Publication);
         let prepared = self
             .delivery
             .prepare_candidate(
@@ -293,9 +297,7 @@ impl PostMergeProviderPort for PostMergeVerificationProvider {
             )
             .map_err(provider_error)?;
         if prepared["status"].as_str() == Some("main_changed") {
-            return Self::superseded(
-                prepared["expected_main"].as_str().unwrap_or_default(),
-            );
+            return Self::superseded(prepared["expected_main"].as_str().unwrap_or_default());
         }
         let expected = json!({
             "candidate_commit": scope["merge_commit"],
@@ -341,8 +343,7 @@ impl PostMergeProviderPort for PostMergeVerificationProvider {
             "transport_sha256": self.transport_digest()?,
             "gate_source_sha256": prepared["gate_source_sha256"],
         });
-        crate::durable_files::durable_json(&path, &binding, 0o600)
-            .map_err(ProviderError::Other)?;
+        crate::durable_files::durable_json(&path, &binding, 0o600).map_err(ProviderError::Other)?;
         Ok(json!({
             "status": "prepared",
             "request": request,
@@ -358,7 +359,9 @@ impl PostMergeProviderPort for PostMergeVerificationProvider {
         require_start_lease()?;
         let request = self.request(job, request)?;
         let lease = || require_start_lease().map_err(DeliveryError::Publication);
-        self.delivery.verify(&request, &lease).map_err(provider_error)
+        self.delivery
+            .verify(&request, &lease)
+            .map_err(provider_error)
     }
 
     fn cancel(

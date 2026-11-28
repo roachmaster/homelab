@@ -231,7 +231,10 @@ fn require_ready(
     snapshot: &Value,
     project: &str,
 ) -> Result<(), WorkError> {
-    let digests: Vec<String> = NATIVE_POLICY_DIGESTS.iter().map(|d| d.to_string()).collect();
+    let digests: Vec<String> = NATIVE_POLICY_DIGESTS
+        .iter()
+        .map(|d| d.to_string())
+        .collect();
     let rows = tx.readiness(Some(&digests))?;
     for (profile_key, mode, entry) in [
         ("author_profile", "implement", "author_implement"),
@@ -315,10 +318,16 @@ impl WorkflowStore {
                     return Err(reconcile_required());
                 }
             }
-            if intent["source_revision"].as_i64().map(|v| v < 1).unwrap_or(true)
+            if intent["source_revision"]
+                .as_i64()
+                .map(|v| v < 1)
+                .unwrap_or(true)
                 || intent["max_native_deadline_retries"].as_i64() != Some(NATIVE_DEADLINE_RETRIES)
                 || text(action, "source_key")
-                    != format!("native-deadline-retry:{}", text(intent, "source_attempt_id"))
+                    != format!(
+                        "native-deadline-retry:{}",
+                        text(intent, "source_attempt_id")
+                    )
                 || text(finish, "status") != "native_deadline_retried"
                 || !finish["receipt"].is_object()
             {
@@ -594,7 +603,10 @@ impl WorkflowStore {
     /// _recover_native_timeouts: the durable-event scan
     /// retries only reconciled deadline stops.
     pub fn recover_native_timeouts(&self) -> Result<(), WorkError> {
-        let digests: Vec<String> = NATIVE_POLICY_DIGESTS.iter().map(|d| d.to_string()).collect();
+        let digests: Vec<String> = NATIVE_POLICY_DIGESTS
+            .iter()
+            .map(|d| d.to_string())
+            .collect();
         let candidates = self
             .tx_factory()
             .native_timeout_candidates(self.retry_events_enabled(), &digests)?;
@@ -810,7 +822,8 @@ impl WorkflowStore {
             &json!({"enabled": true, "phase": "code_review", "escalation_reason": ""}),
         )?;
         let task_key = correction_key.replace(':', "-");
-        let admission = flow_work(self.admit_reviewer(tx, workflow, &new_review, task, Some(&task_key)))?;
+        let admission =
+            flow_work(self.admit_reviewer(tx, workflow, &new_review, task, Some(&task_key)))?;
         tx.update_action(
             review_action_id,
             &json!({"status": "completed", "finish_receipt": admission}),
@@ -947,9 +960,7 @@ impl WorkflowStore {
             let review = tx
                 .workflow_review(workflow_review_id, true)?
                 .ok_or_else(not_reviewable)?;
-            let workflow = tx
-                .workflow(workflow_id, true)?
-                .ok_or_else(not_reviewable)?;
+            let workflow = tx.workflow(workflow_id, true)?.ok_or_else(not_reviewable)?;
             self.current_policy(tx, &workflow)?;
             let snapshot = self.snapshot_of(&workflow)?;
             let (task, critic) = match (task, critic) {
@@ -1028,12 +1039,10 @@ impl WorkflowStore {
             {
                 return Err(mismatch());
             }
-            let target = parse_review_target(
-                text(&review, "target_json").as_bytes(),
-                &target_sha,
-            )
-            .map_err(|_| mismatch())?;
-            if let Some(defect) = classify_context_transcription(text(&result, "content"), &target) {
+            let target = parse_review_target(text(&review, "target_json").as_bytes(), &target_sha)
+                .map_err(|_| mismatch())?;
+            if let Some(defect) = classify_context_transcription(text(&result, "content"), &target)
+            {
                 return self.correct_peer_verdict(
                     tx,
                     &workflow,
@@ -1051,13 +1060,7 @@ impl WorkflowStore {
             parse_review_verdict(text(&result, "content").as_bytes(), &target)
                 .map_err(|_| mismatch())?;
             let review_row = self.verify_peer_recovery_source(
-                tx,
-                &project,
-                &workflow,
-                &review,
-                &task,
-                &critic,
-                &target,
+                tx, &project, &workflow, &review, &task, &critic, &target,
             )?;
             let action_key = format!("{reviewer_attempt_id}:{result_sha}");
             let action = tx.action_by_source_review(
@@ -1079,7 +1082,12 @@ impl WorkflowStore {
                 }
                 _ => return Err(not_reviewable()),
             };
-            if tx.count_actions_by_source_prefix(workflow_id, Some("decide"), "peer-verdict-replay:")? > 0 {
+            if tx.count_actions_by_source_prefix(
+                workflow_id,
+                Some("decide"),
+                "peer-verdict-replay:",
+            )? > 0
+            {
                 return Err(not_reviewable());
             }
             if !self.retry_events_enabled() {
@@ -1215,13 +1223,8 @@ impl WorkflowStore {
                 return Err(not_reviewable());
             }
             let review_row = tx.review_row(review_id, true)?;
-            let workflow = workflow_in_project(
-                self,
-                tx,
-                uuid_of(&task, "workflow_id"),
-                &project,
-                true,
-            )?;
+            let workflow =
+                workflow_in_project(self, tx, uuid_of(&task, "workflow_id"), &project, true)?;
             let workflow = match workflow {
                 Some(workflow) => workflow,
                 None => return Err(not_reviewable()),
@@ -1442,14 +1445,14 @@ impl WorkflowStore {
                 None => return Err(not_reviewable()),
             };
             let infra = int_of(&review_row, "infrastructure_retries");
-            let snapshot_limit = int_of(
-                &snapshot["repair_policy"],
-                "max_infrastructure_retries",
-            );
+            let snapshot_limit = int_of(&snapshot["repair_policy"], "max_infrastructure_retries");
             if text(&workflow, "phase") != "escalated"
                 || workflow["enabled"].as_bool() != Some(false)
                 || text(&workflow, "escalation_reason") != text(&review_row, "reason")
-                || !matches!(text(&review_row, "reason"), "review_unavailable" | "workspace_busy")
+                || !matches!(
+                    text(&review_row, "reason"),
+                    "review_unavailable" | "workspace_busy"
+                )
                 || text(&review_row, "phase") != "local"
                 || text(&review_row, "status") != "handoff"
                 || present(&review_row, "candidate_commit")
@@ -1482,8 +1485,14 @@ impl WorkflowStore {
                 && text(verification, "failure_stage") == "snapshot"
                 && text(verification, "exception_type") == "WorkspaceBusyError";
             let legacy_busy = text(&review_row, "reason") == "review_unavailable"
-                && verification.as_object().map(|o| !o.contains_key("failure_stage")) == Some(true)
-                && verification.as_object().map(|o| !o.contains_key("exception_type")) == Some(true);
+                && verification
+                    .as_object()
+                    .map(|o| !o.contains_key("failure_stage"))
+                    == Some(true)
+                && verification
+                    .as_object()
+                    .map(|o| !o.contains_key("exception_type"))
+                    == Some(true);
             if !present(&review_row, "finish_token")
                 || text(failure, "review_id") != review_id.to_string()
                 || text(failure, "status") != "handoff"
@@ -1536,7 +1545,9 @@ impl WorkflowStore {
             if tx.max_review_no(&project, task_id)? != Some(int_of(&review_row, "review_no")) {
                 return Err(not_reviewable());
             }
-            if tx.count_actions_by_source_prefix(workflow_id, None, "source-readiness-delivery:")? > 0 {
+            if tx.count_actions_by_source_prefix(workflow_id, None, "source-readiness-delivery:")?
+                > 0
+            {
                 return Err(not_reviewable());
             }
             tx.update_workflow(
@@ -1615,7 +1626,10 @@ mod tests {
     #[test]
     fn parse_ts_absolute_vectors() {
         assert_eq!(parse_ts("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(parse_ts("1970-01-02T00:00:00+00:00"), Some(86_400_000_000_000));
+        assert_eq!(
+            parse_ts("1970-01-02T00:00:00+00:00"),
+            Some(86_400_000_000_000)
+        );
         // Leap day, a known epoch second (951825600).
         assert_eq!(
             parse_ts("2000-02-29T12:00:00Z"),
@@ -1639,8 +1653,14 @@ mod tests {
         // Naive and malformed values never parse.
         assert_eq!(parse_ts("2026-11-27T10:00:00"), None);
         assert_eq!(parse_ts("not-a-time"), None);
-        assert!(ts_ge("2026-11-27T10:00:00.5+00:00", "2026-11-27T10:00:00+00:00"));
-        assert!(!ts_ge("2026-11-27T09:59:59+00:00", "2026-11-27T10:00:00+00:00"));
+        assert!(ts_ge(
+            "2026-11-27T10:00:00.5+00:00",
+            "2026-11-27T10:00:00+00:00"
+        ));
+        assert!(!ts_ge(
+            "2026-11-27T09:59:59+00:00",
+            "2026-11-27T10:00:00+00:00"
+        ));
     }
 
     #[test]
@@ -1675,13 +1695,43 @@ mod tests {
                 "model": "gpt-5", "modes": ["plan", "implement"],
             }],
         })];
-        assert!(ready_for_recipe(&rows, "homelab", "codex-author", "implement", &recipe(2)));
-        assert!(!ready_for_recipe(&rows, "homelab", "codex-author", "review", &recipe(2)));
-        assert!(!ready_for_recipe(&rows, "other", "codex-author", "implement", &recipe(2)));
-        assert!(!ready_for_recipe(&rows, "homelab", "codex-author", "implement", &recipe(1)));
+        assert!(ready_for_recipe(
+            &rows,
+            "homelab",
+            "codex-author",
+            "implement",
+            &recipe(2)
+        ));
+        assert!(!ready_for_recipe(
+            &rows,
+            "homelab",
+            "codex-author",
+            "review",
+            &recipe(2)
+        ));
+        assert!(!ready_for_recipe(
+            &rows,
+            "other",
+            "codex-author",
+            "implement",
+            &recipe(2)
+        ));
+        assert!(!ready_for_recipe(
+            &rows,
+            "homelab",
+            "codex-author",
+            "implement",
+            &recipe(1)
+        ));
         let mut other = recipe(2);
         other.model = "gpt-4".to_string();
-        assert!(!ready_for_recipe(&rows, "homelab", "codex-author", "implement", &other));
+        assert!(!ready_for_recipe(
+            &rows,
+            "homelab",
+            "codex-author",
+            "implement",
+            &other
+        ));
     }
 
     #[test]

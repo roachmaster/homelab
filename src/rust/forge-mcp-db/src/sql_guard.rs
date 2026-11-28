@@ -11,16 +11,49 @@ pub const MAX_SQL_CHARS: usize = 20_000;
 const ALLOWED_FIRST: [&str; 6] = ["select", "with", "values", "table", "explain", "show"];
 const DENIED_WORDS: [&str; 5] = ["insert", "update", "delete", "merge", "into"];
 const DENIED_FUNCTIONS: [&str; 43] = [
-    "pg_sleep", "pg_sleep_for", "pg_sleep_until", "pg_read_file", "pg_read_binary_file",
-    "pg_ls_dir", "pg_stat_file", "pg_ls_logdir", "pg_ls_waldir", "pg_ls_tmpdir",
-    "pg_ls_archive_statusdir", "lo_import", "lo_export", "lo_get", "lo_open", "lo_creat",
-    "lo_create", "lo_unlink", "lo_put", "lo_from_bytea", "dblink", "dblink_exec",
-    "dblink_connect", "pg_terminate_backend", "pg_cancel_backend", "set_config",
-    "pg_reload_conf", "pg_rotate_logfile", "nextval", "setval", "pg_advisory_lock",
-    "pg_advisory_xact_lock", "pg_advisory_lock_shared", "pg_try_advisory_lock",
-    "pg_advisory_xact_lock_shared", "pg_try_advisory_xact_lock", "query_to_xml",
-    "query_to_xml_and_xmlschema", "query_to_xmlschema", "cursor_to_xml", "database_to_xml",
-    "database_to_xml_and_xmlschema", "schema_to_xml",
+    "pg_sleep",
+    "pg_sleep_for",
+    "pg_sleep_until",
+    "pg_read_file",
+    "pg_read_binary_file",
+    "pg_ls_dir",
+    "pg_stat_file",
+    "pg_ls_logdir",
+    "pg_ls_waldir",
+    "pg_ls_tmpdir",
+    "pg_ls_archive_statusdir",
+    "lo_import",
+    "lo_export",
+    "lo_get",
+    "lo_open",
+    "lo_creat",
+    "lo_create",
+    "lo_unlink",
+    "lo_put",
+    "lo_from_bytea",
+    "dblink",
+    "dblink_exec",
+    "dblink_connect",
+    "pg_terminate_backend",
+    "pg_cancel_backend",
+    "set_config",
+    "pg_reload_conf",
+    "pg_rotate_logfile",
+    "nextval",
+    "setval",
+    "pg_advisory_lock",
+    "pg_advisory_xact_lock",
+    "pg_advisory_lock_shared",
+    "pg_try_advisory_lock",
+    "pg_advisory_xact_lock_shared",
+    "pg_try_advisory_xact_lock",
+    "query_to_xml",
+    "query_to_xml_and_xmlschema",
+    "query_to_xmlschema",
+    "cursor_to_xml",
+    "database_to_xml",
+    "database_to_xml_and_xmlschema",
+    "schema_to_xml",
 ];
 // NOTE: pg_notify, txid_current, pg_current_xact_id,
 // pg_logical_emit_message, pg_switch_wal and pg_create_restore_point
@@ -87,9 +120,7 @@ pub fn strip_literals(sql: &str) -> Result<String, GuardError> {
     let length = chars.len();
     let mut out: Vec<char> = Vec::new();
     let mut index = 0;
-    let pair = |index: usize| -> String {
-        chars[index..(index + 2).min(length)].iter().collect()
-    };
+    let pair = |index: usize| -> String { chars[index..(index + 2).min(length)].iter().collect() };
     while index < length {
         let c = chars[index];
         if pair(index) == "--" {
@@ -159,8 +190,8 @@ pub fn strip_literals(sql: &str) -> Result<String, GuardError> {
                 }
             }
             let valid_tag = tag_end < length && chars[tag_end] == '$';
-            let previous_ok =
-                index == 0 || !(chars[index - 1].is_ascii_alphanumeric() || chars[index - 1] == '_');
+            let previous_ok = index == 0
+                || !(chars[index - 1].is_ascii_alphanumeric() || chars[index - 1] == '_');
             if valid_tag && previous_ok {
                 let tag: String = chars[index..=tag_end].iter().collect();
                 let tag_chars: Vec<char> = tag.chars().collect();
@@ -277,8 +308,7 @@ pub fn check_read_only(sql: Option<&str>) -> Result<String, GuardError> {
         .collect();
     if found.is_empty() || !ALLOWED_FIRST.contains(&found[0].as_str()) {
         return Err(GuardError(
-            "only SELECT, WITH, VALUES, TABLE, EXPLAIN or SHOW statements are allowed"
-                .to_string(),
+            "only SELECT, WITH, VALUES, TABLE, EXPLAIN or SHOW statements are allowed".to_string(),
         ));
     }
     if found[0] == "explain" && found.iter().take(6).any(|word| word == "analyze") {
@@ -337,10 +367,12 @@ mod tests {
             .unwrap_err()
             .0
             .contains("only SELECT"));
-        assert!(check_read_only(Some("WITH x AS (DELETE FROM t RETURNING *) SELECT 1"))
-            .unwrap_err()
-            .0
-            .contains("DELETE"));
+        assert!(
+            check_read_only(Some("WITH x AS (DELETE FROM t RETURNING *) SELECT 1"))
+                .unwrap_err()
+                .0
+                .contains("DELETE")
+        );
         assert!(check_read_only(Some("SELECT * INTO t FROM u"))
             .unwrap_err()
             .0

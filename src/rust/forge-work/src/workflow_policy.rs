@@ -126,7 +126,10 @@ pub fn compatible_snapshot(
     catalog: &dyn WorkflowCatalog,
     native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
 ) -> Option<Value> {
-    if ![frozen, current, effective].iter().all(|value| intact(value)) {
+    if ![frozen, current, effective]
+        .iter()
+        .all(|value| intact(value))
+    {
         return None;
     }
     if !same_keys(frozen, current) || !same_keys(effective, frozen) {
@@ -259,9 +262,7 @@ impl ProjectWorkflowPolicy {
             return Err("Invalid workflow reviewer identifier".to_string());
         }
         if author_profile == reviewer_profile {
-            return Err(
-                "Workflow author and reviewer must be distinct profiles".to_string(),
-            );
+            return Err("Workflow author and reviewer must be distinct profiles".to_string());
         }
         if !(0..=crate::retry_policy::AGENT_RETRY_LIMIT).contains(&max_plan_revisions) {
             return Err("Invalid workflow revision policy".to_string());
@@ -296,7 +297,11 @@ impl ProjectWorkflowPolicy {
         let mut recipes = serde_json::Map::new();
         for (name, alias, mode) in [
             ("author_plan", self.author_profile.as_str(), "plan"),
-            ("author_implement", self.author_profile.as_str(), "implement"),
+            (
+                "author_implement",
+                self.author_profile.as_str(),
+                "implement",
+            ),
             ("reviewer_review", self.reviewer_profile.as_str(), "review"),
         ] {
             let recipe = catalog
@@ -437,8 +442,8 @@ mod tests {
 
     #[test]
     fn project_workflow_snapshot_freezes_recipes_and_digest() {
-        let policy = ProjectWorkflowPolicy::new("codex-author", "codex-reviewer", 20, true)
-            .unwrap();
+        let policy =
+            ProjectWorkflowPolicy::new("codex-author", "codex-reviewer", 20, true).unwrap();
         let repair = json!({
             "max_rounds": 20, "max_stagnant_rounds": 20,
             "max_infrastructure_retries": 20, "required_hosted_checks": ["ci"],
@@ -447,7 +452,10 @@ mod tests {
         assert_eq!(snapshot["version"], json!("forge-autonomy-v1"));
         assert_eq!(snapshot["max_plan_revisions"], json!(20));
         assert_eq!(snapshot["max_code_revisions"], json!(20));
-        assert_eq!(snapshot["repair_policy"]["required_hosted_checks"], json!(["ci"]));
+        assert_eq!(
+            snapshot["repair_policy"]["required_hosted_checks"],
+            json!(["ci"])
+        );
         for key in ["author_plan", "author_implement", "reviewer_review"] {
             assert_eq!(snapshot["recipes"][key]["digest"], json!("digest-x"));
         }
@@ -461,9 +469,7 @@ mod tests {
         let frozen = snapshot("codex-author", "codex-reviewer");
         let mut current = frozen.clone();
         current["max_plan_revisions"] = json!(3);
-        assert!(
-            compatible_snapshot(&frozen, &current, &frozen, &Catalog, &matches).is_none()
-        );
+        assert!(compatible_snapshot(&frozen, &current, &frozen, &Catalog, &matches).is_none());
     }
 
     #[test]

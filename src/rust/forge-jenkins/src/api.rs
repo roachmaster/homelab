@@ -97,7 +97,9 @@ fn bad_request() -> JenkinsStoreError {
     rejected(400, "invalid_request")
 }
 
-fn require_object<'a>(body: &'a Value) -> Result<&'a serde_json::Map<String, Value>, JenkinsStoreError> {
+fn require_object<'a>(
+    body: &'a Value,
+) -> Result<&'a serde_json::Map<String, Value>, JenkinsStoreError> {
     body.as_object().ok_or_else(bad_request)
 }
 
@@ -252,16 +254,16 @@ pub fn decode(
                 event_id,
             }))
         }
-        JenkinsDestination::DeliveriesList => Ok(JenkinsCommand::DeliveriesList(
-            JenkinsDeliveriesList {
+        JenkinsDestination::DeliveriesList => {
+            Ok(JenkinsCommand::DeliveriesList(JenkinsDeliveriesList {
                 project_alias: required_string(body, "project_alias")?,
                 consumer_name: optional_string(body, "consumer_name")?,
                 status: optional_string(body, "status")?,
                 after_sequence: required_int(body, "after_sequence", Some(0))?,
                 action_id: optional_string(body, "action_id")?,
                 limit: required_int(body, "limit", Some(50))?,
-            },
-        )),
+            }))
+        }
     }
 }
 
@@ -300,9 +302,7 @@ pub fn failed(correlation: Option<&str>, error: &JenkinsStoreError) -> (u16, Val
             409 if code.as_deref() == Some("idempotency_conflict") => {
                 (status, "idempotency_conflict".to_string())
             }
-            503 if code.as_deref() == Some("queue_full") => {
-                (status, "queue_full".to_string())
-            }
+            503 if code.as_deref() == Some("queue_full") => (status, "queue_full".to_string()),
             _ => (503, "unavailable".to_string()),
         }
     };
@@ -468,9 +468,11 @@ impl JenkinsServiceFactory {
                 &self.worker_id,
             )
             .map_err(|error| JenkinsStoreError::Value(error.to_string()))?;
-            Some(factory.create().map_err(|error| {
-                JenkinsStoreError::Value(error.to_string())
-            })?)
+            Some(
+                factory
+                    .create()
+                    .map_err(|error| JenkinsStoreError::Value(error.to_string()))?,
+            )
         } else {
             None
         };

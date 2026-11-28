@@ -18,7 +18,7 @@ use forge_work_worker::review_ports::{HostedChecksPort, ReviewError};
 use crate::delivery_stores::{error_code, MergeStorePort, NativeMergeFailureError, RequireLease};
 use crate::hosted_checks::GitHubHostedChecksProvider;
 use crate::publication_clients::{
-    uuid, GitHubPullRequestClient, GitRepositoryProvider, PublicationError, ProviderError,
+    uuid, GitHubPullRequestClient, GitRepositoryProvider, ProviderError, PublicationError,
 };
 use crate::publication_config::PublicationConfig;
 
@@ -70,7 +70,10 @@ pub fn merge_sha(payload: &Value) -> Result<String, PublicationError> {
     let date = payload["author"]["date"].as_str().ok_or_else(invalid)?;
     let epoch = iso_epoch_seconds(date).ok_or_else(invalid)?;
     let timestamp = epoch as i64;
-    let mut headers: Vec<String> = vec![format!("tree {}", payload["tree"].as_str().unwrap_or_default())];
+    let mut headers: Vec<String> = vec![format!(
+        "tree {}",
+        payload["tree"].as_str().unwrap_or_default()
+    )];
     if let Some(parents) = payload["parents"].as_array() {
         for parent in parents {
             headers.push(format!("parent {}", parent.as_str().unwrap_or_default()));
@@ -101,7 +104,12 @@ pub fn merge_sha(payload: &Value) -> Result<String, PublicationError> {
 pub trait MergeProviderPort: Send {
     fn prepare(&mut self, job: &Value) -> Result<Value, ProviderError>;
     fn validate_intent(&self, job: &Value, intent: &Value) -> Result<Value, ProviderError>;
-    fn apply(&mut self, job: &Value, intent: &Value, require_lease: RequireLease) -> Result<(), ProviderError>;
+    fn apply(
+        &mut self,
+        job: &Value,
+        intent: &Value,
+        require_lease: RequireLease,
+    ) -> Result<(), ProviderError>;
     fn reconcile(&mut self, job: &Value, intent: &Value) -> Result<bool, ProviderError>;
     fn main_head(&mut self, job: &Value) -> Result<String, ProviderError>;
 }
@@ -172,7 +180,11 @@ impl GitHubExactTreeMergeProvider {
     }
 
     fn main(&mut self, job: &Value) -> Result<String, PublicationError> {
-        let value = self.client.api("GET", &format!("{}/git/ref/heads/main", self.prefix(job)?), None)?;
+        let value = self.client.api(
+            "GET",
+            &format!("{}/git/ref/heads/main", self.prefix(job)?),
+            None,
+        )?;
         let valid = value["ref"].as_str() == Some("refs/heads/main")
             && value["object"]["type"].as_str() == Some("commit");
         if !valid {
@@ -189,29 +201,47 @@ impl GitHubExactTreeMergeProvider {
             .cloned()
             .unwrap_or_default();
         let prefix = format!("https://github.com/{repository}/pull/");
-        let url = job.get("pr_url").and_then(|value| value.as_str()).unwrap_or_default();
+        let url = job
+            .get("pr_url")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
         let number = url.strip_prefix(&prefix).unwrap_or_default();
         if number.is_empty()
             || !number.bytes().all(|byte| byte.is_ascii_digit())
             || number.parse::<i64>().unwrap_or(0) < 1
             || number.parse::<i64>().unwrap_or(0).to_string() != number
         {
-            return Err(PublicationError::Code("invalid_merge_pull_request".to_string()));
+            return Err(PublicationError::Code(
+                "invalid_merge_pull_request".to_string(),
+            ));
         }
-        let value = self
-            .client
-            .api("GET", &format!("{}/pulls/{number}", self.prefix(job)?), None)?;
-        self.client.validated(job, job["candidate_commit"].as_str().unwrap_or_default(), &value)?;
+        let value = self.client.api(
+            "GET",
+            &format!("{}/pulls/{number}", self.prefix(job)?),
+            None,
+        )?;
+        self.client.validated(
+            job,
+            job["candidate_commit"].as_str().unwrap_or_default(),
+            &value,
+        )?;
         if value.get("state").and_then(|state| state.as_str()) != Some("open")
-            || !value.get("merged_at").map(|merged| merged.is_null()).unwrap_or(false)
+            || !value
+                .get("merged_at")
+                .map(|merged| merged.is_null())
+                .unwrap_or(false)
         {
-            return Err(PublicationError::Code("merge_pull_request_changed".to_string()));
+            return Err(PublicationError::Code(
+                "merge_pull_request_changed".to_string(),
+            ));
         }
         Ok(value)
     }
 
     fn checks(&mut self, job: &Value) -> Result<(), PublicationError> {
-        let required = job.get("required_hosted_checks").and_then(|value| value.as_array());
+        let required = job
+            .get("required_hosted_checks")
+            .and_then(|value| value.as_array());
         let configured: std::collections::BTreeSet<&str> = self
             .config
             .required_hosted_checks
@@ -258,13 +288,17 @@ impl GitHubExactTreeMergeProvider {
             .candidates
             .acquire(&acquire_job)
             .map_err(review_failure)?;
-        let tree = sha(&Value::String(
-            self.git
-                .git_text(Some(&repository), &["rev-parse", &format!("{head}^{{tree}}")], false, 60.0)?,
-        ))?;
-        let commit = self
-            .client
-            .api("GET", &format!("{}/git/commits/{head}", self.prefix(job)?), None)?;
+        let tree = sha(&Value::String(self.git.git_text(
+            Some(&repository),
+            &["rev-parse", &format!("{head}^{{tree}}")],
+            false,
+            60.0,
+        )?))?;
+        let commit = self.client.api(
+            "GET",
+            &format!("{}/git/commits/{head}", self.prefix(job)?),
+            None,
+        )?;
         if commit["sha"].as_str() != Some(head.as_str())
             || commit["tree"]["sha"].as_str() != Some(tree.as_str())
         {
@@ -288,10 +322,17 @@ impl MergeProviderPort for GitHubExactTreeMergeProvider {
         // candidate clone. Avoid downloading a potentially
         // huge comparison patch.
         self.git
-            .git_text(Some(&repository), &["merge-base", "--is-ancestor", &main, &head], false, 60.0)
-            .map_err(|_| ProviderError::Publication(PublicationError::Code(
-                "merge_main_requires_reverification".to_string(),
-            )))?;
+            .git_text(
+                Some(&repository),
+                &["merge-base", "--is-ancestor", &main, &head],
+                false,
+                60.0,
+            )
+            .map_err(|_| {
+                ProviderError::Publication(PublicationError::Code(
+                    "merge_main_requires_reverification".to_string(),
+                ))
+            })?;
         let date = (self.now)();
         let identity = json!({
             "name": self.config.commit_name,
@@ -329,11 +370,22 @@ impl MergeProviderPort for GitHubExactTreeMergeProvider {
             ProviderError::Publication(PublicationError::Code("merge_intent_changed".to_string()))
         };
         let object = intent.as_object().ok_or_else(changed)?;
-        let keys: std::collections::BTreeSet<&str> = object.keys().map(|key| key.as_str()).collect();
+        let keys: std::collections::BTreeSet<&str> =
+            object.keys().map(|key| key.as_str()).collect();
         let expected_keys: std::collections::BTreeSet<&str> = [
-            "version", "merge_id", "workflow_id", "task_id", "repository", "pr_url",
-            "candidate_commit", "candidate_tree", "expected_main", "merge_commit", "review_id",
-            "gate_manifest_sha256", "commit_payload",
+            "version",
+            "merge_id",
+            "workflow_id",
+            "task_id",
+            "repository",
+            "pr_url",
+            "candidate_commit",
+            "candidate_tree",
+            "expected_main",
+            "merge_commit",
+            "review_id",
+            "gate_manifest_sha256",
+            "commit_payload",
         ]
         .into_iter()
         .collect();
@@ -368,10 +420,11 @@ impl MergeProviderPort for GitHubExactTreeMergeProvider {
             .map(|object| object.keys().map(|key| key.as_str()).collect())
             .unwrap_or_default();
         let valid = payload_keys
-            == ["tree", "parents", "message", "author", "committer"].into_iter().collect()
+            == ["tree", "parents", "message", "author", "committer"]
+                .into_iter()
+                .collect()
             && payload["tree"] == intent["candidate_tree"]
-            && payload["parents"]
-                == json!([intent["expected_main"], intent["candidate_commit"]])
+            && payload["parents"] == json!([intent["expected_main"], intent["candidate_commit"]])
             && payload["message"].as_str()
                 == Some(&format!(
                     "Merge verified Forge workflow {}\n",
@@ -385,14 +438,21 @@ impl MergeProviderPort for GitHubExactTreeMergeProvider {
                 .unwrap_or(false)
             && payload["author"]["name"].as_str() == Some(self.config.commit_name.as_str())
             && payload["author"]["email"].as_str() == Some(self.config.commit_email.as_str())
-            && merge_sha(payload).map(|digest| digest == intent["merge_commit"].as_str().unwrap_or_default()).unwrap_or(false);
+            && merge_sha(payload)
+                .map(|digest| digest == intent["merge_commit"].as_str().unwrap_or_default())
+                .unwrap_or(false);
         if !valid {
             return Err(changed());
         }
         Ok(intent.clone())
     }
 
-    fn apply(&mut self, job: &Value, intent: &Value, require_lease: RequireLease) -> Result<(), ProviderError> {
+    fn apply(
+        &mut self,
+        job: &Value,
+        intent: &Value,
+        require_lease: RequireLease,
+    ) -> Result<(), ProviderError> {
         self.validate_intent(job, intent)?;
         require_lease()?;
         self.pr(job)?;
@@ -466,9 +526,11 @@ impl MergeProviderPort for GitHubExactTreeMergeProvider {
             ),
             None,
         )?;
-        Ok(matches!(value["status"].as_str(), Some("ahead") | Some("identical"))
-            && value["base_commit"]["sha"].as_str() == intent["merge_commit"].as_str()
-            && value["merge_base_commit"]["sha"].as_str() == intent["merge_commit"].as_str())
+        Ok(
+            matches!(value["status"].as_str(), Some("ahead") | Some("identical"))
+                && value["base_commit"]["sha"].as_str() == intent["merge_commit"].as_str()
+                && value["merge_base_commit"]["sha"].as_str() == intent["merge_commit"].as_str(),
+        )
     }
 
     fn main_head(&mut self, job: &Value) -> Result<String, ProviderError> {
@@ -494,14 +556,22 @@ impl MergeWorker {
             job = native_ci.publication_job(&job)?;
         }
         for name in [
-            "merge_id", "workflow_id", "task_id", "review_id", "lease_token",
-            "target_publication_id", "source_publication_id",
+            "merge_id",
+            "workflow_id",
+            "task_id",
+            "review_id",
+            "lease_token",
+            "target_publication_id",
+            "source_publication_id",
         ] {
             uuid(Some(&job[name]))?;
         }
         if !self.config.merge_enabled
             || job.get("merge_method").and_then(|value| value.as_str()) != Some("merge")
-            || !self.config.repositories.contains_key(job["project_alias"].as_str().unwrap_or_default())
+            || !self
+                .config
+                .repositories
+                .contains_key(job["project_alias"].as_str().unwrap_or_default())
             || !self
                 .config
                 .worker
@@ -570,7 +640,11 @@ impl MergeWorker {
         require_lease: &(dyn Fn() -> Result<(), PublicationError> + Send + Sync),
         lost: &Arc<AtomicBool>,
     ) -> Result<(), ProviderError> {
-        let mut intent: Option<Value> = if job.get("intent").map(|value| value.is_null()).unwrap_or(true) {
+        let mut intent: Option<Value> = if job
+            .get("intent")
+            .map(|value| value.is_null())
+            .unwrap_or(true)
+        {
             None
         } else {
             Some(job["intent"].clone())
@@ -578,10 +652,10 @@ impl MergeWorker {
         let mut mutable = false;
         let mut reservation: Option<MergeReservation> = None;
         // The per-merge lock file (fcntl.flock in Python).
-        let lock_path = self
-            .config
-            .state_root()
-            .join(format!("{}.merge.lock", job["merge_id"].as_str().unwrap_or_default()));
+        let lock_path = self.config.state_root().join(format!(
+            "{}.merge.lock",
+            job["merge_id"].as_str().unwrap_or_default()
+        ));
         let lock_file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -630,7 +704,8 @@ impl MergeWorker {
                 self.provider.apply(job, &intent_value, require_lease)?;
             }
             require_lease().map_err(ProviderError::Publication)?;
-            self.source_sync.synchronize(job, &intent_value, require_lease)?;
+            self.source_sync
+                .synchronize(job, &intent_value, require_lease)?;
             require_lease().map_err(ProviderError::Publication)?;
             self.store.merge_finish(
                 job,
@@ -686,7 +761,10 @@ impl MergeWorker {
             let no_merge_confirmed = !remote_merged;
             let mut merged = false;
             if remote_merged {
-                match self.source_sync.synchronize(job, intent.unwrap(), require_lease) {
+                match self
+                    .source_sync
+                    .synchronize(job, intent.unwrap(), require_lease)
+                {
                     Ok(()) => merged = true,
                     Err(_) => {}
                 }
@@ -700,11 +778,14 @@ impl MergeWorker {
             };
             let main_raced = intent.is_some()
                 && current_main.is_some()
-                && current_main.as_deref() != intent.map(|value| value["expected_main"].as_str().unwrap_or_default());
+                && current_main.as_deref()
+                    != intent.map(|value| value["expected_main"].as_str().unwrap_or_default());
             if no_merge_confirmed
                 && self.repair_sources.is_some()
-                && (matches!(code.as_str(), "merge_main_requires_reverification" | "reference_not_fast_forward")
-                    || main_raced)
+                && (matches!(
+                    code.as_str(),
+                    "merge_main_requires_reverification" | "reference_not_fast_forward"
+                ) || main_raced)
             {
                 // A read-only exact-reference reconciliation
                 // above has ruled out a successful main update.
@@ -713,7 +794,11 @@ impl MergeWorker {
                 // bounded author repair cycle.
                 let outcome = {
                     let repair = self.repair_sources.as_mut().unwrap();
-                    repair.prepare(job, current_main.as_deref().unwrap_or_default(), require_lease)?
+                    repair.prepare(
+                        job,
+                        current_main.as_deref().unwrap_or_default(),
+                        require_lease,
+                    )?
                 };
                 require_lease().map_err(ProviderError::Publication)?;
                 match self.store.native_merge_failure(job, &outcome) {
@@ -734,9 +819,9 @@ impl MergeWorker {
                         // Replay only the exact durable DB
                         // outcome; never repeat source
                         // preparation or a push.
-                        self.store.native_merge_failure(job, &outcome).map_err(|failure| {
-                            ProviderError::Other(format!("{failure:?}"))
-                        })?;
+                        self.store
+                            .native_merge_failure(job, &outcome)
+                            .map_err(|failure| ProviderError::Other(format!("{failure:?}")))?;
                     }
                     Err(NativeMergeFailureError::Other(message)) => {
                         return Err(ProviderError::Other(message));

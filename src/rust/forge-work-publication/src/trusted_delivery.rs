@@ -131,9 +131,7 @@ impl SourceArtifactRejected {
                     && path.len() <= 1024
                     && !path.starts_with('/')
                     && !path.chars().any(|ch| (ch as u32) < 32)
-                    && !path
-                        .split('/')
-                        .any(|part| matches!(part, "" | "." | ".."))
+                    && !path.split('/').any(|part| matches!(part, "" | "." | ".."))
                     && ARTIFACT_REJECTION_CODES.contains(&code.as_str())
             });
         if !valid {
@@ -300,9 +298,9 @@ fn is_branch_name(value: &str) -> bool {
     !bytes.is_empty()
         && bytes.len() <= 128
         && (bytes[0].is_ascii_alphanumeric())
-        && bytes[1..].iter().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'-')
-        })
+        && bytes[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'-'))
 }
 
 pub fn validate_branch_name(value: &str) -> DeliveryResult<String> {
@@ -616,7 +614,9 @@ impl DeliveryConfig {
         {
             return Err(invalid("Invalid delivery database scope"));
         }
-        let projects_raw = raw["projects"].as_object().ok_or_else(|| invalid("Invalid delivery projects"))?;
+        let projects_raw = raw["projects"]
+            .as_object()
+            .ok_or_else(|| invalid("Invalid delivery projects"))?;
         if projects_raw.is_empty() || projects_raw.len() > 64 {
             return Err(invalid("Invalid delivery projects"));
         }
@@ -661,7 +661,9 @@ impl DeliveryConfig {
                 .ok_or_else(|| invalid("Delivery paths must be explicit absolute paths"))
         };
         digest(raw["jenkins_binary_sha256"].as_str().unwrap_or_default())?;
-        let job = raw["jenkins_job"].as_str().unwrap_or("forge-exact-candidate");
+        let job = raw["jenkins_job"]
+            .as_str()
+            .unwrap_or("forge-exact-candidate");
         if job != "forge-exact-candidate" && job != "forge-native-candidate" {
             return Err(invalid("Invalid fixed Jenkins job"));
         }
@@ -676,7 +678,9 @@ impl DeliveryConfig {
             }
         };
         let profile = CiGateContractFactory::new(
-            raw["verification_profile"].as_str().unwrap_or(LEGACY_PROFILE),
+            raw["verification_profile"]
+                .as_str()
+                .unwrap_or(LEGACY_PROFILE),
         )
         .map(|factory| factory.create().profile)
         .map_err(DeliveryError::value)?;
@@ -765,7 +769,12 @@ impl ForgeJenkinsPort {
         }
     }
 
-    pub fn call(&mut self, action: &str, arguments: &[String], structured: bool) -> DeliveryResult<Value> {
+    pub fn call(
+        &mut self,
+        action: &str,
+        arguments: &[String],
+        structured: bool,
+    ) -> DeliveryResult<Value> {
         let binary = &self.config.jenkins_binary;
         let pinned = format!(
             "{:x}",
@@ -786,16 +795,13 @@ impl ForgeJenkinsPort {
             format!("jenkins.{action}"),
         ];
         argv.extend(arguments.iter().cloned());
-        let output = self
-            .execute
-            .execute(&argv, &env, None, None, 20.0)?;
+        let output = self.execute.execute(&argv, &env, None, None, 20.0)?;
         if output.len() > 1024 * 1024 {
             return value_error("Oversized Jenkins observation");
         }
         if structured {
-            return serde_json::from_slice(&output).map_err(|_| {
-                DeliveryError::value("Malformed Jenkins observation".to_string())
-            });
+            return serde_json::from_slice(&output)
+                .map_err(|_| DeliveryError::value("Malformed Jenkins observation".to_string()));
         }
         let text = String::from_utf8(output)
             .map_err(|_| DeliveryError::value("Malformed Jenkins observation".to_string()))?;
@@ -805,7 +811,10 @@ impl ForgeJenkinsPort {
         }
         for line in text.split('\n') {
             let line = line.strip_suffix('\r').unwrap_or(line);
-            if line.is_empty() && text.ends_with('\n') && line == text.split('\n').last().unwrap_or_default() {
+            if line.is_empty()
+                && text.ends_with('\n')
+                && line == text.split('\n').last().unwrap_or_default()
+            {
                 continue;
             }
             let Some((key, value)) = line.split_once('=') else {
@@ -846,8 +855,14 @@ impl ForgeJenkinsPort {
         })?;
         let mut matches: Vec<(String, Value)> = Vec::new();
         for (kind, rows) in [
-            ("build", builds["builds"].as_array().cloned().unwrap_or_default()),
-            ("queue", queue["items"].as_array().cloned().unwrap_or_default()),
+            (
+                "build",
+                builds["builds"].as_array().cloned().unwrap_or_default(),
+            ),
+            (
+                "queue",
+                queue["items"].as_array().cloned().unwrap_or_default(),
+            ),
         ] {
             for item in rows {
                 let params = &item["parameters"];
@@ -860,7 +875,8 @@ impl ForgeJenkinsPort {
                         return value_error("Jenkins correlation intent changed");
                     }
                 }
-                if kind == "queue" && item["job"].as_str() != Some(self.config.jenkins_job.as_str()) {
+                if kind == "queue" && item["job"].as_str() != Some(self.config.jenkins_job.as_str())
+                {
                     return value_error("Jenkins queue job changed");
                 }
                 matches.push((kind.to_string(), item));
@@ -886,7 +902,12 @@ impl ForgeJenkinsPort {
                     "Conflicting Jenkins runs require reconciliation".to_string(),
                 ));
             }
-            return Ok(Some(matches.into_iter().find(|(kind, _)| kind == "build").unwrap()));
+            return Ok(Some(
+                matches
+                    .into_iter()
+                    .find(|(kind, _)| kind == "build")
+                    .unwrap(),
+            ));
         }
         if let Some(found) = matches.into_iter().next() {
             return Ok(Some(found));
@@ -964,10 +985,7 @@ mod tests {
     fn branch_scopes_derive_and_validate() {
         let commit = "a".repeat(40);
         let other = "b".repeat(40);
-        assert_eq!(
-            derive_branch_scope(&commit, &commit, None).unwrap(),
-            "main"
-        );
+        assert_eq!(derive_branch_scope(&commit, &commit, None).unwrap(), "main");
         assert_eq!(
             derive_branch_scope(&commit, &other, None).unwrap(),
             "detached"
@@ -1001,7 +1019,10 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert_ne!(ids[0], ids[1]);
         // Deterministic across calls.
-        assert_eq!(native_action_id("forge-native-v1", &identity).unwrap(), ids[1]);
+        assert_eq!(
+            native_action_id("forge-native-v1", &identity).unwrap(),
+            ids[1]
+        );
     }
 
     #[test]
@@ -1039,7 +1060,10 @@ mod tests {
         .unwrap();
         let result = rejected.result();
         assert_eq!(result["status"], json!("failed"));
-        assert_eq!(result["receipt"]["reason"], json!("source_artifact_rejected"));
+        assert_eq!(
+            result["receipt"]["reason"],
+            json!("source_artifact_rejected")
+        );
         assert!(SourceArtifactRejected::new(
             &"a".repeat(40),
             &"b".repeat(40),

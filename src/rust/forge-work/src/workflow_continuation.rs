@@ -16,13 +16,13 @@ use crate::execution_policy::sha256_canonical;
 use crate::peer_review::{parse_review_target, parse_review_verdict};
 use crate::pinned_recipe::PinnedRecipe;
 use crate::retry_events::is_id;
+use crate::work_error::WorkError;
+use crate::work_requests::ResumeRequest;
 use crate::workflow::{
     actor_json, coordinator_actor, denied, int_of, operator_actor, prepare_title, present,
     ready_for_recipe, text, truncate_chars, uuid_of, WorkflowStore, NATIVE_POLICY_DIGESTS,
 };
 use crate::workflow_tx::WorkflowTx;
-use crate::work_error::WorkError;
-use crate::work_requests::ResumeRequest;
 
 pub const CONTINUATION_POLICY: &str = "forge-policy-incident-continuation-v1";
 pub const CONTINUATION_PREFIX: &str = "policy-continuation:";
@@ -50,9 +50,7 @@ pub fn is_retained_source(task: &Value, bindings: &[Value]) -> bool {
 }
 
 fn note_valid(note: &str) -> bool {
-    !note.trim().is_empty()
-        && note.len() <= 1024
-        && !note.chars().any(|c| (c as u32) < 32)
+    !note.trim().is_empty() && note.len() <= 1024 && !note.chars().any(|c| (c as u32) < 32)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,12 +242,7 @@ impl BoundPlanDirectionAuthority {
 /// the application role intentionally cannot enumerate them,
 /// so composition supplies a separately-credentialed reader.
 pub trait RetryEvidencePort {
-    fn read(
-        &self,
-        owner: &str,
-        project: &str,
-        workflow_id: Uuid,
-    ) -> Result<Vec<Value>, WorkError>;
+    fn read(&self, owner: &str, project: &str, workflow_id: Uuid) -> Result<Vec<Value>, WorkError>;
 }
 
 fn rejected(status: u16, code: &str) -> WorkError {
@@ -1306,17 +1299,22 @@ mod tests {
         );
         assert!(!wrong_branch.branch_qualified("codex-author"));
 
-        assert!(!evidence_exhausted(&[json!({"status": "resolved", "used": 1, "attempt_limit": 20})]));
-        assert!(evidence_exhausted(&[json!({"status": "open", "used": 0, "attempt_limit": 20})]));
-        assert!(evidence_exhausted(&[json!({"status": "resolved", "used": 20, "attempt_limit": 20})]));
+        assert!(!evidence_exhausted(&[
+            json!({"status": "resolved", "used": 1, "attempt_limit": 20})
+        ]));
+        assert!(evidence_exhausted(&[
+            json!({"status": "open", "used": 0, "attempt_limit": 20})
+        ]));
+        assert!(evidence_exhausted(&[
+            json!({"status": "resolved", "used": 20, "attempt_limit": 20})
+        ]));
     }
 
     #[test]
     fn direction_dto_validation() {
         let id = Uuid::nil();
         assert!(
-            ApprovedPlanDirectionResume::new("homelab", id, id, 1, id, id, &"b".repeat(40))
-                .is_ok()
+            ApprovedPlanDirectionResume::new("homelab", id, id, 1, id, id, &"b".repeat(40)).is_ok()
         );
         assert!(
             ApprovedPlanDirectionResume::new("homelab", id, id, 1, id, id, &"b".repeat(39))
@@ -1328,18 +1326,13 @@ mod tests {
     fn dto_validation() {
         let id = Uuid::nil();
         assert!(
-            PolicyIncidentContinuation::new("homelab", id, &"a".repeat(64), id, "note")
-                .is_ok()
+            PolicyIncidentContinuation::new("homelab", id, &"a".repeat(64), id, "note").is_ok()
         );
         assert!(
             PolicyIncidentContinuation::new("homelab", id, &"a".repeat(64), id, "bad\nnote")
                 .is_err()
         );
-        assert!(
-            UnstartedPlanResume::new("homelab", id, id, 1, id, id, &"b".repeat(40)).is_ok()
-        );
-        assert!(
-            UnstartedPlanResume::new("homelab", id, id, 0, id, id, &"b".repeat(40)).is_err()
-        );
+        assert!(UnstartedPlanResume::new("homelab", id, id, 1, id, id, &"b".repeat(40)).is_ok());
+        assert!(UnstartedPlanResume::new("homelab", id, id, 0, id, id, &"b".repeat(40)).is_err());
     }
 }

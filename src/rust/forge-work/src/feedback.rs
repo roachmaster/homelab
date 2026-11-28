@@ -113,7 +113,10 @@ pub fn validate_findings(values: &Value, public: bool) -> Result<Vec<Value>, Fee
             .filter(|text| check_feedback_text(text, 2048, false))
             .ok_or_else(|| err("Invalid feedback text"))?;
         normalized.insert("summary".to_string(), json!(summary));
-        let status = object.get("status").cloned().unwrap_or_else(|| json!("open"));
+        let status = object
+            .get("status")
+            .cloned()
+            .unwrap_or_else(|| json!("open"));
         let status_ok = status
             .as_str()
             .map(|text| {
@@ -172,9 +175,7 @@ pub fn validate_feedback(value: &Value) -> Result<Value, FeedbackError> {
     let fields_ok = object
         .keys()
         .all(|key| FEEDBACK_FIELDS.contains(&key.as_str()) || key == "workspace_digest_kind")
-        && FEEDBACK_FIELDS
-            .iter()
-            .all(|key| object.contains_key(*key))
+        && FEEDBACK_FIELDS.iter().all(|key| object.contains_key(*key))
         && is_int(&object["version"])
         && object["version"].as_i64() == Some(1);
     if !fields_ok {
@@ -203,7 +204,11 @@ pub fn validate_feedback(value: &Value) -> Result<Value, FeedbackError> {
     if !plan_decision.is_null() && !is_canonical_uuid(plan_decision) {
         return Err(err("Invalid feedback identity"));
     }
-    for name in ["parent_result_sha256", "workspace_digest", "gate_manifest_sha256"] {
+    for name in [
+        "parent_result_sha256",
+        "workspace_digest",
+        "gate_manifest_sha256",
+    ] {
         if !is_digest(&object[name]) {
             return Err(err("Invalid feedback digest"));
         }

@@ -20,11 +20,7 @@ use uuid::Uuid;
 impl ReconcilerApi {
     /// Renews one review lease
     /// (forge_coding_reconciler_api.review_renew).
-    pub fn review_renew(
-        &mut self,
-        review_id: Uuid,
-        token: Uuid,
-    ) -> Result<bool, AdapterError> {
+    pub fn review_renew(&mut self, review_id: Uuid, token: Uuid) -> Result<bool, AdapterError> {
         self.call_bool_params(
             "SELECT forge_coding_reconciler_api.review_renew($1, $2)",
             &[&review_id, &token],
@@ -44,9 +40,7 @@ impl ReconcilerApi {
             "SELECT forge_coding_reconciler_api.review_finish($1, $2, $3)",
             &[&review_id, &token, outcome],
         )?
-        .ok_or_else(|| {
-            AdapterError::Protocol("review_finish returned no row".to_string())
-        })
+        .ok_or_else(|| AdapterError::Protocol("review_finish returned no row".to_string()))
     }
 }
 
@@ -84,20 +78,14 @@ impl PgReviewStore {
 }
 
 impl ReviewStorePort for PgReviewStore {
-    fn review_finish(
-        &self,
-        job: &Value,
-        outcome: &Value,
-    ) -> Result<Value, StoreFailure> {
+    fn review_finish(&self, job: &Value, outcome: &Value) -> Result<Value, StoreFailure> {
         // The Python store validates and normalizes the
         // findings before the call, replacing the outcome's
         // findings with the validated list.
         let findings = outcome.get("findings").cloned().unwrap_or(json!([]));
-        let validated = validate_findings(&findings, false).map_err(|error| {
-            StoreFailure {
-                connection_class: false,
-                message: error.0.to_string(),
-            }
+        let validated = validate_findings(&findings, false).map_err(|error| StoreFailure {
+            connection_class: false,
+            message: error.0.to_string(),
         })?;
         let mut outcome = outcome.clone();
         if let Some(map) = outcome.as_object_mut() {

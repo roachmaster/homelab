@@ -11,8 +11,15 @@
 //! checks, CLI runs, source imports, pushes and PR creation
 //! are never replayed.
 
+use crate::diagnostic::{diagnostic_text, MAX_DIAGNOSTIC_BYTES};
 use crate::ports_runtime::GitRunner;
+use crate::repair_policy::{decide_repair, failure_fingerprint, RepairObservation};
 use crate::review_candidate::{source_map, tree_map, ReviewedCandidateProvider};
+use crate::review_job::{
+    canonical_uuid, event_observation, event_used, gate_manifest_sha256, gate_source_digest,
+    hosted_deadline, protected_gate_path, py_truthy, repair_policy_for, validate_review,
+    verification_job, ReportSignals, ReviewValidationConfig, LEGACY_PROFILE,
+};
 use crate::review_ports::{
     BranchReservationData, ChecksPort, HostedChecksPort, NativeCiPort, RepairSourcesPort,
     ReviewBranchPort, ReviewError, ReviewGitPort, ReviewStorePort, SnapshotPort,
@@ -20,13 +27,6 @@ use crate::review_ports::{
 };
 use crate::workspace::WorkspaceLease;
 use crate::WorkerError;
-use crate::diagnostic::{diagnostic_text, MAX_DIAGNOSTIC_BYTES};
-use crate::repair_policy::{decide_repair, failure_fingerprint, RepairObservation};
-use crate::review_job::{
-    canonical_uuid, event_observation, event_used, gate_manifest_sha256, gate_source_digest,
-    hosted_deadline, protected_gate_path, py_truthy, repair_policy_for, validate_review,
-    verification_job, ReportSignals, ReviewValidationConfig, LEGACY_PROFILE,
-};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -137,10 +137,7 @@ impl LeaseGuard {
     }
 }
 
-fn spawn_heartbeat(
-    guard: Arc<LeaseGuard>,
-    done: Arc<AtomicBool>,
-) -> std::thread::JoinHandle<()> {
+fn spawn_heartbeat(guard: Arc<LeaseGuard>, done: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         while !done.load(Ordering::SeqCst) {
             if guard.require().is_err() {
@@ -186,9 +183,7 @@ fn acquire_lock(state_root: &Path, job: &Value) -> Result<ReviewLock, ReviewErro
     .map_err(|error| ReviewError::other(format!("review lock open failed: {error}")))?;
     match Flock::lock(fd, FlockArg::LockExclusiveNonblock) {
         Ok(flock) => Ok(ReviewLock { _flock: flock }),
-        Err((_, nix::errno::Errno::EWOULDBLOCK)) => {
-            Err(ReviewError::code("review_already_owned"))
-        }
+        Err((_, nix::errno::Errno::EWOULDBLOCK)) => Err(ReviewError::code("review_already_owned")),
         Err((_, error)) => Err(ReviewError::other(format!(
             "review lock flock failed: {error}"
         ))),
@@ -344,8 +339,7 @@ impl ReviewWorker {
                         return Err(ReviewError::Busy);
                     }
                     let remaining = deadline.saturating_duration_since(Instant::now());
-                    let until =
-                        Instant::now() + remaining.min(Duration::from_millis(100));
+                    let until = Instant::now() + remaining.min(Duration::from_millis(100));
                     while Instant::now() < until && !self.stop.load(Ordering::SeqCst) {
                         std::thread::sleep(Duration::from_millis(10));
                     }
@@ -537,7 +531,9 @@ impl ReviewWorker {
                 Err(error) => return Err(error),
             };
             state.head = Some(head.clone());
-            let raw = self.git.git_bytes(Some(&repo), &["rev-parse", "FETCH_HEAD"])?;
+            let raw = self
+                .git
+                .git_bytes(Some(&repo), &["rev-parse", "FETCH_HEAD"])?;
             state.integration_base = String::from_utf8(raw)
                 .map_err(|_| ReviewError::other("FETCH_HEAD is not UTF-8"))?
                 .trim()
@@ -568,8 +564,7 @@ impl ReviewWorker {
             let frozen = snapshot
                 .get("provenance")
                 .ok_or_else(|| ReviewError::other("identity snapshot lacks provenance"))?;
-            state.source_gate_digest =
-                Some(str_field(frozen, "native_gate_source_sha256")?);
+            state.source_gate_digest = Some(str_field(frozen, "native_gate_source_sha256")?);
             state.gate_changes = frozen
                 .get("gate_changes_require_review")
                 .and_then(Value::as_bool)
@@ -868,7 +863,8 @@ impl ReviewWorker {
             "candidate_commit": head,
             "conflict_paths": conflict.conflict_paths,
         });
-        let evidence = crate::contexts::sha256_hex(crate::policy::canonical_json(&details).as_bytes());
+        let evidence =
+            crate::contexts::sha256_hex(crate::policy::canonical_json(&details).as_bytes());
         let first_path = conflict
             .conflict_paths
             .first()
@@ -916,19 +912,18 @@ impl ReviewWorker {
             "source_integration": details,
         });
         self.candidates.record(job, &manifest)?;
-        let retry_observation = if job.get("retry_policy").and_then(Value::as_str)
-            == Some("event-v1")
-        {
-            Some(json!({
-                "failure_kind": "merge",
-                "phase_id": "main-integration",
-                "passed_kinds": [],
-                "passed_phase_ids": [],
-                "stage_evidence_digest": evidence,
-            }))
-        } else {
-            None
-        };
+        let retry_observation =
+            if job.get("retry_policy").and_then(Value::as_str) == Some("event-v1") {
+                Some(json!({
+                    "failure_kind": "merge",
+                    "phase_id": "main-integration",
+                    "passed_kinds": [],
+                    "passed_phase_ids": [],
+                    "stage_evidence_digest": evidence,
+                }))
+            } else {
+                None
+            };
         let observation = RepairObservation::new(
             "source",
             event_used(job, retry_observation.as_ref()).map_err(ReviewError::code)?,
@@ -1036,11 +1031,7 @@ impl ReviewWorker {
         join_heartbeat(heartbeat);
     }
 
-    fn source_inner(
-        &mut self,
-        job: &Value,
-        guard: &LeaseGuard,
-    ) -> Result<(), ReviewError> {
+    fn source_inner(&mut self, job: &Value, guard: &LeaseGuard) -> Result<(), ReviewError> {
         let _lock = acquire_lock(&self.config.state_root, job)?;
         guard.require()?;
         let (repository, head) = self.candidates.import_source(job)?;
@@ -1165,11 +1156,7 @@ impl ReviewWorker {
         join_heartbeat(heartbeat);
     }
 
-    fn hosted_inner(
-        &mut self,
-        job: &Value,
-        guard: &LeaseGuard,
-    ) -> Result<(), ReviewError> {
+    fn hosted_inner(&mut self, job: &Value, guard: &LeaseGuard) -> Result<(), ReviewError> {
         let _lock = acquire_lock(&self.config.state_root, job)?;
         guard.require()?;
         if self.hosted_checks.is_none()
@@ -1296,10 +1283,8 @@ impl ReviewWorker {
                     "hosted_status": report.status,
                 },
             });
-            let retry_observation =
-                event_observation(job, None, Some(&outcome_stub), true);
-            let used =
-                event_used(job, retry_observation.as_ref()).map_err(ReviewError::code)?;
+            let retry_observation = event_observation(job, None, Some(&outcome_stub), true);
+            let used = event_used(job, retry_observation.as_ref()).map_err(ReviewError::code)?;
             let observation = RepairObservation::new(
                 &category,
                 used,
@@ -1323,8 +1308,7 @@ impl ReviewWorker {
             )
             .map_err(|error| ReviewError::other(error.0))?;
             let decision = decide_repair(&observation, &policy);
-            let (mut next_disposition, mut next_reason) =
-                (decision.disposition, decision.reason);
+            let (mut next_disposition, mut next_reason) = (decision.disposition, decision.reason);
             if next_disposition == "repair" && !jbool(job, "auto_repair") {
                 next_disposition = "awaiting_review".to_string();
                 next_reason = "owner_repair_decision_required".to_string();

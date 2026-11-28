@@ -81,7 +81,8 @@ pub trait WorkflowTx: RetryEvents {
     ) -> Result<(), WorkError>;
 
     // -- row loads -------------------------------------------------
-    fn workflow(&mut self, workflow_id: Uuid, for_update: bool) -> Result<Option<Value>, WorkError>;
+    fn workflow(&mut self, workflow_id: Uuid, for_update: bool)
+        -> Result<Option<Value>, WorkError>;
     fn task(&mut self, task_id: Uuid, for_update: bool) -> Result<Option<Value>, WorkError>;
     fn task_in_project(
         &mut self,
@@ -130,7 +131,8 @@ pub trait WorkflowTx: RetryEvents {
         attempt_id: Uuid,
         task_revision: i64,
     ) -> Result<Option<Value>, WorkError>;
-    fn review_row(&mut self, review_id: Uuid, for_update: bool) -> Result<Option<Value>, WorkError>;
+    fn review_row(&mut self, review_id: Uuid, for_update: bool)
+        -> Result<Option<Value>, WorkError>;
     fn latest_local_review(
         &mut self,
         project: &str,
@@ -179,10 +181,7 @@ pub trait WorkflowTx: RetryEvents {
         action_id: Uuid,
     ) -> Result<Option<(String, Option<String>, bool)>, WorkError>;
     /// (enabled, phase) for one workflow.
-    fn workflow_state(
-        &mut self,
-        workflow_id: Uuid,
-    ) -> Result<Option<(bool, String)>, WorkError>;
+    fn workflow_state(&mut self, workflow_id: Uuid) -> Result<Option<(bool, String)>, WorkError>;
     /// _revive's live composite: a live attempt, a
     /// queued/running/cancel_requested task, or a pending/leased
     /// action exists.
@@ -223,10 +222,7 @@ pub trait WorkflowTx: RetryEvents {
     fn claim_action(&mut self, worker_id: &str) -> Result<Option<Value>, WorkError>;
     fn recover_workflows(&mut self) -> Result<Vec<Value>, WorkError>;
     fn recover_tasks(&mut self, workflow_id: Uuid, project: &str) -> Result<Vec<Value>, WorkError>;
-    fn peer_review_state(
-        &mut self,
-        workflow_review_id: Uuid,
-    ) -> Result<Option<Value>, WorkError>;
+    fn peer_review_state(&mut self, workflow_review_id: Uuid) -> Result<Option<Value>, WorkError>;
     fn reconciliation_exists(
         &mut self,
         project: &str,
@@ -360,7 +356,11 @@ pub trait WorkflowTx: RetryEvents {
     ) -> Result<bool, WorkError>;
     /// Any workflow task is cancelled or in a live/blocking
     /// status (the model-route "workflow_task_blocked" probe).
-    fn workflow_task_blocked(&mut self, project: &str, workflow_id: Uuid) -> Result<bool, WorkError>;
+    fn workflow_task_blocked(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<bool, WorkError>;
     /// An operator cancelled/cancel_requested event exists on
     /// any task of the workflow.
     fn operator_cancel_event_exists(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
@@ -429,11 +429,7 @@ pub trait WorkflowTx: RetryEvents {
     ) -> Result<Option<Value>, WorkError>;
     /// handoff()'s busy composite: sibling queued work, live
     /// attempts, pending actions/reviews, open publications.
-    fn handoff_busy(
-        &mut self,
-        workflow_id: Uuid,
-        task_id: Uuid,
-    ) -> Result<bool, WorkError>;
+    fn handoff_busy(&mut self, workflow_id: Uuid, task_id: Uuid) -> Result<bool, WorkError>;
     /// The attempt's latest reconciliation receipt (created_at
     /// DESC, receipt_id DESC).
     fn latest_receipt(
@@ -491,11 +487,8 @@ pub trait WorkflowTx: RetryEvents {
         source_key: &str,
     ) -> Result<Option<Value>, WorkError>;
     /// Another pending/leased action exists in the workflow.
-    fn other_actions_busy(
-        &mut self,
-        workflow_id: Uuid,
-        action_id: Uuid,
-    ) -> Result<bool, WorkError>;
+    fn other_actions_busy(&mut self, workflow_id: Uuid, action_id: Uuid)
+        -> Result<bool, WorkError>;
 
     // -- F5c feedback-recovery probes --------------------------
 
@@ -517,11 +510,7 @@ pub trait WorkflowTx: RetryEvents {
     /// The feedback-recovery busy composite: live attempts,
     /// live or stopped-state sibling tasks, pending/leased
     /// actions, open publications, open local reviews.
-    fn recovery_busy(
-        &mut self,
-        workflow_id: Uuid,
-        task_id: Uuid,
-    ) -> Result<bool, WorkError>;
+    fn recovery_busy(&mut self, workflow_id: Uuid, task_id: Uuid) -> Result<bool, WorkError>;
     /// The shared recovery budget over both accounting
     /// prefixes: {used, ready} where ready means the newest
     /// recovery action is at least 60 seconds old.
@@ -618,11 +607,7 @@ pub trait WorkflowTx: RetryEvents {
         policies: &[String],
     ) -> Result<Vec<Value>, WorkError>;
     /// The task's latest local review by review_no.
-    fn latest_review(
-        &mut self,
-        project: &str,
-        task_id: Uuid,
-    ) -> Result<Option<Value>, WorkError>;
+    fn latest_review(&mut self, project: &str, task_id: Uuid) -> Result<Option<Value>, WorkError>;
     /// The latest decided code peer review for one source
     /// review.
     fn peer_for_source_review(
@@ -888,8 +873,5 @@ pub trait WorkflowTxFactory {
     /// one of the failure summaries and a revision-bound
     /// reconciliation receipt, LIMIT 64. The peer consumer
     /// passes its own summary list.
-    fn feedback_recovery_candidates(
-        &self,
-        summaries: &[String],
-    ) -> Result<Vec<Value>, WorkError>;
+    fn feedback_recovery_candidates(&self, summaries: &[String]) -> Result<Vec<Value>, WorkError>;
 }

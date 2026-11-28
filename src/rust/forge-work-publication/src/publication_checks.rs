@@ -10,8 +10,8 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -50,7 +50,11 @@ fn exclusive_output(path: &Path) -> std::io::Result<File> {
 }
 
 fn python_repr(text: &str) -> String {
-    let quote = if text.contains('\'') && !text.contains('"') { '"' } else { '\'' };
+    let quote = if text.contains('\'') && !text.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
     let mut out = String::new();
     out.push(quote);
     for ch in text.chars() {
@@ -143,7 +147,11 @@ impl IsolatedCheckRunner {
         let directory = repository
             .parent()
             .unwrap_or_else(|| Path::new("/"))
-            .join(format!("checks-{}", uuid(Some(&job["lease_token"])).map_err(|error| fail_report(&self.config.checks, error.code()))?));
+            .join(format!(
+                "checks-{}",
+                uuid(Some(&job["lease_token"]))
+                    .map_err(|error| fail_report(&self.config.checks, error.code()))?
+            ));
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&directory)
@@ -154,11 +162,19 @@ impl IsolatedCheckRunner {
                 .create(directory.join(name));
         }
         let browser = Path::new("src/rust/forge-ide-web/tests/browser");
-        let project_root = crate::publication_clients::project_path(&self.config, job["project_alias"].as_str().unwrap_or_default())
-            .ok_or_else(|| fail_report(&self.config.checks, "verification_process_unavailable"))?;
+        let project_root = crate::publication_clients::project_path(
+            &self.config,
+            job["project_alias"].as_str().unwrap_or_default(),
+        )
+        .ok_or_else(|| fail_report(&self.config.checks, "verification_process_unavailable"))?;
         let source = project_root.join(browser);
         let target = repository.join(browser);
-        if self.config.checks.iter().any(|command| command == &vec!["/usr/bin/make".to_string(), "ui-qa".to_string()]) {
+        if self
+            .config
+            .checks
+            .iter()
+            .any(|command| command == &vec!["/usr/bin/make".to_string(), "ui-qa".to_string()])
+        {
             let source_lock = source.join("package-lock.json");
             let target_lock = target.join("package-lock.json");
             let available = source.join("node_modules").is_dir()
@@ -166,14 +182,25 @@ impl IsolatedCheckRunner {
                 && target_lock.is_file()
                 && sha256_file(&source_lock).ok() == sha256_file(&target_lock).ok();
             if !available {
-                return Err(fail_report(&self.config.checks, "verification_dependencies_unavailable"));
+                return Err(fail_report(
+                    &self.config.checks,
+                    "verification_dependencies_unavailable",
+                ));
             }
             let support = target.join("node_modules");
-            let changed = support.symlink_metadata().map(|meta| meta.file_type().is_symlink()).unwrap_or(false)
+            let changed = support
+                .symlink_metadata()
+                .map(|meta| meta.file_type().is_symlink())
+                .unwrap_or(false)
                 || (support.exists()
-                    && std::fs::read_dir(&support).map(|mut rows| rows.next().is_some()).unwrap_or(false));
+                    && std::fs::read_dir(&support)
+                        .map(|mut rows| rows.next().is_some())
+                        .unwrap_or(false));
             if changed {
-                return Err(fail_report(&self.config.checks, "verification_dependencies_changed"));
+                return Err(fail_report(
+                    &self.config.checks,
+                    "verification_dependencies_changed",
+                ));
             }
             let _ = std::fs::create_dir(&support);
         }
@@ -200,7 +227,8 @@ impl IsolatedCheckRunner {
              \x20print('FORGE_CHECK_PASS '+str(index),flush=True)\n",
             checks_repr(&self.config.checks)
         );
-        std::fs::write(&script, script_text).map_err(|_| fail_report(&self.config.checks, "verification_process_unavailable"))?;
+        std::fs::write(&script, script_text)
+            .map_err(|_| fail_report(&self.config.checks, "verification_process_unavailable"))?;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o444))
             .map_err(|_| fail_report(&self.config.checks, "verification_process_unavailable"))?;
         let workspace = WorkspaceLease {
@@ -208,7 +236,10 @@ impl IsolatedCheckRunner {
             repository: project_root.clone(),
             git_directory: repository.join(".git"),
             task_id: job["task_id"].as_str().unwrap_or_default().to_string(),
-            base_revision: job["base_revision"].as_str().unwrap_or_default().to_string(),
+            base_revision: job["base_revision"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             source_repository: None,
             execution_branch: None,
         };
@@ -235,7 +266,8 @@ impl IsolatedCheckRunner {
         };
         let publication_id = uuid(Some(&job["publication_id"]))
             .map_err(|error| fail_report(&self.config.checks, error.code()))?;
-        let unit = unit_name(&publication_id).map_err(|_| fail_report(&self.config.checks, "verification_process_unavailable"))?;
+        let unit = unit_name(&publication_id)
+            .map_err(|_| fail_report(&self.config.checks, "verification_process_unavailable"))?;
         let lease = Lease {
             task_id: String::new(),
             project_alias: String::new(),
@@ -385,7 +417,11 @@ impl IsolatedCheckRunner {
                         }
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {
-                        if child.try_wait().map(|status| status.is_some()).unwrap_or(false) {
+                        if child
+                            .try_wait()
+                            .map(|status| status.is_some())
+                            .unwrap_or(false)
+                        {
                             // Give the reader threads a brief
                             // window to flush the tail.
                             match receiver.recv_timeout(Duration::from_millis(50)) {
@@ -406,9 +442,8 @@ impl IsolatedCheckRunner {
                     Ok(Some(status)) => {
                         returncode = status.code().map(|code| code as i64).unwrap_or(-1);
                         if returncode != 0 && failure.is_none() {
-                            failure = Some(PublicationError::Code(
-                                "verification_failed".to_string(),
-                            ));
+                            failure =
+                                Some(PublicationError::Code("verification_failed".to_string()));
                         }
                         break;
                     }
@@ -466,16 +501,25 @@ impl IsolatedCheckRunner {
         let report_path = repository
             .parent()
             .unwrap_or_else(|| Path::new("/"))
-            .join(format!("checks-{}.json", job["lease_token"].as_str().unwrap_or_default()));
+            .join(format!(
+                "checks-{}.json",
+                job["lease_token"].as_str().unwrap_or_default()
+            ));
         let receipt = json!({
             "status": if outcome.checks_passed { "passed" } else { "failed" },
             "commands": self.config.checks,
             "publication_id": job["publication_id"],
             "verification": outcome.to_dict(),
         });
-        match exclusive_output(&report_path)
-            .and_then(|mut file| file.write_all(format!("{}\n", serde_json::to_string_pretty(&receipt).unwrap_or_default()).as_bytes()))
-        {
+        match exclusive_output(&report_path).and_then(|mut file| {
+            file.write_all(
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&receipt).unwrap_or_default()
+                )
+                .as_bytes(),
+            )
+        }) {
             Ok(()) => {}
             Err(_) => {
                 let report = project_verification(
@@ -504,16 +548,16 @@ impl IsolatedCheckRunner {
 impl ChecksPort for IsolatedCheckRunner {
     fn quiesce(&mut self, job: &Value) -> Result<(), ReviewError> {
         let publication_id = uuid(Some(&job["publication_id"]))?;
-        let unit = unit_name(&publication_id).map_err(|error| ReviewError::other(error.to_string()))?;
+        let unit =
+            unit_name(&publication_id).map_err(|error| ReviewError::other(error.to_string()))?;
         let proof = self
             .supervisor
             .stop(&unit)
             .map_err(|error| ReviewError::other(error.to_string()))?;
         if !proof.scope_stopped {
-            return Err(PublicationError::Code(
-                "prior_verification_scope_unstopped".to_string(),
-            )
-            .into());
+            return Err(
+                PublicationError::Code("prior_verification_scope_unstopped".to_string()).into(),
+            );
         }
         Ok(())
     }

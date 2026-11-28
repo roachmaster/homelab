@@ -32,8 +32,7 @@ use crate::trusted_delivery::{jenkins_gate_manifest, native_action_ids, Delivery
 use crate::verification::{check_id, protected_retry_observation};
 use crate::verifier_parity::{PythonAstPort, VerifierAstPort};
 
-pub const OLD_HELPER: &str =
-    "80d0edca103852fca1474245516f2cc56894ebe94857bd5af6d9dd70bd92927d";
+pub const OLD_HELPER: &str = "80d0edca103852fca1474245516f2cc56894ebe94857bd5af6d9dd70bd92927d";
 pub const M38_PATHS: [&str; 2] = [
     "deploy/mission-control/agent-runner/work_external_plan_override.py",
     "deploy/mission-control/sql/migrations/0038_external_plan_approve_override.sql",
@@ -65,8 +64,8 @@ fn sha256_of(raw: &[u8]) -> String {
 pub fn root_read(path: &Path, maximum: usize) -> Result<Vec<u8>, WorkError> {
     use std::os::unix::fs::MetadataExt;
     for parent in path.ancestors().skip(1) {
-        let info = std::fs::symlink_metadata(parent)
-            .map_err(|_| store("Mutable deployment scope"))?;
+        let info =
+            std::fs::symlink_metadata(parent).map_err(|_| store("Mutable deployment scope"))?;
         if !info.is_dir() || info.uid() != 0 || info.mode() & 0o022 != 0 {
             return Err(store("Mutable deployment scope"));
         }
@@ -144,7 +143,10 @@ impl GatePolicy {
     fn profile_protects(&self, path: &str, profile: &str) -> Result<bool, WorkError> {
         match self.call(
             "profile_protected_gate_path",
-            vec![AstVal::Str(path.to_string()), AstVal::Str(profile.to_string())],
+            vec![
+                AstVal::Str(path.to_string()),
+                AstVal::Str(profile.to_string()),
+            ],
         )? {
             AstVal::Bool(flag) => Ok(flag),
             _ => Err(store("Verifier gate predicate did not return a boolean")),
@@ -158,20 +160,27 @@ impl GatePolicy {
             .ok_or_else(|| store("Verifier gate predicate missing"))?;
         let params = fld(fld(definition, "args"), "args");
         let mut env: HashMap<String, AstVal> = HashMap::new();
-        for (param, value) in params.as_array().map(|a| a.as_slice()).unwrap_or(&[]).iter().zip(args) {
+        for (param, value) in params
+            .as_array()
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .zip(args)
+        {
             env.insert(fld(param, "arg").as_str().unwrap_or("").to_string(), value);
         }
-        for statement in fld(definition, "body").as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+        for statement in fld(definition, "body")
+            .as_array()
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+        {
             match ntype(statement) {
                 "Assign" => {
                     let value = self.eval(fld(statement, "value"), &env)?;
                     let targets = fld(statement, "targets");
                     if let Some(target) = targets.as_array().and_then(|t| t.first()) {
                         if ntype(target) == "Name" {
-                            env.insert(
-                                fld(target, "id").as_str().unwrap_or("").to_string(),
-                                value,
-                            );
+                            env.insert(fld(target, "id").as_str().unwrap_or("").to_string(), value);
                         }
                     }
                 }
@@ -203,7 +212,11 @@ impl GatePolicy {
             }
             "Set" => {
                 let mut values = HashSet::new();
-                for element in fld(node, "elts").as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+                for element in fld(node, "elts")
+                    .as_array()
+                    .map(|a| a.as_slice())
+                    .unwrap_or(&[])
+                {
                     values.insert(
                         const_str(element)
                             .ok_or_else(|| store("Unsupported verifier policy set"))?
@@ -215,7 +228,11 @@ impl GatePolicy {
             "BoolOp" => {
                 let op = ntype(fld(node, "op"));
                 let mut result = op == "And";
-                for value in fld(node, "values").as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+                for value in fld(node, "values")
+                    .as_array()
+                    .map(|a| a.as_slice())
+                    .unwrap_or(&[])
+                {
                     let AstVal::Bool(flag) = self.eval(value, env)? else {
                         return Err(store("Verifier policy operand is not boolean"));
                     };
@@ -385,8 +402,8 @@ fn analyze_helper(raw: &[u8], port: &dyn VerifierAstPort) -> Result<HelperAnalys
             if ntype(value) != "Call" || args.as_array().map(|a| a.len()) != Some(1) {
                 return Err(store("Unexpected verifier V2 policy"));
             }
-            v2_paths = literal_str_set(&args[0])
-                .ok_or_else(|| store("Unexpected verifier V2 policy"))?;
+            v2_paths =
+                literal_str_set(&args[0]).ok_or_else(|| store("Unexpected verifier V2 policy"))?;
         }
     }
     let config = config.ok_or_else(|| store("Incomplete verifier policy proof"))?;
@@ -487,10 +504,7 @@ impl ActivePublicationSelector {
         let pid: i64 = value
             .parse()
             .map_err(|_| store("Publication worker is not active"))?;
-        if value.is_empty()
-            || !value.bytes().all(|byte| byte.is_ascii_digit())
-            || pid < 2
-        {
+        if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) || pid < 2 {
             return Err(store("Publication worker is not active"));
         }
         Ok(pid)
@@ -614,12 +628,7 @@ impl NativeCiStoppedProof {
 }
 
 impl ReprepareProofPort for NativeCiStoppedProof {
-    fn acquire(
-        &self,
-        task: &Value,
-        review: &Value,
-        workflow: &Value,
-    ) -> Result<Value, WorkError> {
+    fn acquire(&self, task: &Value, review: &Value, workflow: &Value) -> Result<Value, WorkError> {
         let root = &self.config.state_root;
         let read = |path: &Path| -> Result<(Value, String), WorkError> {
             let raw = read_private(path, 262144, Some(self.config.owner_uid))
@@ -639,7 +648,10 @@ impl ReprepareProofPort for NativeCiStoppedProof {
             .map(|object| object.keys().map(|key| key.as_str()).collect())
             .unwrap_or_default();
         if keys != HashSet::from(["version", "action_id"])
-            || !matches!(text(&index, "version"), "forge-native-jenkins-v2" | NATIVE_VERSION)
+            || !matches!(
+                text(&index, "version"),
+                "forge-native-jenkins-v2" | NATIVE_VERSION
+            )
         {
             return Err(reconcile());
         }
@@ -676,11 +688,7 @@ impl ReprepareProofPort for NativeCiStoppedProof {
             .map_err(|error| WorkError::store(error.to_string()))?;
         let scope_matches = expected
             .as_object()
-            .map(|object| {
-                object
-                    .iter()
-                    .all(|(key, value)| &request[key] == value)
-            })
+            .map(|object| object.iter().all(|(key, value)| &request[key] == value))
             .unwrap_or(false);
         if text(&binding, "version") != text(&index, "version")
             || binding["scope"] != expected
@@ -688,8 +696,7 @@ impl ReprepareProofPort for NativeCiStoppedProof {
             || text(request, "action_id") != action
             || !action_ids.iter().any(|id| id == &action)
             || text(request, "prepare_action_id")
-                != Uuid::new_v5(&Uuid::parse_str(&action).unwrap(), b"candidate-bundle")
-                    .to_string()
+                != Uuid::new_v5(&Uuid::parse_str(&action).unwrap(), b"candidate-bundle").to_string()
             || request["candidate_commit"] != review["candidate_commit"]
             || request["integration_base"] != review["verification"]["integration_base"]
             || text(&cancel, "status") != "cancelled"
@@ -765,11 +772,7 @@ impl NativePostfixProof {
         }
     }
 
-    fn git(
-        &self,
-        repository: &Path,
-        args: &[String],
-    ) -> Result<Vec<u8>, WorkError> {
+    fn git(&self, repository: &Path, args: &[String]) -> Result<Vec<u8>, WorkError> {
         let mut argv: Vec<String> = vec![
             "/usr/bin/git".to_string(),
             "-c".to_string(),
@@ -865,8 +868,7 @@ impl PostfixProofPort for NativePostfixProof {
             || text(old, "action_id") != action
             || !action_ids.iter().any(|id| id == &action)
             || text(old, "prepare_action_id")
-                != Uuid::new_v5(&Uuid::parse_str(&action).unwrap(), b"candidate-bundle")
-                    .to_string()
+                != Uuid::new_v5(&Uuid::parse_str(&action).unwrap(), b"candidate-bundle").to_string()
             || old["candidate_commit"] != q["candidate_commit"]
             || binding["native_gate_manifest_sha256"] != q["gate_manifest_sha256"]
             || old["integration_base"] != q["verification"]["integration_base"]
@@ -927,13 +929,15 @@ impl PostfixProofPort for NativePostfixProof {
         let pub_raw = root_read_default(&c.publication_path)?;
         let publication = strict(&pub_raw)?;
         let delivery_path = PathBuf::from(text(&publication, "jenkins_delivery_config"));
-        let delivery_raw = read_private(&delivery_path, 65536, Some(c.worker_uid))
-            .map_err(WorkError::store)?;
+        let delivery_raw =
+            read_private(&delivery_path, 65536, Some(c.worker_uid)).map_err(WorkError::store)?;
         let delivery_document = strict(&delivery_raw)?;
         let selected = DeliveryConfig::parse(&delivery_document)
             .map_err(|error| WorkError::store(error.to_string()))?;
-        let expected_verifier_parent = Path::new("/opt/forge-ci")
-            .join(format!("native-verifier-{}", &command.new_helper_sha256[..16]));
+        let expected_verifier_parent = Path::new("/opt/forge-ci").join(format!(
+            "native-verifier-{}",
+            &command.new_helper_sha256[..16]
+        ));
         if text(&publication, "hosted_provider") != "jenkins"
             || text(&publication, "jenkins_verification_profile") != EVENT_PROFILE
             || publication
@@ -957,7 +961,9 @@ impl PostfixProofPort for NativePostfixProof {
         }
         let launcher = root_read_default(Path::new("/usr/local/libexec/forge-native-ci-check"))?;
         if sha256_of(&launcher) != new_sha {
-            return Err(store("Actual Jenkins launcher does not use the fixed helper"));
+            return Err(store(
+                "Actual Jenkins launcher does not use the fixed helper",
+            ));
         }
         let new_helper = analyze_helper(&new_raw, self.ast_port.as_ref())?;
         let baseline_path = module
@@ -968,7 +974,9 @@ impl PostfixProofPort for NativePostfixProof {
         let baseline_raw = root_read_default(&baseline_path)?;
         let baseline = analyze_helper(&baseline_raw, self.ast_port.as_ref())?;
         if new_helper.normalized != baseline.normalized {
-            return Err(store("Selected helper differs from qualified runtime policy"));
+            return Err(store(
+                "Selected helper differs from qualified runtime policy",
+            ));
         }
         let root_config_raw = root_read_default(&new_helper.config_path)?;
         let root_config = strict(&root_config_raw)?;
@@ -1067,13 +1075,8 @@ impl PostfixProofPort for NativePostfixProof {
             return Err(store("Historical gate mismatch was not reproduced"));
         }
         let expected_new = gate_manifest_for(&new_files, &new_sha, branch_scope)?;
-        let produced = jenkins_gate_manifest(
-            &selected,
-            &files,
-            old["branch_scope"].as_str(),
-            true,
-        )
-        .map_err(|error| WorkError::store(error.to_string()))?;
+        let produced = jenkins_gate_manifest(&selected, &files, old["branch_scope"].as_str(), true)
+            .map_err(|error| WorkError::store(error.to_string()))?;
         if produced.2 != expected_new {
             return Err(store(
                 "Fixed producer and actual helper policy still differ",
@@ -1249,11 +1252,7 @@ impl PostfixPassProofPort for NativePostfixPassProof {
             .map_err(|error| WorkError::store(error.to_string()))?;
         let scope_matches = scope
             .as_object()
-            .map(|object| {
-                object
-                    .iter()
-                    .all(|(key, value)| &request[key] == value)
-            })
+            .map(|object| object.iter().all(|(key, value)| &request[key] == value))
             .unwrap_or(false);
         if text(&binding, "version") != NATIVE_VERSION
             || binding["scope"] != scope
@@ -1261,8 +1260,7 @@ impl PostfixPassProofPort for NativePostfixPassProof {
             || text(request, "action_id") != action
             || !action_ids.iter().any(|id| id == &action)
             || text(request, "prepare_action_id")
-                != Uuid::new_v5(&Uuid::parse_str(&action).unwrap(), b"candidate-bundle")
-                    .to_string()
+                != Uuid::new_v5(&Uuid::parse_str(&action).unwrap(), b"candidate-bundle").to_string()
             || text(request, "candidate_commit") != candidate
             || text(request, "verification_profile") != EVENT_PROFILE
             || binding["native_gate_manifest_sha256"] != review["gate_manifest_sha256"]
@@ -1313,11 +1311,7 @@ impl PostfixPassProofPort for NativePostfixPassProof {
         wanted_keys.insert("bundle_sha256");
         let submitted_matches = expected
             .as_object()
-            .map(|object| {
-                object
-                    .iter()
-                    .all(|(key, value)| &submitted[key] == value)
-            })
+            .map(|object| object.iter().all(|(key, value)| &submitted[key] == value))
             .unwrap_or(false);
         if submitted_keys != wanted_keys
             || !is_int(&submitted["version"])
@@ -1361,13 +1355,9 @@ impl PostfixPassProofPort for NativePostfixPassProof {
         {
             return Err(store("Root CI receipt changed"));
         }
-        let witness = protected_retry_observation(
-            &plan.profile,
-            &plan.scope,
-            Some(&root),
-            Some(&digest),
-        )
-        .map_err(WorkError::store)?;
+        let witness =
+            protected_retry_observation(&plan.profile, &plan.scope, Some(&root), Some(&digest))
+                .map_err(WorkError::store)?;
         if witness
             .as_ref()
             .is_some_and(|value| !value["failure_kind"].is_null())
@@ -1405,7 +1395,9 @@ impl PostfixPassProofPort for NativePostfixPassProof {
         let build_number = journal["receipt"]["build_number"].clone();
         let queue_ok = journal["receipt"]["queue_id"].is_null()
             || (is_int(&journal["receipt"]["queue_id"])
-                && journal["receipt"]["queue_id"].as_i64().is_some_and(|n| n >= 1));
+                && journal["receipt"]["queue_id"]
+                    .as_i64()
+                    .is_some_and(|n| n >= 1));
         let parameters = json!({
             "FORGE_ACTION_ID": action,
             "FORGE_WORKFLOW_ID": text(workflow, "workflow_id"),
@@ -1497,9 +1489,7 @@ mod tests {
     fn config_validation() {
         assert!(NativeCiProofConfig::new(PathBuf::from("/srv/state"), 1000).is_ok());
         assert!(NativeCiProofConfig::new(PathBuf::from("relative"), 1000).is_err());
-        assert!(
-            NativeCiProofConfig::new(PathBuf::from("/srv/../state"), 1000).is_err()
-        );
+        assert!(NativeCiProofConfig::new(PathBuf::from("/srv/../state"), 1000).is_err());
         assert!(NativePostfixProofConfig::new(
             PathBuf::from("/etc/pub.json"),
             PathBuf::from("/srv/state"),

@@ -56,7 +56,8 @@ pub(crate) fn is_hex(value: &Value, len: usize) -> bool {
         .as_str()
         .map(|raw| {
             raw.len() == len
-                && raw.bytes()
+                && raw
+                    .bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         })
         .unwrap_or(false)
@@ -214,8 +215,8 @@ impl ExternalWorkflowStore {
             let mut label = kind.replace('_', " ");
             let mut chars = label.chars();
             if let Some(first) = chars.next() {
-                label = first.to_ascii_uppercase().to_string()
-                    + &chars.as_str().to_ascii_lowercase();
+                label =
+                    first.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase();
             }
             self.escalate(
                 tx,
@@ -312,13 +313,21 @@ impl ExternalWorkflowStore {
             {
                 continue;
             }
-            let uuids_ok = ["source_review_id", "source_assignment_id", "idempotency_key"]
-                .iter()
-                .all(|key| record[*key].as_str().and_then(|raw| raw.parse::<Uuid>().ok()).is_some())
-                && receipt["task_id"]
+            let uuids_ok = [
+                "source_review_id",
+                "source_assignment_id",
+                "idempotency_key",
+            ]
+            .iter()
+            .all(|key| {
+                record[*key]
                     .as_str()
                     .and_then(|raw| raw.parse::<Uuid>().ok())
-                    .is_some();
+                    .is_some()
+            }) && receipt["task_id"]
+                .as_str()
+                .and_then(|raw| raw.parse::<Uuid>().ok())
+                .is_some();
             if !uuids_ok
                 || !is_hex(&record["source_sha256"], 64)
                 || !is_hex(&record["reviewer_result_sha256"], 64)
@@ -354,7 +363,10 @@ impl ExternalWorkflowStore {
                 get(&w["plan_revisions"]),
                 get(&w["code_revisions"]),
             );
-            if !(1 <= prior_wf && prior_wf < receipt_wf && receipt_wf <= w_rev && w_rev < (1i64 << 53))
+            if !(1 <= prior_wf
+                && prior_wf < receipt_wf
+                && receipt_wf <= w_rev
+                && w_rev < (1i64 << 53))
                 || receipt_wf != prior_wf + 1
                 || !(1 <= prior_root && prior_root < receipt_root && receipt_root < (1i64 << 53))
                 || receipt_root != prior_root + 1
@@ -453,11 +465,7 @@ impl ExternalWorkflowStore {
 
     /// forbid_manual_control: an enrolled task refuses the
     /// manual control surface.
-    pub fn forbid_manual_control(
-        &self,
-        project: &str,
-        task_id: Uuid,
-    ) -> Result<(), WorkError> {
+    pub fn forbid_manual_control(&self, project: &str, task_id: Uuid) -> Result<(), WorkError> {
         if !self.manages(project) {
             return Ok(());
         }
@@ -575,11 +583,7 @@ impl ExternalWorkflowStore {
 impl ExternalWorkflowStore {
     /// _create: enroll the root task's workflow (insert, or
     /// the existing row on conflict).
-    pub(crate) fn create(
-        &self,
-        tx: &mut dyn ExternalTx,
-        task: &Value,
-    ) -> Result<Value, WorkError> {
+    pub(crate) fn create(&self, tx: &mut dyn ExternalTx, task: &Value) -> Result<Value, WorkError> {
         let project = text(task, "project_alias");
         let policy = &self.policies[project];
         let snapshot = policy
@@ -708,7 +712,13 @@ impl ExternalWorkflowStore {
             let workflows = tx.leased_workflows(&projects)?;
             for w in workflows {
                 let mut w = w;
-                if !self.scope(tx, text(&w, "project_alias"), text(&w, "author_profile"), true, false)? {
+                if !self.scope(
+                    tx,
+                    text(&w, "project_alias"),
+                    text(&w, "author_profile"),
+                    true,
+                    false,
+                )? {
                     self.escalate(
                         tx,
                         &mut w,
@@ -836,7 +846,11 @@ impl ExternalWorkflowStore {
             )?;
             Ok(receipt)
         })?;
-        Ok(if outcome.is_null() { None } else { Some(outcome) })
+        Ok(if outcome.is_null() {
+            None
+        } else {
+            Some(outcome)
+        })
     }
 }
 

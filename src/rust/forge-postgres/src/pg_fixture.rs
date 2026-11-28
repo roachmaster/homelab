@@ -148,7 +148,10 @@ impl DisposablePostgresCluster {
                 "-d".to_string(),
                 "postgres".to_string(),
                 "-f".to_string(),
-                sql_dir().join("provision.sql").to_string_lossy().into_owned(),
+                sql_dir()
+                    .join("provision.sql")
+                    .to_string_lossy()
+                    .into_owned(),
             ]);
             run("psql", &args, 40)?;
             cluster.apply_and_verify()?;
@@ -331,9 +334,11 @@ impl DisposablePostgresCluster {
     pub async fn reset_coding_tables(&self) -> Result<(), String> {
         self.reset_retry_events().await?;
         self.admin_exec(
-            &["TRUNCATE forge_agent.coding_tasks, forge_agent.coding_worker_grants, \
+            &[
+                "TRUNCATE forge_agent.coding_tasks, forge_agent.coding_worker_grants, \
                forge_agent.coding_worker_readiness, forge_agent.coding_provider_usage, \
-               forge_agent.coding_usage_refresh_requests CASCADE"],
+               forge_agent.coding_usage_refresh_requests CASCADE",
+            ],
             false,
         )
         .await
@@ -342,8 +347,10 @@ impl DisposablePostgresCluster {
     pub async fn reset_jenkins_tables(&self) -> Result<(), String> {
         self.reset_retry_events().await?;
         self.admin_exec(
-            &["TRUNCATE forge_agent.jenkins_events, forge_agent.jenkins_event_deliveries, \
-               forge_agent.jenkins_observations CASCADE"],
+            &[
+                "TRUNCATE forge_agent.jenkins_events, forge_agent.jenkins_event_deliveries, \
+               forge_agent.jenkins_observations CASCADE",
+            ],
             false,
         )
         .await
@@ -367,7 +374,13 @@ impl DisposablePostgresCluster {
                 "INSERT INTO forge_agent.coding_worker_grants ( \
                  worker_role, owner_id, project_alias, agent_profile, mode) \
                  VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-                &[&worker_role, &owner_id, &project_alias, &agent_profile, &mode],
+                &[
+                    &worker_role,
+                    &owner_id,
+                    &project_alias,
+                    &agent_profile,
+                    &mode,
+                ],
             )
             .await
             .map_err(|error| error.to_string())?;

@@ -34,9 +34,11 @@ pub const VALID_SYNC_STATUSES: [&str; 5] = [
     "conflict",
     "unknown",
 ];
-pub const VALID_CACHE_STATUSES: [&str; 5] = ["hit_branch", "hit_main", "miss", "disabled", "unknown"];
+pub const VALID_CACHE_STATUSES: [&str; 5] =
+    ["hit_branch", "hit_main", "miss", "disabled", "unknown"];
 pub const VALID_RESERVATION_STATUSES: [&str; 2] = ["idle", "active"];
-pub const VALID_SCOPE_KINDS: [&str; 3] = ["native_workflow", "standalone_task", "external_workflow"];
+pub const VALID_SCOPE_KINDS: [&str; 3] =
+    ["native_workflow", "standalone_task", "external_workflow"];
 pub const VALID_RELEASE_REASONS: [&str; 5] = [
     "merged",
     "accepted",
@@ -345,7 +347,12 @@ impl AgentBranchPolicy {
             };
             profile_branches.insert(profile.alias.clone(), branch);
         }
-        AgentBranchPolicy::new(policy, profile_branches, project_overrides, external_profiles)
+        AgentBranchPolicy::new(
+            policy,
+            profile_branches,
+            project_overrides,
+            external_profiles,
+        )
     }
 
     pub fn resolve_branch(
@@ -554,22 +561,21 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
         } else {
             task_id.clone()
         };
-        let (scope_kind, scope_id, root_task_id) = if job.get("workflow_id").is_some()
-            && !job["workflow_id"].is_null()
-        {
-            (
-                "native_workflow",
-                workflow_id.clone().unwrap_or_default(),
-                root_or_task,
-            )
-        } else {
-            let root = if job_present(job, "repair_root_task_id") {
-                job_text(job, "repair_root_task_id").unwrap()
+        let (scope_kind, scope_id, root_task_id) =
+            if job.get("workflow_id").is_some() && !job["workflow_id"].is_null() {
+                (
+                    "native_workflow",
+                    workflow_id.clone().unwrap_or_default(),
+                    root_or_task,
+                )
             } else {
-                task_id.clone()
+                let root = if job_present(job, "repair_root_task_id") {
+                    job_text(job, "repair_root_task_id").unwrap()
+                } else {
+                    task_id.clone()
+                };
+                ("standalone_task", root.clone(), root)
             };
-            ("standalone_task", root.clone(), root)
-        };
         Ok(Some(json!({
             "project_alias": project_alias,
             "task_id": task_id,
@@ -587,7 +593,8 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
         project_alias: &str,
         agent_profile: &str,
     ) -> Result<String, BranchError> {
-        self.policy.resolve_branch(project_alias, agent_profile, false)
+        self.policy
+            .resolve_branch(project_alias, agent_profile, false)
     }
 
     pub fn acquire(
@@ -636,8 +643,14 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
             ));
         }
         Ok(Some(BranchReservation {
-            project_alias: scope["project_alias"].as_str().unwrap_or_default().to_string(),
-            agent_profile: scope["agent_profile"].as_str().unwrap_or_default().to_string(),
+            project_alias: scope["project_alias"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            agent_profile: scope["agent_profile"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             branch_name: result["branch_name"]
                 .as_str()
                 .ok_or_else(|| BranchError::Store("branch_name missing".to_string()))?
@@ -648,7 +661,10 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
                 .to_string(),
             scope_kind: scope["scope_kind"].as_str().unwrap_or_default().to_string(),
             scope_id: scope["scope_id"].as_str().unwrap_or_default().to_string(),
-            root_task_id: scope["root_task_id"].as_str().unwrap_or_default().to_string(),
+            root_task_id: scope["root_task_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             task_id: scope["task_id"].as_str().unwrap_or_default().to_string(),
             reservation_epoch: result["reservation_epoch"]
                 .as_i64()
@@ -663,10 +679,7 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
         }))
     }
 
-    pub fn verify_owner(
-        &mut self,
-        reservation: &BranchReservation,
-    ) -> Result<Value, BranchError> {
+    pub fn verify_owner(&mut self, reservation: &BranchReservation) -> Result<Value, BranchError> {
         let result = self.store.agent_branch_verify_owner(
             &reservation.project_alias,
             &reservation.agent_profile,
@@ -728,10 +741,9 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
             }
         }
         let expected_candidate = job_text(job, "candidate_commit");
-        if let (Some(expected), Some(actual)) = (
-            &expected_candidate,
-            row["active_candidate_commit"].as_str(),
-        ) {
+        if let (Some(expected), Some(actual)) =
+            (&expected_candidate, row["active_candidate_commit"].as_str())
+        {
             if actual != expected {
                 return Err(BranchError::Conflict(BranchOwnershipConflictError::new(
                     "Persistent branch active candidate commit mismatch during merge",
@@ -739,8 +751,14 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
             }
         }
         Ok(Some(BranchReservation {
-            project_alias: scope["project_alias"].as_str().unwrap_or_default().to_string(),
-            agent_profile: scope["agent_profile"].as_str().unwrap_or_default().to_string(),
+            project_alias: scope["project_alias"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            agent_profile: scope["agent_profile"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             branch_name: row["branch_name"]
                 .as_str()
                 .ok_or_else(|| BranchError::Store("branch_name missing".to_string()))?
@@ -751,7 +769,10 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
                 .to_string(),
             scope_kind: scope["scope_kind"].as_str().unwrap_or_default().to_string(),
             scope_id: scope["scope_id"].as_str().unwrap_or_default().to_string(),
-            root_task_id: scope["root_task_id"].as_str().unwrap_or_default().to_string(),
+            root_task_id: scope["root_task_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             task_id: scope["task_id"].as_str().unwrap_or_default().to_string(),
             reservation_epoch: row["reservation_epoch"]
                 .as_i64()
@@ -921,9 +942,7 @@ impl<S: BranchProviderPort> AgentBranchProvider<S> {
                 Ok(false) => {
                     summary["blocked"] = json!(summary["blocked"].as_i64().unwrap_or(0) + 1)
                 }
-                Err(_) => {
-                    summary["errors"] = json!(summary["errors"].as_i64().unwrap_or(0) + 1)
-                }
+                Err(_) => summary["errors"] = json!(summary["errors"].as_i64().unwrap_or(0) + 1),
             }
         }
         Ok(summary)
@@ -973,11 +992,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            policy.resolve_branch("homelab", "muse-primary", false).unwrap(),
+            policy
+                .resolve_branch("homelab", "muse-primary", false)
+                .unwrap(),
             "feature/muse"
         );
         assert_eq!(
-            policy.resolve_branch("homelab", "codex-primary", false).unwrap(),
+            policy
+                .resolve_branch("homelab", "codex-primary", false)
+                .unwrap(),
             "forge/agent/codex-primary"
         );
     }
@@ -996,18 +1019,16 @@ impl<S: BranchProviderPort + Send> crate::review_ports::ReviewBranchPort
         &mut self,
         job: &Value,
         review_id: &str,
-    ) -> Result<
-        Option<crate::review_ports::BranchReservationData>,
-        crate::review_ports::ReviewError,
-    > {
+    ) -> Result<Option<crate::review_ports::BranchReservationData>, crate::review_ports::ReviewError>
+    {
         let reservation = AgentBranchProvider::acquire(self, job, Some(review_id), None)
             .map_err(|error| crate::review_ports::ReviewError::other(error.to_string()))?;
-        Ok(reservation.map(|reservation| {
-            crate::review_ports::BranchReservationData {
+        Ok(
+            reservation.map(|reservation| crate::review_ports::BranchReservationData {
                 agent_profile: reservation.agent_profile,
                 branch_name: reservation.branch_name,
                 reservation_epoch: reservation.reservation_epoch,
-            }
-        }))
+            }),
+        )
     }
 }

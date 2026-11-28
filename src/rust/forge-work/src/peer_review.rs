@@ -134,7 +134,9 @@ fn digest_detail(expected: Option<&str>, actual: Option<&str>) -> Map<String, Va
     );
     detail.insert(
         "expected_length".to_string(),
-        expected.map(|text| json!(text.len())).unwrap_or(Value::Null),
+        expected
+            .map(|text| json!(text.len()))
+            .unwrap_or(Value::Null),
     );
     match actual {
         Some(text) => {
@@ -218,8 +220,7 @@ fn exact_fields(value: &Value, fields: &[&str]) -> bool {
     value
         .as_object()
         .map(|object| {
-            object.len() == fields.len()
-                && object.keys().all(|key| fields.contains(&key.as_str()))
+            object.len() == fields.len() && object.keys().all(|key| fields.contains(&key.as_str()))
         })
         .unwrap_or(false)
 }
@@ -251,7 +252,11 @@ fn validate_target_inner(value: &Value) -> PResult<Value> {
     ] {
         uuid_field(&object[field], &format!("target.uuid.{field}"), false)?;
     }
-    uuid_field(&object["plan_decision_id"], "target.uuid.plan_decision_id", true)?;
+    uuid_field(
+        &object["plan_decision_id"],
+        "target.uuid.plan_decision_id",
+        true,
+    )?;
     require(
         is_digest(&object["policy_digest"]),
         "target.digest.policy_digest",
@@ -296,10 +301,7 @@ fn validate_target_inner(value: &Value) -> PResult<Value> {
     require_detail(
         source_hash == object["source_result_sha256"].as_str().unwrap_or_default(),
         "target.source_hash",
-        digest_detail(
-            object["source_result_sha256"].as_str(),
-            Some(&source_hash),
-        ),
+        digest_detail(object["source_result_sha256"].as_str(), Some(&source_hash)),
     )?;
     require(
         check_text(&object["request_prompt"], 8192, false).is_some(),
@@ -461,7 +463,10 @@ pub fn parse_review_target(raw: &[u8], sha256: &str) -> PResult<Value> {
 
 fn parse_target_inner(raw: &[u8], sha256: &str) -> PResult<Value> {
     require(is_digest(&json!(sha256)), "target.sha256")?;
-    require(!raw.is_empty() && raw.len() <= MAX_TARGET_BYTES, "target.raw")?;
+    require(
+        !raw.is_empty() && raw.len() <= MAX_TARGET_BYTES,
+        "target.raw",
+    )?;
     let actual = sha256_hex(raw);
     require_detail(
         actual == sha256,
@@ -546,7 +551,10 @@ pub fn classify_verdict_defect(raw: &[u8], target: &Value) -> Option<(String, Ma
 }
 
 fn parse_verdict_inner(raw: &[u8], target: &Value, skip_context_check: bool) -> PResult<Value> {
-    wrap("verdict", parse_verdict_body(raw, target, skip_context_check))
+    wrap(
+        "verdict",
+        parse_verdict_body(raw, target, skip_context_check),
+    )
 }
 
 fn parse_verdict_body(raw: &[u8], target: &Value, skip_context_check: bool) -> PResult<Value> {
@@ -566,7 +574,10 @@ fn parse_verdict_body(raw: &[u8], target: &Value, skip_context_check: bool) -> P
         .collect();
     let binding = validate_target_inner(&Value::Object(binding_map))?;
     let binding = binding.as_object().expect("validated target").clone();
-    require(!raw.is_empty() && raw.len() <= MAX_VERDICT_BYTES, "verdict.raw")?;
+    require(
+        !raw.is_empty() && raw.len() <= MAX_VERDICT_BYTES,
+        "verdict.raw",
+    )?;
     let value = json_strict(raw)?;
     let object = value
         .as_object()
@@ -586,15 +597,11 @@ fn parse_verdict_body(raw: &[u8], target: &Value, skip_context_check: bool) -> P
         })
         .map(|field| field.to_string())
         .collect();
-    require_detail(
-        mismatched.is_empty(),
-        "verdict.identity.fields",
-        {
-            let mut detail = Map::new();
-            detail.insert("fields".to_string(), json!(mismatched));
-            detail
-        },
-    )?;
+    require_detail(mismatched.is_empty(), "verdict.identity.fields", {
+        let mut detail = Map::new();
+        detail.insert("fields".to_string(), json!(mismatched));
+        detail
+    })?;
     if !skip_context_check {
         require_detail(
             object["context_sha256"].as_str() == Some(expected_text.as_str()),
@@ -603,7 +610,10 @@ fn parse_verdict_body(raw: &[u8], target: &Value, skip_context_check: bool) -> P
         )?;
     }
     require(
-        matches!(object["decision"].as_str(), Some("approve") | Some("revise") | Some("escalate")),
+        matches!(
+            object["decision"].as_str(),
+            Some("approve") | Some("revise") | Some("escalate")
+        ),
         "verdict.decision",
     )?;
     require(
@@ -623,17 +633,13 @@ fn parse_verdict_body(raw: &[u8], target: &Value, skip_context_check: bool) -> P
             }
         }
     }
-    let findings =
-        validate_findings(&peer_findings, true).map_err(|_| parse_failure("value"))?;
+    let findings = validate_findings(&peer_findings, true).map_err(|_| parse_failure("value"))?;
     let ids = object["attested_finding_ids"]
         .as_array()
         .filter(|ids| ids.len() <= 32)
         .ok_or_else(|| PeerReviewError::new("verdict.attested.shape"))?;
     for identity in ids {
-        require(
-            is_identifier(identity),
-            "verdict.attested.pattern",
-        )?;
+        require(is_identifier(identity), "verdict.attested.pattern")?;
     }
     let unique = ids
         .iter()
@@ -826,7 +832,8 @@ mod tests {
         // Attesting on a revise is out of scope.
         let mut v = verdict(&target, &sha, "revise");
         v["attested_finding_ids"] = json!(["f1"]);
-        v["findings"] = json!([{"finding_id": "f2", "category": "correctness", "summary": "wrong"}]);
+        v["findings"] =
+            json!([{"finding_id": "f2", "category": "correctness", "summary": "wrong"}]);
         let raw = serde_json::to_string(&v).unwrap();
         let error = parse_review_verdict(raw.as_bytes(), &parsed).unwrap_err();
         assert_eq!(error.check.as_deref(), Some("verdict.attested.scope"));
@@ -837,7 +844,8 @@ mod tests {
         let target = code_target();
         let (_, sha, parsed) = admitted(&target);
         let mut v = verdict(&target, &sha, "revise");
-        v["findings"] = json!([{"finding_id": "f2", "category": "correctness", "summary": "wrong"}]);
+        v["findings"] =
+            json!([{"finding_id": "f2", "category": "correctness", "summary": "wrong"}]);
         let raw = serde_json::to_string(&v).unwrap();
         let parsed_verdict = parse_review_verdict(raw.as_bytes(), &parsed).unwrap();
         assert_eq!(parsed_verdict["findings"][0]["category"], json!("source"));
@@ -847,7 +855,10 @@ mod tests {
         v["findings"] = json!([{"finding_id": "f2", "category": "source", "summary": "wrong"}]);
         let raw = serde_json::to_string(&v).unwrap();
         let error = parse_review_verdict(raw.as_bytes(), &parsed).unwrap_err();
-        assert_eq!(error.check.as_deref(), Some("verdict.identity.context_sha256"));
+        assert_eq!(
+            error.check.as_deref(),
+            Some("verdict.identity.context_sha256")
+        );
         let defect = classify_verdict_defect(raw.as_bytes(), &parsed).expect("defect");
         assert_eq!(defect.0, "verdict.identity.context_sha256");
         // A wrong context plus a bad decision is not a narrow defect.

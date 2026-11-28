@@ -96,9 +96,7 @@ impl PgExternalDeliveryStore {
         params: &[&(dyn ToSql + Sync)],
     ) -> Result<Value, DeliveryStoreError> {
         self.call("forge_external_delivery_api", name, params, false)?
-            .ok_or_else(|| {
-                DeliveryStoreError::Store(format!("{name} returned null"))
-            })
+            .ok_or_else(|| DeliveryStoreError::Store(format!("{name} returned null")))
     }
 }
 
@@ -118,17 +116,12 @@ impl ExternalDeliveryStorePort for PgExternalDeliveryStore {
             Some(value) => ExternalDeliveryLease::from_value(&value)
                 .map(Some)
                 .ok_or_else(|| {
-                    DeliveryStoreError::Store(
-                        "Invalid delivery lease document".to_string(),
-                    )
+                    DeliveryStoreError::Store("Invalid delivery lease document".to_string())
                 }),
         }
     }
 
-    fn renew(
-        &mut self,
-        lease: &ExternalDeliveryLease,
-    ) -> Result<Value, DeliveryStoreError> {
+    fn renew(&mut self, lease: &ExternalDeliveryLease) -> Result<Value, DeliveryStoreError> {
         let action_id = parse_uuid(&lease.action_id)?;
         let token = parse_uuid(&lease.token)?;
         let generation = lease.generation as i32;
@@ -219,9 +212,7 @@ impl ExternalDeliveryStorePort for PgExternalDeliveryStore {
             Some(text) => Some(
                 chrono::DateTime::parse_from_rfc3339(text)
                     .map(|parsed| parsed.with_timezone(&chrono::Utc))
-                    .map_err(|error| {
-                        DeliveryStoreError::Store(error.to_string())
-                    })?,
+                    .map_err(|error| DeliveryStoreError::Store(error.to_string()))?,
             ),
         };
         let conflict_paths = upsert.conflict_paths.as_ref().map(|paths| {
@@ -232,11 +223,7 @@ impl ExternalDeliveryStorePort for PgExternalDeliveryStore {
                     .collect(),
             )
         });
-        let last_task_id = upsert
-            .last_task_id
-            .as_deref()
-            .map(parse_uuid)
-            .transpose()?;
+        let last_task_id = upsert.last_task_id.as_deref().map(parse_uuid).transpose()?;
         let last_correlation_id = upsert
             .last_correlation_id
             .as_deref()
@@ -358,9 +345,8 @@ impl PgBranchProvider {
         params: &[&(dyn ToSql + Sync)],
         name: &str,
     ) -> Result<Value, BranchError> {
-        self.call(sql, params)?.ok_or_else(|| {
-            BranchError::Store(format!("{name} returned null"))
-        })
+        self.call(sql, params)?
+            .ok_or_else(|| BranchError::Store(format!("{name} returned null")))
     }
 }
 
@@ -498,14 +484,8 @@ impl BranchProviderPort for PgBranchProvider {
                     .map_err(|error| BranchError::Store(error.to_string()))?,
             ),
         };
-        let conflict_json = conflict_paths.map(|paths| {
-            Value::Array(
-                paths
-                    .into_iter()
-                    .map(Value::String)
-                    .collect(),
-            )
-        });
+        let conflict_json = conflict_paths
+            .map(|paths| Value::Array(paths.into_iter().map(Value::String).collect()));
         let last_task_id = opt_uuid(last_task_id, "last_task_id")?;
         let last_correlation_id = opt_uuid(last_correlation_id, "last_correlation_id")?;
         self.document(

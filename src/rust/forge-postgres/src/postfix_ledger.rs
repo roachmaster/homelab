@@ -57,9 +57,7 @@ impl Drop for PgPostfixEventLock {
     fn drop(&mut self) {
         if let Some(mut session) = self.session.take() {
             let (client, rt) = session.raw();
-            let _ = rt.block_on(async {
-                client.batch_execute("ROLLBACK").await
-            });
+            let _ = rt.block_on(async { client.batch_execute("ROLLBACK").await });
         }
     }
 }
@@ -81,9 +79,7 @@ impl PostfixLedgerPort for PgPostfixLedger {
         let digest = rt
             .block_on(async {
                 client.batch_execute("BEGIN").await?;
-                client
-                    .batch_execute("SET LOCAL lock_timeout='4s'")
-                    .await?;
+                client.batch_execute("SET LOCAL lock_timeout='4s'").await?;
                 client
                     .batch_execute("SET LOCAL statement_timeout='10s'")
                     .await?;

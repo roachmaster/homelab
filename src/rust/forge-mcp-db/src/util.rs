@@ -91,7 +91,11 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     } else {
         month_prime - 9
     };
-    (if month <= 2 { year + 1 } else { year }, month as u32, day as u32)
+    (
+        if month <= 2 { year + 1 } else { year },
+        month as u32,
+        day as u32,
+    )
 }
 
 fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
@@ -154,7 +158,16 @@ pub fn epoch_from_iso(text: &str) -> Option<i64> {
     let days_in_month = [
         31,
         if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ][(month - 1) as usize];
     if day < 1 || day > days_in_month {
         return None;

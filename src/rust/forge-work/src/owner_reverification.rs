@@ -126,7 +126,9 @@ pub fn failed_ci(q: &Value) -> Result<Value, WorkError> {
         .map(|items| {
             items.len() == 3
                 && CHECKS.iter().all(|id| {
-                    items.iter().any(|check| check["check_id"].as_str() == Some(id))
+                    items
+                        .iter()
+                        .any(|check| check["check_id"].as_str() == Some(id))
                 })
                 && items.iter().all(|check| {
                     matches!(
@@ -161,7 +163,13 @@ pub fn failed_ci(q: &Value) -> Result<Value, WorkError> {
         && v["cleanup_confirmed"] == json!(true)
         && key_set(
             failure,
-            &["version", "tested_candidate", "current_main", "build", "conflict_paths"],
+            &[
+                "version",
+                "tested_candidate",
+                "current_main",
+                "build",
+                "conflict_paths",
+            ],
         )
         && is_int(&failure["version"])
         && failure["version"].as_i64() == Some(1)
@@ -346,27 +354,25 @@ pub fn replay(
     keys.retain(|key| *key != "actor");
     keys.sort_unstable();
     let actor_ok = saved["actor"].is_null()
-        || saved["actor"]
-            == json!({"kind": "operator", "id": text(task, "owner_id")});
-    let valid = keys
-        == [
+        || saved["actor"] == json!({"kind": "operator", "id": text(task, "owner_id")});
+    let valid =
+        keys == [
             "base_revision",
             "project_alias",
             "review_id",
             "revision",
             "status",
             "task_id",
-        ]
-        && actor_ok
-        && saved["project_alias"] == task["project_alias"]
-        && saved["task_id"].as_str() == Some(&uuid_of(task, "id").to_string())
-        && is_int(&saved["base_revision"])
-        && saved["base_revision"].as_i64() == Some(expected_revision)
-        && is_int(&saved["revision"])
-        && saved["revision"].as_i64() == Some(expected_revision + 1)
-        && saved["status"].as_str() == Some("awaiting_review")
-        && is_canonical_uuid(&saved["review_id"])
-        && saved["review_id"] != request["review_id"];
+        ] && actor_ok
+            && saved["project_alias"] == task["project_alias"]
+            && saved["task_id"].as_str() == Some(&uuid_of(task, "id").to_string())
+            && is_int(&saved["base_revision"])
+            && saved["base_revision"].as_i64() == Some(expected_revision)
+            && is_int(&saved["revision"])
+            && saved["revision"].as_i64() == Some(expected_revision + 1)
+            && saved["status"].as_str() == Some("awaiting_review")
+            && is_canonical_uuid(&saved["review_id"])
+            && saved["review_id"] != request["review_id"];
     if !valid {
         return Err(reconcile_required());
     }
@@ -393,7 +399,10 @@ pub fn replay(
         || intent["policy"].as_str() != Some(POLICY)
         || intent["workflow_id"].as_str() != Some(&workflow_id.to_string())
         || text(action, "source_key")
-            != source_key(workflow_id, opt_uuid(request, "review_id").unwrap_or_default())
+            != source_key(
+                workflow_id,
+                opt_uuid(request, "review_id").unwrap_or_default(),
+            )
         || finish["status"].as_str() != Some(STATUS)
         || !control_ok
     {
@@ -424,17 +433,12 @@ fn review_chain(
     let mut v1 = false;
     while int_of(&q, "source_revision") != floor {
         let q_id = uuid_of(&q, "review_id");
-        if seen.contains(&q_id)
-            || chain.len() >= 32
-            || int_of(&q, "source_revision") < floor
-        {
+        if seen.contains(&q_id) || chain.len() >= 32 || int_of(&q, "source_revision") < floor {
             return Err(mismatch());
         }
         seen.push(q_id);
         let previous_id = opt_uuid(&q, "previous_review_id").ok_or_else(mismatch)?;
-        let previous = tx
-            .review_row(previous_id, false)?
-            .ok_or_else(mismatch)?;
+        let previous = tx.review_row(previous_id, false)?.ok_or_else(mismatch)?;
         let actions = tx.receipt_review_actions(
             text(task, "project_alias"),
             workflow_id,
@@ -518,7 +522,9 @@ fn review_chain(
             || request["findings"] != json!([])
             || request["verified_finding_ids"] != json!([])
             || intent["source_attempt_id"].as_str()
-                != opt_uuid(&q, "attempt_id").map(|id| id.to_string()).as_deref()
+                != opt_uuid(&q, "attempt_id")
+                    .map(|id| id.to_string())
+                    .as_deref()
             || intent["source_result_sha256"] != q["parent_result_sha256"]
             || intent["source_workspace_digest"] != q["workspace_digest"]
             || intent["source_review_id"].as_str() != Some(&previous_id.to_string())
@@ -541,8 +547,7 @@ fn review_chain(
             .as_ref()
             .map(|control| {
                 control["action"].as_str() == Some("review_decide")
-                    && control["intent_digest"].as_str()
-                        == Some(&request_digest(request))
+                    && control["intent_digest"].as_str() == Some(&request_digest(request))
                     && control["receipt_json"] == expected
                     && control["base_revision"] == previous["source_revision"]
                     && control["result_revision"] == q["source_revision"]
@@ -562,10 +567,15 @@ fn review_chain(
         q = previous;
     }
     if !v1
-        || opt_uuid(&q, "previous_review_id").map(|id| id.to_string()).as_deref()
+        || opt_uuid(&q, "previous_review_id")
+            .map(|id| id.to_string())
+            .as_deref()
             != owner["intent"]["review_id"].as_str()
         || int_of(&q, "source_revision")
-            != owner["finish_receipt"]["receipt"]["revision"].as_i64().unwrap_or(0) + 2
+            != owner["finish_receipt"]["receipt"]["revision"]
+                .as_i64()
+                .unwrap_or(0)
+                + 2
     {
         return Err(mismatch());
     }
@@ -597,9 +607,7 @@ pub fn recover(
         return Err(WorkError::rejected(409, "idempotency_conflict"));
     }
     let workflow_id = uuid_of(task, "workflow_id");
-    let w = tx
-        .workflow(workflow_id, true)?
-        .ok_or_else(not_reviewable)?;
+    let w = tx.workflow(workflow_id, true)?.ok_or_else(not_reviewable)?;
     if bool_of(&w, "enabled")
         || text(&w, "phase") != "escalated"
         || text(&w, "escalation_reason") != "no_progress"
@@ -675,8 +683,7 @@ pub fn recover(
         && of["receipt"]["project_alias"] == task["project_alias"]
         && is_int(&ore["expected_revision"])
         && of["receipt"]["base_revision"] == ore["expected_revision"]
-        && of["receipt"]["revision"].as_i64()
-            == Some(int_of(ore, "expected_revision") + 1)
+        && of["receipt"]["revision"].as_i64() == Some(int_of(ore, "expected_revision") + 1)
         && of["receipt"]["recipe_digest"].as_str() == Some(recipe.digest.as_str());
     if !valid_owner {
         return Err(not_reviewable());
@@ -708,7 +715,10 @@ pub fn recover(
         || q["plan_decision_id"] != task["plan_decision_id"]
         || q["scope_plan_decision_id"] != task["scope_plan_decision_id"]
         || !q["repair_task_id"].is_null()
-        || q["candidate_commit"].as_str().map(str::is_empty).unwrap_or(true)
+        || q["candidate_commit"]
+            .as_str()
+            .map(str::is_empty)
+            .unwrap_or(true)
         || q["gate_manifest_sha256"]
             .as_str()
             .map(str::is_empty)
@@ -764,7 +774,8 @@ pub fn recover(
     {
         return Err(mismatch());
     }
-    let plan_artifact = tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
+    let plan_artifact =
+        tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
     if plan_artifact["result_sha256"] != plan["plan_sha256"] {
         return Err(mismatch());
     }
@@ -801,7 +812,10 @@ pub fn recover(
         &json!({"enabled": true, "phase": "checks", "escalation_reason": ""}),
     )?;
     flow.grant(tx, &w, text(&p, "reviewer_profile"), "review")?;
-    let digests: Vec<String> = NATIVE_POLICY_DIGESTS.iter().map(|d| d.to_string()).collect();
+    let digests: Vec<String> = NATIVE_POLICY_DIGESTS
+        .iter()
+        .map(|d| d.to_string())
+        .collect();
     let ready = tx.readiness(Some(&digests))?;
     let reviewer_recipe = PinnedRecipe::from_snapshot(&p, "reviewer_review", flow.native())
         .map_err(WorkError::store)?;

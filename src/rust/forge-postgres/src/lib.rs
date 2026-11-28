@@ -1,6 +1,20 @@
 pub mod branch;
 pub mod candidate_source;
+pub mod client;
+pub mod config;
 pub mod context_providers;
+pub mod delivery_repair_adapter;
+pub mod delivery_workers_adapter;
+pub mod error;
+pub mod external_adapter;
+pub mod external_context;
+pub mod external_delivery_adapter;
+pub mod factory;
+pub mod gpu_adapter;
+pub mod gpu_worker;
+pub mod jenkins_store_adapter;
+pub mod model_route_proofs;
+pub mod peer_validator;
 /// This adapter provides a synchronous facade over tokio-postgres, dedicated to PostgreSQL operations.
 /// It uses explicit leases, which are values that expire server-side and are not cleaned up by Drop.
 /// The transport decision is handled by forge-postgres, and this crate does not route through forge-pg-proxy.
@@ -8,26 +22,14 @@ pub mod context_providers;
 /// over the same session/transaction surface; their helpers stay crate-internal.
 #[cfg(feature = "test-support")]
 pub mod pg_fixture;
-pub mod client;
-pub mod config;
-pub mod error;
-pub mod delivery_repair_adapter;
-pub mod delivery_workers_adapter;
-pub mod external_adapter;
-pub mod external_delivery_adapter;
-pub mod external_context;
-pub mod factory;
-pub mod gpu_adapter;
-pub mod gpu_worker;
-pub mod jenkins_store_adapter;
-pub mod model_route_proofs;
-pub mod peer_validator;
 pub mod postfix_ledger;
+pub mod publication_composition;
 pub mod publication_store_adapter;
 pub mod reconciler;
+pub mod registrar;
 pub mod retry_evidence;
 pub mod review_store;
-pub mod registrar;
+pub mod runner_composition;
 pub mod tx;
 pub mod usage_store_adapter;
 pub mod work_admission;
@@ -51,11 +53,9 @@ pub mod work_read_scope;
 pub mod work_rows;
 pub mod work_store;
 pub mod worker;
-pub mod publication_composition;
-pub mod runner_composition;
-pub mod worker_composition;
 pub mod worker_adapter;
 pub mod worker_adapter_reconciler;
+pub mod worker_composition;
 pub mod worker_context;
 pub mod workflow_adapter;
 pub mod workflow_decision;

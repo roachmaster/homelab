@@ -90,9 +90,7 @@ impl ExternalWorkflowPolicy {
         let int_or = |key: &str, default: i64| -> Result<i64, String> {
             match object.get(key) {
                 None => Ok(default),
-                Some(v) if crate::validation::is_int(v) => {
-                    Ok(v.as_i64().unwrap_or(i64::MIN))
-                }
+                Some(v) if crate::validation::is_int(v) => Ok(v.as_i64().unwrap_or(i64::MIN)),
                 Some(_) => Err("Invalid external workflow delegation".to_string()),
             }
         };
@@ -103,7 +101,9 @@ impl ExternalWorkflowPolicy {
             int_or("max_code_revisions", AGENT_RETRY_LIMIT)?,
             object["auto_merge"].as_bool().unwrap_or(true),
             object["merge_method"].as_str().unwrap_or("merge"),
-            object["version"].as_str().unwrap_or(EXTERNAL_AUTONOMY_VERSION),
+            object["version"]
+                .as_str()
+                .unwrap_or(EXTERNAL_AUTONOMY_VERSION),
         )
     }
 
@@ -135,9 +135,8 @@ impl ExternalWorkflowPolicy {
         {
             return Err("External workflow requires external-v2 author and independent native Codex reviewer".to_string());
         }
-        let entry = |recipe: &ResolvedRecipe| {
-            json!({"recipe": recipe.document, "digest": recipe.digest})
-        };
+        let entry =
+            |recipe: &ResolvedRecipe| json!({"recipe": recipe.document, "digest": recipe.digest});
         let mut value = self.fields();
         value.insert(
             "recipes".into(),
@@ -236,20 +235,32 @@ mod tests {
             policy_digest: "d".repeat(64),
         };
         let policy = ExternalWorkflowPolicy::new(
-            "agy-primary", "codex-primary", 20, 20, true, "merge", EXTERNAL_AUTONOMY_VERSION,
+            "agy-primary",
+            "codex-primary",
+            20,
+            20,
+            true,
+            "merge",
+            EXTERNAL_AUTONOMY_VERSION,
         )
         .unwrap();
         let snapshot = policy.snapshot(&FakeCatalog, &native).unwrap();
-        assert_eq!(snapshot["recipes"]["author_plan"]["digest"], json!("e".repeat(64)));
         assert_eq!(
-            snapshot["policy_digest"].as_str().unwrap().len(),
-            64
+            snapshot["recipes"]["author_plan"]["digest"],
+            json!("e".repeat(64))
         );
+        assert_eq!(snapshot["policy_digest"].as_str().unwrap().len(), 64);
         let summary = policy.summary(&FakeCatalog, &native).unwrap();
         assert_eq!(summary["author_profile"], json!("agy-primary"));
         // Same-profile author/reviewer is not a delegation.
         assert!(ExternalWorkflowPolicy::new(
-            "agy-primary", "agy-primary", 20, 20, true, "merge", EXTERNAL_AUTONOMY_VERSION,
+            "agy-primary",
+            "agy-primary",
+            20,
+            20,
+            true,
+            "merge",
+            EXTERNAL_AUTONOMY_VERSION,
         )
         .is_err());
     }

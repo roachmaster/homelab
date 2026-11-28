@@ -8,8 +8,8 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use forge_jenkins::provisioning::{JenkinsHttp, run_env, sha256_hex, utc_now_string, write_new};
-use serde_json::{Map, Value, json};
+use forge_jenkins::provisioning::{run_env, sha256_hex, utc_now_string, write_new, JenkinsHttp};
+use serde_json::{json, Map, Value};
 
 const STATE: &str = "/var/lib/forge-provisioning/jenkins";
 const HOME: &str = "/mnt/data/forge-homelab/jenkins";
@@ -44,8 +44,11 @@ fn run(argv: &[String], timeout: u64) -> Result<String, String> {
             });
             let _ = write_new(
                 &state().join("last-command.json"),
-                format!("{}\n", serde_json::to_string_pretty(&record).unwrap_or_default())
-                    .as_bytes(),
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&record).unwrap_or_default()
+                )
+                .as_bytes(),
                 0o600,
             );
             Err(error)
@@ -129,8 +132,7 @@ fn verify() -> Result<Map<String, Value>, String> {
             if code != 200 || !home.join(".forge-headless-bootstrap-v1").is_file() {
                 return Err("not ready".to_string());
             }
-            let config: Value =
-                serde_json::from_slice(&body).map_err(|error| error.to_string())?;
+            let config: Value = serde_json::from_slice(&body).map_err(|error| error.to_string())?;
             if config.get("useSecurity") != Some(&Value::Bool(true))
                 || config.get("numExecutors") != Some(&json!(0))
             {
@@ -159,8 +161,7 @@ fn verify() -> Result<Map<String, Value>, String> {
                 || xml_text(&xml, "disableSignup") != Some("true".to_string())
                 || xml_class(&xml, "authorizationStrategy")
                     != Some(
-                        "hudson.security.FullControlOnceLoggedInAuthorizationStrategy"
-                            .to_string(),
+                        "hudson.security.FullControlOnceLoggedInAuthorizationStrategy".to_string(),
                     )
                 || xml_text(&xml, "denyAnonymousReadAccess") != Some("true".to_string())
             {
@@ -226,14 +227,12 @@ fn start_and_finish(fingerprints: &[String]) -> Result<(), String> {
     result.insert("source_sha256".to_string(), json!(sha256_hex(&own_source)));
     result.insert(
         "package_version".to_string(),
-        json!(
-            run(
-                &strings(&["/usr/bin/dpkg-query", "-W", "-f=${Version}", "jenkins"]),
-                30,
-            )?
-            .trim()
-            .to_string()
-        ),
+        json!(run(
+            &strings(&["/usr/bin/dpkg-query", "-W", "-f=${Version}", "jenkins"]),
+            30,
+        )?
+        .trim()
+        .to_string()),
     );
     result.insert("signing_key_fingerprints".to_string(), json!(fingerprints));
     write_new(
@@ -250,7 +249,9 @@ fn start_and_finish(fingerprints: &[String]) -> Result<(), String> {
 
 fn is_mount(path: &Path) -> bool {
     let metadata = std::fs::metadata(path);
-    let parent = path.parent().and_then(|parent| std::fs::metadata(parent).ok());
+    let parent = path
+        .parent()
+        .and_then(|parent| std::fs::metadata(parent).ok());
     match (metadata, parent) {
         (Ok(metadata), Some(parent)) => metadata.dev() != parent.dev(),
         _ => false,
@@ -298,9 +299,7 @@ fn main_inner(verify_existing: bool) -> Result<(), String> {
     if verify_existing {
         let secret = PathBuf::from(SECRET);
         let secret_ok = std::fs::metadata(&secret)
-            .map(|metadata| {
-                metadata.uid() == 0 && metadata.mode() & 0o077 == 0
-            })
+            .map(|metadata| metadata.uid() == 0 && metadata.mode() & 0o077 == 0)
             .unwrap_or(false);
         if !(home.join(".forge-headless-bootstrap-v1").is_file()
             && state().join("intent.json").is_file()
@@ -308,8 +307,7 @@ fn main_inner(verify_existing: bool) -> Result<(), String> {
             && secret_ok)
         {
             return Err(
-                "Owned completed bootstrap is required for verification continuation"
-                    .to_string(),
+                "Owned completed bootstrap is required for verification continuation".to_string(),
             );
         }
         checkpoint("verifying_existing_bootstrap", &Map::new())?;
@@ -318,8 +316,7 @@ fn main_inner(verify_existing: bool) -> Result<(), String> {
     }
     if home.exists() || Path::new("/var/lib/jenkins/config.xml").exists() {
         return Err(
-            "Existing Jenkins data requires explicit migration; refusing to overwrite"
-                .to_string(),
+            "Existing Jenkins data requires explicit migration; refusing to overwrite".to_string(),
         );
     }
     {
@@ -328,7 +325,10 @@ fn main_inner(verify_existing: bool) -> Result<(), String> {
         drop(listener);
     }
     checkpoint("installing_packages", &Map::new())?;
-    run(&strings(&["/usr/bin/systemctl", "mask", "jenkins.service"]), 30)?;
+    run(
+        &strings(&["/usr/bin/systemctl", "mask", "jenkins.service"]),
+        30,
+    )?;
     let key = {
         let agent = ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
@@ -399,10 +399,13 @@ fn main_inner(verify_existing: bool) -> Result<(), String> {
         Some(jenkins_group.gid),
     )
     .map_err(|error| error.to_string())?;
-    std::fs::set_permissions(&hook_dir, std::os::unix::fs::PermissionsExt::from_mode(0o750))
-        .map_err(|error| error.to_string())?;
-    let groovy = std::fs::read(exe_dir().join("bootstrap.groovy"))
-        .map_err(|error| error.to_string())?;
+    std::fs::set_permissions(
+        &hook_dir,
+        std::os::unix::fs::PermissionsExt::from_mode(0o750),
+    )
+    .map_err(|error| error.to_string())?;
+    let groovy =
+        std::fs::read(exe_dir().join("bootstrap.groovy")).map_err(|error| error.to_string())?;
     write_new(&hook_dir.join("10-forge-bootstrap.groovy"), &groovy, 0o640)?;
     nix::unistd::chown(
         &hook_dir.join("10-forge-bootstrap.groovy"),
@@ -450,7 +453,10 @@ TimeoutStartSec=180
         0o644,
     )?;
     run(&strings(&["/usr/bin/systemctl", "daemon-reload"]), 30)?;
-    run(&strings(&["/usr/bin/systemctl", "unmask", "jenkins.service"]), 30)?;
+    run(
+        &strings(&["/usr/bin/systemctl", "unmask", "jenkins.service"]),
+        30,
+    )?;
     start_and_finish(&fingerprints)
 }
 

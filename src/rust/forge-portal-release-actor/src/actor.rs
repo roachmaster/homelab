@@ -8,14 +8,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 use crate::config::{
-    ActorConfig, CORE, IDENTITY, POLICY, STARTUP_IDENTITY_SECONDS, UNIT, artifact_commands,
-    canonical, decode, is_gate_ref, is_sha40, is_sha64, main_checks, read_root, safe_relative, sha,
-    v3_main_checks, v3_main_phases, write_root,
+    artifact_commands, canonical, decode, is_gate_ref, is_sha40, is_sha64, main_checks, read_root,
+    safe_relative, sha, v3_main_checks, v3_main_phases, write_root, ActorConfig, CORE, IDENTITY,
+    POLICY, STARTUP_IDENTITY_SECONDS, UNIT,
 };
-use crate::system::{ProbeFactory, SystemPort, portal_probe_factory};
+use crate::system::{portal_probe_factory, ProbeFactory, SystemPort};
 
 pub type ReadFn = Arc<dyn Fn(&Path, usize) -> Result<Vec<u8>, String> + Send + Sync>;
 pub type WriteFn = Arc<dyn Fn(&Path, &[u8], u32, u32) -> Result<(), String> + Send + Sync>;
@@ -75,12 +75,7 @@ impl PortalReleaseActor {
         }
     }
 
-    fn authorize(
-        &self,
-        job: &Value,
-        start: bool,
-        plan_sha256: Option<&str>,
-    ) -> Result<(), String> {
+    fn authorize(&self, job: &Value, start: bool, plan_sha256: Option<&str>) -> Result<(), String> {
         let authority = self
             .authority
             .clone()
@@ -97,8 +92,7 @@ impl PortalReleaseActor {
         let object = job
             .as_object()
             .ok_or_else(|| "Unexpected release identity fields".to_string())?;
-        if object.len() != IDENTITY.len()
-            || !IDENTITY.iter().all(|name| object.contains_key(*name))
+        if object.len() != IDENTITY.len() || !IDENTITY.iter().all(|name| object.contains_key(*name))
         {
             return Err("Unexpected release identity fields".to_string());
         }
@@ -184,9 +178,7 @@ impl PortalReleaseActor {
             .to_string();
         let binary_path = PathBuf::from(&binary);
         let config = PathBuf::from(&config_path);
-        let inside_releases = binary_path
-            .strip_prefix(&self.config.releases_root)
-            .is_ok();
+        let inside_releases = binary_path.strip_prefix(&self.config.releases_root).is_ok();
         if !inside_releases || config.parent() != Some(self.config.web_config_root.as_path()) {
             return Err("Portal command escaped configured release boundary".to_string());
         }
@@ -215,7 +207,10 @@ impl PortalReleaseActor {
     fn proof(&self, job: &Value) -> Result<(PathBuf, String, Map<String, Value>), String> {
         let ci_action = get_str(job, "ci_action_id").unwrap_or("");
         let raw = (self.read)(
-            &self.config.ci_results_root.join(format!("{ci_action}.json")),
+            &self
+                .config
+                .ci_results_root
+                .join(format!("{ci_action}.json")),
             0,
         )?;
         let result = decode(&raw)?;
@@ -226,7 +221,11 @@ impl PortalReleaseActor {
         if !matches!(profile, "forge-sdlc-jenkins-v2" | "forge-sdlc-jenkins-v3") {
             return Err("Unsupported full main proof".to_string());
         }
-        let version: i64 = if profile == "forge-sdlc-jenkins-v3" { 3 } else { 2 };
+        let version: i64 = if profile == "forge-sdlc-jenkins-v3" {
+            3
+        } else {
+            2
+        };
         let commands = if version == 3 {
             v3_main_checks()
         } else {
@@ -238,8 +237,10 @@ impl PortalReleaseActor {
                 .iter()
                 .filter_map(|row| row.get("kind").and_then(Value::as_str).map(str::to_string))
                 .collect();
-            let expected_kinds: Vec<Value> =
-                kinds.iter().map(|kind| Value::String(kind.clone())).collect();
+            let expected_kinds: Vec<Value> = kinds
+                .iter()
+                .map(|kind| Value::String(kind.clone()))
+                .collect();
             if result.get("phase_results") != Some(&Value::Array(phases))
                 || result.get("failure_kind") != Some(&Value::Null)
                 || result.get("passed_kinds") != Some(&Value::Array(expected_kinds))
@@ -264,14 +265,13 @@ impl PortalReleaseActor {
             (
                 "gate_manifest_sha256",
                 Value::String(
-                    get_str(job, "gate_manifest_sha256").unwrap_or("").to_string(),
+                    get_str(job, "gate_manifest_sha256")
+                        .unwrap_or("")
+                        .to_string(),
                 ),
             ),
             ("branch_scope", Value::String("main".to_string())),
-            (
-                "verification_profile",
-                Value::String(profile.to_string()),
-            ),
+            ("verification_profile", Value::String(profile.to_string())),
             ("status", Value::String("passed".to_string())),
         ];
         let checks_expected: Vec<Value> = commands
@@ -311,9 +311,7 @@ impl PortalReleaseActor {
                     "backend_suites": "all_four",
                 }))
         {
-            return Err(
-                "Release requires exact full main verification and cleanup".to_string(),
-            );
+            return Err("Release requires exact full main verification and cleanup".to_string());
         }
         let export = result
             .get("artifact_export")
@@ -369,7 +367,10 @@ impl PortalReleaseActor {
             let executable_expected = name == "bin/forge-ide-web-host";
             if keys.len() != 4
                 || !item.get("byte_count").map(Value::is_i64).unwrap_or(false)
-                || !item.get("executable").map(Value::is_boolean).unwrap_or(false)
+                || !item
+                    .get("executable")
+                    .map(Value::is_boolean)
+                    .unwrap_or(false)
                 || item.get("executable") != Some(&Value::Bool(executable_expected))
                 || inventory.contains_key(&name)
                 || !(executable_expected || name.starts_with("assets/"))
@@ -425,9 +426,7 @@ impl PortalReleaseActor {
                     .ok_or_else(|| "Portal manifest file mismatch".to_string())?,
             )?;
             let name = format!("assets/{relative}");
-            if inventory.get(&name).and_then(|entry| entry.get("sha256"))
-                != item.get("sha256")
-            {
+            if inventory.get(&name).and_then(|entry| entry.get("sha256")) != item.get("sha256") {
                 return Err("Portal manifest file mismatch".to_string());
             }
         }
@@ -457,8 +456,7 @@ impl PortalReleaseActor {
         }
         for path in chain {
             std::fs::create_dir_all(&path).map_err(|error| error.to_string())?;
-            let metadata =
-                std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
             use std::os::unix::fs::MetadataExt;
             if !metadata.is_dir() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
                 return Err("Unsafe public artifact directory".to_string());
@@ -507,10 +505,7 @@ impl PortalReleaseActor {
                 raw
             };
             let target = old.join(name);
-            self.public_parent(
-                &self.config.replay_archive_root,
-                target.parent().unwrap(),
-            )?;
+            self.public_parent(&self.config.replay_archive_root, target.parent().unwrap())?;
             if target.exists() {
                 if (self.read)(&target, 0)? != raw {
                     return Err("Retained replay archive conflict".to_string());
@@ -534,7 +529,10 @@ impl PortalReleaseActor {
             if let Some(outcome) = state.get("outcome") {
                 return Ok(map_of(outcome));
             }
-            if matches!(get_str(&Value::Object(state.clone()), "phase"), Some("staging" | "candidate")) {
+            if matches!(
+                get_str(&Value::Object(state.clone()), "phase"),
+                Some("staging" | "candidate")
+            ) {
                 let plan = state.get("plan").cloned().unwrap_or(Value::Null);
                 return self.reconcile(&job, &plan);
             }
@@ -592,7 +590,8 @@ impl PortalReleaseActor {
         packet: &Path,
     ) -> Result<Map<String, Value>, String> {
         use std::os::unix::fs::PermissionsExt;
-        let release = PathBuf::from(get_str(&Value::Object(state.clone()), "release").unwrap_or(""));
+        let release =
+            PathBuf::from(get_str(&Value::Object(state.clone()), "release").unwrap_or(""));
         let web_gid = nix::unistd::Group::from_name(&self.config.web_group)
             .ok()
             .flatten()
@@ -648,7 +647,12 @@ impl PortalReleaseActor {
         );
         config.insert(
             "cooked_replay_archive".to_string(),
-            Value::String(self.config.replay_archive_root.to_string_lossy().into_owned()),
+            Value::String(
+                self.config
+                    .replay_archive_root
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
         );
         let job = state.get("job").cloned().unwrap_or(Value::Null);
         let release_id = get_str(&job, "release_id").unwrap_or("");
@@ -719,10 +723,7 @@ impl PortalReleaseActor {
             let mut old_inventory = Map::new();
             for name in CORE {
                 let raw = (self.read)(&old_assets.join(name), 8 * 1024 * 1024)?;
-                old_inventory.insert(
-                    format!("assets/{name}"),
-                    json!({"sha256": sha(&raw)}),
-                );
+                old_inventory.insert(format!("assets/{name}"), json!({"sha256": sha(&raw)}));
             }
             let before_value = before.get("value").cloned().unwrap_or(Value::Null);
             self.live_health(&map_of(&before_value), &Value::Object(old_inventory))?;
@@ -738,10 +739,12 @@ impl PortalReleaseActor {
         }
         state.insert("phase".to_string(), Value::String("prepared".to_string()));
         self.save(directory, state)?;
-        Ok(json!({"status": "planned", "plan": state.get("plan").cloned().unwrap_or(Value::Null)})
-            .as_object()
-            .unwrap()
-            .clone())
+        Ok(
+            json!({"status": "planned", "plan": state.get("plan").cloned().unwrap_or(Value::Null)})
+                .as_object()
+                .unwrap()
+                .clone(),
+        )
     }
 
     fn health(&self, config: &Map<String, Value>, inventory: &Value) -> Result<(), String> {
@@ -782,11 +785,7 @@ impl PortalReleaseActor {
         self.health(&entry, inventory)
     }
 
-    fn load(
-        &self,
-        job: &Value,
-        public: &Value,
-    ) -> Result<(PathBuf, Map<String, Value>), String> {
+    fn load(&self, job: &Value, public: &Value) -> Result<(PathBuf, Map<String, Value>), String> {
         let (directory, _) = self.paths(job);
         let state = map_of(&decode(&(self.read)(&directory.join("state.json"), 0)?)?);
         if state.get("job") != Some(job)
@@ -812,7 +811,10 @@ impl PortalReleaseActor {
         body.insert("version".to_string(), json!(1));
         body.insert("policy".to_string(), Value::String(POLICY.to_string()));
         body.insert("status".to_string(), Value::String(status.to_string()));
-        body.insert("job".to_string(), state.get("job").cloned().unwrap_or(Value::Null));
+        body.insert(
+            "job".to_string(),
+            state.get("job").cloned().unwrap_or(Value::Null),
+        );
         body.insert(
             "plan_sha256".to_string(),
             plan.get("plan_sha256").cloned().unwrap_or(Value::Null),
@@ -878,8 +880,12 @@ impl PortalReleaseActor {
             }
             _ => false,
         };
-        let local_deadline =
-            (self.monotonic)() + if valid_window { deadline.unwrap() - now } else { 0.0 };
+        let local_deadline = (self.monotonic)()
+            + if valid_window {
+                deadline.unwrap() - now
+            } else {
+                0.0
+            };
         let target = PathBuf::from(get_str(&Value::Object(state.clone()), "release").unwrap_or(""))
             .join("bin/forge-ide-web-host")
             .to_string_lossy()
@@ -908,7 +914,10 @@ impl PortalReleaseActor {
             if current.get("process_binary").and_then(Value::as_str) == Some(target.as_str()) {
                 return Some(current);
             }
-            let process_binary = current.get("process_binary").cloned().unwrap_or(Value::Null);
+            let process_binary = current
+                .get("process_binary")
+                .cloned()
+                .unwrap_or(Value::Null);
             let transient = current.get("service_type").and_then(Value::as_str) == Some("simple")
                 && matches!(
                     current.get("active_state").and_then(Value::as_str),
@@ -936,7 +945,9 @@ impl PortalReleaseActor {
                 let _ = self.diagnostic(directory, state, "startup_identity_timeout");
                 return None;
             }
-            if state.get("activation_diagnostic_stage").and_then(Value::as_str)
+            if state
+                .get("activation_diagnostic_stage")
+                .and_then(Value::as_str)
                 != Some("startup_identity_pending")
             {
                 let _ = self.diagnostic(directory, state, "startup_identity_pending");
@@ -948,11 +959,7 @@ impl PortalReleaseActor {
         }
     }
 
-    pub fn activate(
-        &mut self,
-        job: &Value,
-        public: &Value,
-    ) -> Result<Map<String, Value>, String> {
+    pub fn activate(&mut self, job: &Value, public: &Value) -> Result<Map<String, Value>, String> {
         let (directory, mut state) = self.load(job, public)?;
         if let Some(outcome) = state.get("outcome") {
             return Ok(map_of(outcome));
@@ -997,7 +1004,9 @@ impl PortalReleaseActor {
             .to_string();
         let command = format!(
             "{} serve --config {}",
-            PathBuf::from(&release).join("bin/forge-ide-web-host").display(),
+            PathBuf::from(&release)
+                .join("bin/forge-ide-web-host")
+                .display(),
             live_config
         );
         let override_text = format!("[Service]\nExecStart=\nExecStart={command}\n");
@@ -1038,11 +1047,7 @@ impl PortalReleaseActor {
         self.reconcile(job, public)
     }
 
-    pub fn reconcile(
-        &mut self,
-        job: &Value,
-        public: &Value,
-    ) -> Result<Map<String, Value>, String> {
+    pub fn reconcile(&mut self, job: &Value, public: &Value) -> Result<Map<String, Value>, String> {
         let (directory, mut state) = self.load(job, public)?;
         if let Some(outcome) = state.get("outcome") {
             return Ok(map_of(outcome));
@@ -1100,23 +1105,18 @@ impl PortalReleaseActor {
         self.rollback(job, public)
     }
 
-    pub fn rollback(
-        &mut self,
-        job: &Value,
-        public: &Value,
-    ) -> Result<Map<String, Value>, String> {
+    pub fn rollback(&mut self, job: &Value, public: &Value) -> Result<Map<String, Value>, String> {
         let (directory, mut state) = self.load(job, public)?;
         if let Some(outcome) = state.get("outcome") {
             return Ok(map_of(outcome));
         }
         let before = map_of(state.get("before").unwrap_or(&Value::Null));
         let current = self.system.current()?;
-        let release_binary = PathBuf::from(
-            get_str(&Value::Object(state.clone()), "release").unwrap_or(""),
-        )
-        .join("bin/forge-ide-web-host")
-        .to_string_lossy()
-        .into_owned();
+        let release_binary =
+            PathBuf::from(get_str(&Value::Object(state.clone()), "release").unwrap_or(""))
+                .join("bin/forge-ide-web-host")
+                .to_string_lossy()
+                .into_owned();
         let live_config = get_str(&Value::Object(state.clone()), "live_config")
             .unwrap_or("")
             .to_string();
@@ -1189,10 +1189,7 @@ impl PortalReleaseActor {
                 ));
             }
             state.insert("rollback_restart_requested".to_string(), json!(true));
-            state.insert(
-                "rollback_restart_attempts".to_string(),
-                json!(attempts + 1),
-            );
+            state.insert("rollback_restart_attempts".to_string(), json!(attempts + 1));
             self.save(&directory, &state)?;
             self.system.restart()?;
         }
@@ -1498,10 +1495,7 @@ mod tests {
 
     #[test]
     fn plan_seals_a_prepared_release() {
-        let root = std::env::temp_dir().join(format!(
-            "forge-actor-test-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("forge-actor-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let ci = root.join("ci");
         let web = root.join("web");
@@ -1647,9 +1641,18 @@ mod tests {
         );
         current.insert("pid".to_string(), json!(0));
         current.insert("process_binary".to_string(), Value::Null);
-        current.insert("service_type".to_string(), Value::String("simple".to_string()));
-        current.insert("active_state".to_string(), Value::String("active".to_string()));
-        current.insert("sub_state".to_string(), Value::String("running".to_string()));
+        current.insert(
+            "service_type".to_string(),
+            Value::String("simple".to_string()),
+        );
+        current.insert(
+            "active_state".to_string(),
+            Value::String("active".to_string()),
+        );
+        current.insert(
+            "sub_state".to_string(),
+            Value::String("running".to_string()),
+        );
         current.insert("startup_job".to_string(), json!(false));
         let system = FakeSystem {
             current,
@@ -1657,9 +1660,8 @@ mod tests {
         };
         let mut actor = PortalReleaseActor::new(config, Box::new(system));
         // Test reader/writer: plain filesystem, no Root ownership.
-        actor.read = Arc::new(|path, _maximum| {
-            std::fs::read(path).map_err(|error| error.to_string())
-        });
+        actor.read =
+            Arc::new(|path, _maximum| std::fs::read(path).map_err(|error| error.to_string()));
         actor.write = Arc::new(|path, raw, mode, _group| {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -1688,7 +1690,10 @@ mod tests {
         let outcome = actor
             .invoke("plan", &job, None, Some(&authority))
             .expect("plan succeeds");
-        assert_eq!(outcome.get("status").and_then(Value::as_str), Some("planned"));
+        assert_eq!(
+            outcome.get("status").and_then(Value::as_str),
+            Some("planned")
+        );
         let state = map_of(
             &decode(
                 &std::fs::read(state_root.join("123e4567-e89b-12d3-a456-426614174000/state.json"))
@@ -1696,10 +1701,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(
-            state.get("phase").and_then(Value::as_str),
-            Some("prepared")
-        );
+        assert_eq!(state.get("phase").and_then(Value::as_str), Some("prepared"));
         std::fs::remove_dir_all(&root).ok();
     }
 }

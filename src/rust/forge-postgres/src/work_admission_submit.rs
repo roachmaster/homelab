@@ -100,8 +100,7 @@ pub(crate) fn submit(
 ) -> Result<forge_work::ControlOutcome, forge_work::WorkError> {
     // WorkStore.submit validates the defect document first,
     // before any store work.
-    let defect =
-        forge_work::defect::validate_defect(&request.task_kind, request.defect.as_ref())?;
+    let defect = forge_work::defect::validate_defect(&request.task_kind, request.defect.as_ref())?;
     let title = prepare_title(&request.prompt)?;
     let intent = intent_digest(&submit_intent(request, &defect, true));
     run_tx(store, |tx| {

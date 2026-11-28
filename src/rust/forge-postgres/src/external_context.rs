@@ -90,14 +90,15 @@ impl ExternalContextPort for ExternalContextProvider {
             || target["reviewer_profile"].as_str() != Some(lease.agent_profile.as_str())
             || target["review_base_revision"].as_str() != Some(workspace.base_revision.as_str())
         {
-            return Err(invalid("External context is not bound to this native reviewer"));
+            return Err(invalid(
+                "External context is not bound to this native reviewer",
+            ));
         }
         if target["target_kind"].as_str() == Some("code") {
             let candidate = &target["candidate"];
-            let tree_bytes = self.git.git_bytes(
-                &workspace.path,
-                &["rev-parse", "--verify", "HEAD^{tree}"],
-            )?;
+            let tree_bytes = self
+                .git
+                .git_bytes(&workspace.path, &["rev-parse", "--verify", "HEAD^{tree}"])?;
             let tree = String::from_utf8_lossy(&tree_bytes).trim().to_string();
             if tree != candidate["candidate_tree"].as_str().unwrap_or_default() {
                 return Err(invalid(
@@ -145,10 +146,7 @@ impl ExternalContextPort for ExternalContextProvider {
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
-            review_id: target["review_id"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
+            review_id: target["review_id"].as_str().unwrap_or_default().to_string(),
             workflow_id: target["workflow_id"]
                 .as_str()
                 .unwrap_or_default()

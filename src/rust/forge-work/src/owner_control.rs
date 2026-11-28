@@ -21,8 +21,8 @@ use crate::retry_policy::{budget_compatible_repair_policy, effective_repair_poli
 use crate::reviewer_correction::{resume_intent_digest, ReviewerCorrectionProvider};
 use crate::work_error::WorkError;
 use crate::workflow::{
-    bool_of, denied, int_of, operator_actor, ready_for_recipe, text, uuid_of,
-    WorkflowStore, NATIVE_POLICY_DIGESTS,
+    bool_of, denied, int_of, operator_actor, ready_for_recipe, text, uuid_of, WorkflowStore,
+    NATIVE_POLICY_DIGESTS,
 };
 use crate::workflow_ingress::{parse_ts, BoundPreparationRetryAuthority};
 use crate::workflow_tx::WorkflowTx;
@@ -81,7 +81,8 @@ pub(crate) fn is_hex(value: &Value, len: usize) -> bool {
         .as_str()
         .map(|raw| {
             raw.len() == len
-                && raw.bytes()
+                && raw
+                    .bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         })
         .unwrap_or(false)
@@ -91,8 +92,7 @@ pub(crate) fn key_set(value: &Value, expected: &[&str]) -> bool {
     value
         .as_object()
         .map(|object| {
-            object.len() == expected.len()
-                && expected.iter().all(|key| object.contains_key(*key))
+            object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
         })
         .unwrap_or(false)
 }
@@ -120,13 +120,22 @@ pub(crate) fn verification_failure(review: &Value) -> Result<Value, WorkError> {
     let checks = &verification["checks"];
     let valid = key_set(
         failure,
-        &["version", "tested_candidate", "current_main", "build", "conflict_paths"],
+        &[
+            "version",
+            "tested_candidate",
+            "current_main",
+            "build",
+            "conflict_paths",
+        ],
     ) && is_int(&failure["version"])
         && failure["version"] == json!(1)
         && is_hex(&failure["tested_candidate"], 40)
         && is_hex(&failure["current_main"], 40)
         && failure["conflict_paths"] == json!([])
-        && key_set(build, &["provider", "job", "action_id", "queue_id", "build_number"])
+        && key_set(
+            build,
+            &["provider", "job", "action_id", "queue_id", "build_number"],
+        )
         && build["provider"].as_str() == Some("jenkins")
         && build["job"].as_str() == Some("forge-native-candidate")
         && build["action_id"]
@@ -145,7 +154,10 @@ pub(crate) fn verification_failure(review: &Value) -> Result<Value, WorkError> {
         && verification["cleanup_confirmed"] == json!(true)
         && verification["repair_requires_new_workspace"] == json!(true)
         && verification["integration_base"] == failure["current_main"]
-        && checks.as_array().map(|items| items.len() == 3).unwrap_or(false)
+        && checks
+            .as_array()
+            .map(|items| items.len() == 3)
+            .unwrap_or(false)
         && checks
             .as_array()
             .map(|items| {
@@ -176,8 +188,7 @@ pub(crate) fn verification_failure(review: &Value) -> Result<Value, WorkError> {
     if !valid
         || review["finish_token"].is_null()
         || receipt["status"].as_str() != Some("handoff")
-        || receipt["review_id"].as_str()
-            != Some(&uuid_of(review, "review_id").to_string())
+        || receipt["review_id"].as_str() != Some(&uuid_of(review, "review_id").to_string())
         || outcome["disposition"].as_str() != Some("handoff")
         || outcome["reason"] != review["reason"]
         || outcome["candidate_commit"] != review["candidate_commit"]
@@ -186,9 +197,7 @@ pub(crate) fn verification_failure(review: &Value) -> Result<Value, WorkError> {
     {
         return Err(not_reviewable());
     }
-    let findings = outcome["findings"]
-        .as_array()
-        .ok_or_else(not_reviewable)?;
+    let findings = outcome["findings"].as_array().ok_or_else(not_reviewable)?;
     let witnessed = findings.iter().any(|finding| {
         finding["diagnostic_code"].as_str() == Some("main_ancestor_required")
             && finding["check_id"].as_str() == Some("main-integration")
@@ -208,9 +217,7 @@ pub(crate) fn verification_failure(review: &Value) -> Result<Value, WorkError> {
 /// require_owner_capability: a ready adapter must not admit
 /// work against an older database whose separate
 /// merge-failure path can renew automatic repair allowance.
-pub(crate) fn require_owner_capability(
-    tx: &mut dyn WorkflowTx,
-) -> Result<(), WorkError> {
+pub(crate) fn require_owner_capability(tx: &mut dyn WorkflowTx) -> Result<(), WorkError> {
     let capability = tx
         .owner_capability()?
         .ok_or_else(|| WorkError::rejected(503, "unavailable"))?;
@@ -253,10 +260,7 @@ fn followup_replay(
 ) -> Result<Value, WorkError> {
     let intent = &action["intent"];
     let finish = &action["finish_receipt"];
-    if !intent.is_object()
-        || !intent["request"].is_object()
-        || !finish.is_object()
-    {
+    if !intent.is_object() || !intent["request"].is_object() || !finish.is_object() {
         return Err(reconcile_required());
     }
     if intent["request"] != *request {
@@ -285,8 +289,7 @@ fn followup_replay(
         && action["owner_id"].as_str() == Some(text(task, "owner_id"))
         && action["project_alias"] == task["project_alias"]
         && intent["policy"].as_str() == Some(OWNER_CODE_FOLLOWUP)
-        && intent["workflow_id"].as_str()
-            == Some(&uuid_of(task, "workflow_id").to_string())
+        && intent["workflow_id"].as_str() == Some(&uuid_of(task, "workflow_id").to_string())
         && action["source_key"].as_str()
             == Some(&followup_source_key(
                 uuid_of(task, "workflow_id"),
@@ -294,8 +297,7 @@ fn followup_replay(
             ))
         && finish["status"].as_str() == Some("owner_continued")
         && finish["receipt"] == expected
-        && sequence.map(|n| (2..=MAX_OWNER_SOURCE_ACTIONS as i64).contains(&n))
-            == Some(true)
+        && sequence.map(|n| (2..=MAX_OWNER_SOURCE_ACTIONS as i64).contains(&n)) == Some(true)
         && intent["automatic_allowance_renewed"] == json!(false)
         && intent["auto_repair"] == json!(false)
         && is_hex(&intent["recipe_digest"], 64);
@@ -362,29 +364,55 @@ fn owner_source_history(
             OWNER_CODE_FOLLOWUP
         };
         let required_intent = [
-            "policy_digest", "recipe_digest", "plan_decision_id", "plan_sha256",
-            "plan_revisions", "repair_policy", "source_attempt_id",
-            "source_result_sha256", "source_workspace_digest", "candidate_commit",
-            "gate_manifest_sha256", "verification_sha256", "peer_review_id",
-            "review_id", "target_sha256", "verdict_sha256", "reviewer_attempt_id",
-            "reviewer_result_sha256", "repair_rounds", "stagnant_rounds",
-            "review_round", "review_stagnant_rounds", "infrastructure_retries",
+            "policy_digest",
+            "recipe_digest",
+            "plan_decision_id",
+            "plan_sha256",
+            "plan_revisions",
+            "repair_policy",
+            "source_attempt_id",
+            "source_result_sha256",
+            "source_workspace_digest",
+            "candidate_commit",
+            "gate_manifest_sha256",
+            "verification_sha256",
+            "peer_review_id",
+            "review_id",
+            "target_sha256",
+            "verdict_sha256",
+            "reviewer_attempt_id",
+            "reviewer_result_sha256",
+            "repair_rounds",
+            "stagnant_rounds",
+            "review_round",
+            "review_stagnant_rounds",
+            "infrastructure_retries",
             "auto_repair",
         ];
         let ints_ok = [
-            "plan_revisions", "repair_rounds", "stagnant_rounds", "review_round",
-            "review_stagnant_rounds", "infrastructure_retries",
+            "plan_revisions",
+            "repair_rounds",
+            "stagnant_rounds",
+            "review_round",
+            "review_stagnant_rounds",
+            "infrastructure_retries",
         ]
         .iter()
         .all(|key| {
             is_int(&intent[key])
-                && intent[key].as_i64().map(|n| (0..(1i64 << 53)).contains(&n))
-                    == Some(true)
+                && intent[key].as_i64().map(|n| (0..(1i64 << 53)).contains(&n)) == Some(true)
         });
         let digests_ok = [
-            "policy_digest", "recipe_digest", "plan_sha256", "source_result_sha256",
-            "source_workspace_digest", "gate_manifest_sha256", "verification_sha256",
-            "target_sha256", "verdict_sha256", "reviewer_result_sha256",
+            "policy_digest",
+            "recipe_digest",
+            "plan_sha256",
+            "source_result_sha256",
+            "source_workspace_digest",
+            "gate_manifest_sha256",
+            "verification_sha256",
+            "target_sha256",
+            "verdict_sha256",
+            "reviewer_result_sha256",
         ]
         .iter()
         .all(|key| is_hex(&intent[key], 64));
@@ -399,8 +427,13 @@ fn owner_source_history(
         let request_valid = key_set(
             request,
             &[
-                "project_alias", "task_id", "expected_revision", "agent_profile",
-                "reconciliation_receipt_id", "note", "idempotency_key",
+                "project_alias",
+                "task_id",
+                "expected_revision",
+                "agent_profile",
+                "reconciliation_receipt_id",
+                "note",
+                "idempotency_key",
             ],
         ) && is_int(&request["expected_revision"])
             && request["expected_revision"]
@@ -460,10 +493,8 @@ fn owner_source_history(
             None => true,
             Some(previous) => {
                 intent["previous_owner_action_id"] == previous["action_id"]
-                    && intent["previous_peer_review_id"]
-                        == previous["intent"]["peer_review_id"]
-                    && intent["manual_source_sequence"].as_i64()
-                        == Some(index as i64 + 1)
+                    && intent["previous_peer_review_id"] == previous["intent"]["peer_review_id"]
+                    && intent["manual_source_sequence"].as_i64() == Some(index as i64 + 1)
                     && intent["automatic_allowance_renewed"] == json!(false)
                     && intent["auto_repair"] == json!(false)
                     && request["expected_revision"].as_i64().unwrap_or(0)
@@ -471,8 +502,7 @@ fn owner_source_history(
                             .as_i64()
                             .unwrap_or(0)
                             + 2
-                    && intent["source_attempt_id"]
-                        != previous["intent"]["source_attempt_id"]
+                    && intent["source_attempt_id"] != previous["intent"]["source_attempt_id"]
             }
         };
         if text(action, "status") != "completed"
@@ -536,8 +566,7 @@ fn owner_source_history(
             || source["workspace_digest"] != intent["source_workspace_digest"]
             || source["candidate_commit"] != intent["candidate_commit"]
             || source["gate_manifest_sha256"] != intent["gate_manifest_sha256"]
-            || sha256_canonical(&source["verification"])
-                != text(intent, "verification_sha256")
+            || sha256_canonical(&source["verification"]) != text(intent, "verification_sha256")
             || opt_uuid(&peer, "source_task_id") != opt_uuid(task, "id")
             || opt_uuid(&peer, "source_attempt_id") != opt_uuid(&source, "attempt_id")
             || opt_uuid(&peer, "source_review_id") != opt_uuid(&source, "review_id")
@@ -545,12 +574,10 @@ fn owner_source_history(
             || peer["source_result_sha256"] != source["parent_result_sha256"]
             || peer["target_sha256"] != intent["target_sha256"]
             || peer["verdict_sha256"] != intent["verdict_sha256"]
-            || peer["reviewer_attempt_id"].as_str()
-                != intent["reviewer_attempt_id"].as_str()
+            || peer["reviewer_attempt_id"].as_str() != intent["reviewer_attempt_id"].as_str()
             || peer["reviewer_result_sha256"] != intent["reviewer_result_sha256"]
             || !peer["verdict_json"].is_string()
-            || sha256_hex(text(&peer, "verdict_json").as_bytes())
-                != text(&peer, "verdict_sha256")
+            || sha256_hex(text(&peer, "verdict_json").as_bytes()) != text(&peer, "verdict_sha256")
         {
             return Err(reconcile_required());
         }
@@ -559,20 +586,14 @@ fn owner_source_history(
             text(&peer, "target_sha256"),
         )
         .map_err(|_| reconcile_required())?;
-        let verdict = parse_review_verdict(
-            text(&peer, "verdict_json").as_bytes(),
-            &target,
-        )
-        .map_err(|_| reconcile_required())?;
+        let verdict = parse_review_verdict(text(&peer, "verdict_json").as_bytes(), &target)
+            .map_err(|_| reconcile_required())?;
         if text(&verdict, "decision") != "revise"
             || verdict["findings"].as_array().map(|f| f.is_empty()) != Some(false)
         {
             return Err(reconcile_required());
         }
-        let source_artifact = tx.artifact(
-            uuid_of(task, "id"),
-            uuid_of(&source, "attempt_id"),
-        )?;
+        let source_artifact = tx.artifact(uuid_of(task, "id"), uuid_of(&source, "attempt_id"))?;
         let critic_artifact = tx.artifact(
             uuid_of(&peer, "reviewer_task_id"),
             uuid_of(&peer, "reviewer_attempt_id"),
@@ -675,10 +696,7 @@ impl OwnerControlProvider {
     /// current main. None when the decision is not
     /// retry_infrastructure, the task is not a workflow task,
     /// or no owner continuation exists.
-    pub fn review_decide(
-        &self,
-        command: &ReviewDecideRequest,
-    ) -> Result<Option<Value>, WorkError> {
+    pub fn review_decide(&self, command: &ReviewDecideRequest) -> Result<Option<Value>, WorkError> {
         if command.decision != ReviewDecision::RetryInfrastructure {
             return Ok(None);
         }
@@ -737,26 +755,28 @@ impl OwnerControlProvider {
                     != Some(&command.review_id.to_string())
                 {
                     return crate::owner_reverification::recover(
-                        flow, tx, &task, &owner_action, command, &request, &digest,
+                        flow,
+                        tx,
+                        &task,
+                        &owner_action,
+                        command,
+                        &request,
+                        &digest,
                     );
                 }
                 if prior_intent["request"] != request {
                     return Err(WorkError::rejected(409, "idempotency_conflict"));
                 }
                 let saved = prior_finish["receipt"].clone();
-                let control = tx.control_receipt(
-                    project,
-                    command.task_id,
-                    &command.idempotency_key,
-                )?;
+                let control =
+                    tx.control_receipt(project, command.task_id, &command.idempotency_key)?;
                 let control_ok = control
                     .as_ref()
                     .map(|control| {
                         control["action"].as_str() == Some("review_decide")
                             && control["intent_digest"].as_str() == Some(digest.as_str())
                             && control["receipt_json"] == saved
-                            && control["base_revision"].as_i64()
-                                == Some(command.expected_revision)
+                            && control["base_revision"].as_i64() == Some(command.expected_revision)
                             && control["result_revision"].as_i64()
                                 == Some(command.expected_revision + 1)
                     })
@@ -765,8 +785,7 @@ impl OwnerControlProvider {
                     || prior["owner_id"].as_str() != Some(flow.config().owner.as_str())
                     || prior["project_alias"].as_str() != Some(project)
                     || prior_intent["policy"].as_str() != Some(OWNER_VERIFY_RETRY)
-                    || prior_finish["status"].as_str()
-                        != Some("owner_verification_queued")
+                    || prior_finish["status"].as_str() != Some("owner_verification_queued")
                     || !control_ok
                 {
                     return Err(reconcile_required());
@@ -790,8 +809,13 @@ impl OwnerControlProvider {
             if !key_set(
                 owner_request,
                 &[
-                    "project_alias", "task_id", "expected_revision", "agent_profile",
-                    "reconciliation_receipt_id", "note", "idempotency_key",
+                    "project_alias",
+                    "task_id",
+                    "expected_revision",
+                    "agent_profile",
+                    "reconciliation_receipt_id",
+                    "note",
+                    "idempotency_key",
                 ],
             ) || !is_int(&owner_request["expected_revision"])
             {
@@ -802,16 +826,13 @@ impl OwnerControlProvider {
                 || owner_action["project_alias"].as_str() != Some(project)
                 || text(&owner_action, "status") != "completed"
                 || owner_intent["policy"].as_str() != Some(OWNER_CODE_RESUME)
-                || owner_intent["workflow_id"].as_str()
-                    != Some(&workflow_id.to_string())
-                || owner_request["task_id"].as_str()
-                    != Some(&command.task_id.to_string())
+                || owner_intent["workflow_id"].as_str() != Some(&workflow_id.to_string())
+                || owner_request["task_id"].as_str() != Some(&command.task_id.to_string())
                 || owner_request["project_alias"].as_str() != Some(project)
                 || owner_finish["status"].as_str() != Some("owner_continued")
                 || owner_receipt["status"].as_str() != Some("queued")
                 || owner_receipt["revision"].as_i64() != Some(owner_revision + 1)
-                || owner_receipt["task_id"].as_str()
-                    != Some(&command.task_id.to_string())
+                || owner_receipt["task_id"].as_str() != Some(&command.task_id.to_string())
                 || owner_receipt["project_alias"].as_str() != Some(project)
             {
                 return Err(not_reviewable());
@@ -834,22 +855,18 @@ impl OwnerControlProvider {
                 .map(|control| {
                     control["action"].as_str() == Some("resume")
                         && control["receipt_json"] == *owner_receipt
-                        && control["intent_digest"].as_str()
-                            == Some(owner_digest.as_str())
+                        && control["intent_digest"].as_str() == Some(owner_digest.as_str())
                 })
                 .unwrap_or(false);
             if !owner_control_ok {
                 return Err(not_reviewable());
             }
-            let w = tx
-                .workflow(workflow_id, true)?
-                .ok_or_else(not_reviewable)?;
+            let w = tx.workflow(workflow_id, true)?.ok_or_else(not_reviewable)?;
             if bool_of(&w, "enabled")
                 || text(&w, "phase") != "escalated"
                 || text(&w, "escalation_reason") != "no_progress"
                 || int_of(&task, "revision") != command.expected_revision
-                || int_of(&task, "revision")
-                    != owner_receipt["revision"].as_i64().unwrap_or(0) + 2
+                || int_of(&task, "revision") != owner_receipt["revision"].as_i64().unwrap_or(0) + 2
                 || text(&task, "status") != "awaiting_review"
                 || text(&task, "mode") != "implement"
                 || bool_of(&task, "auto_repair")
@@ -867,8 +884,7 @@ impl OwnerControlProvider {
                 || task["pinned_recipe"] != recipe.to_dict()
                 || task["recipe_digest"].as_str() != Some(recipe.digest.as_str())
                 || owner_intent["policy_digest"] != w["policy_digest"]
-                || owner_intent["recipe_digest"].as_str()
-                    != Some(recipe.digest.as_str())
+                || owner_intent["recipe_digest"].as_str() != Some(recipe.digest.as_str())
                 || owner_intent["plan_revisions"] != w["plan_revisions"]
             {
                 return Err(mismatch());
@@ -876,20 +892,16 @@ impl OwnerControlProvider {
             let q = tx
                 .latest_review(project, command.task_id)?
                 .ok_or_else(not_reviewable)?;
-            let effective = effective_repair_policy(
-                &p["repair_policy"],
-                &flow.config().repair_policy,
-            )
-            .map_err(WorkError::store)?;
+            let effective =
+                effective_repair_policy(&p["repair_policy"], &flow.config().repair_policy)
+                    .map_err(WorkError::store)?;
             if uuid_of(&q, "review_id") != command.review_id
                 || text(&q, "phase") != "local"
                 || text(&q, "status") != "handoff"
                 || text(&q, "reason") != "no_progress"
                 || opt_uuid(&q, "attempt_id") != opt_uuid(&task, "latest_attempt_id")
-                || q["attempt_id"].as_str()
-                    == owner_intent["source_attempt_id"].as_str()
-                || q["previous_review_id"].as_str()
-                    != owner_intent["review_id"].as_str()
+                || q["attempt_id"].as_str() == owner_intent["source_attempt_id"].as_str()
+                || q["previous_review_id"].as_str() != owner_intent["review_id"].as_str()
                 || int_of(&q, "source_revision") != int_of(&task, "revision")
                 || q["base_revision"] != task["base_revision"]
                 || q["plan_decision_id"] != task["plan_decision_id"]
@@ -898,7 +910,9 @@ impl OwnerControlProvider {
                 || q["gate_manifest_sha256"].is_null()
                 || !q["repair_task_id"].is_null()
                 || int_of(&q, "infrastructure_retries")
-                    >= effective["max_infrastructure_retries"].as_i64().unwrap_or(0)
+                    >= effective["max_infrastructure_retries"]
+                        .as_i64()
+                        .unwrap_or(0)
             {
                 return Err(not_reviewable());
             }
@@ -918,7 +932,9 @@ impl OwnerControlProvider {
                 || attempt["published_at"].is_null()
                 || attempt["result_sha256"] != q["parent_result_sha256"]
                 || started
-                    .map(|start| start <= parse_ts(text(&owner_action, "created_at")).unwrap_or(i128::MIN))
+                    .map(|start| {
+                        start <= parse_ts(text(&owner_action, "created_at")).unwrap_or(i128::MIN)
+                    })
                     .unwrap_or(true)
                 || attempt["pinned_recipe"] != recipe.to_dict()
                 || attempt["recipe_digest"].as_str() != Some(recipe.digest.as_str())
@@ -934,10 +950,7 @@ impl OwnerControlProvider {
             {
                 return Err(reconcile_required());
             }
-            let artifact = tx.artifact(
-                command.task_id,
-                uuid_of(&attempt, "attempt_id"),
-            )?;
+            let artifact = tx.artifact(command.task_id, uuid_of(&attempt, "attempt_id"))?;
             if artifact["result_sha256"] != q["parent_result_sha256"] {
                 return Err(mismatch());
             }
@@ -949,12 +962,9 @@ impl OwnerControlProvider {
             } else {
                 uuid_of(&task, "repair_root_task_id")
             };
-            let budget = tx
-                .budget(project, root)?
-                .ok_or_else(mismatch)?;
+            let budget = tx.budget(project, root)?.ok_or_else(mismatch)?;
             if !budget_compatible_repair_policy(&p["repair_policy"], &budget["policy"])
-                || int_of(&budget, "repair_rounds")
-                    != int_of(owner_intent, "repair_rounds")
+                || int_of(&budget, "repair_rounds") != int_of(owner_intent, "repair_rounds")
                 || int_of(&q, "round") != int_of(&budget, "repair_rounds")
                 || int_of(&q, "stagnant_rounds") != int_of(&budget, "stagnant_rounds")
                 || int_of(&budget, "stagnant_rounds")
@@ -978,12 +988,13 @@ impl OwnerControlProvider {
                 &json!({"enabled": true, "phase": "checks", "escalation_reason": ""}),
             )?;
             flow.grant(tx, &w, text(&p, "reviewer_profile"), "review")?;
-            let digests: Vec<String> =
-                NATIVE_POLICY_DIGESTS.iter().map(|d| d.to_string()).collect();
+            let digests: Vec<String> = NATIVE_POLICY_DIGESTS
+                .iter()
+                .map(|d| d.to_string())
+                .collect();
             let ready = tx.readiness(Some(&digests))?;
-            let reviewer_recipe =
-                PinnedRecipe::from_snapshot(&p, "reviewer_review", flow.native())
-                    .map_err(WorkError::store)?;
+            let reviewer_recipe = PinnedRecipe::from_snapshot(&p, "reviewer_review", flow.native())
+                .map_err(WorkError::store)?;
             if !ready_for_recipe(
                 &ready,
                 project,
@@ -1008,14 +1019,12 @@ impl OwnerControlProvider {
             // Only this new pending row changes: old failed
             // candidate, seed, build, findings and finish
             // receipt remain immutable evidence.
-            let new_review_id = opt_uuid(&receipt, "review_id")
-                .ok_or_else(reconcile_required)?;
+            let new_review_id = opt_uuid(&receipt, "review_id").ok_or_else(reconcile_required)?;
             if tx.clear_pending_review(new_review_id, uuid_of(&q, "review_id"))? != 1 {
                 return Err(reconcile_required());
             }
             let deadline_recoveries = tx.deadline_retry_count(workflow_id)?;
-            let verification_retries =
-                tx.verification_retries_sum(workflow_id, new_review_id)?;
+            let verification_retries = tx.verification_retries_sum(workflow_id, new_review_id)?;
             let intent = json!({
                 "policy": OWNER_VERIFY_RETRY,
                 "request": request,
@@ -1049,7 +1058,11 @@ impl OwnerControlProvider {
             }))?;
             Ok(receipt)
         })?;
-        Ok(if outcome.is_null() { None } else { Some(outcome) })
+        Ok(if outcome.is_null() {
+            None
+        } else {
+            Some(outcome)
+        })
     }
 }
 
@@ -1725,7 +1738,11 @@ impl OwnerControlProvider {
             tx.notify_jobs()?;
             Ok(receipt)
         })?;
-        Ok(if outcome.is_null() { None } else { Some(outcome) })
+        Ok(if outcome.is_null() {
+            None
+        } else {
+            Some(outcome)
+        })
     }
 }
 

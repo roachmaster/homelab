@@ -27,6 +27,8 @@ use crate::execution_policy::{
 };
 use crate::pinned_recipe::PinnedRecipe;
 use crate::quota_diagnostics::parse_quota_summary;
+use crate::work_error::WorkError;
+use crate::work_requests::ResumeRequest;
 use crate::workflow::{
     coordinator_actor, denied, int_of, mismatch, operator_actor, present, ready_for_recipe, text,
     uuid_of, ExecutionPolicyHook, WorkflowStore, NATIVE_POLICY_DIGESTS,
@@ -34,8 +36,6 @@ use crate::workflow::{
 use crate::workflow_ingress::{parse_ts, workflow_in_project};
 use crate::workflow_policy::WorkflowCatalog;
 use crate::workflow_tx::{BusyCheck, WorkflowTx, WorkflowTxFactory};
-use crate::work_error::WorkError;
-use crate::work_requests::ResumeRequest;
 
 fn not_reviewable() -> WorkError {
     WorkError::rejected(409, "not_reviewable")
@@ -344,8 +344,7 @@ pub(crate) fn model_snapshot_from(
         && intent["original_snapshot_sha256"] == workflow["policy_digest"]
         && intent["effective_snapshot"] == expected
         && source_attempt.is_some()
-        && text(row, "source_key")
-            == format!("{MODEL_ROUTE_PREFIX}{}", source_attempt.unwrap())
+        && text(row, "source_key") == format!("{MODEL_ROUTE_PREFIX}{}", source_attempt.unwrap())
         && finish["status"].as_str() == Some("provider_model_routed")
         && finish["intent_sha256"].as_str() == Some(&sha256_canonical(intent))
         && finish["receipt"]["status"].as_str() == Some("queued")
@@ -448,11 +447,7 @@ impl ExecutionPolicyHook for ExecutionPolicyProvider {
             if text(row, "model") == profile.model {
                 swallow(flow.recover_model_route(&command, &PublishedQuotaProof))?;
             } else if text(row, "model") == model {
-                swallow(flow.wait_or_resume_model_route(
-                    &command,
-                    false,
-                    &*self.author_handoff,
-                ))?;
+                swallow(flow.wait_or_resume_model_route(&command, false, &*self.author_handoff))?;
             }
         }
         self.author_handoff.run_once(flow)
@@ -511,11 +506,7 @@ impl WorkflowStore {
         )
     }
 
-    fn recipe(
-        &self,
-        snapshot: &Value,
-        key: &str,
-    ) -> Result<PinnedRecipe, WorkError> {
+    fn recipe(&self, snapshot: &Value, key: &str) -> Result<PinnedRecipe, WorkError> {
         PinnedRecipe::from_snapshot(snapshot, key, self.native()).map_err(WorkError::store)
     }
 
@@ -1594,8 +1585,7 @@ mod tests {
         );
         // A fully bound route yields the changed snapshot.
         let expected =
-            changed_snapshot(&workflow["snapshot"], &catalog(), "gemini-backup", &native)
-                .unwrap();
+            changed_snapshot(&workflow["snapshot"], &catalog(), "gemini-backup", &native).unwrap();
         let attempt_id = Uuid::new_v4();
         let task_id = Uuid::new_v4();
         let intent = json!({

@@ -90,7 +90,9 @@ impl GitSourceConfig {
         if bytes == 0
             || bytes > 1024
             || revision.starts_with('-')
-            || revision.chars().any(|ch| (ch as u32) < 32 || (ch as u32) == 127)
+            || revision
+                .chars()
+                .any(|ch| (ch as u32) < 32 || (ch as u32) == 127)
         {
             return Err("Invalid committed artifact scope".to_string());
         }
@@ -232,16 +234,16 @@ impl Budget {
 
 fn is_object_id(text: &str) -> bool {
     (text.len() == 40 || text.len() == 64)
-        && text.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn is_size_literal(text: &str) -> bool {
     if text == "0" {
         return true;
     }
-    !text.is_empty()
-        && !text.starts_with('0')
-        && text.bytes().all(|byte| byte.is_ascii_digit())
+    !text.is_empty() && !text.starts_with('0') && text.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 pub struct GitArtifactSource {
@@ -262,9 +264,11 @@ impl GitArtifactSource {
         // Resolve once: a moving ref is provenance, not a mutable
         // read scope.
         let revision_tree = format!("{}^{{tree}}", config.revision);
-        let tree_raw = run(&budget, &["rev-parse", "--verify", "--end-of-options", &revision_tree])?;
-        let tree_text = std::str::from_utf8(&tree_raw)
-            .map_err(|error| error.to_string())?;
+        let tree_raw = run(
+            &budget,
+            &["rev-parse", "--verify", "--end-of-options", &revision_tree],
+        )?;
+        let tree_text = std::str::from_utf8(&tree_raw).map_err(|error| error.to_string())?;
         if !tree_text.is_ascii() {
             return Err("Invalid source tree object".to_string());
         }
@@ -272,7 +276,10 @@ impl GitArtifactSource {
         if !is_object_id(tree) {
             return Err("Invalid source tree object".to_string());
         }
-        let raw = run(&budget, &["ls-tree", "-r", "--full-tree", "-z", "--long", tree])?;
+        let raw = run(
+            &budget,
+            &["ls-tree", "-r", "--full-tree", "-z", "--long", tree],
+        )?;
         if raw.len() > config.limits.max_files * (MAX_PATH_BYTES + 128)
             || (!raw.is_empty() && !raw.ends_with(b"\0"))
         {
@@ -316,9 +323,7 @@ impl GitArtifactSource {
         // content.
         let structural: Vec<ArtifactEntry> = records
             .iter()
-            .map(|(path, mode, _blob, size)| {
-                ArtifactEntry::new(path, mode, *size, &"0".repeat(64))
-            })
+            .map(|(path, mode, _blob, size)| ArtifactEntry::new(path, mode, *size, &"0".repeat(64)))
             .collect::<Result<_, _>>()?;
         ArtifactManifest::new(structural)?;
         let mut entries = Vec::new();
@@ -409,17 +414,13 @@ impl DirectoryArtifactSource {
             if info.is_dir() {
                 let reopened = std::fs::metadata(&full).map_err(to_string)?;
                 if stable(&reopened) != stable(&info) {
-                    return Err(
-                        "Artifact directory changed during acquisition".to_string()
-                    );
+                    return Err("Artifact directory changed during acquisition".to_string());
                 }
                 self.walk(&full, &format!("{path}/"), budget, entries, visited)?;
                 continue;
             }
             let mode_bits = info.mode();
-            if !info.is_file()
-                || mode_bits & 0o7000 != 0
-            {
+            if !info.is_file() || mode_bits & 0o7000 != 0 {
                 return Err("Artifact special file mode is unsupported".to_string());
             }
             budget.add(info.size() as i64)?;
@@ -448,7 +449,11 @@ impl DirectoryArtifactSource {
             if count != info.size() as i64 || stable(&after) != stable(&info) {
                 return Err("Artifact file changed during acquisition".to_string());
             }
-            let mode = if mode_bits & 0o100 != 0 { "100755" } else { "100644" };
+            let mode = if mode_bits & 0o100 != 0 {
+                "100755"
+            } else {
+                "100644"
+            };
             entries.push(ArtifactEntry::new(
                 &path,
                 mode,
@@ -614,11 +619,7 @@ mod tests {
     #[test]
     fn memory_source_hashes_and_rejects_conflicts() {
         let config = MemorySourceConfig::new(
-            vec![(
-                "a.txt".to_string(),
-                "100644".to_string(),
-                b"hello".to_vec(),
-            )],
+            vec![("a.txt".to_string(), "100644".to_string(), b"hello".to_vec())],
             SourceLimits::default(),
         )
         .unwrap();
@@ -640,16 +641,13 @@ mod tests {
 
     #[test]
     fn directory_source_reads_a_tree() {
-        let root = std::env::temp_dir().join(format!(
-            "forge-artifact-source-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("forge-artifact-source-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("sub")).unwrap();
         std::fs::write(root.join("a.txt"), b"hello").unwrap();
         std::fs::write(root.join("sub/b.txt"), b"world!").unwrap();
-        let config = DirectorySourceConfig::new(root.clone(), SourceLimits::default())
-            .unwrap();
+        let config = DirectorySourceConfig::new(root.clone(), SourceLimits::default()).unwrap();
         let manifest = DirectoryArtifactSource { config }.acquire().unwrap();
         let paths: Vec<&str> = manifest
             .entries

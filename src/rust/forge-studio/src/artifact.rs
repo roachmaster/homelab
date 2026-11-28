@@ -17,7 +17,8 @@ pub const MAX_ARCHIVE: usize = MAX_ARTIFACT + 1024 * 1024;
 pub const BUILD_SECONDS: u64 = 20;
 pub const LINK_SECONDS: i64 = 900;
 
-pub const CSP: &str = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; \
+pub const CSP: &str =
+    "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; \
 img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; \
 worker-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'";
 
@@ -192,20 +193,14 @@ fn parse_tar(archive: &[u8]) -> Result<Vec<TarEntry>, String> {
             break;
         }
         let name_field = &header[0..100];
-        let name_end = name_field
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(100);
+        let name_end = name_field.iter().position(|byte| *byte == 0).unwrap_or(100);
         let mut name = String::from_utf8_lossy(&name_field[..name_end]).into_owned();
         let size = parse_octal(&header[124..136]) as usize;
         let typeflag = header[156];
         // ustar prefix
         if &header[257..262] == b"ustar" {
             let prefix = &header[345..500];
-            let prefix_end = prefix
-                .iter()
-                .position(|byte| *byte == 0)
-                .unwrap_or(155);
+            let prefix_end = prefix.iter().position(|byte| *byte == 0).unwrap_or(155);
             if prefix_end > 0 {
                 name = format!(
                     "{}/{}",
@@ -226,7 +221,9 @@ fn parse_tar(archive: &[u8]) -> Result<Vec<TarEntry>, String> {
                 let mut rest = text.as_ref();
                 while !rest.is_empty() {
                     let Some(space) = rest.find(' ') else { break };
-                    let Ok(length) = rest[..space].parse::<usize>() else { break };
+                    let Ok(length) = rest[..space].parse::<usize>() else {
+                        break;
+                    };
                     if length == 0 || length > rest.len() {
                         break;
                     }
@@ -349,28 +346,19 @@ fn zip_read(content: &[u8], wanted: &str) -> Option<Vec<u8>> {
     }
     let eocd = eocd?;
     let count = u16::from_le_bytes([content[eocd + 10], content[eocd + 11]]) as usize;
-    let mut offset =
-        u32::from_le_bytes(content[eocd + 16..eocd + 20].try_into().ok()?) as usize;
+    let mut offset = u32::from_le_bytes(content[eocd + 16..eocd + 20].try_into().ok()?) as usize;
     for _ in 0..count {
-        if offset + 46 > content.len()
-            || content[offset..offset + 4] != [0x50, 0x4b, 0x01, 0x02]
-        {
+        if offset + 46 > content.len() || content[offset..offset + 4] != [0x50, 0x4b, 0x01, 0x02] {
             return None;
         }
         let method = u16::from_le_bytes([content[offset + 10], content[offset + 11]]);
         let size = u32::from_le_bytes(content[offset + 20..offset + 24].try_into().ok()?) as usize;
-        let name_len =
-            u16::from_le_bytes([content[offset + 28], content[offset + 29]]) as usize;
-        let extra_len =
-            u16::from_le_bytes([content[offset + 30], content[offset + 31]]) as usize;
-        let comment_len =
-            u16::from_le_bytes([content[offset + 32], content[offset + 33]]) as usize;
-        let local =
-            u32::from_le_bytes(content[offset + 42..offset + 46].try_into().ok()?) as usize;
-        let name = String::from_utf8_lossy(
-            &content[offset + 46..offset + 46 + name_len],
-        )
-        .into_owned();
+        let name_len = u16::from_le_bytes([content[offset + 28], content[offset + 29]]) as usize;
+        let extra_len = u16::from_le_bytes([content[offset + 30], content[offset + 31]]) as usize;
+        let comment_len = u16::from_le_bytes([content[offset + 32], content[offset + 33]]) as usize;
+        let local = u32::from_le_bytes(content[offset + 42..offset + 46].try_into().ok()?) as usize;
+        let name =
+            String::from_utf8_lossy(&content[offset + 46..offset + 46 + name_len]).into_owned();
         if name == wanted {
             if method != 0 || local + 30 > content.len() {
                 return None;
@@ -463,14 +451,17 @@ pub fn publish(directory: &Path, content: &[u8]) -> Result<(String, i64), String
         }
     }
     let _ = std::fs::remove_file(&temporary);
-    let dir_file =
-        std::fs::File::open(directory).map_err(|error| error.to_string())?;
+    let dir_file = std::fs::File::open(directory).map_err(|error| error.to_string())?;
     dir_file.sync_all().map_err(|error| error.to_string())?;
     Ok((digest, content.len() as i64))
 }
 
 pub fn read_artifact(directory: &Path, digest: &str) -> Option<Vec<u8>> {
-    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) {
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
         return None;
     }
     let mut options = std::fs::OpenOptions::new();
@@ -604,7 +595,12 @@ mod tests {
         assert!(valid_signature(secret, &digest, &token, Some(1_000)));
         assert!(valid_signature(secret, &digest, &token, Some(1_900)));
         assert!(!valid_signature(secret, &digest, &token, Some(1_901)));
-        assert!(!valid_signature(b"other-secret", &digest, &token, Some(1_000)));
+        assert!(!valid_signature(
+            b"other-secret",
+            &digest,
+            &token,
+            Some(1_000)
+        ));
         assert!(!valid_signature(secret, &digest, "bad", Some(1_000)));
     }
 }

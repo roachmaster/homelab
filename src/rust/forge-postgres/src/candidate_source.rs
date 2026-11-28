@@ -160,7 +160,10 @@ fn fetch_and_verify(
         ],
     )?;
     verify_source(git, source, head, error)?;
-    let resolved = git.git(repository, &["rev-parse", "--verify", &format!("{head}^{{commit}}")])?;
+    let resolved = git.git(
+        repository,
+        &["rev-parse", "--verify", &format!("{head}^{{commit}}")],
+    )?;
     if resolved.trim() != head {
         return Err(error());
     }
@@ -351,8 +354,7 @@ mod tests {
         let mut lease = lease();
         assert!(!linked_candidate_input(&lease, None));
         lease.parent_task_id = Some("44444444-4444-4444-4444-444444444444".to_string());
-        lease.repair_source_review_id =
-            Some("55555555-5555-5555-5555-555555555555".to_string());
+        lease.repair_source_review_id = Some("55555555-5555-5555-5555-555555555555".to_string());
         lease.feedback_id = Some("66666666-6666-6666-6666-666666666666".to_string());
         lease.feedback_sha256 = Some("b".repeat(64));
         lease.repair_candidate_commit = Some("a".repeat(40));
@@ -365,10 +367,7 @@ mod tests {
 
     #[test]
     fn manifest_read_enforces_the_guarded_discipline() {
-        let dir = std::env::temp_dir().join(format!(
-            "forge-candidate-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("forge-candidate-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("review.json");
         std::fs::write(&path, b"{}").unwrap();

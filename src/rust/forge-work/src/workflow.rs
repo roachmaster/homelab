@@ -24,8 +24,8 @@ use uuid::Uuid;
 use crate::canonical::{canonical_json, loose_json, sha256_hex};
 use crate::decision_requests::{PlanDecideRequest, ReviewDecideRequest};
 use crate::peer_review::{
-    parse_review_target, validate_live_review_verdict, validate_review_target,
-    IncompleteApproval, PeerReviewError,
+    parse_review_target, validate_live_review_verdict, validate_review_target, IncompleteApproval,
+    PeerReviewError,
 };
 use crate::pinned_recipe::PinnedRecipe;
 use crate::retry_events::RetryScope;
@@ -326,11 +326,7 @@ pub trait ReviewerCorrectionHook {
 /// corrects transcription-defect verdicts.
 pub trait SupersedingHook {
     fn recover(&self) -> Result<(), WorkError>;
-    fn root_review_id(
-        &self,
-        tx: &mut dyn WorkflowTx,
-        review: &Value,
-    ) -> Result<Uuid, WorkError>;
+    fn root_review_id(&self, tx: &mut dyn WorkflowTx, review: &Value) -> Result<Uuid, WorkError>;
     fn correct(
         &self,
         ctx: CorrectionContext,
@@ -427,9 +423,7 @@ impl BoundDelegatedAuthority {
             return Err(mismatch());
         }
         let workflow_id = uuid_of(&self.workflow, "workflow_id");
-        let state = tx
-            .workflow_state(workflow_id)?
-            .ok_or_else(denied)?;
+        let state = tx.workflow_state(workflow_id)?.ok_or_else(denied)?;
         if !state.0 || ["cancelled", "completed", "escalated"].contains(&state.1.as_str()) {
             return Err(denied());
         }
@@ -457,7 +451,8 @@ pub struct WorkflowStore {
     catalog: Box<dyn WorkflowCatalog>,
     tx_factory: Box<dyn WorkflowTxFactory>,
     decisions: Box<dyn WorkflowDecisionPort>,
-    native_policy_matches: Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+    native_policy_matches:
+        Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
     /// Mirrors Python's `self.retry_events is not None`: the
     /// transaction itself implements RetryEvents; this flag says
     /// the durable retry-event accounting is engaged (vs. the
@@ -478,7 +473,9 @@ impl WorkflowStore {
         catalog: Box<dyn WorkflowCatalog>,
         tx_factory: Box<dyn WorkflowTxFactory>,
         decisions: Box<dyn WorkflowDecisionPort>,
-        native_policy_matches: Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+        native_policy_matches: Box<
+            dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync,
+        >,
         retry_events_enabled: bool,
     ) -> WorkflowStore {
         WorkflowStore {
@@ -656,8 +653,7 @@ impl WorkflowStore {
     ) -> Result<i64, WorkError> {
         let policy = self.current_policy(tx, workflow)?;
         let allowance = self.allowance_snapshot(tx, workflow, &policy)?;
-        effective_limit(&workflow["snapshot"], key, Some(&allowance))
-            .map_err(WorkError::store)
+        effective_limit(&workflow["snapshot"], key, Some(&allowance)).map_err(WorkError::store)
     }
 
     /// _grant.
@@ -785,11 +781,7 @@ impl WorkflowStore {
         let reason = truncate_chars(reason, 2048);
         let workflow_id = uuid_of(workflow, "workflow_id");
         let project = text(workflow, "project_alias");
-        let root = tx.task_in_project(
-            project,
-            uuid_of(workflow, "root_task_id"),
-            true,
-        )?;
+        let root = tx.task_in_project(project, uuid_of(workflow, "root_task_id"), true)?;
         let current = tx.workflow(workflow_id, true)?;
         let current_phase = current
             .as_ref()
@@ -873,92 +865,98 @@ impl WorkflowStore {
         if self.retry_events_enabled {
             return Ok(());
         }
-        if ["max_rounds", "max_stagnant_rounds", "max_infrastructure_retries"]
-            .iter()
-            .any(|key| self.config.repair_policy[key].as_i64() != Some(AGENT_RETRY_LIMIT))
+        if [
+            "max_rounds",
+            "max_stagnant_rounds",
+            "max_infrastructure_retries",
+        ]
+        .iter()
+        .any(|key| self.config.repair_policy[key].as_i64() != Some(AGENT_RETRY_LIMIT))
         {
             return Ok(());
         }
         let repair_policy = self.config.repair_policy.clone();
-        self.tx_factory.run(false, &mut |tx| {
-            if !tx.amend_policy_available()? {
-                return Ok(Value::Null);
-            }
-            let position = self.retry_allowance_position.borrow().clone();
-            let rows = tx.allowance_workflows(position.as_ref().map(|(at, id)| (at.as_str(), *id)))?;
-            if rows.len() == 64 {
-                let last = rows.last().cloned().unwrap_or(Value::Null);
-                *self.retry_allowance_position.borrow_mut() = Some((
-                    last["created_at"].as_str().unwrap_or_default().to_string(),
-                    uuid_of(&last, "workflow_id"),
-                ));
-            } else {
-                *self.retry_allowance_position.borrow_mut() = None;
-            }
-            for workflow in &rows {
-                let policy = match self.current_policy(tx, workflow) {
-                    Ok(policy) => policy,
-                    Err(WorkError::Rejected { .. }) => continue,
-                    Err(error) => return Err(error),
-                };
-                if policy.max_plan_revisions != AGENT_RETRY_LIMIT {
-                    continue;
+        self.tx_factory
+            .run(false, &mut |tx| {
+                if !tx.amend_policy_available()? {
+                    return Ok(Value::Null);
                 }
-                let enabled = [&policy.author_profile, &policy.reviewer_profile]
-                    .iter()
-                    .all(|alias| {
-                        self.config
-                            .profile(alias)
-                            .map(|profile| profile.execution_enabled)
-                            .unwrap_or(false)
-                    });
-                if !enabled {
-                    continue;
+                let position = self.retry_allowance_position.borrow().clone();
+                let rows =
+                    tx.allowance_workflows(position.as_ref().map(|(at, id)| (at.as_str(), *id)))?;
+                if rows.len() == 64 {
+                    let last = rows.last().cloned().unwrap_or(Value::Null);
+                    *self.retry_allowance_position.borrow_mut() = Some((
+                        last["created_at"].as_str().unwrap_or_default().to_string(),
+                        uuid_of(&last, "workflow_id"),
+                    ));
+                } else {
+                    *self.retry_allowance_position.borrow_mut() = None;
                 }
-                tx.project_lock(text(workflow, "project_alias"))?;
-                tx.amend_retry_allowance(
-                    text(workflow, "project_alias"),
-                    uuid_of(workflow, "root_task_id"),
-                    &repair_policy,
-                )?;
-            }
-            let position = self.manual_allowance_position.borrow().clone();
-            let manual = tx.allowance_manual_tasks(
-                &repair_policy,
-                position.as_ref().map(|(at, id)| (at.as_str(), *id)),
-            )?;
-            if manual.len() == 64 {
-                let last = manual.last().cloned().unwrap_or(Value::Null);
-                *self.manual_allowance_position.borrow_mut() = Some((
-                    last["created_at"].as_str().unwrap_or_default().to_string(),
-                    uuid_of(&last, "id"),
-                ));
-            } else {
-                *self.manual_allowance_position.borrow_mut() = None;
-            }
-            for row in &manual {
-                let profile = self.config.profile(text(row, "agent_profile"));
-                let allowed = profile
-                    .map(|profile| profile.execution_enabled)
-                    .unwrap_or(false)
-                    && self
-                        .config
-                        .allowed_modes
+                for workflow in &rows {
+                    let policy = match self.current_policy(tx, workflow) {
+                        Ok(policy) => policy,
+                        Err(WorkError::Rejected { .. }) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    if policy.max_plan_revisions != AGENT_RETRY_LIMIT {
+                        continue;
+                    }
+                    let enabled = [&policy.author_profile, &policy.reviewer_profile]
                         .iter()
-                        .any(|mode| mode == text(row, "mode"));
-                if !allowed {
-                    continue;
+                        .all(|alias| {
+                            self.config
+                                .profile(alias)
+                                .map(|profile| profile.execution_enabled)
+                                .unwrap_or(false)
+                        });
+                    if !enabled {
+                        continue;
+                    }
+                    tx.project_lock(text(workflow, "project_alias"))?;
+                    tx.amend_retry_allowance(
+                        text(workflow, "project_alias"),
+                        uuid_of(workflow, "root_task_id"),
+                        &repair_policy,
+                    )?;
                 }
-                tx.project_lock(text(row, "project_alias"))?;
-                tx.amend_retry_allowance(
-                    text(row, "project_alias"),
-                    uuid_of(row, "id"),
+                let position = self.manual_allowance_position.borrow().clone();
+                let manual = tx.allowance_manual_tasks(
                     &repair_policy,
+                    position.as_ref().map(|(at, id)| (at.as_str(), *id)),
                 )?;
-            }
-            Ok(Value::Null)
-        })
-        .map(|_| ())
+                if manual.len() == 64 {
+                    let last = manual.last().cloned().unwrap_or(Value::Null);
+                    *self.manual_allowance_position.borrow_mut() = Some((
+                        last["created_at"].as_str().unwrap_or_default().to_string(),
+                        uuid_of(&last, "id"),
+                    ));
+                } else {
+                    *self.manual_allowance_position.borrow_mut() = None;
+                }
+                for row in &manual {
+                    let profile = self.config.profile(text(row, "agent_profile"));
+                    let allowed = profile
+                        .map(|profile| profile.execution_enabled)
+                        .unwrap_or(false)
+                        && self
+                            .config
+                            .allowed_modes
+                            .iter()
+                            .any(|mode| mode == text(row, "mode"));
+                    if !allowed {
+                        continue;
+                    }
+                    tx.project_lock(text(row, "project_alias"))?;
+                    tx.amend_retry_allowance(
+                        text(row, "project_alias"),
+                        uuid_of(row, "id"),
+                        &repair_policy,
+                    )?;
+                }
+                Ok(Value::Null)
+            })
+            .map(|_| ())
     }
 
     /// _queue_review.
@@ -1174,10 +1172,7 @@ impl WorkflowStore {
                         tx.resolve_verified(
                             &scope,
                             "infrastructure",
-                            &format!(
-                                "native-artifact:{}",
-                                uuid_of(task, "latest_attempt_id")
-                            ),
+                            &format!("native-artifact:{}", uuid_of(task, "latest_attempt_id")),
                             text(task, "result_sha256"),
                             Some(&native_deadline_phase(uuid_of(task, "id"))),
                         )?;
@@ -1214,12 +1209,9 @@ impl WorkflowStore {
                                 self.phase(tx, workflow, "repair")?;
                                 continue;
                             }
-                            let publication =
-                                tx.latest_publication(uuid_of(local, "review_id"))?;
+                            let publication = tx.latest_publication(uuid_of(local, "review_id"))?;
                             match &publication {
-                                Some(publication)
-                                    if text(publication, "status") == "published" =>
-                                {
+                                Some(publication) if text(publication, "status") == "published" => {
                                     let active = tx.merge_action_active(uuid_of(
                                         publication,
                                         "publication_id",
@@ -1230,9 +1222,7 @@ impl WorkflowStore {
                                         if active { "merging" } else { "hosted" },
                                     )?;
                                 }
-                                Some(publication)
-                                    if text(publication, "status") == "failed" =>
-                                {
+                                Some(publication) if text(publication, "status") == "failed" => {
                                     self.escalate(tx, workflow, "Trusted publication stopped; retained source and remote metadata require reconciliation.", None)?;
                                 }
                                 _ => {
@@ -1303,7 +1293,11 @@ impl WorkflowStore {
             self.recover_tx(tx)?;
             Ok(tx.claim_action(worker_id)?.unwrap_or(Value::Null))
         })?;
-        Ok(if claimed.is_null() { None } else { Some(claimed) })
+        Ok(if claimed.is_null() {
+            None
+        } else {
+            Some(claimed)
+        })
     }
 }
 
@@ -1314,81 +1308,86 @@ impl WorkflowStore {
         let review_key = uuid_of(job, "workflow_review_id");
         let action_key = uuid_of(job, "action_id");
         let job_token = job["lease_token"].clone();
-        self.tx_factory.run(false, &mut |tx| {
-            tx.project_lock(&project)?;
-            let Some((source_task_id, root_task_id)) = tx.review_identity(review_key)? else {
-                return Ok(Value::Null);
-            };
-            if root_task_id != source_task_id {
-                tx.lock_task(root_task_id)?;
-            }
-            let task = tx
-                .task(source_task_id, true)?
-                .ok_or_else(|| WorkError::store("workflow source task vanished"))?;
-            let review = tx
-                .workflow_review(review_key, true)?
-                .ok_or_else(|| WorkError::store("workflow review vanished"))?;
-            let Some(action) = tx.action(action_key, true)? else {
-                return Ok(Value::Null);
-            };
-            if text(&action, "status") != "leased" || action["lease_token"] != job_token {
-                return Ok(Value::Null);
-            }
-            if !tx.lease_valid(action_key)? {
-                return Err(WorkError::rejected(409, "reconcile_required"));
-            }
-            let workflow = tx
-                .workflow(uuid_of(&action, "workflow_id"), true)?
-                .ok_or_else(|| WorkError::store("workflow vanished"))?;
-            tx.savepoint("workflow_action")?;
-            let outcome = self.process_inner(tx, &workflow, &review, &task, &action);
-            match outcome {
-                Ok(receipt) => {
-                    tx.update_action(
-                        action_key,
-                        &json!({
-                            "status": "completed",
-                            "finish_token": action["lease_token"],
-                            "finish_receipt": receipt,
-                            "lease_token": Value::Null,
-                            "lease_expires_at": Value::Null,
-                        }),
-                    )?;
+        self.tx_factory
+            .run(false, &mut |tx| {
+                tx.project_lock(&project)?;
+                let Some((source_task_id, root_task_id)) = tx.review_identity(review_key)? else {
+                    return Ok(Value::Null);
+                };
+                if root_task_id != source_task_id {
+                    tx.lock_task(root_task_id)?;
                 }
-                Err(error) => {
-                    tx.rollback_to_savepoint("workflow_action")?;
-                    if let FlowError::Work(WorkError::Rejected { status, code }) = &error {
-                        if code == "reconcile_required" || *status >= 500 {
-                            return Ok(Value::Null);
-                        }
-                    }
-                    let suffix = match &error {
-                        FlowError::Work(WorkError::Rejected { code, .. }) => code.clone(),
-                        FlowError::Peer(_) => "PeerReviewError".to_string(),
-                        FlowError::Work(_) => "ValueError".to_string(),
-                    };
-                    self.escalate(
-                        tx,
-                        &workflow,
-                        &format!("Peer review could not safely continue: {suffix}"),
-                        None,
-                    )?;
-                    let mut set = json!({"status": "escalated"});
-                    if review.as_object().map(|o| o.contains_key("diagnostics")).unwrap_or(false) {
-                        set["diagnostics"] = match &error {
-                            FlowError::Peer(peer) if peer.check.is_some() => json!({
-                                "check": peer.check,
-                                "detail": Value::Object(peer.detail.clone()),
+                let task = tx
+                    .task(source_task_id, true)?
+                    .ok_or_else(|| WorkError::store("workflow source task vanished"))?;
+                let review = tx
+                    .workflow_review(review_key, true)?
+                    .ok_or_else(|| WorkError::store("workflow review vanished"))?;
+                let Some(action) = tx.action(action_key, true)? else {
+                    return Ok(Value::Null);
+                };
+                if text(&action, "status") != "leased" || action["lease_token"] != job_token {
+                    return Ok(Value::Null);
+                }
+                if !tx.lease_valid(action_key)? {
+                    return Err(WorkError::rejected(409, "reconcile_required"));
+                }
+                let workflow = tx
+                    .workflow(uuid_of(&action, "workflow_id"), true)?
+                    .ok_or_else(|| WorkError::store("workflow vanished"))?;
+                tx.savepoint("workflow_action")?;
+                let outcome = self.process_inner(tx, &workflow, &review, &task, &action);
+                match outcome {
+                    Ok(receipt) => {
+                        tx.update_action(
+                            action_key,
+                            &json!({
+                                "status": "completed",
+                                "finish_token": action["lease_token"],
+                                "finish_receipt": receipt,
+                                "lease_token": Value::Null,
+                                "lease_expires_at": Value::Null,
                             }),
-                            _ => Value::Null,
-                        };
+                        )?;
                     }
-                    tx.update_workflow_review(review_key, &set)?;
+                    Err(error) => {
+                        tx.rollback_to_savepoint("workflow_action")?;
+                        if let FlowError::Work(WorkError::Rejected { status, code }) = &error {
+                            if code == "reconcile_required" || *status >= 500 {
+                                return Ok(Value::Null);
+                            }
+                        }
+                        let suffix = match &error {
+                            FlowError::Work(WorkError::Rejected { code, .. }) => code.clone(),
+                            FlowError::Peer(_) => "PeerReviewError".to_string(),
+                            FlowError::Work(_) => "ValueError".to_string(),
+                        };
+                        self.escalate(
+                            tx,
+                            &workflow,
+                            &format!("Peer review could not safely continue: {suffix}"),
+                            None,
+                        )?;
+                        let mut set = json!({"status": "escalated"});
+                        if review
+                            .as_object()
+                            .map(|o| o.contains_key("diagnostics"))
+                            .unwrap_or(false)
+                        {
+                            set["diagnostics"] = match &error {
+                                FlowError::Peer(peer) if peer.check.is_some() => json!({
+                                    "check": peer.check,
+                                    "detail": Value::Object(peer.detail.clone()),
+                                }),
+                                _ => Value::Null,
+                            };
+                        }
+                        tx.update_workflow_review(review_key, &set)?;
+                    }
                 }
-            }
-            Ok(Value::Null)
-        })
-        .map(|_| ())
+                Ok(Value::Null)
+            })
+            .map(|_| ())
     }
 
     fn process_inner(
@@ -1433,10 +1432,7 @@ impl WorkflowStore {
     ) -> FlowResult<Value> {
         let snapshot = self.snapshot_of(workflow)?;
         self.grant(tx, workflow, text(&snapshot, "reviewer_profile"), "review")?;
-        let source = tx.artifact(
-            uuid_of(task, "id"),
-            uuid_of(review, "source_attempt_id"),
-        )?;
+        let source = tx.artifact(uuid_of(task, "id"), uuid_of(review, "source_attempt_id"))?;
         let reviewer_id = Uuid::new_v4();
         let assignment = tx
             .task_in_project(
@@ -1501,7 +1497,8 @@ impl WorkflowStore {
                 .plan_decision(plan_id)?
                 .filter(|plan| text(plan, "decision") == "resume")
                 .ok_or_else(|| WorkError::rejected(409, "not_reviewable"))?;
-            let plan_source = tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
+            let plan_source =
+                tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
             let verified: Vec<String> = local["verified_finding_ids"]
                 .as_array()
                 .map(|ids| {
@@ -1517,10 +1514,7 @@ impl WorkflowStore {
                         .iter()
                         .map(|finding| {
                             let mut finding = finding.clone();
-                            if verified
-                                .iter()
-                                .any(|id| id == text(&finding, "finding_id"))
-                            {
+                            if verified.iter().any(|id| id == text(&finding, "finding_id")) {
                                 finding["status"] = json!("verified");
                             } else if !present(&finding, "status") {
                                 finding["status"] = json!("open");
@@ -1753,16 +1747,33 @@ impl WorkflowStore {
         {
             return Err(mismatch().into());
         }
-        let result = tx.artifact(uuid_of(&critic, "id"), uuid_of(&critic, "latest_attempt_id"))?;
-        let verdict = match validate_live_review_verdict(
-            text(&result, "content").as_bytes(),
-            target,
-        ) {
-            Ok(verdict) => verdict,
-            Err(error) => {
-                if let Some(incomplete) = &error.incomplete {
-                    if let Some(hook) = self.reviewer_correction.borrow().as_ref() {
-                        return Ok(hook.correct(
+        let result = tx.artifact(
+            uuid_of(&critic, "id"),
+            uuid_of(&critic, "latest_attempt_id"),
+        )?;
+        let verdict =
+            match validate_live_review_verdict(text(&result, "content").as_bytes(), target) {
+                Ok(verdict) => verdict,
+                Err(error) => {
+                    if let Some(incomplete) = &error.incomplete {
+                        if let Some(hook) = self.reviewer_correction.borrow().as_ref() {
+                            return Ok(hook.correct(
+                                CorrectionContext {
+                                    tx,
+                                    workflow,
+                                    review,
+                                    task,
+                                    critic: &critic,
+                                    result: &result,
+                                    action,
+                                },
+                                incomplete,
+                            )?);
+                        }
+                        return Err(WorkError::rejected(503, "unavailable").into());
+                    }
+                    if let Some(hook) = self.superseding_review.borrow().as_ref() {
+                        if let Some(receipt) = hook.correct(
                             CorrectionContext {
                                 tx,
                                 workflow,
@@ -1772,30 +1783,14 @@ impl WorkflowStore {
                                 result: &result,
                                 action,
                             },
-                            incomplete,
-                        )?);
+                            &error,
+                        )? {
+                            return Ok(receipt);
+                        }
                     }
-                    return Err(WorkError::rejected(503, "unavailable").into());
+                    return Err(error.into());
                 }
-                if let Some(hook) = self.superseding_review.borrow().as_ref() {
-                    if let Some(receipt) = hook.correct(
-                        CorrectionContext {
-                            tx,
-                            workflow,
-                            review,
-                            task,
-                            critic: &critic,
-                            result: &result,
-                            action,
-                        },
-                        &error,
-                    )? {
-                        return Ok(receipt);
-                    }
-                }
-                return Err(error.into());
-            }
-        };
+            };
         let content_sha = sha256_hex(text(&result, "content").as_bytes());
         tx.update_workflow_review(
             uuid_of(review, "workflow_review_id"),
@@ -1858,7 +1853,11 @@ impl WorkflowStore {
             }
         }
         let mut incident_budget_spent = false;
-        if decision == "revise" && !tx.retained_sources(uuid_of(workflow, "workflow_id"))?.is_empty() {
+        if decision == "revise"
+            && !tx
+                .retained_sources(uuid_of(workflow, "workflow_id"))?
+                .is_empty()
+        {
             let spent = if text(&review, "target_kind") == "code" {
                 tx.budget(
                     text(workflow, "project_alias"),
@@ -1882,7 +1881,11 @@ impl WorkflowStore {
             && int_of(workflow, "plan_revisions")
                 >= self.retry_limit(tx, workflow, "max_plan_revisions")?;
         let receipt: Value;
-        if decision == "escalate" || event_exhausted || incident_budget_spent || plan_revise_exhausted {
+        if decision == "escalate"
+            || event_exhausted
+            || incident_budget_spent
+            || plan_revise_exhausted
+        {
             let cause = if decision == "escalate" {
                 "review_verdict"
             } else if event_exhausted {
@@ -1896,10 +1899,18 @@ impl WorkflowStore {
                 "workflow_id": text(workflow, "workflow_id"),
             });
         } else if text(&review, "target_kind") == "plan" {
-            let mode = if decision == "approve" { "implement" } else { "plan" };
+            let mode = if decision == "approve" {
+                "implement"
+            } else {
+                "plan"
+            };
             self.grant(tx, workflow, text(&snapshot, "author_profile"), mode)?;
             let mut note = text(&verdict, "summary").to_string();
-            if verdict["findings"].as_array().map(|f| !f.is_empty()).unwrap_or(false) {
+            if verdict["findings"]
+                .as_array()
+                .map(|f| !f.is_empty())
+                .unwrap_or(false)
+            {
                 note += "\n";
                 note += &loose_json(&verdict["findings"]);
             }
@@ -1961,23 +1972,15 @@ impl WorkflowStore {
                 )?;
             } else if budget.is_some() {
                 authority.validate(tx, task, "code")?;
-                receipt = self.code_handoff(
-                    tx,
-                    workflow,
-                    &review,
-                    "repair_budget_exhausted",
-                    budget,
-                )?;
+                receipt =
+                    self.code_handoff(tx, workflow, &review, "repair_budget_exhausted", budget)?;
             } else {
                 if decision == "revise" {
                     self.grant(tx, workflow, text(&snapshot, "author_profile"), "implement")?;
                 }
                 tx.savepoint("peer_code_decision")?;
-                let recipe = PinnedRecipe::from_snapshot(
-                    &snapshot,
-                    "author_implement",
-                    self.native(),
-                )?;
+                let recipe =
+                    PinnedRecipe::from_snapshot(&snapshot, "author_implement", self.native())?;
                 let outcome = self.decisions.review_decide(&ReviewDecideRequest {
                     project_alias: text(workflow, "project_alias").to_string(),
                     task_id: uuid_of(task, "id"),
@@ -2105,7 +2108,11 @@ impl WorkflowStore {
             return Err(WorkError::rejected(404, "not_found"));
         }
         let actor = actor.unwrap_or_else(|| operator_actor(&self.config.owner));
-        let key = format!("{}{}", crate::revival::REVIVAL_SOURCE_PREFIX, idempotency_key);
+        let key = format!(
+            "{}{}",
+            crate::revival::REVIVAL_SOURCE_PREFIX,
+            idempotency_key
+        );
         let intent = json!({
             "policy": REVIVAL_POLICY,
             "workflow_id": workflow_id.to_string(),
@@ -2132,8 +2139,7 @@ impl WorkflowStore {
                 if previous["intent"] != intent {
                     return Err(WorkError::rejected(409, "idempotency_conflict"));
                 }
-                if text(&previous, "status") != "completed"
-                    || !present(&previous, "finish_receipt")
+                if text(&previous, "status") != "completed" || !present(&previous, "finish_receipt")
                 {
                     return Err(WorkError::rejected(409, "reconcile_required"));
                 }
@@ -2281,9 +2287,7 @@ impl WorkflowStore {
                 tx.rollback_to_savepoint("workflow_revival_grant")?;
                 return Err(RevivalError::Refused(Refused::new(
                     "grant_not_covered",
-                    &format!(
-                        "The current grant does not cover the workflow profiles ({code})."
-                    ),
+                    &format!("The current grant does not cover the workflow profiles ({code})."),
                 )));
             }
             Err(error) => return Err(RevivalError::Work(error)),
@@ -2556,7 +2560,10 @@ mod tests {
 
     #[test]
     fn prepare_title_collapses_and_bounds() {
-        assert_eq!(prepare_title("  hello   world  \nsecond").unwrap(), "hello world");
+        assert_eq!(
+            prepare_title("  hello   world  \nsecond").unwrap(),
+            "hello world"
+        );
         assert!(prepare_title("  \n  ").is_err());
         let long = "x".repeat(200);
         assert_eq!(prepare_title(&long).unwrap().chars().count(), 128);

@@ -51,9 +51,17 @@ pub fn identify_plan(check_names: &[String]) -> Option<CiGatePlan> {
             .collect()
     {
         (SCOPED_PROFILE, "detached")
-    } else if set == ["check", "real-browser", "backend-suites"].into_iter().collect() {
+    } else if set
+        == ["check", "real-browser", "backend-suites"]
+            .into_iter()
+            .collect()
+    {
         (SCOPED_PROFILE, "main")
-    } else if set == ["check", "real-browser", "pr-fast-gate"].into_iter().collect() {
+    } else if set
+        == ["check", "real-browser", "pr-fast-gate"]
+            .into_iter()
+            .collect()
+    {
         (LEGACY_PROFILE, "detached")
     } else {
         return None;
@@ -68,9 +76,7 @@ pub fn identify_plan(check_names: &[String]) -> Option<CiGatePlan> {
 fn as_utc(value: &Value) -> Option<f64> {
     match value {
         Value::Number(number) => number.as_f64(),
-        Value::String(text) => {
-            forge_work_worker::native_identity::iso_epoch_seconds(text)
-        }
+        Value::String(text) => forge_work_worker::native_identity::iso_epoch_seconds(text),
         _ => None,
     }
 }
@@ -290,8 +296,11 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
                     if completed_status[index].is_none()
                         && matches!(status, Some("success") | Some("failure"))
                     {
-                        completed_status[index] =
-                            Some(if status == Some("success") { "passed" } else { "failed" });
+                        completed_status[index] = Some(if status == Some("success") {
+                            "passed"
+                        } else {
+                            "failed"
+                        });
                         started[index] = true;
                     }
                 }
@@ -326,7 +335,10 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
         if let Some(name) = check.get("name").and_then(|value| value.as_str()) {
             observation_by_name.insert(
                 name.to_string(),
-                check.get("status").and_then(|value| value.as_str()).map(str::to_string),
+                check
+                    .get("status")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
             );
         }
     }
@@ -430,15 +442,16 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
     for finding in &params.findings {
         if finding.is_object() && truthy(finding.get("check_id")) {
             let key = text_of(finding.get("check_id")).unwrap_or_default();
-            findings_by_check.entry(key).or_insert_with(|| finding.clone());
+            findings_by_check
+                .entry(key)
+                .or_insert_with(|| finding.clone());
         }
     }
     for stage in stages.iter_mut() {
         if stage["status"] == json!("failed") {
             if let Some(finding) = findings_by_check.get(stage["id"].as_str().unwrap_or_default()) {
                 stage["finding_id"] = finding.get("finding_id").cloned().unwrap_or(Value::Null);
-                stage["finding_summary"] =
-                    finding.get("summary").cloned().unwrap_or(Value::Null);
+                stage["finding_summary"] = finding.get("summary").cloned().unwrap_or(Value::Null);
             }
         }
     }
@@ -453,7 +466,11 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
         if started.iter().any(|flag| *flag)
             || completed_status.iter().any(|status| status.is_some())
         {
-            if stale { "unknown" } else { "running" }
+            if stale {
+                "unknown"
+            } else {
+                "running"
+            }
         } else if stale {
             "unknown"
         } else {
@@ -508,11 +525,20 @@ fn aggregate_stage_status(statuses: &[String]) -> &'static str {
     if ordered.contains(&"waiting") {
         return "waiting";
     }
-    if ordered.iter().all(|status| matches!(*status, "not_run" | "skipped")) {
-        return if ordered.contains(&"not_run") { "not_run" } else { "skipped" };
+    if ordered
+        .iter()
+        .all(|status| matches!(*status, "not_run" | "skipped"))
+    {
+        return if ordered.contains(&"not_run") {
+            "not_run"
+        } else {
+            "skipped"
+        };
     }
     if ordered.contains(&"passed")
-        && ordered.iter().any(|status| matches!(*status, "waiting" | "not_run"))
+        && ordered
+            .iter()
+            .any(|status| matches!(*status, "waiting" | "not_run"))
     {
         return "waiting";
     }
@@ -585,9 +611,8 @@ fn build_run_from_stage_results(
     // order.
     let mut grouped: Vec<(String, Vec<Value>)> = Vec::new();
     for row in &rows {
-        let lid = or_text(row, &["logical_stage_id", "phase_id"]).unwrap_or_else(|| {
-            format!("check_{}", py_int(row.get("stage_index"), 0))
-        });
+        let lid = or_text(row, &["logical_stage_id", "phase_id"])
+            .unwrap_or_else(|| format!("check_{}", py_int(row.get("stage_index"), 0)));
         if let Some((_, members)) = grouped.iter_mut().find(|(id, _)| *id == lid) {
             members.push(row.clone());
         } else {
@@ -628,13 +653,19 @@ fn build_run_from_stage_results(
             let status = match release_status {
                 Some("activated" | "deployed" | "passed" | "completed") => "passed",
                 Some("failed" | "blocked") => "failed",
-                Some("running" | "activating" | "building" | "deploying" | "pending") => {
-                    "running"
-                }
+                Some("running" | "activating" | "building" | "deploying" | "pending") => "running",
                 _ => "waiting",
             };
-            let mut stage = empty_stage(sid, catalog_labels.get(sid.as_str()).unwrap_or(&sid.as_str()), status);
-            stage["returncode"] = if status == "passed" { json!(0) } else { Value::Null };
+            let mut stage = empty_stage(
+                sid,
+                catalog_labels.get(sid.as_str()).unwrap_or(&sid.as_str()),
+                status,
+            );
+            stage["returncode"] = if status == "passed" {
+                json!(0)
+            } else {
+                Value::Null
+            };
             stages.push(stage);
             continue;
         }
@@ -651,9 +682,7 @@ fn build_run_from_stage_results(
         }
         let statuses: Vec<String> = members
             .iter()
-            .map(|member| {
-                text_of(member.get("status")).unwrap_or_else(|| "unknown".to_string())
-            })
+            .map(|member| text_of(member.get("status")).unwrap_or_else(|| "unknown".to_string()))
             .collect();
         let agg_status = aggregate_stage_status(&statuses);
         let rcs: Vec<i64> = members
@@ -682,8 +711,11 @@ fn build_run_from_stage_results(
                 }
             })
             .collect();
-        let duration_total: Option<i64> =
-            if durations.is_empty() { None } else { Some(durations.iter().sum()) };
+        let duration_total: Option<i64> = if durations.is_empty() {
+            None
+        } else {
+            Some(durations.iter().sum())
+        };
         let sum_field = |key: &str| -> Option<i64> {
             let values: Vec<i64> = members
                 .iter()
@@ -701,12 +733,12 @@ fn build_run_from_stage_results(
                 Some(values.iter().sum())
             }
         };
-        let error_excerpt = members.iter().find_map(|member| {
-            match member.get("error_excerpt") {
+        let error_excerpt = members
+            .iter()
+            .find_map(|member| match member.get("error_excerpt") {
                 Some(Value::String(text)) if !text.is_empty() => Some(text.clone()),
                 _ => None,
-            }
-        });
+            });
         let error_count = members
             .iter()
             .filter(|member| member.get("status") == Some(&json!("failed")))
@@ -841,15 +873,13 @@ fn build_run_from_events_only(
     let mut ordered: Vec<Value> = events_for_run.to_vec();
     ordered.sort_by_key(sequence_of);
     let first = ordered[0].clone();
-    let branch_scope = ordered
-        .iter()
-        .find_map(|event| {
-            if truthy(event.get("branch_scope")) {
-                text_of(event.get("branch_scope"))
-            } else {
-                None
-            }
-        });
+    let branch_scope = ordered.iter().find_map(|event| {
+        if truthy(event.get("branch_scope")) {
+            text_of(event.get("branch_scope"))
+        } else {
+            None
+        }
+    });
     let pipeline_scope = pipeline_scope.unwrap_or_else(|| {
         if branch_scope.as_deref() == Some("main")
             || first.get("branch") == Some(&json!("main"))
@@ -875,7 +905,11 @@ fn build_run_from_events_only(
             CiGateContractFactory::new(SCOPED_PROFILE)
                 .ok()?
                 .create()
-                .plan(if pipeline_scope == "main" { "main" } else { "detached" })
+                .plan(if pipeline_scope == "main" {
+                    "main"
+                } else {
+                    "detached"
+                })
                 .ok()
         })
         .expect("scoped plan always builds");
@@ -1001,8 +1035,8 @@ pub fn project_correlation_cicd(params: CorrelationParams) -> Value {
                 events_by_action.push((aid, vec![event.clone()]));
             }
         } else {
-            let job = or_text(event, &["job_name"])
-                .unwrap_or_else(|| NATIVE_JENKINS_JOB.to_string());
+            let job =
+                or_text(event, &["job_name"]).unwrap_or_else(|| NATIVE_JENKINS_JOB.to_string());
             let number = if truthy(event.get("build_number")) {
                 py_int(event.get("build_number"), 0)
             } else if truthy(event.get("queue_id")) {
@@ -1034,10 +1068,7 @@ pub fn project_correlation_cicd(params: CorrelationParams) -> Value {
     let mut obs_by_action: HashMap<String, Vec<Value>> = HashMap::new();
     let mut obs_by_commit: HashMap<String, Vec<Value>> = HashMap::new();
     for observation in &params.hosted_observations {
-        let Some(checks) = observation
-            .get("checks")
-            .and_then(|value| value.as_array())
-        else {
+        let Some(checks) = observation.get("checks").and_then(|value| value.as_array()) else {
             continue;
         };
         if truthy(observation.get("candidate_commit")) {
@@ -1093,7 +1124,13 @@ pub fn project_correlation_cicd(params: CorrelationParams) -> Value {
                 .as_ref()
                 .and_then(|commit| obs_by_commit.get(commit).cloned())
         });
-        runs.push(build_run_from_events_only(aid, evs, observation, None, params.now));
+        runs.push(build_run_from_events_only(
+            aid,
+            evs,
+            observation,
+            None,
+            params.now,
+        ));
     }
     for (key, evs) in &events_by_build {
         let commit = evs.iter().find_map(|event| {
@@ -1145,9 +1182,7 @@ pub fn project_correlation_cicd(params: CorrelationParams) -> Value {
                     match params.release_status.as_deref() {
                         Some("activated" | "deployed" | "passed" | "completed") => "passed",
                         Some("failed" | "blocked") => "failed",
-                        Some("running" | "activating" | "building" | "deploying") => {
-                            "running"
-                        }
+                        Some("running" | "activating" | "building" | "deploying") => "running",
                         _ => stage_status,
                     }
                 } else {
@@ -1204,7 +1239,11 @@ pub fn project_correlation_cicd(params: CorrelationParams) -> Value {
             .unwrap_or_default();
         (
             stamp,
-            if run.get("pipeline_scope") == Some(&json!("branch")) { 0 } else { 1 },
+            if run.get("pipeline_scope") == Some(&json!("branch")) {
+                0
+            } else {
+                1
+            },
             py_int(run.get("build_number"), 0),
             text_of(run.get("run_id")).unwrap_or_default(),
         )

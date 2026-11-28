@@ -290,13 +290,15 @@ fn assemble(view: &str, rows: &[tokio_postgres::Row]) -> Result<String, forge_wo
 /// verification must be a dict, its verification_id a canonical
 /// UUID string, and its commit_sha a 40-char lowercase hex SHA;
 /// anything else binds nothing.
-fn delivery_main_binding(
-    delivery: Option<&serde_json::Value>,
-) -> (Option<Uuid>, Option<String>) {
+fn delivery_main_binding(delivery: Option<&serde_json::Value>) -> (Option<Uuid>, Option<String>) {
     let Some(delivery) = delivery else {
         return (None, None);
     };
-    if delivery.get("verification").and_then(|v| v.as_object()).is_none() {
+    if delivery
+        .get("verification")
+        .and_then(|v| v.as_object())
+        .is_none()
+    {
         return (None, None);
     }
     let action = delivery.get("verification_id").and_then(|v| v.as_str());

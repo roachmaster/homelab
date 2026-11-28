@@ -34,8 +34,7 @@ use crate::workflow_tx::WorkflowTx;
 pub const PEER_POLICY: &str = "forge-native-peer-feedback-recovery-v1";
 pub const RECOVERY_SUMMARY: &str = "Trusted build feedback is temporarily unavailable.";
 pub const LEGACY_SUMMARY: &str = "The current review feedback could not be verified.";
-pub const PEER_FAILURE_SUMMARY: &str =
-    "The complete workflow feedback could not be verified.";
+pub const PEER_FAILURE_SUMMARY: &str = "The complete workflow feedback could not be verified.";
 pub const MAX_RECOVERIES: i64 = AGENT_RETRY_LIMIT;
 pub const BACKOFF_SECONDS: i64 = 60;
 
@@ -63,7 +62,8 @@ fn opt_uuid(row: &Value, key: &str) -> Option<Uuid> {
 fn valid_key(key: &str) -> bool {
     !key.is_empty()
         && key.len() <= 128
-        && key.bytes()
+        && key
+            .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
 }
 
@@ -72,7 +72,8 @@ fn is_digest64(value: &Value) -> bool {
         .as_str()
         .map(|raw| {
             raw.len() == 64
-                && raw.bytes()
+                && raw
+                    .bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         })
         .unwrap_or(false)
@@ -261,10 +262,7 @@ fn peer_context_valid(
     peer: &Value,
     critic: &Value,
 ) -> Result<bool, WorkError> {
-    let result = tx.artifact(
-        uuid_of(critic, "id"),
-        uuid_of(peer, "reviewer_attempt_id"),
-    )?;
+    let result = tx.artifact(uuid_of(critic, "id"), uuid_of(peer, "reviewer_attempt_id"))?;
     if result["content"] != peer["verdict_json"]
         || result["result_sha256"] != peer["verdict_sha256"]
     {
@@ -276,10 +274,8 @@ fn peer_context_valid(
     ) else {
         return Ok(false);
     };
-    let Ok(verdict) = validate_live_review_verdict(
-        text(peer, "verdict_json").as_bytes(),
-        &target,
-    ) else {
+    let Ok(verdict) = validate_live_review_verdict(text(peer, "verdict_json").as_bytes(), &target)
+    else {
         return Ok(false);
     };
     if text(&verdict, "decision") != "revise"
@@ -293,24 +289,20 @@ fn peer_context_valid(
     {
         return Ok(false);
     }
-    let plan_id = opt_uuid(task, "plan_decision_id")
-        .or_else(|| opt_uuid(task, "scope_plan_decision_id"));
+    let plan_id =
+        opt_uuid(task, "plan_decision_id").or_else(|| opt_uuid(task, "scope_plan_decision_id"));
     let Some(plan) = plan_id.and_then(|id| tx.plan_decision(id).ok()).flatten() else {
         return Ok(false);
     };
     if text(&plan, "decision") != "resume"
-        || target["plan_decision_id"].as_str()
-            != Some(&uuid_of(&plan, "decision_id").to_string())
-        || target["approved_plan"]["attempt_id"].as_str()
-            != plan["plan_attempt_id"].as_str()
+        || target["plan_decision_id"].as_str() != Some(&uuid_of(&plan, "decision_id").to_string())
+        || target["approved_plan"]["attempt_id"].as_str() != plan["plan_attempt_id"].as_str()
         || target["approved_plan"]["sha256"] != plan["plan_sha256"]
     {
         return Ok(false);
     }
-    let plan_artifact = tx.artifact(
-        uuid_of(&plan, "task_id"),
-        uuid_of(&plan, "plan_attempt_id"),
-    )?;
+    let plan_artifact =
+        tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
     if plan_artifact["content"] != target["approved_plan"]["content"] {
         return Ok(false);
     }
@@ -350,13 +342,9 @@ fn peer_context_valid(
         "plan_attempt_id": plan["plan_attempt_id"],
         "plan_sha256": plan["plan_sha256"],
     });
-    let validated = validate_workflow_feedback(
-        &lease,
-        &envelope,
-        Some(&plan_context),
-        Some(&context),
-    )
-    .map_err(|_| WorkError::store("PeerReviewError"))?;
+    let validated =
+        validate_workflow_feedback(&lease, &envelope, Some(&plan_context), Some(&context))
+            .map_err(|_| WorkError::store("PeerReviewError"))?;
     Ok(validated.sha256 == text(peer, "verdict_sha256")
         && sha256_hex(&validated.content) == text(peer, "verdict_sha256"))
 }
@@ -452,8 +440,7 @@ fn retry(
             || opt_uuid(&task, "latest_attempt_id") != opt_uuid(&rec, "attempt_id")
             || int_of(&rec, "task_revision") != int_of(&task, "revision")
             || task["feedback_id"].is_null()
-            || (task["plan_decision_id"].is_null()
-                && task["scope_plan_decision_id"].is_null())
+            || (task["plan_decision_id"].is_null() && task["scope_plan_decision_id"].is_null())
             || task["agent_profile"] != p["author_profile"]
             || task["pinned_recipe"] != recipe.to_dict()
             || task["recipe_digest"].as_str() != Some(recipe.digest.as_str())
@@ -525,11 +512,7 @@ fn retry(
         };
         // The feedback packet chain: a missing packet or any
         // parse/binding failure is a result mismatch.
-        let packet = tx.feedback_packet(
-            uuid_of(&task, "feedback_id"),
-            project,
-            task_id,
-        )?;
+        let packet = tx.feedback_packet(uuid_of(&task, "feedback_id"), project, task_id)?;
         let Some(packet) = packet else {
             return Err(mismatch());
         };
@@ -545,13 +528,8 @@ fn retry(
             let parsed = proof
                 .as_ref()
                 .and_then(|proof| {
-                    parse_author_handoff(
-                        proof,
-                        &lease,
-                        text(&feedback, "agent_profile"),
-                        "build",
-                    )
-                    .ok()
+                    parse_author_handoff(proof, &lease, text(&feedback, "agent_profile"), "build")
+                        .ok()
                 })
                 .and_then(|context| match context {
                     AuthorHandoffContext::Build(build) => Some(build),
@@ -559,12 +537,10 @@ fn retry(
                 });
             match parsed {
                 Some(build)
-                    if build.parent_attempt_id
-                        == text(&feedback, "parent_attempt_id")
+                    if build.parent_attempt_id == text(&feedback, "parent_attempt_id")
                         && build.feedback_workspace_digest
                             == text(&feedback, "workspace_digest")
-                        && build.resume_workspace_digest
-                            == text(&rec, "workspace_digest") =>
+                        && build.resume_workspace_digest == text(&rec, "workspace_digest") =>
                 {
                     handoff = Some(AuthorHandoffContext::Build(build));
                 }
@@ -579,30 +555,22 @@ fn retry(
         let valid_packet = packet["feedback_sha256"] == task["feedback_sha256"]
             && text(&feedback, "workspace_digest_kind") == "native_receipt"
             && text(&feedback, "disposition") == "repair"
-            && feedback["feedback_id"].as_str()
-                == Some(&uuid_of(&task, "feedback_id").to_string())
+            && feedback["feedback_id"].as_str() == Some(&uuid_of(&task, "feedback_id").to_string())
             && feedback["task_id"].as_str() == Some(&task_id.to_string())
             && (feedback["agent_profile"] == task["agent_profile"] || handoff.is_some())
-            && (feedback["workspace_digest"] == rec["workspace_digest"]
-                || handoff.is_some())
+            && (feedback["workspace_digest"] == rec["workspace_digest"] || handoff.is_some())
             && feedback["plan_decision_id"] == plan_binding
             && feedback["integration_base"] == task["base_revision"];
         if !valid_packet {
             return Err(mismatch());
         }
-        let review = tx.feedback_review(
-            project,
-            task_id,
-            uuid_of(&packet, "review_id"),
-        )?;
+        let review = tx.feedback_review(project, task_id, uuid_of(&packet, "review_id"))?;
         let Some(review) = review else {
             return Err(mismatch());
         };
         let source = tx.artifact(task_id, uuid_of(&packet, "parent_attempt_id"))?;
         let expected_workspace = match &handoff {
-            Some(AuthorHandoffContext::Build(build)) => {
-                build.feedback_workspace_digest.clone()
-            }
+            Some(AuthorHandoffContext::Build(build)) => build.feedback_workspace_digest.clone(),
             _ => text(&rec, "workspace_digest").to_string(),
         };
         if text(&review, "status") != "repair"
@@ -619,8 +587,7 @@ fn retry(
             || review["workspace_digest"].as_str() != Some(expected_workspace.as_str())
             || review["verification"]["cleanup_confirmed"] != json!(true)
             || !validate_failure_context(
-                spec, flow, tx, &w, &task, &attempt, &feedback, &packet, &review,
-                &source,
+                spec, flow, tx, &w, &task, &attempt, &feedback, &packet, &review, &source,
             )?
         {
             return Err(mismatch());
@@ -651,10 +618,8 @@ fn retry(
                 &format!("feedback.{}", uuid_of(&task, "feedback_id")),
                 &[],
             )?;
-            let prior_used = tx.feedback_resume_used(
-                workflow_id,
-                &uuid_of(&task, "feedback_id").to_string(),
-            )?;
+            let prior_used =
+                tx.feedback_resume_used(workflow_id, &uuid_of(&task, "feedback_id").to_string())?;
             if int_of(&observed, "used") == 0 && prior_used > 0 {
                 observed = tx.adopt_legacy(
                     uuid_of(&observed, "event_id"),
@@ -680,21 +645,26 @@ fn retry(
         )?;
         flow.grant(tx, &w, text(&p, "author_profile"), "implement")?;
         flow.grant(tx, &w, text(&p, "reviewer_profile"), "review")?;
-        let digests: Vec<String> =
-            NATIVE_POLICY_DIGESTS.iter().map(|d| d.to_string()).collect();
+        let digests: Vec<String> = NATIVE_POLICY_DIGESTS
+            .iter()
+            .map(|d| d.to_string())
+            .collect();
         let ready = tx.readiness(Some(&digests))?;
-        let reviewer_recipe =
-            PinnedRecipe::from_snapshot(&p, "reviewer_review", flow.native())
-                .map_err(WorkError::store)?;
-        if !ready_for_recipe(&ready, project, text(&p, "author_profile"), "implement", &recipe)
-            || !ready_for_recipe(
-                &ready,
-                project,
-                text(&p, "reviewer_profile"),
-                "review",
-                &reviewer_recipe,
-            )
-        {
+        let reviewer_recipe = PinnedRecipe::from_snapshot(&p, "reviewer_review", flow.native())
+            .map_err(WorkError::store)?;
+        if !ready_for_recipe(
+            &ready,
+            project,
+            text(&p, "author_profile"),
+            "implement",
+            &recipe,
+        ) || !ready_for_recipe(
+            &ready,
+            project,
+            text(&p, "reviewer_profile"),
+            "review",
+            &reviewer_recipe,
+        ) {
             return Err(WorkError::rejected(503, "unavailable"));
         }
         let note = make_recovery_note(
@@ -889,10 +859,7 @@ mod tests {
         assert_eq!(PEER_POLICY, "forge-native-peer-feedback-recovery-v1");
         assert_eq!(MAX_RECOVERIES, 20);
         assert_eq!(BACKOFF_SECONDS, 60);
-        assert_eq!(
-            context_recovery_actor().id,
-            "context-recovery"
-        );
+        assert_eq!(context_recovery_actor().id, "context-recovery");
     }
 
     #[test]

@@ -101,10 +101,8 @@ where
         if argv.is_empty() {
             return Err(invalid("Empty observer command"));
         }
-        let env_pairs: Vec<(&str, &str)> = env
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let env_pairs: Vec<(&str, &str)> =
+            env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         let timeout = timeout_seconds.max(1.0).ceil() as u64;
         let request = forge_work_worker::process_exec::ProcessRequest::cleared(
             argv.to_vec(),
@@ -133,8 +131,11 @@ impl ObserverExecute for ProcessObserverExecute {
         env: &[(String, String)],
         timeout_seconds: f64,
     ) -> ObserverResult<Vec<u8>> {
-        IoClientObserverExecute::new(forge_work_worker::process_exec::SystemProcessExec)
-            .execute(argv, env, timeout_seconds)
+        IoClientObserverExecute::new(forge_work_worker::process_exec::SystemProcessExec).execute(
+            argv,
+            env,
+            timeout_seconds,
+        )
     }
 }
 
@@ -162,8 +163,7 @@ impl ObserverReader for ImmutableReader {
             return Err(invalid("Unsafe read-only observer input"));
         }
         let mut data = Vec::new();
-        file
-            .by_ref()
+        file.by_ref()
             .take((maximum + 1) as u64)
             .read_to_end(&mut data)
             .map_err(|error| JenkinsObserverError::Io(error.to_string()))?;
@@ -254,10 +254,7 @@ impl JenkinsReadObserverConfig {
             && object
                 .keys()
                 .all(|key| required.contains(&key.as_str()) || optional.contains(&key.as_str()));
-        if !keys_valid
-            || !is_int(&object["version"])
-            || object["version"].as_i64() != Some(1)
-        {
+        if !keys_valid || !is_int(&object["version"]) || object["version"].as_i64() != Some(1) {
             return Err(invalid("Invalid read-only observer configuration"));
         }
         for key in ["binary", "jenkins_config"] {
@@ -266,9 +263,7 @@ impl JenkinsReadObserverConfig {
                 .map(Path::new)
                 .filter(|path| {
                     path.is_absolute()
-                        && !path
-                            .components()
-                            .any(|part| part == Component::ParentDir)
+                        && !path.components().any(|part| part == Component::ParentDir)
                 })
                 .ok_or_else(|| invalid("Observer paths must be explicit absolute paths"))?;
             let _ = path;
@@ -282,9 +277,9 @@ impl JenkinsReadObserverConfig {
             .as_array()
             .filter(|jobs| {
                 !jobs.is_empty()
-                    && jobs.iter().all(|job| {
-                        job.as_str().is_some_and(|name| JOBS.contains(&name))
-                    })
+                    && jobs
+                        .iter()
+                        .all(|job| job.as_str().is_some_and(|name| JOBS.contains(&name)))
                     && {
                         let mut seen = std::collections::HashSet::new();
                         jobs.iter()
@@ -300,7 +295,9 @@ impl JenkinsReadObserverConfig {
         ] {
             let value = object.get(key).cloned().unwrap_or(json!(default));
             if !is_int(&value)
-                || value.as_i64().is_none_or(|number| !(low..=high).contains(&number))
+                || value
+                    .as_i64()
+                    .is_none_or(|number| !(low..=high).contains(&number))
             {
                 return Err(invalid("Invalid bounded observer policy"));
             }
@@ -336,7 +333,9 @@ fn is_number(value: &Value) -> bool {
 
 fn parameters(value: &Value) -> ObserverResult<()> {
     let valid = value.as_object().is_some_and(|object| {
-        object.keys().all(|key| PUBLIC_PARAMETERS.contains(&key.as_str()))
+        object
+            .keys()
+            .all(|key| PUBLIC_PARAMETERS.contains(&key.as_str()))
             && object.values().all(|item| {
                 item.as_str().is_some_and(|text| {
                     text.len() <= 8192 && text.chars().all(|ch| (ch as u32) >= 32)
@@ -422,7 +421,11 @@ impl<E: ObserverExecute, R: ObserverReader, C: ObserverClock> JenkinsReadObserve
     fn pins(&self) -> ObserverResult<()> {
         for (path, expected, bound) in [
             (&self.sidecar, &self.sidecar_sha256, 16384usize),
-            (&self.config.binary, &self.config.binary_sha256, 64 * 1024 * 1024),
+            (
+                &self.config.binary,
+                &self.config.binary_sha256,
+                64 * 1024 * 1024,
+            ),
             (
                 &self.config.jenkins_config,
                 &self.config.jenkins_config_sha256,
@@ -461,16 +464,12 @@ impl<E: ObserverExecute, R: ObserverReader, C: ObserverClock> JenkinsReadObserve
         }
         let remaining = deadline - self.clock.now();
         if remaining <= 0.0 {
-            return Err(unavailable(
-                "Jenkins history observation deadline expired",
-            ));
+            return Err(unavailable("Jenkins history observation deadline expired"));
         }
         self.pins()?;
         let remaining = deadline - self.clock.now();
         if remaining <= 0.0 {
-            return Err(unavailable(
-                "Jenkins history observation deadline expired",
-            ));
+            return Err(unavailable("Jenkins history observation deadline expired"));
         }
         let mut argv = vec![
             self.config.binary.to_string_lossy().into_owned(),
@@ -513,8 +512,7 @@ impl<E: ObserverExecute, R: ObserverReader, C: ObserverClock> JenkinsReadObserve
                         .all(|key| object.contains_key(*key))
                     && is_number(&object["id"])
                     && object["job"].as_str().is_some_and(|job| {
-                        job.chars().count() <= 1024
-                            && job.chars().all(|ch| (ch as u32) >= 32)
+                        job.chars().count() <= 1024 && job.chars().all(|ch| (ch as u32) >= 32)
                     })
             });
             if !valid || !seen.insert(row["id"].as_i64().unwrap_or(i64::MIN)) {
@@ -591,11 +589,7 @@ impl<E: ObserverExecute, R: ObserverReader, C: ObserverClock> JenkinsReadObserve
     /// Find the unique execution (build or queue entry) correlated
     /// with `expected`, or None when the complete bounded history
     /// proves there is none.
-    pub fn find(
-        &self,
-        job: &str,
-        expected: &Value,
-    ) -> ObserverResult<Option<(String, Value)>> {
+    pub fn find(&self, job: &str, expected: &Value) -> ObserverResult<Option<(String, Value)>> {
         if !self.config.jobs.iter().any(|item| item == job)
             || !expected.is_object()
             || !truthy(&expected["FORGE_ACTION_ID"])
@@ -698,7 +692,10 @@ impl<E: ObserverExecute, R: ObserverReader, C: ObserverClock> JenkinsReadObserve
             }
             return Ok(Some(("build".to_string(), actual[0].clone())));
         }
-        Ok(matches.into_iter().next().map(|(kind, row)| (kind.to_string(), row)))
+        Ok(matches
+            .into_iter()
+            .next()
+            .map(|(kind, row)| (kind.to_string(), row)))
     }
 }
 
@@ -713,12 +710,14 @@ pub struct JenkinsReadObserverFactory<E, R, C> {
 }
 
 impl<E: ObserverExecute, R: ObserverReader, C: ObserverClock> JenkinsReadObserverFactory<E, R, C> {
-    pub fn new(path: PathBuf, execute: E, reader: R, clock: C, home: String) -> ObserverResult<Self> {
-        if !path.is_absolute()
-            || path
-                .components()
-                .any(|part| part == Component::ParentDir)
-        {
+    pub fn new(
+        path: PathBuf,
+        execute: E,
+        reader: R,
+        clock: C,
+        home: String,
+    ) -> ObserverResult<Self> {
+        if !path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
             return Err(invalid(
                 "Expected an explicit observer path and execution port",
             ));
@@ -737,10 +736,7 @@ impl<E: ObserverExecute, R: ObserverReader, C: ObserverClock> JenkinsReadObserve
         let config = JenkinsReadObserverConfig::parse(&strict_json(&raw)?)?;
         let cli_raw = self.reader.read(&config.jenkins_config, 65536)?;
         let cli = strict_json(&cli_raw)?;
-        let observed: Vec<Value> = PUBLIC_PARAMETERS
-            .iter()
-            .map(|item| json!(item))
-            .collect();
+        let observed: Vec<Value> = PUBLIC_PARAMETERS.iter().map(|item| json!(item)).collect();
         if sha256_hex(&cli_raw) != config.jenkins_config_sha256
             || !cli.is_object()
             || cli["allow_mutations"] != json!(false)
@@ -764,11 +760,7 @@ impl<E: ObserverExecute, R: ObserverReader, C: ObserverClock> JenkinsReadObserve
 }
 
 /// Composition-root selection. An absent option performs no I/O.
-pub fn configured_read_observer<
-    E: ObserverExecute,
-    R: ObserverReader,
-    C: ObserverClock,
->(
+pub fn configured_read_observer<E: ObserverExecute, R: ObserverReader, C: ObserverClock>(
     path: Option<PathBuf>,
     execute: E,
     reader: R,

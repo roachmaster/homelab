@@ -14,9 +14,9 @@ use sha2::Digest as _;
 use forge_work_worker::process::terminate_and_reap;
 
 use crate::delivery_stores::{DeliveryStorePort, RequireLease};
-use crate::publication_clients::ProviderError;
 use crate::delivery_worker::ReleaseProviderPort;
 use crate::durable_files::{effective_uid, read_private};
+use crate::publication_clients::ProviderError;
 use crate::publication_clients::PublicationError;
 use crate::publication_config::PublicationConfig;
 use crate::strict_json::strict_parse;
@@ -41,7 +41,12 @@ pub const IDENTITY: [&str; 9] = [
 
 fn plan_keys() -> Vec<&'static str> {
     let mut keys: Vec<&'static str> = IDENTITY.to_vec();
-    keys.extend(["version", "policy", "artifact_manifest_sha256", "plan_sha256"]);
+    keys.extend([
+        "version",
+        "policy",
+        "artifact_manifest_sha256",
+        "plan_sha256",
+    ]);
     keys
 }
 
@@ -54,8 +59,13 @@ pub fn release_authority(value: Option<&Value>) -> Result<Value, String> {
     if object.len() != 2
         || !object.contains_key("generation")
         || !object.contains_key("lease_token")
-        || !generation.map(|value| value.is_i64() || value.is_u64()).unwrap_or(false)
-        || generation.and_then(Value::as_i64).map(|value| !(1..=100_000).contains(&value)).unwrap_or(true)
+        || !generation
+            .map(|value| value.is_i64() || value.is_u64())
+            .unwrap_or(false)
+        || generation
+            .and_then(Value::as_i64)
+            .map(|value| !(1..=100_000).contains(&value))
+            .unwrap_or(true)
     {
         return Err("Invalid private release authority".to_string());
     }
@@ -196,8 +206,8 @@ pub struct RootActorPort {
 
 impl RootActorPort {
     pub fn new(expected_sha256: &str) -> Result<Self, String> {
-        let expected_sha256 = validate_digest(expected_sha256)
-            .map_err(|error| error.to_string())?;
+        let expected_sha256 =
+            validate_digest(expected_sha256).map_err(|error| error.to_string())?;
         Ok(RootActorPort {
             expected_sha256,
             execute: Box::new(actor_command),
@@ -215,9 +225,8 @@ impl ActorPort for RootActorPort {
                 meta.permissions().mode() & 0o111 != 0
             })
             .unwrap_or(false);
-        let raw = read_private(actor, 1024 * 1024, Some(0)).map_err(|_| {
-            "Selected root release actor changed".to_string()
-        })?;
+        let raw = read_private(actor, 1024 * 1024, Some(0))
+            .map_err(|_| "Selected root release actor changed".to_string())?;
         if !executable || sha256_hex(&raw) != self.expected_sha256 {
             return Err("Selected root release actor changed".to_string());
         }
@@ -263,12 +272,13 @@ impl ActorPort for RootActorPort {
         ]
         .into_iter()
         .collect();
-        let output = (self.execute)(&argv, &env, &raw, 120.0)
-            .map_err(|error| error.code().to_string())?;
+        let output =
+            (self.execute)(&argv, &env, &raw, 120.0).map_err(|error| error.code().to_string())?;
         if output.len() > 65_536 {
             return Err("Oversized release actor response".to_string());
         }
-        let value = strict_parse(&output).map_err(|_| "Invalid release actor response".to_string())?;
+        let value =
+            strict_parse(&output).map_err(|_| "Invalid release actor response".to_string())?;
         if !value.is_object() {
             return Err("Invalid release actor response".to_string());
         }
@@ -288,10 +298,11 @@ impl ReleaseProvider {
             && job.get("owner_id").and_then(Value::as_str)
                 == Some(self.config.worker.owner.as_str())
             && job.get("project_alias").and_then(Value::as_str) == Some("homelab")
-            && self
-                .config
-                .repositories
-                .contains_key(job.get("project_alias").and_then(Value::as_str).unwrap_or_default());
+            && self.config.repositories.contains_key(
+                job.get("project_alias")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            );
         if !scope_ok {
             return Err("Portal release scope denied".to_string());
         }
@@ -327,8 +338,12 @@ impl ReleaseProvider {
         if !shape_ok {
             return Err("Portal release plan identity changed".to_string());
         }
-        validate_digest(plan["artifact_manifest_sha256"].as_str().unwrap_or_default())
-            .map_err(|_| "Portal release plan identity changed".to_string())?;
+        validate_digest(
+            plan["artifact_manifest_sha256"]
+                .as_str()
+                .unwrap_or_default(),
+        )
+        .map_err(|_| "Portal release plan identity changed".to_string())?;
         let unsigned = plan
             .as_object()
             .expect("checked")
@@ -350,22 +365,37 @@ impl ReleaseProvider {
         plan: Option<&Value>,
         result: &Value,
     ) -> Result<(), String> {
-        let status = result.get("status").and_then(Value::as_str).unwrap_or_default();
+        let status = result
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let receipt = result.get("receipt").cloned().unwrap_or(Value::Null);
-        let summary = result.get("summary").and_then(Value::as_str).unwrap_or_default();
+        let summary = result
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if !result.is_object()
             || !["pending", "deployed", "failed", "superseded"].contains(&status)
             || !receipt.is_object()
-            || result.get("summary").map(|value| !value.is_string()).unwrap_or(true)
+            || result
+                .get("summary")
+                .map(|value| !value.is_string())
+                .unwrap_or(true)
             || summary.len() > 4096
         {
             return Err("Invalid portal release observation".to_string());
         }
-        if IDENTITY.iter().any(|key| receipt.get(*key) != identity.get(*key)) {
+        if IDENTITY
+            .iter()
+            .any(|key| receipt.get(*key) != identity.get(*key))
+        {
             return Err("Portal release receipt identity changed".to_string());
         }
         if let Some(plan) = plan {
-            if plan_keys().iter().any(|key| receipt.get(*key) != plan.get(*key)) {
+            if plan_keys()
+                .iter()
+                .any(|key| receipt.get(*key) != plan.get(*key))
+            {
                 return Err("Portal release receipt plan changed".to_string());
             }
         }
@@ -379,8 +409,12 @@ impl ReleaseProvider {
             {
                 return Err("Portal activation is not healthy and confirmed".to_string());
             }
-            validate_digest(receipt["activation_receipt_sha256"].as_str().unwrap_or_default())
-                .map_err(|_| "Portal activation is not healthy and confirmed".to_string())?;
+            validate_digest(
+                receipt["activation_receipt_sha256"]
+                    .as_str()
+                    .unwrap_or_default(),
+            )
+            .map_err(|_| "Portal activation is not healthy and confirmed".to_string())?;
         }
         if status == "failed" && receipt.get("rollback_confirmed") == Some(&json!(true)) {
             if receipt.get("health_confirmed") != Some(&json!(true))
@@ -389,8 +423,12 @@ impl ReleaseProvider {
             {
                 return Err("Portal rollback health remains unconfirmed".to_string());
             }
-            validate_digest(receipt["activation_receipt_sha256"].as_str().unwrap_or_default())
-                .map_err(|_| "Portal rollback health remains unconfirmed".to_string())?;
+            validate_digest(
+                receipt["activation_receipt_sha256"]
+                    .as_str()
+                    .unwrap_or_default(),
+            )
+            .map_err(|_| "Portal rollback health remains unconfirmed".to_string())?;
         }
         Ok(())
     }
@@ -425,11 +463,17 @@ impl ReleaseProvider {
         require_lease().map_err(ProviderError::Publication)?;
         let result = self
             .actor
-            .call(action, identity["release_id"].as_str().unwrap_or_default(), &identity, plan.as_ref(), &authority)
+            .call(
+                action,
+                identity["release_id"].as_str().unwrap_or_default(),
+                &identity,
+                plan.as_ref(),
+                &authority,
+            )
             .map_err(ProviderError::Other)?;
         if result.get("status").and_then(Value::as_str) == Some("planned") {
-            let recovered = Self::plan_valid(&identity, &result["plan"])
-                .map_err(ProviderError::Other)?;
+            let recovered =
+                Self::plan_valid(&identity, &result["plan"]).map_err(ProviderError::Other)?;
             if let Some(plan) = &plan {
                 if &recovered != plan {
                     return Err(ProviderError::Other(
@@ -449,7 +493,9 @@ impl ReleaseProvider {
                             .map(|key| (key.to_string(), receipt[*key].clone()))
                             .collect(),
                     );
-                    plan = Some(Self::plan_valid(&identity, &extracted).map_err(ProviderError::Other)?);
+                    plan = Some(
+                        Self::plan_valid(&identity, &extracted).map_err(ProviderError::Other)?,
+                    );
                 }
             }
         }
@@ -460,21 +506,22 @@ impl ReleaseProvider {
 }
 
 impl ReleaseProviderPort for ReleaseProvider {
-    fn plan(
-        &mut self,
-        job: &Value,
-        require_lease: RequireLease,
-    ) -> Result<Value, ProviderError> {
+    fn plan(&mut self, job: &Value, require_lease: RequireLease) -> Result<Value, ProviderError> {
         let identity = self.identity(job).map_err(ProviderError::Other)?;
         let authority = self.authority(job).map_err(ProviderError::Other)?;
         require_lease().map_err(ProviderError::Publication)?;
         let result = self
             .actor
-            .call("plan", identity["release_id"].as_str().unwrap_or_default(), &identity, None, &authority)
+            .call(
+                "plan",
+                identity["release_id"].as_str().unwrap_or_default(),
+                &identity,
+                None,
+                &authority,
+            )
             .map_err(ProviderError::Other)?;
         if result.get("status").and_then(Value::as_str) == Some("planned") {
-            Self::plan_valid(&identity, &result["plan"])
-                .map_err(ProviderError::Other)?;
+            Self::plan_valid(&identity, &result["plan"]).map_err(ProviderError::Other)?;
         } else {
             self.observation(&identity, None, &result)
                 .map_err(ProviderError::Other)?;
@@ -541,12 +588,8 @@ impl SourceObserver {
         store: Box<dyn DeliveryStorePort>,
         delivery: TrustedDeliveryPort,
     ) -> Result<Self, String> {
-        if !config.source_observation_enabled
-            || config.source_observation_interval_seconds != 60
-        {
-            return Err(
-                "Source observation requires the explicit sixty-second policy".to_string(),
-            );
+        if !config.source_observation_enabled || config.source_observation_interval_seconds != 60 {
+            return Err("Source observation requires the explicit sixty-second policy".to_string());
         }
         let mut projects: Vec<String> = config.repositories.keys().cloned().collect();
         projects.sort();

@@ -203,8 +203,7 @@ fn review_decide_bound(
         let review_attempt: Option<Uuid> = col(review, "attempt_id")?;
         let review_status: String = col(review, "status")?;
         if review_attempt != task.latest_attempt_id
-            || ["pending", "checking", "approved", "cancelled"]
-                .contains(&review_status.as_str())
+            || ["pending", "checking", "approved", "cancelled"].contains(&review_status.as_str())
         {
             return Err(not_reviewable());
         }
@@ -238,11 +237,8 @@ fn review_decide_bound(
                     .first()
                     .and_then(|row| row.get::<usize, Option<Value>>(0))
                     .ok_or_else(not_reviewable)?;
-                let max_params: &[&(dyn ToSql + Sync)] = &[
-                    &store.owner,
-                    &request.project_alias,
-                    &request.task_id,
-                ];
+                let max_params: &[&(dyn ToSql + Sync)] =
+                    &[&store.owner, &request.project_alias, &request.task_id];
                 let max_rows = tx
                     .query_rows(
                         "SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3",
@@ -298,11 +294,8 @@ fn review_decide_bound(
                     .first()
                     .and_then(|row| row.get::<usize, Option<Value>>(0))
                     .ok_or_else(not_reviewable)?;
-                let max_params: &[&(dyn ToSql + Sync)] = &[
-                    &store.owner,
-                    &request.project_alias,
-                    &request.task_id,
-                ];
+                let max_params: &[&(dyn ToSql + Sync)] =
+                    &[&store.owner, &request.project_alias, &request.task_id];
                 let max_rows = tx
                     .query_rows(
                         "SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=$1 AND project_alias=$2 AND task_id=$3",
@@ -910,11 +903,8 @@ pub(crate) fn handoff_author_full(
         return Err(forge_work::WorkError::rejected(403, "denied"));
     }
     run_tx(store, |tx| {
-        let params: &[&(dyn ToSql + Sync)] = &[
-            &store.owner,
-            &command.project_alias,
-            &command.task_id,
-        ];
+        let params: &[&(dyn ToSql + Sync)] =
+            &[&store.owner, &command.project_alias, &command.task_id];
         let task = tx
             .call_json(
                 "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_tasks WHERE (owner_id, project_alias, id) = ($1, $2, $3) FOR UPDATE) t",

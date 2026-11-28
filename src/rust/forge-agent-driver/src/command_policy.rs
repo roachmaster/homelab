@@ -109,9 +109,7 @@ pub fn parse_command(command: &str, files: &[String]) -> Result<Vec<Vec<String>>
 }
 
 fn is_grep_flag(flag: &str) -> bool {
-    flag.len() >= 2
-        && flag.starts_with('-')
-        && flag[1..].chars().all(|c| matches!(c, 'F' | 'n'))
+    flag.len() >= 2 && flag.starts_with('-') && flag[1..].chars().all(|c| matches!(c, 'F' | 'n'))
 }
 
 fn is_grep_pattern(pattern: &str) -> bool {
@@ -164,16 +162,12 @@ pub fn file_command(tokens: &[String], files: &[String]) -> Result<Vec<String>, 
         argv.push(filename);
         return Ok(argv);
     }
-    if name == "head"
-        && options.len() == 2
-        && options[0] == "-n"
-        && {
-            let value = &options[1];
-            (value.len() == 1 || value.len() == 2)
-                && value.chars().all(|c| c.is_ascii_digit())
-                && !value.starts_with('0')
-        }
-    {
+    if name == "head" && options.len() == 2 && options[0] == "-n" && {
+        let value = &options[1];
+        (value.len() == 1 || value.len() == 2)
+            && value.chars().all(|c| c.is_ascii_digit())
+            && !value.starts_with('0')
+    } {
         return Ok(vec![
             "/usr/bin/head".to_string(),
             "-n".to_string(),
@@ -300,7 +294,11 @@ pub fn execute(
         }
         previous = stdout;
     }
-    Ok((0, String::from_utf8_lossy(&previous).into_owned(), String::new()))
+    Ok((
+        0,
+        String::from_utf8_lossy(&previous).into_owned(),
+        String::new(),
+    ))
 }
 
 #[cfg(test)]
@@ -330,7 +328,15 @@ mod tests {
         );
         assert_eq!(
             parse_command("cut -d, -f2 names.txt", &files()).unwrap(),
-            vec![vec!["/usr/bin/cut", "-d", ",", "-f", "2", "--", "names.txt"]]
+            vec![vec![
+                "/usr/bin/cut",
+                "-d",
+                ",",
+                "-f",
+                "2",
+                "--",
+                "names.txt"
+            ]]
         );
         assert_eq!(
             parse_command("head -n 12 notes.txt", &files()).unwrap(),
@@ -350,7 +356,8 @@ mod tests {
 
     #[test]
     fn execute_runs_pipeline() {
-        let directory = std::env::temp_dir().join(format!("forge-driver-test-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("forge-driver-test-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join("names.txt"), "beta\nalpha\nbeta\n").unwrap();
         let commands = parse_command("sort names.txt | uniq", &files()).unwrap();

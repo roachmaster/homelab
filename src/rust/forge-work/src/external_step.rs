@@ -12,9 +12,7 @@
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::branch_scope::{
-    derive_branch_scope, validate_branch_name, validate_branch_scope,
-};
+use crate::branch_scope::{derive_branch_scope, validate_branch_name, validate_branch_scope};
 use crate::canonical::{canonical_json, sha256_hex};
 use crate::execution_policy::sha256_canonical;
 use crate::external_identity::validate_content_identity;
@@ -23,12 +21,12 @@ use crate::external_tx::{ExternalTx, LockMode};
 use crate::external_workflow::{is_hex, opt_uuid, ExternalWorkflowStore, TERMINAL};
 use crate::model_route::format_iso;
 use crate::retry_policy::AGENT_RETRY_LIMIT;
-use crate::workflow_ingress::parse_ts;
 use crate::strict_json::parse_strict;
 use crate::validation::is_int;
 use crate::work_actors::{Actor, ActorKind};
 use crate::work_error::WorkError;
 use crate::workflow::{coordinator_actor, int_of, prepare_title, text, uuid_of};
+use crate::workflow_ingress::parse_ts;
 
 /// _verified_stage_observation's port: the exact stopped
 /// stage evidence for a verify receipt, or an error the
@@ -191,13 +189,7 @@ impl ExternalWorkflowStore {
         });
         let result = tx.insert_action_row(&row)?;
         *self.new_actions.borrow_mut() = true;
-        self.event(
-            tx,
-            w,
-            &format!("Trusted {kind} action queued."),
-            None,
-            None,
-        )?;
+        self.event(tx, w, &format!("Trusted {kind} action queued."), None, None)?;
         tx.notify_delivery()?;
         Ok(result)
     }
@@ -309,9 +301,7 @@ impl ExternalWorkflowStore {
             }
         } else if scope == "main" {
             if candidate["candidate_commit"] != candidate["integration_base"] {
-                return Err(
-                    "Non-main candidate cannot claim main branch scope".to_string(),
-                );
+                return Err("Non-main candidate cannot claim main branch scope".to_string());
             }
             if !matches!(source_branch, None | Some("main")) {
                 return Err("Main branch scope conflicts with source_branch".to_string());
@@ -332,8 +322,7 @@ impl ExternalWorkflowStore {
     /// _candidate_manifest: the strict version-1 author
     /// manifest.
     fn candidate_manifest(content: &str) -> Result<Value, String> {
-        let value = parse_strict(content)
-            .map_err(|_| "Invalid candidate manifest".to_string())?;
+        let value = parse_strict(content).map_err(|_| "Invalid candidate manifest".to_string())?;
         let object = value
             .as_object()
             .ok_or_else(|| "Invalid candidate manifest".to_string())?;
@@ -348,10 +337,7 @@ impl ExternalWorkflowStore {
             && object
                 .keys()
                 .all(|key| required.contains(&key.as_str()) || key == "source_branch");
-        if !keys_ok
-            || !is_int(&object["version"])
-            || object["version"].as_i64() != Some(1)
-        {
+        if !keys_ok || !is_int(&object["version"]) || object["version"].as_i64() != Some(1) {
             return Err("Invalid candidate manifest".to_string());
         }
         for key in ["candidate_commit", "candidate_tree", "base_revision"] {
@@ -371,9 +357,7 @@ impl ExternalWorkflowStore {
                 .ok_or_else(|| "Invalid Git branch name".to_string())?;
             validate_branch_name(branch)?;
             if branch == "main" && object["candidate_commit"] != object["base_revision"] {
-                return Err(
-                    "Non-main candidate cannot claim main source branch".to_string(),
-                );
+                return Err("Non-main candidate cannot claim main source branch".to_string());
             }
         }
         Ok(value)
@@ -382,33 +366,22 @@ impl ExternalWorkflowStore {
     /// _step: one phase-machine advance for a leased
     /// workflow.
     #[allow(clippy::too_many_lines)]
-    pub(crate) fn step(
-        &self,
-        tx: &mut dyn ExternalTx,
-        w: &mut Value,
-    ) -> Result<bool, WorkError> {
+    pub(crate) fn step(&self, tx: &mut dyn ExternalTx, w: &mut Value) -> Result<bool, WorkError> {
         let root = self.task(tx, w, Some(uuid_of(w, "root_task_id")))?;
         let task = if uuid_of(w, "active_task_id") == uuid_of(w, "root_task_id") {
             root.clone()
         } else {
             self.task(tx, w, None)?
         };
-        let cancelled = |row: &Value| {
-            matches!(text(row, "status"), "cancelled" | "cancel_requested")
-        };
+        let cancelled =
+            |row: &Value| matches!(text(row, "status"), "cancelled" | "cancel_requested");
         if text(w, "phase") != "merging" && (cancelled(&root) || cancelled(&task)) {
             let note = if cancelled(&root) {
                 "Root workflow task cancellation observed."
             } else {
                 "Author task cancellation observed."
             };
-            return self.cancel_locked(
-                tx,
-                w,
-                note,
-                &coordinator_actor(),
-                "workflow_cancelled",
-            );
+            return self.cancel_locked(tx, w, note, &coordinator_actor(), "workflow_cancelled");
         }
         if matches!(
             text(w, "phase"),
@@ -426,10 +399,7 @@ impl ExternalWorkflowStore {
                     self.escalate(
                         tx,
                         w,
-                        &format!(
-                            "External author cannot continue: {}",
-                            text(&task, "status")
-                        ),
+                        &format!("External author cannot continue: {}", text(&task, "status")),
                         true,
                         None,
                     )?;
@@ -643,10 +613,7 @@ impl ExternalWorkflowStore {
                     &artifact,
                     ReviseOptions {
                         retry_kind: Some("verification".to_string()),
-                        source_id: Some(format!(
-                            "delivery:{}",
-                            uuid_of(&a, "action_id")
-                        )),
+                        source_id: Some(format!("delivery:{}", uuid_of(&a, "action_id"))),
                         evidence_digest: Some(sha256_canonical(&a["result"])),
                         ..Default::default()
                     },
@@ -666,23 +633,18 @@ impl ExternalWorkflowStore {
                 .map(|object| object.contains_key("source_integration"))
                 .unwrap_or(false)
             {
-                let integration = ExternalSourceIntegration::from_value(
-                    &candidate["source_integration"],
-                )
-                .map_err(WorkError::store)?;
+                let integration =
+                    ExternalSourceIntegration::from_value(&candidate["source_integration"])
+                        .map_err(WorkError::store)?;
                 let action_id = uuid_of(&a, "action_id").to_string();
                 if integration.prepare_action_id != action_id
                     || py_str(&candidate["prepare_action_id"]) != action_id
-                    || integration.source_base_revision
-                        != text(&manifest, "base_revision")
-                    || integration.source_candidate_commit
-                        != text(&manifest, "candidate_commit")
-                    || integration.source_candidate_tree
-                        != text(&manifest, "candidate_tree")
+                    || integration.source_base_revision != text(&manifest, "base_revision")
+                    || integration.source_candidate_commit != text(&manifest, "candidate_commit")
+                    || integration.source_candidate_tree != text(&manifest, "candidate_tree")
                     || py_str(&candidate["author_candidate_commit"])
                         != text(&manifest, "candidate_commit")
-                    || integration.integration_base
-                        != text(&candidate, "integration_base")
+                    || integration.integration_base != text(&candidate, "integration_base")
                     || integration.candidate_tree != text(&candidate, "candidate_tree")
                     || integration.integration_base == integration.source_base_revision
                 {
@@ -699,9 +661,7 @@ impl ExternalWorkflowStore {
             }
             for key in ["diff_sha256", "gate_source_sha256"] {
                 if !is_hex(&candidate[key], 64) {
-                    return Err(WorkError::store(
-                        "Candidate lacks exact gate/diff digests",
-                    ));
+                    return Err(WorkError::store("Candidate lacks exact gate/diff digests"));
                 }
             }
             let gate = validate_gate_reference(&candidate["gate_manifest_sha256"])?;
@@ -726,8 +686,7 @@ impl ExternalWorkflowStore {
                 let content = validate_content_identity(&candidate["content_identity"])
                     .map_err(WorkError::store)?;
                 let action_id = uuid_of(&a, "action_id").to_string();
-                if content["verification"]["generation"].as_str()
-                    != Some(action_id.as_str())
+                if content["verification"]["generation"].as_str() != Some(action_id.as_str())
                     || py_str(&candidate["prepare_action_id"]) != action_id
                 {
                     return Err(WorkError::store(
@@ -750,15 +709,12 @@ impl ExternalWorkflowStore {
                 .map(|list| {
                     list.len() <= 256
                         && list.iter().all(|change| {
-                            change.is_object()
-                                && change["finding_id"].as_str().is_some()
+                            change.is_object() && change["finding_id"].as_str().is_some()
                         })
                 })
                 .unwrap_or(false);
             if !changes_ok {
-                return Err(WorkError::store(
-                    "Invalid protected gate change manifest",
-                ));
+                return Err(WorkError::store("Invalid protected gate change manifest"));
             }
             self.resolve_retry(
                 tx,
@@ -1012,9 +968,7 @@ impl ExternalWorkflowStore {
                 int_of(task, "revision")
             }
             Some(accepted) => {
-                if text(task, "status") != "completed"
-                    || int_of(task, "revision") != accepted + 1
-                {
+                if text(task, "status") != "completed" || int_of(task, "revision") != accepted + 1 {
                     return Ok(None);
                 }
                 accepted
@@ -1033,11 +987,8 @@ impl ExternalWorkflowStore {
             return Ok(None);
         };
         let byte_count = a["result_byte_count"].as_i64().unwrap_or(0);
-        if byte_count == 0 || byte_count > crate::external_workflow::MAX_NATIVE_VERDICT as i64
-        {
-            return Err(WorkError::store(
-                "Native reviewer verdict exceeds contract",
-            ));
+        if byte_count == 0 || byte_count > crate::external_workflow::MAX_NATIVE_VERDICT as i64 {
+            return Err(WorkError::store("Native reviewer verdict exceeds contract"));
         }
         let chunks = tx.result_chunks(
             text(w, "project_alias"),
@@ -1097,15 +1048,12 @@ impl ExternalWorkflowStore {
         tx: &mut dyn ExternalTx,
         w: &mut Value,
     ) -> Result<bool, WorkError> {
-        let review_id = opt_uuid(&w["state"], "active_review_id").ok_or_else(|| {
-            WorkError::store("External workflow review binding changed")
-        })?;
+        let review_id = opt_uuid(&w["state"], "active_review_id")
+            .ok_or_else(|| WorkError::store("External workflow review binding changed"))?;
         let review = tx
             .review_row(review_id, LockMode::Update)?
             .filter(|review| text(review, "status") == "reviewing")
-            .ok_or_else(|| {
-                WorkError::store("External workflow review binding changed")
-            })?;
+            .ok_or_else(|| WorkError::store("External workflow review binding changed"))?;
         let critic = self.task(tx, w, Some(uuid_of(&review, "reviewer_task_id")))?;
         let task = self.task(tx, w, Some(uuid_of(&review, "source_task_id")))?;
         let source = self
@@ -1114,9 +1062,7 @@ impl ExternalWorkflowStore {
                 source["assignment_id"] == review["source_assignment_id"]
                     && source["sha256"] == review["source_sha256"]
             })
-            .ok_or_else(|| {
-                WorkError::store("External source changed while reviewing")
-            })?;
+            .ok_or_else(|| WorkError::store("External source changed while reviewing"))?;
         let result = match self.native_artifact(tx, w, &critic, None) {
             Ok(result) => result,
             Err(WorkError::Store { .. }) => {
@@ -1157,11 +1103,8 @@ impl ExternalWorkflowStore {
             }
             return Ok(false);
         };
-        let target = validate_target(
-            text(&review, "target_json"),
-            text(&review, "target_sha256"),
-        )
-        .map_err(WorkError::store)?;
+        let target = validate_target(text(&review, "target_json"), text(&review, "target_sha256"))
+            .map_err(WorkError::store)?;
         let verdict = match parse_verdict(
             text(&result, "content"),
             &target,
@@ -1215,7 +1158,13 @@ impl ExternalWorkflowStore {
         )?;
         match text(&verdict, "decision") {
             "escalate" => {
-                self.escalate(tx, w, text(&verdict, "summary"), true, Some("review_verdict"))?;
+                self.escalate(
+                    tx,
+                    w,
+                    text(&verdict, "summary"),
+                    true,
+                    Some("review_verdict"),
+                )?;
                 Ok(true)
             }
             "revise" => self.revise(
@@ -1315,9 +1264,8 @@ impl ExternalWorkflowStore {
             if pending["review_id"].as_str() != Some(review_id.to_string().as_str()) {
                 return Err(WorkError::store("Review retry wait binding changed"));
             }
-            let not_before = parse_ts(text(&pending, "not_before")).ok_or_else(|| {
-                WorkError::store("Review retry wait timestamp is invalid")
-            })?;
+            let not_before = parse_ts(text(&pending, "not_before"))
+                .ok_or_else(|| WorkError::store("Review retry wait timestamp is invalid"))?;
             if now < not_before {
                 return Ok(false);
             }
@@ -1490,13 +1438,12 @@ impl ExternalWorkflowStore {
     ) -> Result<Uuid, WorkError> {
         let task_id = task_id.unwrap_or_else(Uuid::new_v4);
         let root = self.task(tx, w, Some(uuid_of(w, "root_task_id")))?;
-        let recipe = w["snapshot"]["recipes"]
-            [if mode == "plan" {
-                "author_plan"
-            } else {
-                "author_implement"
-            }]
-            .clone();
+        let recipe = w["snapshot"]["recipes"][if mode == "plan" {
+            "author_plan"
+        } else {
+            "author_implement"
+        }]
+        .clone();
         let phase = if mode == "plan" {
             if feedback.is_some() {
                 "plan_revision"
@@ -1592,11 +1539,7 @@ impl ExternalWorkflowStore {
         state_pop(w, "candidate");
         state_pop(w, "code_review");
         state_pop(w, "candidate_source");
-        tx.update_workflow_state(
-            uuid_of(w, "workflow_id"),
-            &w["state"].clone(),
-            None,
-        )?;
+        tx.update_workflow_state(uuid_of(w, "workflow_id"), &w["state"].clone(), None)?;
         Ok(assignment)
     }
 
@@ -1688,9 +1631,7 @@ impl ExternalWorkflowStore {
             let source_task = self.task(tx, w, None)?;
             let source = self
                 .artifact(tx, w, &source_task)?
-                .ok_or_else(|| {
-                    WorkError::store("External author artifact disappeared")
-                })?;
+                .ok_or_else(|| WorkError::store("External author artifact disappeared"))?;
             let options = match &observation {
                 None => ReviseOptions::default(),
                 Some(observation) => ReviseOptions {
@@ -1700,13 +1641,8 @@ impl ExternalWorkflowStore {
                             .unwrap_or("verification")
                             .to_string(),
                     ),
-                    source_id: Some(format!(
-                        "delivery:{}",
-                        uuid_of(&a, "action_id")
-                    )),
-                    evidence_digest: Some(
-                        text(observation, "stage_evidence_digest").to_string(),
-                    ),
+                    source_id: Some(format!("delivery:{}", uuid_of(&a, "action_id"))),
+                    evidence_digest: Some(text(observation, "stage_evidence_digest").to_string()),
                     passed_kinds: string_list(&observation["passed_kinds"]),
                     phase_id: Some(
                         observation["phase_id"]
@@ -1732,9 +1668,14 @@ impl ExternalWorkflowStore {
                 options,
             );
         }
-        if ["candidate_commit", "candidate_tree", "gate_manifest_sha256", "branch_scope"]
-            .iter()
-            .any(|key| receipt[*key] != candidate[*key])
+        if [
+            "candidate_commit",
+            "candidate_tree",
+            "gate_manifest_sha256",
+            "branch_scope",
+        ]
+        .iter()
+        .any(|key| receipt[*key] != candidate[*key])
             || receipt["result"].as_str() != Some("SUCCESS")
         {
             return Err(WorkError::store(
@@ -1828,9 +1769,7 @@ impl ExternalWorkflowStore {
         if !root["latest_attempt_id"].is_null()
             || text(&root, "agent_profile") != text(w, "author_profile")
         {
-            return Err(WorkError::store(
-                "Root external envelope identity changed",
-            ));
+            return Err(WorkError::store("Root external envelope identity changed"));
         }
         let mut set = json!({
             "status": "completed",
@@ -1840,11 +1779,7 @@ impl ExternalWorkflowStore {
         if root["accepted_at"].is_null() {
             set["accepted_at"] = json!({"$now": true});
         }
-        tx.update_task_row(
-            text(w, "project_alias"),
-            uuid_of(&root, "id"),
-            &set,
-        )?;
+        tx.update_task_row(text(w, "project_alias"), uuid_of(&root, "id"), &set)?;
         let evidence = json!({
             "workflow_id": uuid_of(w, "workflow_id").to_string(),
             "phase": "completed",
@@ -1897,9 +1832,7 @@ impl ExternalWorkflowStore {
             }
         } else {
             let used = int_of(&w["state"], "trusted_main_refreshes");
-            if used + int_of(w, "code_revisions")
-                >= self.retry_limit(w, "max_code_revisions")?
-            {
+            if used + int_of(w, "code_revisions") >= self.retry_limit(w, "max_code_revisions")? {
                 self.escalate(
                     tx,
                     w,
@@ -1911,8 +1844,7 @@ impl ExternalWorkflowStore {
             }
             w["state"]["trusted_main_refreshes"] = json!(used + 1);
         }
-        w["state"]["prepare_refresh_epoch"] =
-            json!(uuid_of(action, "action_id").to_string());
+        w["state"]["prepare_refresh_epoch"] = json!(uuid_of(action, "action_id").to_string());
         for key in [
             "candidate",
             "candidate_source",
@@ -1959,12 +1891,10 @@ impl ExternalWorkflowStore {
                 "source_id": format!("delivery:{}", uuid_of(action, "action_id")),
                 "digest": sha256_canonical(&action["result"]),
             });
-            w["state"]["prepare_refresh_epoch"] =
-                json!(uuid_of(action, "action_id").to_string());
+            w["state"]["prepare_refresh_epoch"] = json!(uuid_of(action, "action_id").to_string());
         }
         state_pop(w, "base_revision");
-        w["state"]["pending_rebase"] =
-            json!(summary.chars().take(2048).collect::<String>());
+        w["state"]["pending_rebase"] = json!(summary.chars().take(2048).collect::<String>());
         self.save(
             tx,
             w,
@@ -2009,8 +1939,7 @@ impl ExternalWorkflowStore {
             .filter(|ch| !ch.is_control() || matches!(ch, '\r' | '\n' | '\t'))
             .collect();
         let bounded = truncate_bytes(&safe, 2048);
-        let code =
-            crate::work_events::escalation_cause(reason, cause).map_err(WorkError::store)?;
+        let code = crate::work_events::escalation_cause(reason, cause).map_err(WorkError::store)?;
         w["enabled"] = json!(false);
         w["state"]["escalation_reason"] = json!(bounded);
         self.save(

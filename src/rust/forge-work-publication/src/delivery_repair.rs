@@ -259,10 +259,7 @@ impl DeliveryRepairConsumer {
             receipt.get("gate_manifest_sha256").cloned(),
         );
         let identity = Value::Object(identity);
-        let diagnostics = bounded(
-            &forge_work::canonical::canonical_json(&receipt),
-            2800,
-        );
+        let diagnostics = bounded(&forge_work::canonical::canonical_json(&receipt), 2800);
         let original = job
             .get("original")
             .filter(|value| value.is_object())
@@ -359,7 +356,10 @@ impl DeliveryRepairConsumer {
             .get("verification_receipt")
             .and_then(|receipt| receipt.get("failure"))
             .and_then(Value::as_str);
-        if job.get("request").map(|value| value.is_null()).unwrap_or(true)
+        if job
+            .get("request")
+            .map(|value| value.is_null())
+            .unwrap_or(true)
             && receipt_failure == Some("gate_manifest_mismatch")
         {
             self.store.finish(
@@ -455,8 +455,7 @@ mod tests {
     #[test]
     fn intent_digest_omits_false_auto_repair() {
         let digest = submit_intent_digest("p", "b", "plan", "a", "x", "y", false, None, None);
-        let with_repair =
-            submit_intent_digest("p", "b", "plan", "a", "x", "y", true, None, None);
+        let with_repair = submit_intent_digest("p", "b", "plan", "a", "x", "y", true, None, None);
         assert_ne!(digest, with_repair);
         assert_eq!(digest.len(), 64);
     }

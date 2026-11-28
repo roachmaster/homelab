@@ -18,10 +18,10 @@ use crate::feedback::parse_feedback_json;
 use crate::native_ci_postfix::{hex_ok, POSTFIX_POLICY};
 use crate::owner_reverification::SOURCE;
 use crate::pinned_recipe::PinnedRecipe;
+use crate::work_error::WorkError;
 use crate::workflow::{bool_of, int_of, present, text, uuid_of, WorkflowStore};
 use crate::workflow_continuation::recipe;
 use crate::workflow_tx::WorkflowTx;
-use crate::work_error::WorkError;
 
 pub const COMPLETION_KEY: &str = "forge-native-ci-postfix-m38-v1:verified";
 pub const MAX_LINEAGE: usize = 128;
@@ -210,36 +210,36 @@ fn lineage(
             let t = &node.task;
             let a = &node.attempt;
             if text(r, "owner_id") != text(workflow, "owner_id")
-            || text(r, "project_alias") != text(workflow, "project_alias")
-            || uuid_of(t, "workflow_id") != uuid_of(workflow, "workflow_id")
-            || uuid_of(a, "workflow_id") != uuid_of(workflow, "workflow_id")
-            || text(t, "mode") != "implement"
-            || !bool_of(t, "workflow_required")
-            || (if present(t, "repair_root_task_id") {
-                uuid_of(t, "repair_root_task_id")
-            } else {
-                uuid_of(t, "id")
-            }) != uuid_of(workflow, "root_task_id")
-            || text(t, "agent_profile") != author
-            || text(a, "agent_profile") != author
-            || present(t, "cancelled_at")
-            || plan_of(r) != plan_value
-            || plan_of(a) != plan_value
-            || plan_of(t) != plan_value
-            || text(a, "phase") != "stopped"
-            || bool_of(a, "reservation_active")
-            || present(a, "lease_expires_at")
-            || !present(a, "published_at")
-            || a["result_sha256"] != r["parent_result_sha256"]
-            || text(a, "recipe_digest") != author_recipe.digest
-            || a["pinned_recipe"] != author_recipe.to_dict()
-        {
-            return Err(mismatch());
-        }
-        let artifact = tx.artifact(uuid_of(t, "id"), uuid_of(a, "attempt_id"))?;
-        if artifact["result_sha256"] != r["parent_result_sha256"] {
-            return Err(mismatch());
-        }
+                || text(r, "project_alias") != text(workflow, "project_alias")
+                || uuid_of(t, "workflow_id") != uuid_of(workflow, "workflow_id")
+                || uuid_of(a, "workflow_id") != uuid_of(workflow, "workflow_id")
+                || text(t, "mode") != "implement"
+                || !bool_of(t, "workflow_required")
+                || (if present(t, "repair_root_task_id") {
+                    uuid_of(t, "repair_root_task_id")
+                } else {
+                    uuid_of(t, "id")
+                }) != uuid_of(workflow, "root_task_id")
+                || text(t, "agent_profile") != author
+                || text(a, "agent_profile") != author
+                || present(t, "cancelled_at")
+                || plan_of(r) != plan_value
+                || plan_of(a) != plan_value
+                || plan_of(t) != plan_value
+                || text(a, "phase") != "stopped"
+                || bool_of(a, "reservation_active")
+                || present(a, "lease_expires_at")
+                || !present(a, "published_at")
+                || a["result_sha256"] != r["parent_result_sha256"]
+                || text(a, "recipe_digest") != author_recipe.digest
+                || a["pinned_recipe"] != author_recipe.to_dict()
+            {
+                return Err(mismatch());
+            }
+            let artifact = tx.artifact(uuid_of(t, "id"), uuid_of(a, "attempt_id"))?;
+            if artifact["result_sha256"] != r["parent_result_sha256"] {
+                return Err(mismatch());
+            }
             proof.push(json!({
                 "review_id": review_id.to_string(),
                 "task_id": uuid_of(t, "id").to_string(),
@@ -252,15 +252,10 @@ fn lineage(
         }
         let mut stepped = false;
         if present(&node.review, "previous_review_id") {
-            if let Some(previous) =
-                load_node(tx, uuid_of(&node.review, "previous_review_id"))?
-            {
-                if uuid_of(&previous.attempt, "attempt_id")
-                    == uuid_of(&node.attempt, "attempt_id")
+            if let Some(previous) = load_node(tx, uuid_of(&node.review, "previous_review_id"))? {
+                if uuid_of(&previous.attempt, "attempt_id") == uuid_of(&node.attempt, "attempt_id")
                 {
-                    if source_identity_of(&previous.review)
-                        != source_identity_of(&node.review)
-                    {
+                    if source_identity_of(&previous.review) != source_identity_of(&node.review) {
                         return Err(mismatch());
                     }
                     node = previous;
@@ -271,17 +266,14 @@ fn lineage(
         if stepped {
             continue;
         }
-        if !present(&node.attempt, "feedback_id")
-            || !present(&node.attempt, "feedback_sha256")
-        {
+        if !present(&node.attempt, "feedback_id") || !present(&node.attempt, "feedback_sha256") {
             return Err(mismatch());
         }
         let feedback = tx
             .feedback_by_id(uuid_of(&node.attempt, "feedback_id"))?
             .ok_or_else(mismatch)?;
         if uuid_of(&feedback, "task_id") != uuid_of(&node.task, "id")
-            || text(&feedback, "feedback_sha256")
-                != text(&node.attempt, "feedback_sha256")
+            || text(&feedback, "feedback_sha256") != text(&node.attempt, "feedback_sha256")
         {
             return Err(mismatch());
         }
@@ -372,8 +364,7 @@ impl NativePostfixCompletion {
             if let Some(prior) = tx.action_by_source(scope.workflow_id, "decide", COMPLETION_KEY)? {
                 if text(&prior, "status") != "completed"
                     || text(&prior["intent"], "event_id") != scope.event_id.to_string()
-                    || text(&prior["finish_receipt"], "status")
-                        != "postfix_infrastructure_resolved"
+                    || text(&prior["finish_receipt"], "status") != "postfix_infrastructure_resolved"
                 {
                     return Err(reconcile_required());
                 }
@@ -384,10 +375,8 @@ impl NativePostfixCompletion {
                 .ok_or_else(not_reviewable)?;
             if text(&admission, "status") != "completed"
                 || text(&admission["intent"], "policy") != POSTFIX_POLICY
-                || text(&admission["intent"]["request"], "event_id")
-                    != scope.event_id.to_string()
-                || text(&admission["finish_receipt"], "status")
-                    != "postfix_verification_queued"
+                || text(&admission["intent"]["request"], "event_id") != scope.event_id.to_string()
+                || text(&admission["finish_receipt"], "status") != "postfix_verification_queued"
             {
                 return Err(not_reviewable());
             }
@@ -403,8 +392,7 @@ impl NativePostfixCompletion {
             }
             let original = &admission["intent"]["request"];
             let registered = load_node(tx, anchor)?.ok_or_else(mismatch)?;
-            if uuid_of(&registered.review, "previous_review_id")
-                != uuid_of(original, "review_id")
+            if uuid_of(&registered.review, "previous_review_id") != uuid_of(original, "review_id")
                 || int_of(&registered.review, "source_revision")
                     != int_of(original, "expected_revision") + 1
                 || int_of(&registered.review, "infrastructure_retries") != 21
@@ -440,10 +428,8 @@ impl NativePostfixCompletion {
             {
                 return Err(mismatch());
             }
-            let plan_artifact = tx.artifact(
-                uuid_of(&plan, "task_id"),
-                uuid_of(&plan, "plan_attempt_id"),
-            )?;
+            let plan_artifact =
+                tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
             if plan_artifact["result_sha256"] != plan["plan_sha256"] {
                 return Err(mismatch());
             }
@@ -490,10 +476,7 @@ impl NativePostfixCompletion {
                     let resolved = tx.resolve_verified(
                         &retry_scope,
                         "infrastructure",
-                        &format!(
-                            "postfix-pass:{}",
-                            uuid_of(&node.review, "review_id")
-                        ),
+                        &format!("postfix-pass:{}", uuid_of(&node.review, "review_id")),
                         &evidence.root_receipt_sha256,
                         Some("infrastructure"),
                     )?;

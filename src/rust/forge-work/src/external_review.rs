@@ -124,7 +124,9 @@ impl ExternalSourceIntegration {
             .filter(|object| {
                 object.len() == 7
                     && object.contains_key("version")
-                    && INTEGRATION_FIELDS.iter().all(|key| object.contains_key(*key))
+                    && INTEGRATION_FIELDS
+                        .iter()
+                        .all(|key| object.contains_key(*key))
                     && is_int(&object["version"])
                     && object["version"].as_i64() == Some(1)
             })
@@ -213,7 +215,9 @@ pub fn validate_target(raw: &str, digest: &str) -> Result<Value, String> {
         || text.len() > MAX_SOURCE_BYTES
         || sha256_hex(text.as_bytes()) != object["source_sha256"].as_str().unwrap_or_default()
     {
-        return Err(err("External source content does not match its immutable artifact"));
+        return Err(err(
+            "External source content does not match its immutable artifact",
+        ));
     }
     if object["target_kind"].as_str() == Some("code") {
         validate_code_target(object, text)?;
@@ -223,7 +227,9 @@ pub fn validate_target(raw: &str, digest: &str) -> Result<Value, String> {
     {
         return Err(err("Plan target carries code authority"));
     } else if object["version"].as_i64() != Some(1) {
-        return Err(err("Content identity protocol applies only to code targets"));
+        return Err(err(
+            "Content identity protocol applies only to code targets",
+        ));
     }
     let attest = object["required_attestations"]
         .as_array()
@@ -257,8 +263,7 @@ fn validate_code_target(object: &Map<String, Value>, text: &str) -> Result<(), S
         .filter(|content| {
             !content.is_empty()
                 && content.len() <= MAX_SOURCE_BYTES
-                && sha256_hex(content.as_bytes())
-                    == plan["sha256"].as_str().unwrap_or_default()
+                && sha256_hex(content.as_bytes()) == plan["sha256"].as_str().unwrap_or_default()
         })
         .ok_or_else(|| err("Approved external plan unavailable"))?;
     let _ = content;
@@ -278,14 +283,16 @@ fn validate_code_target(object: &Map<String, Value>, text: &str) -> Result<(), S
     }
     if let Some(integration_value) = candidate.get("source_integration") {
         let integration = ExternalSourceIntegration::from_value(integration_value)?;
-        let authored = parse_strict(text).map_err(|_| {
-            err("External review integration lost its immutable author source")
-        })?;
-        let authored = authored.as_object().ok_or_else(|| {
-            err("External review integration lost its immutable author source")
-        })?;
+        let authored = parse_strict(text)
+            .map_err(|_| err("External review integration lost its immutable author source"))?;
+        let authored = authored
+            .as_object()
+            .ok_or_else(|| err("External review integration lost its immutable author source"))?;
         let matches = integration.prepare_action_id
-            == candidate.get("prepare_action_id").and_then(Value::as_str).unwrap_or_default()
+            == candidate
+                .get("prepare_action_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
             && integration.source_base_revision
                 == object["source_base_revision"].as_str().unwrap_or_default()
             && integration.source_base_revision
@@ -293,25 +300,35 @@ fn validate_code_target(object: &Map<String, Value>, text: &str) -> Result<(), S
             && integration.source_candidate_commit
                 == authored["candidate_commit"].as_str().unwrap_or_default()
             && integration.source_candidate_commit
-                == candidate.get("author_candidate_commit").and_then(Value::as_str).unwrap_or_default()
+                == candidate
+                    .get("author_candidate_commit")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
             && integration.source_candidate_tree
                 == authored["candidate_tree"].as_str().unwrap_or_default()
             && integration.integration_base
-                == candidate.get("integration_base").and_then(Value::as_str).unwrap_or_default()
+                == candidate
+                    .get("integration_base")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
             && integration.candidate_tree
-                == candidate.get("candidate_tree").and_then(Value::as_str).unwrap_or_default()
+                == candidate
+                    .get("candidate_tree")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
             && integration.integration_base != integration.source_base_revision;
         if !matches {
-            return Err(err("External review integration lost its immutable author source"));
+            return Err(err(
+                "External review integration lost its immutable author source",
+            ));
         }
     }
     if object["version"].as_i64() == Some(2) {
         if candidate.get("identity_protocol").and_then(Value::as_str) != Some("content-v2") {
             return Err(err("Missing frozen content protocol"));
         }
-        let identity = validate_content_identity(
-            candidate.get("content_identity").unwrap_or(&Value::Null),
-        )?;
+        let identity =
+            validate_content_identity(candidate.get("content_identity").unwrap_or(&Value::Null))?;
         if identity["verification"]["generation"].as_str()
             != candidate.get("prepare_action_id").and_then(Value::as_str)
         {
@@ -320,7 +337,11 @@ fn validate_code_target(object: &Map<String, Value>, text: &str) -> Result<(), S
             ));
         }
     } else if candidate.contains_key("content_identity")
-        || candidate.get("identity_protocol").and_then(Value::as_str).unwrap_or("legacy-v1") != "legacy-v1"
+        || candidate
+            .get("identity_protocol")
+            .and_then(Value::as_str)
+            .unwrap_or("legacy-v1")
+            != "legacy-v1"
     {
         return Err(err("Legacy target cannot reinterpret content identity"));
     }
@@ -382,8 +403,8 @@ pub fn parse_verdict(text: &str, target: &Value, digest: &str) -> Result<Value, 
         })
         .ok_or_else(|| err("Invalid review summary"))?;
     let _ = summary;
-    let findings = validate_findings(&object["findings"], false)
-        .map_err(|error| error.0.to_string())?;
+    let findings =
+        validate_findings(&object["findings"], false).map_err(|error| error.0.to_string())?;
     if findings
         .iter()
         .any(|finding| finding["status"].as_str().unwrap_or("open") != "open")
@@ -405,12 +426,7 @@ pub fn parse_verdict(text: &str, target: &Value, digest: &str) -> Result<Value, 
         .ok_or_else(|| err("Invalid review attestation"))?;
     let required: Vec<&str> = target["required_attestations"]
         .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str())
-                .collect()
-        })
+        .map(|items| items.iter().filter_map(|item| item.as_str()).collect())
         .unwrap_or_default();
     if attest
         .iter()
@@ -419,11 +435,15 @@ pub fn parse_verdict(text: &str, target: &Value, digest: &str) -> Result<Value, 
         return Err(err("Invalid review attestation"));
     }
     if object["decision"].as_str() == Some("approve") {
-        let attested: std::collections::BTreeSet<&str> =
-            attest.iter().map(|item| item.as_str().unwrap_or_default()).collect();
+        let attested: std::collections::BTreeSet<&str> = attest
+            .iter()
+            .map(|item| item.as_str().unwrap_or_default())
+            .collect();
         let required_set: std::collections::BTreeSet<&str> = required.iter().copied().collect();
         if !findings.is_empty() || attested != required_set {
-            return Err(err("Approval omitted findings or protected gate verification"));
+            return Err(err(
+                "Approval omitted findings or protected gate verification",
+            ));
         }
     }
     if object["decision"].as_str() == Some("revise") && findings.is_empty() {
@@ -464,14 +484,20 @@ mod tests {
     impl ArtifactSourcePort for FakeArtifacts {
         fn acquire(&mut self, _repository: &str, commit: &str) -> Result<ArtifactManifest, String> {
             let marker = if commit == "candidate" { "a" } else { "b" };
-            ArtifactManifest::new(vec![
-                ArtifactEntry::new("src/lib.rs", "100644", 4, &marker.repeat(64)).unwrap(),
-            ])
+            ArtifactManifest::new(vec![ArtifactEntry::new(
+                "src/lib.rs",
+                "100644",
+                4,
+                &marker.repeat(64),
+            )
+            .unwrap()])
         }
     }
 
     fn code_target_v2() -> (String, String) {
-        let mut provider = ExternalCandidateIdentityProvider { artifacts: FakeArtifacts };
+        let mut provider = ExternalCandidateIdentityProvider {
+            artifacts: FakeArtifacts,
+        };
         let plan = crate::artifact_identity::CiPlan {
             profile: "forge-external-db-v2".into(),
             scope: "branch".into(),

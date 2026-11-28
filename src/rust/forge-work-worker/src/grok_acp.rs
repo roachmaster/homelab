@@ -58,13 +58,13 @@ pub fn terminal_usage(value: Option<&Value>) -> Result<Option<Value>, String> {
     if value.is_null() {
         return Ok(None);
     }
-    let map = value
-        .as_object()
-        .ok_or("Invalid ACP terminal usage")?;
+    let map = value.as_object().ok_or("Invalid ACP terminal usage")?;
     let field = |key: &str| -> Result<Option<u128>, String> {
         match map.get(key) {
             None | Some(Value::Null) => Ok(None),
-            Some(other) => counter(other).ok_or("Invalid ACP terminal counter".to_string()).map(Some),
+            Some(other) => counter(other)
+                .ok_or("Invalid ACP terminal counter".to_string())
+                .map(Some),
         }
     };
     let full = field("inputTokens")?;
@@ -164,7 +164,10 @@ fn charset(value: &str, min: usize, max: usize, allow: fn(char) -> bool) -> bool
 }
 
 fn is_bool_value(value: &str) -> bool {
-    matches!(value.to_ascii_lowercase().as_str(), "true" | "false" | "0" | "1")
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "true" | "false" | "0" | "1"
+    )
 }
 
 /// The fetch refspec spelling:
@@ -251,7 +254,8 @@ pub fn harmless_git_config(content: &str) -> bool {
             },
             "remote" => match key.as_str() {
                 "url" => charset(value, 1, 4096, |c| {
-                    c.is_ascii_alphanumeric() || matches!(c, '@' | ':' | '/' | '.' | '_' | '~' | '+' | '-')
+                    c.is_ascii_alphanumeric()
+                        || matches!(c, '@' | ':' | '/' | '.' | '_' | '~' | '+' | '-')
                 }),
                 "fetch" => harmless_fetch(value),
                 "mirror" => is_bool_value(value),
@@ -315,7 +319,10 @@ fn parse_assignment(line: &str) -> Option<(String, String)> {
     let (key, value) = line.split_once('=')?;
     let key = key.trim();
     let mut chars = key.chars();
-    if !chars.next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false)
+    if !chars
+        .next()
+        .map(|c| c.is_ascii_alphabetic())
+        .unwrap_or(false)
         || !chars.all(|c| c.is_ascii_alphanumeric() || c == '-')
     {
         return None;
@@ -395,7 +402,9 @@ fn native_metadata(block: Option<&Value>) -> Option<Map<String, Value>> {
     if !["namespace", "name", "version"]
         .iter()
         .all(|key| block.contains_key(*key))
-        || !block.keys().all(|key| NATIVE_TOOL_KEYS.contains(&key.as_str()))
+        || !block
+            .keys()
+            .all(|key| NATIVE_TOOL_KEYS.contains(&key.as_str()))
     {
         return None;
     }
@@ -430,7 +439,11 @@ fn native_metadata(block: Option<&Value>) -> Option<Map<String, Value>> {
 /// proves the captured arguments only when it reconstructs them
 /// exactly (paths normalized through descriptor_path). The
 /// descriptor is never substituted into the authoritative rawInput.
-fn descriptor_matches(block: &Map<String, Value>, raw: &Map<String, Value>, allowed_notes: &[String]) -> bool {
+fn descriptor_matches(
+    block: &Map<String, Value>,
+    raw: &Map<String, Value>,
+    allowed_notes: &[String],
+) -> bool {
     let Some(input) = block.get("input") else {
         return true;
     };
@@ -453,7 +466,8 @@ fn descriptor_matches(block: &Map<String, Value>, raw: &Map<String, Value>, allo
             same_json(&Value::Object(value.clone()), &Value::Object(expected))
         }
         Some("list_dir") => {
-            let Some(normalized) = descriptor_path(raw.get("target_directory"), allowed_notes) else {
+            let Some(normalized) = descriptor_path(raw.get("target_directory"), allowed_notes)
+            else {
                 return false;
             };
             value.len() == 1
@@ -476,10 +490,11 @@ fn descriptor_matches(block: &Map<String, Value>, raw: &Map<String, Value>, allo
             same_json(&Value::Object(value.clone()), &Value::Object(expected))
         }
         Some("run_terminal_command") => {
-            let keys: std::collections::HashSet<&str> =
-                value.keys().map(|k| k.as_str()).collect();
+            let keys: std::collections::HashSet<&str> = value.keys().map(|k| k.as_str()).collect();
             keys == raw.keys().map(|k| k.as_str()).collect()
-                && keys.iter().all(|key| matches!(*key, "command" | "description"))
+                && keys
+                    .iter()
+                    .all(|key| matches!(*key, "command" | "description"))
                 && value
                     .get("command")
                     .and_then(|v| v.as_str())
@@ -526,7 +541,10 @@ pub fn same_tool_identity(previous: &Value, current: &Value) -> bool {
         return false;
     };
     core.iter().all(|(key, expected)| {
-        value.get(key).map(|v| same_json(v, expected)).unwrap_or(true)
+        value
+            .get(key)
+            .map(|v| same_json(v, expected))
+            .unwrap_or(true)
     })
 }
 
@@ -541,7 +559,10 @@ pub fn same_tool_input(previous: &Value, current: &Value, allowed_notes: &[Strin
         return false;
     }
     let empty = Map::new();
-    let meta = current.get("_meta").and_then(|v| v.as_object()).unwrap_or(&empty);
+    let meta = current
+        .get("_meta")
+        .and_then(|v| v.as_object())
+        .unwrap_or(&empty);
     if !meta
         .keys()
         .all(|key| matches!(key.as_str(), "x.ai/tool" | "toolNotRun"))
@@ -598,8 +619,7 @@ pub fn same_tool_input(previous: &Value, current: &Value, allowed_notes: &[Strin
             ],
             _ => return false,
         };
-        return raw.keys().all(|key| complete.contains(&key.as_str()))
-            && with_input(augmented);
+        return raw.keys().all(|key| complete.contains(&key.as_str())) && with_input(augmented);
     }
     let tagged = &current["rawInput"];
     if same_json(tagged, &Value::Object(raw.clone())) {
@@ -615,10 +635,7 @@ pub fn same_tool_input(previous: &Value, current: &Value, allowed_notes: &[Strin
         match original.get("name").and_then(|v| v.as_str()) {
             Some("read_file") => ("ReadFile", Vec::new()),
             Some("list_dir") => ("ListDir", Vec::new()),
-            Some("run_terminal_command") => (
-                "Bash",
-                vec![("is_background", Value::Bool(false))],
-            ),
+            Some("run_terminal_command") => ("Bash", vec![("is_background", Value::Bool(false))]),
             Some("grep") => (
                 "Grep",
                 vec![
@@ -642,15 +659,20 @@ pub fn same_tool_input(previous: &Value, current: &Value, allowed_notes: &[Strin
         .map(|k| k.as_str())
         .chain(additions.iter().map(|(key, _)| *key))
         .collect();
-    if tagged.keys().map(|k| k.as_str()).collect::<std::collections::HashSet<&str>>()
+    if tagged
+        .keys()
+        .map(|k| k.as_str())
+        .collect::<std::collections::HashSet<&str>>()
         != expected_keys
     {
         return false;
     }
-    if !additions
-        .iter()
-        .all(|(key, value)| tagged.get(*key).map(|v| same_json(v, value)).unwrap_or(false))
-    {
+    if !additions.iter().all(|(key, value)| {
+        tagged
+            .get(*key)
+            .map(|v| same_json(v, value))
+            .unwrap_or(false)
+    }) {
         return false;
     }
     let normalized: Map<String, Value> = tagged
@@ -751,38 +773,41 @@ impl NativePaths {
         } else {
             base.iter().chain(components.iter()).cloned().collect()
         };
-        let (root, parts): (PathBuf, Vec<String>) =
-            if absolute == base || (absolute.len() > base.len() && absolute[..base.len()] == base[..])
+        let (root, parts): (PathBuf, Vec<String>) = if absolute == base
+            || (absolute.len() > base.len() && absolute[..base.len()] == base[..])
+        {
+            let relative = &absolute[base.len()..];
+            if relative
+                .iter()
+                .any(|p| matches!(*p, ".git" | ".grok" | ".claude" | ".cursor" | ".envrc"))
             {
-                let relative = &absolute[base.len()..];
-                if relative
-                    .iter()
-                    .any(|p| matches!(*p, ".git" | ".grok" | ".claude" | ".cursor" | ".envrc"))
-                {
-                    return false;
-                }
-                (
-                    self.workspace.clone(),
-                    relative.iter().map(|p| p.to_string()).collect(),
-                )
-            } else {
-                if write {
-                    return false;
-                }
-                let normalized = format!("/{}", absolute.join("/"));
-                let Some(host) = self
-                    .notes
-                    .iter()
-                    .find(|(child, _)| *child == normalized)
-                    .map(|(_, host)| host)
-                else {
-                    return false;
-                };
-                let (Some(parent), Some(name)) = (host.parent(), host.file_name()) else {
-                    return false;
-                };
-                (parent.to_path_buf(), vec![name.to_string_lossy().into_owned()])
+                return false;
+            }
+            (
+                self.workspace.clone(),
+                relative.iter().map(|p| p.to_string()).collect(),
+            )
+        } else {
+            if write {
+                return false;
+            }
+            let normalized = format!("/{}", absolute.join("/"));
+            let Some(host) = self
+                .notes
+                .iter()
+                .find(|(child, _)| *child == normalized)
+                .map(|(_, host)| host)
+            else {
+                return false;
             };
+            let (Some(parent), Some(name)) = (host.parent(), host.file_name()) else {
+                return false;
+            };
+            (
+                parent.to_path_buf(),
+                vec![name.to_string_lossy().into_owned()],
+            )
+        };
         if !Self::directory_chain(&root) {
             return false;
         }
@@ -861,17 +886,17 @@ fn test_target(value: &str) -> bool {
     let rest: Vec<&str> = groups.collect();
     rest.len() <= 2
         && rest.iter().all(|group| {
-            !group.is_empty()
-                && group
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            !group.is_empty() && group.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         })
 }
 
 /// `[A-Za-z][A-Za-z0-9_]{0,127}`
 fn cargo_argument(value: &str) -> bool {
     let mut chars = value.chars();
-    chars.next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false)
+    chars
+        .next()
+        .map(|c| c.is_ascii_alphabetic())
+        .unwrap_or(false)
         && value.chars().count() <= 128
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
@@ -1026,7 +1051,10 @@ impl Permissions {
         if args[0] == "echo" {
             return args.len() == 2 && echo_marker(&args[1]);
         }
-        if args.len() >= 2 && args[0] == "python3" && args[1] == format!("{STATE}/report_progress.py") {
+        if args.len() >= 2
+            && args[0] == "python3"
+            && args[1] == format!("{STATE}/report_progress.py")
+        {
             return self.progress
                 && args.len() == 4
                 && matches!(args[2].as_str(), "plan" | "progress")
@@ -1052,9 +1080,9 @@ impl Permissions {
             }
             if !tail.is_empty() && tail[0] == "log" {
                 return tail.len() <= 5
-                    && tail[1..]
-                        .iter()
-                        .all(|a| matches!(a.as_str(), "--oneline" | "--no-decorate" | "HEAD") || log_count(a));
+                    && tail[1..].iter().all(|a| {
+                        matches!(a.as_str(), "--oneline" | "--no-decorate" | "HEAD") || log_count(a)
+                    });
             }
             if tail_eq(&tail[..tail.len().min(3)], &["grep", "-n", "--"])
                 || tail_eq(&tail[..tail.len().min(4)], &["grep", "-n", "-F", "--"])
@@ -1095,7 +1123,10 @@ impl Permissions {
                 && (args.len() == prefix + 1 || args.len() == prefix + 2)
                 && !args[prefix].is_empty()
                 && args[prefix].chars().count() <= 2048
-                && (args.len() == prefix + 1 || self.paths.allows(&json!(args[args.len() - 1].clone()), false));
+                && (args.len() == prefix + 1
+                    || self
+                        .paths
+                        .allows(&json!(args[args.len() - 1].clone()), false));
         }
         if self.mode != "implement" {
             return false;
@@ -1107,7 +1138,15 @@ impl Permissions {
         }
         if args.len() >= 4 && tail_eq(&args[..4], &["python3", "-B", "-m", "unittest"]) {
             if args.len() >= 8
-                && tail_eq(&args[4..8], &["discover", "-s", "deploy/mission-control/agent-runner", "-p"])
+                && tail_eq(
+                    &args[4..8],
+                    &[
+                        "discover",
+                        "-s",
+                        "deploy/mission-control/agent-runner",
+                        "-p",
+                    ],
+                )
             {
                 return (args.len() == 9 || args.len() == 10)
                     && test_file(&args[8])
@@ -1120,14 +1159,23 @@ impl Permissions {
                     .all(|a| matches!(a.as_str(), "-q" | "-v") || test_target(a));
         }
         if args.len() >= 2 && tail_eq(&args[..2], &["python3", "-B"]) {
-            return tail_eq(&args[2..], &["deploy/mission-control/backend-suites.py", "--scope", "branch"]);
+            return tail_eq(
+                &args[2..],
+                &[
+                    "deploy/mission-control/backend-suites.py",
+                    "--scope",
+                    "branch",
+                ],
+            );
         }
         // Explicit compiler/test commands only, no arbitrary scripts,
         // shell, package installation, network/publishing or
         // user-provided executables.
         if args[0] == "cargo" && args.len() >= 2 {
-            return matches!(args[1].as_str(), "check" | "build" | "test" | "clippy" | "fmt")
-                && args.len() <= 16
+            return matches!(
+                args[1].as_str(),
+                "check" | "build" | "test" | "clippy" | "fmt"
+            ) && args.len() <= 16
                 && args[2..].iter().all(|a| {
                     matches!(
                         a.as_str(),
@@ -1173,13 +1221,22 @@ impl Permissions {
             return false;
         };
         if name == "run_terminal_command" {
-            let fields: HashSet<&str> = ["command", "cwd", "timeout_ms", "max_output_chars", "description"]
-                .into_iter()
-                .collect();
+            let fields: HashSet<&str> = [
+                "command",
+                "cwd",
+                "timeout_ms",
+                "max_output_chars",
+                "description",
+            ]
+            .into_iter()
+            .collect();
             return raw.keys().all(|key| fields.contains(key.as_str()))
                 && self.terminal(raw.get("command"), raw.get("cwd"));
         }
-        if matches!(name, "read_file" | "list_dir" | "grep" | "write" | "search_replace") {
+        if matches!(
+            name,
+            "read_file" | "list_dir" | "grep" | "write" | "search_replace"
+        ) {
             let write = matches!(name, "write" | "search_replace");
             if write && self.mode != "implement" {
                 return false;
@@ -1201,7 +1258,14 @@ impl Permissions {
                     "case_sensitive",
                 ],
                 "write" => &["file_path", "target_file", "path", "contents", "content"],
-                _ => &["file_path", "target_file", "path", "old_string", "new_string", "replace_all"],
+                _ => &[
+                    "file_path",
+                    "target_file",
+                    "path",
+                    "old_string",
+                    "new_string",
+                    "replace_all",
+                ],
             };
             if !raw.keys().all(|key| fields.contains(&key.as_str())) {
                 return false;
@@ -1219,8 +1283,7 @@ impl Permissions {
             // A grep with no path (or an explicit null path) reads the
             // workspace itself; every other call names exactly one.
             let path: Value = if name == "grep"
-                && (pathfields.is_empty()
-                    || pathfields == ["path"] && raw["path"].is_null())
+                && (pathfields.is_empty() || pathfields == ["path"] && raw["path"].is_null())
             {
                 Value::String(WORKSPACE.to_string())
             } else if pathfields.len() == 1 {
@@ -1245,7 +1308,10 @@ impl Permissions {
                 }
                 for (key, minimum, maximum) in [("head_limit", 1i64, 10000i64), ("-A", 0, 4096)] {
                     if let Some(value) = raw.get(key) {
-                        if value.as_i64().map(|n| !(minimum..=maximum).contains(&n)).unwrap_or(true)
+                        if value
+                            .as_i64()
+                            .map(|n| !(minimum..=maximum).contains(&n))
+                            .unwrap_or(true)
                             || value.is_f64()
                         {
                             return false;
@@ -1269,10 +1335,16 @@ impl Permissions {
                 }
             }
             for key in ["include_pattern", "exclude_pattern", "glob"] {
-                if name == "grep" && key == "glob" && raw.get(key).map(|v| v.is_null()).unwrap_or(false) {
+                if name == "grep"
+                    && key == "glob"
+                    && raw.get(key).map(|v| v.is_null()).unwrap_or(false)
+                {
                     continue;
                 }
-                let pattern = raw.get(key).cloned().unwrap_or(Value::String(String::new()));
+                let pattern = raw
+                    .get(key)
+                    .cloned()
+                    .unwrap_or(Value::String(String::new()));
                 let Some(pattern) = pattern.as_str() else {
                     return false;
                 };
@@ -1393,9 +1465,7 @@ impl GrokAcpTransport {
     }
 
     fn record(&mut self, value: Value) -> Result<Vec<Value>, String> {
-        let object = value
-            .as_object()
-            .ok_or("Invalid ACP envelope")?;
+        let object = value.as_object().ok_or("Invalid ACP envelope")?;
         if object.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") || self.complete {
             return Err("Invalid ACP envelope".to_string());
         }
@@ -1422,8 +1492,7 @@ impl GrokAcpTransport {
                 return Ok(Vec::new());
             }
             if self.session.is_none()
-                || params.get("sessionId").and_then(|v| v.as_str())
-                    != self.session.as_deref()
+                || params.get("sessionId").and_then(|v| v.as_str()) != self.session.as_deref()
             {
                 return Err("ACP session changed".to_string());
             }
@@ -1441,8 +1510,7 @@ impl GrokAcpTransport {
         // A host response.
         let allowed: HashSet<&str> = ["jsonrpc", "id", "result", "error"].into_iter().collect();
         if !object.keys().all(|key| allowed.contains(key.as_str()))
-            || object.get("id").and_then(|v| v.as_str())
-                != Some(&format!("host-{}", self.phase))
+            || object.get("id").and_then(|v| v.as_str()) != Some(&format!("host-{}", self.phase))
         {
             return Err("ACP host response identity changed".to_string());
         }
@@ -1456,10 +1524,17 @@ impl GrokAcpTransport {
         match self.phase {
             "initialize" => {
                 let version = result.get("protocolVersion");
-                if version.and_then(|v| v.as_i64()) != Some(1) || version.map(|v| v.is_number() && !v.is_i64() && !v.is_u64()).unwrap_or(false) {
+                if version.and_then(|v| v.as_i64()) != Some(1)
+                    || version
+                        .map(|v| v.is_number() && !v.is_i64() && !v.is_u64())
+                        .unwrap_or(false)
+                {
                     return Err("Unsupported ACP version".to_string());
                 }
-                let meta = result.get("_meta").cloned().unwrap_or(Value::Object(Map::new()));
+                let meta = result
+                    .get("_meta")
+                    .cloned()
+                    .unwrap_or(Value::Object(Map::new()));
                 let Some(meta) = meta.as_object() else {
                     return Err("ACP native capability identity changed".to_string());
                 };
@@ -1468,7 +1543,10 @@ impl GrokAcpTransport {
                     .and_then(|v| v.as_str())
                     .unwrap_or(WORKSPACE)
                     != WORKSPACE
-                    || meta.get("agentVersion").and_then(|v| v.as_str()).unwrap_or("1.0.92")
+                    || meta
+                        .get("agentVersion")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("1.0.92")
                         != "1.0.92"
                 {
                     return Err("ACP native capability identity changed".to_string());
@@ -1516,7 +1594,10 @@ impl GrokAcpTransport {
                         return Err("ACP stop identity changed".to_string());
                     }
                 }
-                let meta = result.get("_meta").cloned().unwrap_or(Value::Object(Map::new()));
+                let meta = result
+                    .get("_meta")
+                    .cloned()
+                    .unwrap_or(Value::Object(Map::new()));
                 let Some(meta) = meta.as_object() else {
                     return Err("Invalid ACP result metadata".to_string());
                 };
@@ -1599,7 +1680,11 @@ impl GrokAcpTransport {
             .collect();
         let admitted = same_tool_input(&previous, &tool_value, &allowed_notes)
             && self.permissions.admit(&previous);
-        let wanted = if admitted { "allow_once" } else { "reject_once" };
+        let wanted = if admitted {
+            "allow_once"
+        } else {
+            "reject_once"
+        };
         let ids: Vec<Option<&str>> = options
             .iter()
             .map(|option| {
@@ -1615,7 +1700,9 @@ impl GrokAcpTransport {
             .filter(|option| option.get("kind").and_then(|v| v.as_str()) == Some(wanted))
             .collect();
         if ids.len() != options.len()
-            || ids.iter().any(|id| id.map(|id| !valid_identity(id)).unwrap_or(true))
+            || ids
+                .iter()
+                .any(|id| id.map(|id| !valid_identity(id)).unwrap_or(true))
             || {
                 let unique: HashSet<&str> = ids.iter().flatten().cloned().collect();
                 unique.len() != ids.len()
@@ -1641,7 +1728,9 @@ impl GrokAcpTransport {
         };
         let stop = update.get("stop_reason").and_then(|v| v.as_str());
         if update.get("sessionUpdate").and_then(|v| v.as_str()) != Some("turn_completed")
-            || stop.map(|stop| !STOP_REASONS.contains(&stop)).unwrap_or(true)
+            || stop
+                .map(|stop| !STOP_REASONS.contains(&stop))
+                .unwrap_or(true)
         {
             return Err("Invalid ACP terminal metadata".to_string());
         }
@@ -1665,11 +1754,7 @@ impl GrokAcpTransport {
         Ok(Vec::new())
     }
 
-    fn error_response(
-        &mut self,
-        value: &Value,
-        error: &Value,
-    ) -> Result<Vec<Value>, String> {
+    fn error_response(&mut self, value: &Value, error: &Value) -> Result<Vec<Value>, String> {
         let object = value.as_object().ok_or("Invalid ACP error response")?;
         let error = error.as_object().ok_or("Invalid ACP error response")?;
         let code = error.get("code").and_then(|v| v.as_i64());
@@ -1686,14 +1771,24 @@ impl GrokAcpTransport {
         self.quota_diagnostic = quota_diagnostic(message);
         let canonical = if self.quota_diagnostic.is_some() {
             "usage_limit_reached"
-        } else if ["unauthorized", "authentication_required", "authentication required", "invalid_grant", "not logged in"]
-            .iter()
-            .any(|key| lowered.contains(key))
+        } else if [
+            "unauthorized",
+            "authentication_required",
+            "authentication required",
+            "invalid_grant",
+            "not logged in",
+        ]
+        .iter()
+        .any(|key| lowered.contains(key))
         {
             "authentication_required"
-        } else if ["permission_denied", "permission denied", "approval required"]
-            .iter()
-            .any(|key| lowered.contains(key))
+        } else if [
+            "permission_denied",
+            "permission denied",
+            "approval required",
+        ]
+        .iter()
+        .any(|key| lowered.contains(key))
         {
             "permission_denied"
         } else if code == -32800 {
@@ -1785,8 +1880,13 @@ impl GrokAcpTransport {
                 // used later as permission evidence.
                 Ok(Vec::new())
             }
-            "user_message_chunk" | "agent_thought_chunk" | "plan" | "available_commands"
-            | "current_mode_update" | "config_option_update" | "usage_update" => Ok(Vec::new()),
+            "user_message_chunk"
+            | "agent_thought_chunk"
+            | "plan"
+            | "available_commands"
+            | "current_mode_update"
+            | "config_option_update"
+            | "usage_update" => Ok(Vec::new()),
             _ => Err("Unsupported ACP update".to_string()),
         }
     }
@@ -1847,10 +1947,8 @@ mod tests {
     const SID: &str = "00000000-0000-4000-8000-000000000041";
 
     fn tempdir(tag: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "forge-acp-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("forge-acp-{tag}-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&path).unwrap();
         path
     }
@@ -1954,7 +2052,13 @@ mod tests {
             assert!(!plan.terminal(Some(&json!(command)), None), "{command}");
         }
         assert!(!plan.terminal(Some(&json!("git status")), Some(&json!("/tmp"))));
-        for name in ["MCPTool", "mcp__read", "spawn_subagent", "web_search", "unknown"] {
+        for name in [
+            "MCPTool",
+            "mcp__read",
+            "spawn_subagent",
+            "web_search",
+            "unknown",
+        ] {
             assert!(!plan.admit(&tool(name, json!({"path": "file"}))), "{name}");
         }
         std::fs::remove_dir_all(root).ok();
@@ -1984,7 +2088,10 @@ mod tests {
     fn native_paths_notes_and_symlinks_are_scoped() {
         let root = tempdir("paths");
         let (plan, workspace) = plan_permissions(&root);
-        assert!(plan.admit(&tool("read_file", json!({"target_file": "file", "limit": 100}))));
+        assert!(plan.admit(&tool(
+            "read_file",
+            json!({"target_file": "file", "limit": 100})
+        )));
         assert!(plan.admit(&tool(
             "read_file",
             json!({"target_file": format!("{STATE}/approved-plan.md")})
@@ -2023,9 +2130,15 @@ mod tests {
         assert!(!no_progress.terminal(Some(&json!(command)), None));
         assert!(!plan.terminal(Some(&json!(format!("{command} && git push"))), None));
         assert!(!plan.terminal(Some(&json!(format!("python3 {STATE}/other.py"))), None));
-        assert!(!plan.admit(&tool("write", json!({"file_path": "file", "contents": "edit"}))));
+        assert!(!plan.admit(&tool(
+            "write",
+            json!({"file_path": "file", "contents": "edit"})
+        )));
         let implementation = Permissions::new("implement", plan.paths.clone(), false).unwrap();
-        assert!(implementation.admit(&tool("write", json!({"file_path": "new", "contents": "edit"}))));
+        assert!(implementation.admit(&tool(
+            "write",
+            json!({"file_path": "new", "contents": "edit"})
+        )));
         assert!(implementation.admit(&tool(
             "search_replace",
             json!({"path": "file", "old_string": "source", "new_string": "edit"})
@@ -2036,7 +2149,10 @@ mod tests {
         )));
         assert!(implementation.terminal(Some(&json!("cargo test --offline --locked")), None));
         assert!(!implementation.terminal(Some(&json!("cargo test --config core.x=y")), None));
-        assert!(!implementation.terminal(Some(&json!("cargo test --manifest-path /tmp/Cargo.toml")), None));
+        assert!(!implementation.terminal(
+            Some(&json!("cargo test --manifest-path /tmp/Cargo.toml")),
+            None
+        ));
         assert!(!implementation.terminal(Some(&json!("cargo publish")), None));
         assert!(!implementation.admit(&tool(
             "write",
@@ -2069,7 +2185,10 @@ mod tests {
             "[alias]\n status = !evil\n",
         ] {
             std::fs::write(&config, content).unwrap();
-            assert!(!scoped.terminal(Some(&json!("git status")), None), "{content}");
+            assert!(
+                !scoped.terminal(Some(&json!("git status")), None),
+                "{content}"
+            );
         }
         let _ = plan;
         std::fs::remove_dir_all(root).ok();
@@ -2112,7 +2231,10 @@ mod tests {
             "cargo test && git push",
             "make ci-preflight NETWORK=on",
         ] {
-            assert!(!implement.terminal(Some(&json!(command)), None), "{command}");
+            assert!(
+                !implement.terminal(Some(&json!(command)), None),
+                "{command}"
+            );
         }
         std::fs::remove_dir_all(root).ok();
     }
@@ -2151,8 +2273,12 @@ mod tests {
         }
         let event: Value = serde_json::from_slice(&output).unwrap();
         assert_eq!(event, json!({"type": "text", "data": "Public answer"}));
-        let silent = update(&mut transport, json!({"sessionUpdate": "user_message_chunk",
-            "content": {"type": "text", "text": "private prompt echo"}})).unwrap();
+        let silent = update(
+            &mut transport,
+            json!({"sessionUpdate": "user_message_chunk",
+            "content": {"type": "text", "text": "private prompt echo"}}),
+        )
+        .unwrap();
         assert!(silent.is_empty());
         let terminal = transport
             .feed(&wire(&json!({"jsonrpc": "2.0", "id": "host-prompt",
@@ -2182,8 +2308,12 @@ mod tests {
             .unwrap()
             .contains("Do not use shell"));
         assert!(!transport.complete);
-        let output = update(&mut transport, json!({"sessionUpdate": "agent_message_chunk",
-            "content": {"type": "text", "text": "Useful alternative"}})).unwrap();
+        let output = update(
+            &mut transport,
+            json!({"sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "Useful alternative"}}),
+        )
+        .unwrap();
         assert!(String::from_utf8_lossy(&output).contains("Useful alternative"));
     }
 
@@ -2244,16 +2374,24 @@ mod tests {
         let mut transport = make_transport();
         initialize(&mut transport);
         update(&mut transport, call.clone()).unwrap();
-        let silent = update(&mut transport, json!({"sessionUpdate": "tool_call_update",
-            "toolCallId": "call-1", "rawInput": {"command": "git push"}})).unwrap();
+        let silent = update(
+            &mut transport,
+            json!({"sessionUpdate": "tool_call_update",
+            "toolCallId": "call-1", "rawInput": {"command": "git push"}}),
+        )
+        .unwrap();
         assert!(silent.is_empty());
         // Status metadata may progress without changing identity.
         let mut transport = make_transport();
         initialize(&mut transport);
         update(&mut transport, call.clone()).unwrap();
-        let silent = update(&mut transport, json!({"sessionUpdate": "tool_call_update",
+        let silent = update(
+            &mut transport,
+            json!({"sessionUpdate": "tool_call_update",
             "toolCallId": "call-1", "status": "failed",
-            "_meta": {"toolNotRun": "cancelled"}})).unwrap();
+            "_meta": {"toolNotRun": "cancelled"}}),
+        )
+        .unwrap();
         assert!(silent.is_empty());
         let changed = json!({"sessionUpdate": "tool_call_update", "toolCallId": "call-1",
             "_meta": {"x.ai/tool": {"name": "write"}}});
@@ -2399,14 +2537,8 @@ mod tests {
                    "head_limit": 25, "type": "rust"})
         )));
         assert!(!plan.admit(&tool("grep", json!({"pattern": ""}))));
-        assert!(!plan.admit(&tool(
-            "grep",
-            json!({"pattern": "needle", "head_limit": 0})
-        )));
-        assert!(!plan.admit(&tool(
-            "grep",
-            json!({"pattern": "needle", "-A": 5000})
-        )));
+        assert!(!plan.admit(&tool("grep", json!({"pattern": "needle", "head_limit": 0}))));
+        assert!(!plan.admit(&tool("grep", json!({"pattern": "needle", "-A": 5000}))));
         assert!(!plan.admit(&tool(
             "grep",
             json!({"pattern": "needle", "type": "not a type!"})
@@ -2415,10 +2547,7 @@ mod tests {
             "grep",
             json!({"pattern": "needle", "glob": "../outside"})
         )));
-        assert!(!plan.admit(&tool(
-            "grep",
-            json!({"pattern": "needle", "-i": "yes"})
-        )));
+        assert!(!plan.admit(&tool("grep", json!({"pattern": "needle", "-i": "yes"}))));
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -2431,8 +2560,12 @@ mod tests {
                                 "result": {"protocolVersion": 1}})))
             .unwrap();
         transport.drain();
-        update(&mut transport, json!({"sessionUpdate": "available_commands",
-            "availableCommands": []})).unwrap();
+        update(
+            &mut transport,
+            json!({"sessionUpdate": "available_commands",
+            "availableCommands": []}),
+        )
+        .unwrap();
         transport
             .feed(&wire(&json!({"jsonrpc": "2.0", "id": "host-new",
                                 "result": {"sessionId": SID}})))
@@ -2446,9 +2579,11 @@ mod tests {
         let mut transport = make_transport();
         initialize(&mut transport);
         transport
-            .feed(&wire(&json!({"jsonrpc": "2.0", "method": "_x.ai/session/update",
+            .feed(&wire(
+                &json!({"jsonrpc": "2.0", "method": "_x.ai/session/update",
                 "params": {"sessionId": SID, "update": {"sessionUpdate": "turn_completed",
-                    "stop_reason": "end_turn", "usage": {"inputTokens": 99999}}}})))
+                    "stop_reason": "end_turn", "usage": {"inputTokens": 99999}}}}),
+            ))
             .unwrap();
         let event = transport
             .feed(&wire(&json!({"jsonrpc": "2.0", "id": "host-prompt",
@@ -2463,8 +2598,8 @@ mod tests {
         let usage = terminal_usage(Some(&json!({"inputTokens": 10061,
             "cachedReadTokens": 4224, "cacheCreationTokens": 0,
             "outputTokens": 808, "totalTokens": 10869})))
-            .unwrap()
-            .unwrap();
+        .unwrap()
+        .unwrap();
         assert_eq!(
             usage,
             json!({"input_tokens": 5837, "cache_read_input_tokens": 4224,
@@ -2496,8 +2631,16 @@ mod tests {
     #[test]
     fn native_errors_classified_without_raw_prose() {
         for (message, code, canonical) in [
-            ("Authentication required PRIVATE", -32000, "authentication_required"),
-            ("usage_limit_reached PRIVATE resets in 1h", -32000, "usage_limit_reached"),
+            (
+                "Authentication required PRIVATE",
+                -32000,
+                "authentication_required",
+            ),
+            (
+                "usage_limit_reached PRIVATE resets in 1h",
+                -32000,
+                "usage_limit_reached",
+            ),
             ("PRIVATE", -32800, "cancelled"),
         ] {
             let mut transport = make_transport();
@@ -2521,7 +2664,8 @@ mod tests {
     #[test]
     fn malformed_frames_fail_closed() {
         for raw in [
-            b"{\"jsonrpc\":\"2.0\",\"id\":\"host-initialize\",\"id\":\"x\",\"result\":{}}\n".to_vec(),
+            b"{\"jsonrpc\":\"2.0\",\"id\":\"host-initialize\",\"id\":\"x\",\"result\":{}}\n"
+                .to_vec(),
             wire(&json!({"jsonrpc": "2.0", "id": "wrong", "result": {}})),
             wire(&json!({"jsonrpc": "2.0", "id": "host-initialize",
                          "result": {"protocolVersion": true}})),

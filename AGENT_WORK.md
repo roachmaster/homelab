@@ -1,3 +1,18 @@
+## Incoming Rust formatting checkpoint — 2026-11-28
+
+PR32 advanced main during the qualified ABI19/schema53 rollout. Its new Rust
+sources fail the existing workspace formatting gate. The pinned CI Rust1.97.1
+formatter has now formatted 178 files, all belonging to that incoming change.
+A whitespace-only empty line in workflow_decision.rs had to be removed before
+rustfmt could complete. No dependency, SQL, application algorithm or gate was
+changed by this formatting checkpoint. Full corrected-source CI remains required.
+
+The previous schema53 proof and failed/stopped-runtime activation receipts remain
+historical evidence; they do not qualify schema54. The portal is available through
+the old qualified API with repair admission held. Model workers remain stopped
+until a reviewed current-main successor and its additive M54 preparation are
+qualified. The separate M55 proxy cutover remains disabled.
+
 ## Proxy migration renumbering correction — 2026-11-28
 
 PR32 added proxy preparation/cutover as migrations 54/55, after the already

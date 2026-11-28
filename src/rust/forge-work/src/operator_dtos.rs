@@ -124,8 +124,14 @@ impl ExternalPlanApproveOverride {
         map.insert("project_alias".into(), json!(self.project_alias));
         map.insert("workflow_id".into(), uuid_string(&self.workflow_id));
         map.insert("root_task_id".into(), uuid_string(&self.root_task_id));
-        map.insert("source_review_id".into(), uuid_string(&self.source_review_id));
-        map.insert("plan_assignment_id".into(), uuid_string(&self.plan_assignment_id));
+        map.insert(
+            "source_review_id".into(),
+            uuid_string(&self.source_review_id),
+        );
+        map.insert(
+            "plan_assignment_id".into(),
+            uuid_string(&self.plan_assignment_id),
+        );
         map.insert("plan_sha256".into(), json!(self.plan_sha256));
         map.insert(
             "expected_workflow_revision".into(),
@@ -295,9 +301,7 @@ impl AuthorHandoff {
         source_attempt_id: Option<uuid::Uuid>,
         quota_source_attempt_id: uuid::Uuid,
     ) -> Result<Self, String> {
-        if !operator_identifier(project_alias)
-            || !(1..MAX_REVISION).contains(&expected_revision)
-        {
+        if !operator_identifier(project_alias) || !(1..MAX_REVISION).contains(&expected_revision) {
             return Err("Invalid author handoff".to_string());
         }
         Ok(Self {
@@ -321,8 +325,18 @@ mod tests {
     #[test]
     fn override_dto_rules_and_intent() {
         let dto = ExternalPlanApproveOverride::new(
-            "homelab", id(1), id(2), id(3), id(4), &"a".repeat(64), 3, 2,
-            "key-1", "operator accepted", "ticket-9", true,
+            "homelab",
+            id(1),
+            id(2),
+            id(3),
+            id(4),
+            &"a".repeat(64),
+            3,
+            2,
+            "key-1",
+            "operator accepted",
+            "ticket-9",
+            true,
         )
         .unwrap();
         let intent = dto.intent("owner-1");
@@ -330,14 +344,34 @@ mod tests {
         assert_eq!(intent["workflow_id"], json!(id(1).to_string()));
         // No confirmation, no override.
         assert!(ExternalPlanApproveOverride::new(
-            "homelab", id(1), id(2), id(3), id(4), &"a".repeat(64), 3, 2,
-            "key-1", "operator accepted", "ticket-9", false,
+            "homelab",
+            id(1),
+            id(2),
+            id(3),
+            id(4),
+            &"a".repeat(64),
+            3,
+            2,
+            "key-1",
+            "operator accepted",
+            "ticket-9",
+            false,
         )
         .is_err());
         // A reason containing a newline is a Cc violation here.
         assert!(ExternalPlanApproveOverride::new(
-            "homelab", id(1), id(2), id(3), id(4), &"a".repeat(64), 3, 2,
-            "key-1", "two\nlines", "ticket-9", true,
+            "homelab",
+            id(1),
+            id(2),
+            id(3),
+            id(4),
+            &"a".repeat(64),
+            3,
+            2,
+            "key-1",
+            "two\nlines",
+            "ticket-9",
+            true,
         )
         .is_err());
     }
@@ -345,15 +379,35 @@ mod tests {
     #[test]
     fn continuation_and_recovery_intents() {
         let continuation = ExternalRetryPolicyContinuation::new(
-            "homelab", id(1), id(2), id(3), 1, 1, id(4), "retry it",
+            "homelab",
+            id(1),
+            id(2),
+            id(3),
+            1,
+            1,
+            id(4),
+            "retry it",
         )
         .unwrap();
-        assert_eq!(continuation.intent("o")["policy"], json!(RETRY_EVENT_POLICY_ID));
+        assert_eq!(
+            continuation.intent("o")["policy"],
+            json!(RETRY_EVENT_POLICY_ID)
+        );
         let recovery = ExternalInfrastructureRetry::new(
-            "homelab", id(1), id(2), 1, 1, id(3), "fixed", &"b".repeat(40),
+            "homelab",
+            id(1),
+            id(2),
+            1,
+            1,
+            id(3),
+            "fixed",
+            &"b".repeat(40),
         )
         .unwrap();
-        assert_eq!(recovery.intent("o")["deployed_fix_revision"], json!("b".repeat(40)));
+        assert_eq!(
+            recovery.intent("o")["deployed_fix_revision"],
+            json!("b".repeat(40))
+        );
         assert!(AuthorHandoff::new("homelab", id(1), 0, None, id(2)).is_err());
         assert!(AuthorHandoff::new("homelab", id(1), 1, None, id(2)).is_ok());
     }

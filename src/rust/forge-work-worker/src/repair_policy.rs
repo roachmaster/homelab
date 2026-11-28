@@ -162,17 +162,7 @@ impl RepairObservation {
     /// every counter zero and every flag at its Python default.
     pub fn simple(category: &str) -> Result<Self, PolicyError> {
         Self::new(
-            category,
-            0,
-            0,
-            0,
-            false,
-            false,
-            false,
-            false,
-            false,
-            true,
-            false,
+            category, 0, 0, 0, false, false, false, false, false, true, false,
         )
     }
 }
@@ -331,7 +321,10 @@ fn replace_timestamps(text: &str) -> String {
 }
 
 fn digits(chars: &[char], start: usize, count: usize) -> bool {
-    start + count <= chars.len() && chars[start..start + count].iter().all(|c| c.is_ascii_digit())
+    start + count <= chars.len()
+        && chars[start..start + count]
+            .iter()
+            .all(|c| c.is_ascii_digit())
 }
 
 fn timestamp_len(chars: &[char], start: usize) -> Option<usize> {
@@ -425,11 +418,7 @@ fn pid_len(chars: &[char], start: usize) -> Option<usize> {
         return None;
     }
     let digits_start = pos;
-    while chars
-        .get(pos)
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(false)
-    {
+    while chars.get(pos).map(|c| c.is_ascii_digit()).unwrap_or(false) {
         pos += 1;
     }
     if pos == digits_start {
@@ -450,9 +439,7 @@ fn replace_shas(text: &str) -> String {
     while i < chars.len() {
         if chars[i].is_ascii_hexdigit() && !chars[i].is_ascii_uppercase() {
             let mut j = i;
-            while j < chars.len()
-                && chars[j].is_ascii_hexdigit()
-                && !chars[j].is_ascii_uppercase()
+            while j < chars.len() && chars[j].is_ascii_hexdigit() && !chars[j].is_ascii_uppercase()
             {
                 j += 1;
             }
@@ -556,7 +543,10 @@ mod tests {
         assert_eq!(decision.disposition, "retry_infrastructure");
         assert!(!decision.consume_round);
         obs.infrastructure_retries = 20;
-        assert_eq!(decide_repair(&obs, &policy).reason, "infrastructure_retries_exhausted");
+        assert_eq!(
+            decide_repair(&obs, &policy).reason,
+            "infrastructure_retries_exhausted"
+        );
         // Source repair consumes a round until limits bite.
         obs.category = "source".into();
         obs.infrastructure_retries = 0;

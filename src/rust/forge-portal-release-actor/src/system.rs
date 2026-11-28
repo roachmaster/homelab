@@ -7,9 +7,11 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
-use crate::config::{ActorConfig, ENTRY_PORT, ENTRY_SOCKET, ENTRY_UNIT, UNIT, canonical, decode, sha};
+use crate::config::{
+    canonical, decode, sha, ActorConfig, ENTRY_PORT, ENTRY_SOCKET, ENTRY_UNIT, UNIT,
+};
 
 pub trait SystemPort: Send {
     fn call(
@@ -278,12 +280,20 @@ impl SystemPort for SubprocessSystem {
     }
 
     fn reload(&self) -> Result<(), String> {
-        self.call(&strings(&["/usr/bin/systemctl", "daemon-reload"]), 30.0, None)?;
+        self.call(
+            &strings(&["/usr/bin/systemctl", "daemon-reload"]),
+            30.0,
+            None,
+        )?;
         Ok(())
     }
 
     fn restart(&self) -> Result<(), String> {
-        self.call(&strings(&["/usr/bin/systemctl", "restart", UNIT]), 90.0, None)?;
+        self.call(
+            &strings(&["/usr/bin/systemctl", "restart", UNIT]),
+            90.0,
+            None,
+        )?;
         Ok(())
     }
 
@@ -332,7 +342,11 @@ impl SystemPort for SubprocessSystem {
         }
         let active = property(ENTRY_UNIT, "ActiveState")?;
         if matches!(active.as_str(), "inactive" | "failed") {
-            self.call(&strings(&["/usr/bin/systemctl", "start", ENTRY_UNIT]), 30.0, None)?;
+            self.call(
+                &strings(&["/usr/bin/systemctl", "start", ENTRY_UNIT]),
+                30.0,
+                None,
+            )?;
         } else if !matches!(active.as_str(), "active" | "activating") {
             return Err("Entry bridge is not ready for recovery".to_string());
         }
@@ -347,32 +361,29 @@ impl SystemPort for SubprocessSystem {
         candidate_config: &Path,
     ) -> Result<(), String> {
         let unit = format!("forge-portal-candidate-{release_id}");
-        let argv = strings(&[
-            "/usr/bin/systemd-run",
-            "--collect",
-        ])
-        .into_iter()
-        .chain([
-            format!("--unit={unit}"),
-            "--property=Type=simple".to_string(),
-            format!("--property=User={}", config.web_user),
-            format!("--property=Group={}", config.web_group),
-            "--property=NoNewPrivileges=yes".to_string(),
-            "--property=ProtectSystem=strict".to_string(),
-            "--property=PrivateTmp=yes".to_string(),
-            "--property=RestrictAddressFamilies=AF_UNIX AF_INET".to_string(),
-            "--property=IPAddressDeny=any".to_string(),
-            "--property=IPAddressAllow=localhost".to_string(),
-            "--property=CapabilityBoundingSet=".to_string(),
-            "--property=RuntimeMaxSec=180".to_string(),
-            "--property=TimeoutStopSec=10".to_string(),
-            "--property=KillMode=control-group".to_string(),
-            binary.to_string_lossy().into_owned(),
-            "serve".to_string(),
-            "--config".to_string(),
-            candidate_config.to_string_lossy().into_owned(),
-        ])
-        .collect::<Vec<_>>();
+        let argv = strings(&["/usr/bin/systemd-run", "--collect"])
+            .into_iter()
+            .chain([
+                format!("--unit={unit}"),
+                "--property=Type=simple".to_string(),
+                format!("--property=User={}", config.web_user),
+                format!("--property=Group={}", config.web_group),
+                "--property=NoNewPrivileges=yes".to_string(),
+                "--property=ProtectSystem=strict".to_string(),
+                "--property=PrivateTmp=yes".to_string(),
+                "--property=RestrictAddressFamilies=AF_UNIX AF_INET".to_string(),
+                "--property=IPAddressDeny=any".to_string(),
+                "--property=IPAddressAllow=localhost".to_string(),
+                "--property=CapabilityBoundingSet=".to_string(),
+                "--property=RuntimeMaxSec=180".to_string(),
+                "--property=TimeoutStopSec=10".to_string(),
+                "--property=KillMode=control-group".to_string(),
+                binary.to_string_lossy().into_owned(),
+                "serve".to_string(),
+                "--config".to_string(),
+                candidate_config.to_string_lossy().into_owned(),
+            ])
+            .collect::<Vec<_>>();
         self.call(&argv, 30.0, None)?;
         Ok(())
     }
@@ -396,8 +407,7 @@ impl SystemPort for SubprocessSystem {
                     None,
                 )?;
                 let observed_text = String::from_utf8_lossy(&observed).into_owned();
-                let lines: std::collections::BTreeSet<&str> =
-                    observed_text.lines().collect();
+                let lines: std::collections::BTreeSet<&str> = observed_text.lines().collect();
                 if lines.contains("LoadState=not-found") && lines.contains("MainPID=0") {
                     Ok(())
                 } else {
@@ -579,17 +589,18 @@ impl PortalProbe {
         }
         let mut body = Map::new();
         body.insert("kind".to_string(), Value::String(kind.to_string()));
-        body.insert(
-            "request_id".to_string(),
-            Value::String(identifier.clone()),
-        );
+        body.insert("request_id".to_string(), Value::String(identifier.clone()));
         if let Some(fields) = fields {
             for (key, value) in fields {
                 body.insert(key.clone(), value.clone());
             }
         }
-        let (status, raw, cookie) =
-            self.request("POST", "/forge/v1/dispatch", Some(&canonical(&Value::Object(body))), &headers)?;
+        let (status, raw, cookie) = self.request(
+            "POST",
+            "/forge/v1/dispatch",
+            Some(&canonical(&Value::Object(body))),
+            &headers,
+        )?;
         let value: Map<String, Value> = if matches!(status, 200 | 202) {
             decode(&raw)?.as_object().cloned().unwrap_or_default()
         } else {
@@ -619,7 +630,9 @@ fn uuid_hex() -> String {
 
 impl Probe for PortalProbe {
     fn check(&mut self, inventory: &Value, project: &str) -> Result<Map<String, Value>, String> {
-        if !self.origin.starts_with("https://portal.thedevex.com") || self.origin != "https://portal.thedevex.com" {
+        if !self.origin.starts_with("https://portal.thedevex.com")
+            || self.origin != "https://portal.thedevex.com"
+        {
             return Err("Unexpected portal origin".to_string());
         }
         let inventory = inventory
@@ -636,11 +649,15 @@ impl Probe for PortalProbe {
                 return Err("Portal served another asset bundle".to_string());
             }
         }
-        let (status, value, cookie) = self.dispatch("resume", "ui.session.resume", None, false, None)?;
+        let (status, value, cookie) =
+            self.dispatch("resume", "ui.session.resume", None, false, None)?;
         let event = value.get("event").cloned().unwrap_or(Value::Null);
         let cookie = cookie.ok_or("Portal admission failed")?;
         let cookie_pair = cookie.split(';').next().unwrap_or("").to_string();
-        let csrf = event.get("csrf").and_then(Value::as_str).map(str::to_string);
+        let csrf = event
+            .get("csrf")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         if status != 200
             || event.get("kind").and_then(Value::as_str) != Some("paired")
             || csrf.is_none()
@@ -652,19 +669,22 @@ impl Probe for PortalProbe {
         {
             return Err("Portal admission failed".to_string());
         }
-        let attributes: std::collections::BTreeSet<&str> = cookie
-            .split(';')
-            .skip(1)
-            .map(|part| part.trim())
-            .collect();
-        if !["HttpOnly", "Secure", "SameSite=Strict", "Path=/forge/v1/dispatch"]
-            .iter()
-            .all(|required| attributes.contains(required))
+        let attributes: std::collections::BTreeSet<&str> =
+            cookie.split(';').skip(1).map(|part| part.trim()).collect();
+        if ![
+            "HttpOnly",
+            "Secure",
+            "SameSite=Strict",
+            "Path=/forge/v1/dispatch",
+        ]
+        .iter()
+        .all(|required| attributes.contains(required))
         {
             return Err("Portal cookie boundary changed".to_string());
         }
         self.session = Some((cookie_pair, csrf.unwrap()));
-        let (status, value, _) = self.dispatch("work_catalog", "ide.work.catalog", None, true, None)?;
+        let (status, value, _) =
+            self.dispatch("work_catalog", "ide.work.catalog", None, true, None)?;
         if status != 200
             || value
                 .get("event")
@@ -714,8 +734,13 @@ impl Probe for PortalProbe {
             ),
         ];
         for (changes, use_session, expected) in &negatives {
-            let (status, _, _) =
-                self.dispatch("work_catalog", "ide.work.catalog", None, *use_session, Some(changes))?;
+            let (status, _, _) = self.dispatch(
+                "work_catalog",
+                "ide.work.catalog",
+                None,
+                *use_session,
+                Some(changes),
+            )?;
             if status != *expected {
                 return Err("Portal negative admission probe failed".to_string());
             }

@@ -36,7 +36,9 @@ impl PgDeliveryWorkers {
 
 fn provider_error(error: AdapterError) -> ProviderError {
     match error {
-        AdapterError::OutcomeConflict(_) => ProviderError::Other("OutcomeConflictError".to_string()),
+        AdapterError::OutcomeConflict(_) => {
+            ProviderError::Other("OutcomeConflictError".to_string())
+        }
         other => ProviderError::Other(other.to_string()),
     }
 }
@@ -56,8 +58,7 @@ fn validate_identifier(value: &str, label: &str) -> Result<String, ProviderError
 
 fn coerce_uuid(job: &Value, key: &str) -> Result<Uuid, ProviderError> {
     let text = job[key].as_str().unwrap_or_default();
-    Uuid::parse_str(text)
-        .map_err(|_| ProviderError::Other(format!("Invalid {key}: not a uuid")))
+    Uuid::parse_str(text).map_err(|_| ProviderError::Other(format!("Invalid {key}: not a uuid")))
 }
 
 fn delivery_lease(job: &Value, key: &str) -> Result<(Uuid, i64, Uuid), ProviderError> {
@@ -138,7 +139,12 @@ impl MergeStorePort for PgDeliveryWorkers {
         result.ok_or_else(|| ProviderError::Other("merge_intent returned no row".to_string()))
     }
 
-    fn merge_finish(&self, job: &Value, status: &str, receipt: &Value) -> Result<Value, ProviderError> {
+    fn merge_finish(
+        &self,
+        job: &Value,
+        status: &str,
+        receipt: &Value,
+    ) -> Result<Value, ProviderError> {
         if !matches!(status, "merged" | "handoff" | "needs_reconcile") || !receipt.is_object() {
             return Err(ProviderError::Other("Invalid merge outcome".to_string()));
         }
@@ -185,9 +191,7 @@ impl MergeStorePort for PgDeliveryWorkers {
         let workflow = job["workflow_id"].as_str().map(str::to_string);
         let mut session = PgSession::connect(self.config.clone()).map_err(|error| match error {
             AdapterError::OutcomeConflict(_) => NativeMergeFailureError::Conflict,
-            AdapterError::Unavailable(message) => {
-                NativeMergeFailureError::Connection(message)
-            }
+            AdapterError::Unavailable(message) => NativeMergeFailureError::Connection(message),
             other => NativeMergeFailureError::Other(other.to_string()),
         })?;
         let result = session
@@ -208,12 +212,12 @@ impl MergeStorePort for PgDeliveryWorkers {
             })
             .map_err(|error| match error {
                 AdapterError::OutcomeConflict(_) => NativeMergeFailureError::Conflict,
-                AdapterError::Unavailable(message) => {
-                    NativeMergeFailureError::Connection(message)
-                }
+                AdapterError::Unavailable(message) => NativeMergeFailureError::Connection(message),
                 other => NativeMergeFailureError::Other(other.to_string()),
             })?;
-        result.ok_or_else(|| NativeMergeFailureError::Other("native_merge_failure returned no row".to_string()))
+        result.ok_or_else(|| {
+            NativeMergeFailureError::Other("native_merge_failure returned no row".to_string())
+        })
     }
 }
 
@@ -231,7 +235,8 @@ impl PgDeliveryWorkers {
             .join(", ");
         let select = format!("SELECT forge_coding_reconciler_api.{name}({placeholders})");
         let mut api = self.api().map_err(provider_error)?;
-        api.call_json_params(&select, params).map_err(provider_error)
+        api.call_json_params(&select, params)
+            .map_err(provider_error)
     }
 
     fn delivery_bool(
@@ -239,7 +244,9 @@ impl PgDeliveryWorkers {
         name: &str,
         params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
     ) -> Result<bool, ProviderError> {
-        Ok(self.delivery_call(name, params)?.is_some_and(|value| value == Value::Bool(true)))
+        Ok(self
+            .delivery_call(name, params)?
+            .is_some_and(|value| value == Value::Bool(true)))
     }
 }
 
@@ -334,12 +341,22 @@ impl DeliveryStorePort for PgDeliveryWorkers {
 
     fn delivery_release_start_allowed(&self, job: &Value) -> Result<bool, ProviderError> {
         let (id, generation, token) = delivery_lease(job, "release_id")?;
-        self.delivery_bool("delivery_release_start_allowed", &[&id, &generation, &token])
+        self.delivery_bool(
+            "delivery_release_start_allowed",
+            &[&id, &generation, &token],
+        )
     }
 
-    fn delivery_release_checkpoint(&self, job: &Value, plan: &Value) -> Result<bool, ProviderError> {
+    fn delivery_release_checkpoint(
+        &self,
+        job: &Value,
+        plan: &Value,
+    ) -> Result<bool, ProviderError> {
         let (id, generation, token) = delivery_lease(job, "release_id")?;
-        self.delivery_bool("delivery_release_checkpoint", &[&id, &generation, &token, plan])
+        self.delivery_bool(
+            "delivery_release_checkpoint",
+            &[&id, &generation, &token, plan],
+        )
     }
 
     fn delivery_release_finish(
@@ -390,7 +407,9 @@ impl PostMergeStorePort for PgDeliveryWorkers {
 
     fn post_merge_checkpoint(&self, job: &Value, request: &Value) -> Result<bool, ProviderError> {
         if !request.is_object() {
-            return Err(ProviderError::Other("Invalid post-merge request".to_string()));
+            return Err(ProviderError::Other(
+                "Invalid post-merge request".to_string(),
+            ));
         }
         let (id, generation, token) = delivery_lease(job, "post_merge_id")?;
         let prepare = Uuid::new_v5(&id, "prepare-v1".as_bytes()).to_string();
@@ -414,11 +433,16 @@ impl PostMergeStorePort for PgDeliveryWorkers {
         receipt: &Value,
         summary: &str,
     ) -> Result<bool, ProviderError> {
-        if !matches!(status, "pending" | "passed" | "failed" | "superseded") || !receipt.is_object() {
-            return Err(ProviderError::Other("Invalid post-merge result".to_string()));
+        if !matches!(status, "pending" | "passed" | "failed" | "superseded") || !receipt.is_object()
+        {
+            return Err(ProviderError::Other(
+                "Invalid post-merge result".to_string(),
+            ));
         }
         if summary.len() > 4096 {
-            return Err(ProviderError::Other("Invalid post-merge summary".to_string()));
+            return Err(ProviderError::Other(
+                "Invalid post-merge summary".to_string(),
+            ));
         }
         let (id, generation, token) = delivery_lease(job, "post_merge_id")?;
         let mut api = self.api().map_err(provider_error)?;
@@ -479,7 +503,9 @@ impl PgDeliveryWorkers {
                 &[&evidence, &chunks],
             )
             .map_err(provider_error)?;
-        result.ok_or_else(|| ProviderError::Other("record_jenkins_stage_evidence returned no row".to_string()))
+        result.ok_or_else(|| {
+            ProviderError::Other("record_jenkins_stage_evidence returned no row".to_string())
+        })
     }
 }
 

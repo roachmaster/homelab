@@ -274,10 +274,7 @@ impl WorkflowTxFactory for PgWorkflowTxFactory {
         self.scan_rows(sql, &params)
     }
 
-    fn feedback_recovery_candidates(
-        &self,
-        summaries: &[String],
-    ) -> Result<Vec<Value>, WorkError> {
+    fn feedback_recovery_candidates(&self, summaries: &[String]) -> Result<Vec<Value>, WorkError> {
         let sql = "SELECT to_jsonb(s) FROM (SELECT t.project_alias, t.id, t.revision, r.receipt_id, a.attempt_id \
               FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w \
               ON (w.owner_id, w.project_alias, w.workflow_id) = (t.owner_id, t.project_alias, t.workflow_id) \
@@ -316,7 +313,6 @@ impl PgWorkflowTxFactory {
             .map(|row| row.get::<usize, Option<Value>>(0).unwrap_or(Value::Null))
             .collect())
     }
-
 }
 
 struct WorkflowTxImpl<'x, 't, 'c, 'o> {
@@ -329,7 +325,10 @@ struct WorkflowTxImpl<'x, 't, 'c, 'o> {
 type Params = Vec<Box<dyn ToSql + Sync + Send>>;
 
 fn refs(params: &Params) -> Vec<&(dyn ToSql + Sync)> {
-    params.iter().map(|param| param.as_ref() as &(dyn ToSql + Sync)).collect()
+    params
+        .iter()
+        .map(|param| param.as_ref() as &(dyn ToSql + Sync))
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -431,7 +430,12 @@ impl<'x, 't, 'c, 'o> WorkflowTxImpl<'x, 't, 'c, 'o> {
         )
     }
 
-    fn insert_row(&mut self, table: &str, row: &Value, suffix: &str) -> Result<Option<Value>, WorkError> {
+    fn insert_row(
+        &mut self,
+        table: &str,
+        row: &Value,
+        suffix: &str,
+    ) -> Result<Option<Value>, WorkError> {
         let (sql, params) = self.insert_sql(table, row);
         let sql = format!("{sql} {suffix}");
         if suffix.contains("RETURNING") {
@@ -460,14 +464,17 @@ impl<'x, 't, 'c, 'o> WorkflowTxImpl<'x, 't, 'c, 'o> {
             } else {
                 let ty = col_type(table, column, value);
                 bind(&mut params, ty, value);
-                assignments.push(format!(
-                    "\"{column}\"={}",
-                    placeholder(params.len(), ty)
-                ));
+                assignments.push(format!("\"{column}\"={}", placeholder(params.len(), ty)));
             }
         }
-        if ["coding_workflows", "coding_tasks", "coding_workflow_reviews", "coding_workflow_actions", "coding_reviews"]
-            .contains(&table)
+        if [
+            "coding_workflows",
+            "coding_tasks",
+            "coding_workflow_reviews",
+            "coding_workflow_actions",
+            "coding_reviews",
+        ]
+        .contains(&table)
         {
             assignments.push("updated_at=clock_timestamp()".to_string());
         }
@@ -561,15 +568,24 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
                 }
             }
         }
-        crate::work_rows::insert_event_raw(self.tx, self.owner, project, task_id, kind, merged, first)
+        crate::work_rows::insert_event_raw(
+            self.tx, self.owner, project, task_id, kind, merged, first,
+        )
     }
 
-    fn workflow(&mut self, workflow_id: Uuid, for_update: bool) -> Result<Option<Value>, WorkError> {
+    fn workflow(
+        &mut self,
+        workflow_id: Uuid,
+        for_update: bool,
+    ) -> Result<Option<Value>, WorkError> {
         let lock = if for_update { " FOR UPDATE" } else { "" };
         let sql = format!(
             "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=$1{lock}) t"
         );
-        self.one(&sql, &vec![Box::new(workflow_id) as Box<dyn ToSql + Sync + Send>])
+        self.one(
+            &sql,
+            &vec![Box::new(workflow_id) as Box<dyn ToSql + Sync + Send>],
+        )
     }
 
     fn task(&mut self, task_id: Uuid, for_update: bool) -> Result<Option<Value>, WorkError> {
@@ -710,7 +726,11 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn receipt_by_id(&mut self, task_id: Uuid, receipt_id: Uuid) -> Result<Option<Value>, WorkError> {
+    fn receipt_by_id(
+        &mut self,
+        task_id: Uuid,
+        receipt_id: Uuid,
+    ) -> Result<Option<Value>, WorkError> {
         let params: Params = vec![
             Box::new(self.owner.to_string()),
             Box::new(task_id),
@@ -740,7 +760,11 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn review_row(&mut self, review_id: Uuid, for_update: bool) -> Result<Option<Value>, WorkError> {
+    fn review_row(
+        &mut self,
+        review_id: Uuid,
+        for_update: bool,
+    ) -> Result<Option<Value>, WorkError> {
         let lock = if for_update { " FOR UPDATE" } else { "" };
         let sql = format!(
             "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_reviews WHERE review_id=$1{lock}) t"
@@ -796,7 +820,12 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn role_granted(&mut self, workflow_id: Uuid, profile: &str, mode: &str) -> Result<bool, WorkError> {
+    fn role_granted(
+        &mut self,
+        workflow_id: Uuid,
+        profile: &str,
+        mode: &str,
+    ) -> Result<bool, WorkError> {
         let params: &[&(dyn ToSql + Sync)] = &[&workflow_id, &profile, &mode];
         self.tx
             .call_bool(
@@ -932,19 +961,13 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
                 params,
             )
             .map_err(work_err)?;
-        Ok(rows.first().map(|row| {
-            (
-                row.get::<usize, Uuid>(0),
-                row.get::<usize, Uuid>(1),
-            )
-        }))
+        Ok(rows
+            .first()
+            .map(|row| (row.get::<usize, Uuid>(0), row.get::<usize, Uuid>(1))))
     }
 
     fn lock_task(&mut self, task_id: Uuid) -> Result<(), WorkError> {
-        let params: Params = vec![
-            Box::new(self.owner.to_string()),
-            Box::new(task_id),
-        ];
+        let params: Params = vec![Box::new(self.owner.to_string()), Box::new(task_id)];
         self.many(
             "SELECT id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND id=$2 FOR UPDATE",
             &params,
@@ -983,10 +1006,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         }))
     }
 
-    fn workflow_state(
-        &mut self,
-        workflow_id: Uuid,
-    ) -> Result<Option<(bool, String)>, WorkError> {
+    fn workflow_state(&mut self, workflow_id: Uuid) -> Result<Option<(bool, String)>, WorkError> {
         let params: &[&(dyn ToSql + Sync)] = &[&workflow_id];
         let rows = self
             .tx
@@ -995,12 +1015,9 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
                 params,
             )
             .map_err(work_err)?;
-        Ok(rows.first().map(|row| {
-            (
-                row.get::<usize, bool>(0),
-                row.get::<usize, String>(1),
-            )
-        }))
+        Ok(rows
+            .first()
+            .map(|row| (row.get::<usize, bool>(0), row.get::<usize, String>(1))))
     }
 
     fn revival_live(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
@@ -1032,10 +1049,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
     fn queue_workflow_review(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError> {
         let (sql, params) = self.insert_sql("coding_workflow_reviews", row);
         let sql = format!("{sql} ON CONFLICT DO NOTHING RETURNING workflow_review_id");
-        let rows = self
-            .tx
-            .query_rows(&sql, &refs(&params))
-            .map_err(work_err)?;
+        let rows = self.tx.query_rows(&sql, &refs(&params)).map_err(work_err)?;
         Ok(rows
             .first()
             .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
@@ -1044,10 +1058,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
     fn insert_action(&mut self, row: &Value) -> Result<Uuid, WorkError> {
         let (sql, params) = self.insert_sql("coding_workflow_actions", row);
         let sql = format!("{sql} RETURNING action_id");
-        let rows = self
-            .tx
-            .query_rows(&sql, &refs(&params))
-            .map_err(work_err)?;
+        let rows = self.tx.query_rows(&sql, &refs(&params)).map_err(work_err)?;
         rows.first()
             .and_then(|row| row.get::<usize, Option<Uuid>>(0))
             .ok_or_else(|| WorkError::store("insert_action returned no action_id"))
@@ -1189,10 +1200,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn peer_review_state(
-        &mut self,
-        workflow_review_id: Uuid,
-    ) -> Result<Option<Value>, WorkError> {
+    fn peer_review_state(&mut self, workflow_review_id: Uuid) -> Result<Option<Value>, WorkError> {
         let params: Params = vec![Box::new(workflow_review_id)];
         self.one(
             "SELECT to_jsonb(t) FROM (SELECT target_kind,status FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=$1) t",
@@ -1541,10 +1549,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
     fn insert_workflow_review(&mut self, row: &Value) -> Result<Uuid, WorkError> {
         let (sql, params) = self.insert_sql("coding_workflow_reviews", row);
         let sql = format!("{sql} RETURNING workflow_review_id");
-        let rows = self
-            .tx
-            .query_rows(&sql, &refs(&params))
-            .map_err(work_err)?;
+        let rows = self.tx.query_rows(&sql, &refs(&params)).map_err(work_err)?;
         rows.first()
             .and_then(|row| row.get::<usize, Option<Uuid>>(0))
             .ok_or_else(|| WorkError::store("insert_workflow_review returned no id"))
@@ -1600,13 +1605,8 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
             "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND workflow_id=$3 AND mode IN('plan','implement') AND id<>$4 AND created_at{comparison}$5::timestamptz) AS newer"
         );
         let created = created_at.to_string();
-        let params: &[&(dyn ToSql + Sync)] = &[
-            &self.owner,
-            &project,
-            &workflow_id,
-            &task_id,
-            &created,
-        ];
+        let params: &[&(dyn ToSql + Sync)] =
+            &[&self.owner, &project, &workflow_id, &task_id, &created];
         self.tx.call_bool(&sql, params).map_err(work_err)
     }
 
@@ -1641,13 +1641,8 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         profile: &str,
         model: &str,
     ) -> Result<Option<Uuid>, WorkError> {
-        let params: &[&(dyn ToSql + Sync)] = &[
-            &self.owner,
-            &project,
-            &workflow_id,
-            &profile,
-            &model,
-        ];
+        let params: &[&(dyn ToSql + Sync)] =
+            &[&self.owner, &project, &workflow_id, &profile, &model];
         let rows = self
             .tx
             .query_rows(
@@ -1852,7 +1847,10 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         let params: &[&(dyn ToSql + Sync)] = &[&project];
         let head = self
             .tx
-            .call_json("SELECT forge_agent.delivery_project_head($1) AS head", params)
+            .call_json(
+                "SELECT forge_agent.delivery_project_head($1) AS head",
+                params,
+            )
             .map_err(work_err)?;
         Ok(head.and_then(|value| {
             value
@@ -1886,10 +1884,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
                 ],
             ),
         };
-        let rows = self
-            .tx
-            .query_rows(sql, &refs(&params))
-            .map_err(work_err)?;
+        let rows = self.tx.query_rows(sql, &refs(&params)).map_err(work_err)?;
         Ok(rows
             .first()
             .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
@@ -1900,10 +1895,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         workflow_id: Uuid,
         task_id: Uuid,
     ) -> Result<Option<Value>, WorkError> {
-        let params: Params = vec![
-            Box::new(workflow_id),
-            Box::new(task_id.to_string()),
-        ];
+        let params: Params = vec![Box::new(workflow_id), Box::new(task_id.to_string())];
         let row = self.one(
             "SELECT to_jsonb(t) FROM (SELECT intent FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND kind='decide' AND status='completed' AND source_key LIKE 'unstarted-plan-resume:%' AND finish_receipt->'receipt'->>'task_id'=$2) t",
             &params,
@@ -1981,15 +1973,17 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
             "SELECT to_jsonb(t) FROM (SELECT payload FROM forge_agent.coding_events WHERE task_id=$1 AND event_kind='checkpoint' AND payload->>'stage'='unstarted_plan_workspace_materialized' AND payload->>'attempt_id'=$2) t",
             &params,
         )?;
-        Ok(rows
-            .iter()
-            .map(|row| row["payload"].clone())
-            .collect())
+        Ok(rows.iter().map(|row| row["payload"].clone()).collect())
     }
 
     fn plan_direction_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError> {
         let params: &[&(dyn ToSql + Sync)] = &[
-            &workflow_id, &workflow_id, &workflow_id, &workflow_id, &workflow_id, &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
         ];
         self.tx
             .call_bool(
@@ -2103,7 +2097,12 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         workflow_id: Uuid,
     ) -> Result<bool, WorkError> {
         let params: &[&(dyn ToSql + Sync)] = &[
-            &attempt_id, &task_id, &workflow_id, &workflow_id, &workflow_id, &workflow_id,
+            &attempt_id,
+            &task_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
         ];
         self.tx
             .call_bool(
@@ -2133,10 +2132,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
     fn insert_action_returning(&mut self, row: &Value) -> Result<Option<Uuid>, WorkError> {
         let (sql, params) = self.insert_sql("coding_workflow_actions", row);
         let sql = format!("{sql} ON CONFLICT DO NOTHING RETURNING action_id");
-        let rows = self
-            .tx
-            .query_rows(&sql, &refs(&params))
-            .map_err(work_err)?;
+        let rows = self.tx.query_rows(&sql, &refs(&params)).map_err(work_err)?;
         Ok(rows
             .first()
             .and_then(|row| row.get::<usize, Option<Uuid>>(0)))
@@ -2194,11 +2190,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn handoff_busy(
-        &mut self,
-        workflow_id: Uuid,
-        task_id: Uuid,
-    ) -> Result<bool, WorkError> {
+    fn handoff_busy(&mut self, workflow_id: Uuid, task_id: Uuid) -> Result<bool, WorkError> {
         let params: Params = vec![
             Box::new(workflow_id),
             Box::new(task_id),
@@ -2412,11 +2404,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn recovery_busy(
-        &mut self,
-        workflow_id: Uuid,
-        task_id: Uuid,
-    ) -> Result<bool, WorkError> {
+    fn recovery_busy(&mut self, workflow_id: Uuid, task_id: Uuid) -> Result<bool, WorkError> {
         let params: Params = vec![
             Box::new(workflow_id),
             Box::new(workflow_id),
@@ -2461,15 +2449,14 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         workflow_id: Uuid,
         feedback_id: &str,
     ) -> Result<i64, WorkError> {
-        let params: Params = vec![
-            Box::new(workflow_id),
-            Box::new(feedback_id.to_string()),
-        ];
+        let params: Params = vec![Box::new(workflow_id), Box::new(feedback_id.to_string())];
         let row = self.one(
             "SELECT to_jsonb(t) FROM (SELECT count(*) AS used FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND kind='decide' AND status='completed' AND (source_key LIKE 'feedback-delivery-retry:%' OR source_key LIKE 'peer-feedback-delivery-retry:%') AND intent->>'feedback_id'=$2) t",
             &params,
         )?;
-        Ok(row.map(|doc| doc["used"].as_i64().unwrap_or(0)).unwrap_or(0))
+        Ok(row
+            .map(|doc| doc["used"].as_i64().unwrap_or(0))
+            .unwrap_or(0))
     }
 
     fn needs_reconcile_witness(
@@ -2628,10 +2615,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
     }
 
     fn deadline_retry_count(&mut self, workflow_id: Uuid) -> Result<i64, WorkError> {
-        let params: Params = vec![
-            Box::new(workflow_id),
-            Box::new(self.owner.to_string()),
-        ];
+        let params: Params = vec![Box::new(workflow_id), Box::new(self.owner.to_string())];
         let row = self.one(
             "SELECT to_jsonb(t) FROM (SELECT count(*) AS n FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND owner_id=$2 AND kind='decide' AND status='completed' AND source_key LIKE 'native-deadline-retry:%') t",
             &params,
@@ -2676,11 +2660,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         )
     }
 
-    fn latest_review(
-        &mut self,
-        project: &str,
-        task_id: Uuid,
-    ) -> Result<Option<Value>, WorkError> {
+    fn latest_review(&mut self, project: &str, task_id: Uuid) -> Result<Option<Value>, WorkError> {
         let params: Params = vec![
             Box::new(self.owner.to_string()),
             Box::new(project.to_string()),
@@ -2714,10 +2694,7 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
         workflow_id: Uuid,
         workflow_review_id: Uuid,
     ) -> Result<Option<Value>, WorkError> {
-        let params: Params = vec![
-            Box::new(workflow_id),
-            Box::new(workflow_review_id),
-        ];
+        let params: Params = vec![Box::new(workflow_id), Box::new(workflow_review_id)];
         self.one(
             "SELECT to_jsonb(t) FROM (SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=$1 AND workflow_review_id=$2 AND kind='decide' AND status='completed') t",
             &params,
@@ -2872,7 +2849,6 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
             .map_err(work_err)?;
         Ok(count)
     }
-
 }
 
 /// The Python provider raises ValueError for these; the closest
@@ -3067,9 +3043,18 @@ mod tests {
     fn column_types_follow_the_python_row_shapes() {
         // owner_id and worker_id are names, not uuids, despite the
         // _id suffix.
-        assert_eq!(col_type("coding_tasks", "owner_id", &json!("lrocha")), Ty::Text);
-        assert_eq!(col_type("coding_workflow_actions", "worker_id", &json!("w")), Ty::Text);
-        assert_eq!(col_type("coding_tasks", "workflow_id", &json!("x")), Ty::Uuid);
+        assert_eq!(
+            col_type("coding_tasks", "owner_id", &json!("lrocha")),
+            Ty::Text
+        );
+        assert_eq!(
+            col_type("coding_workflow_actions", "worker_id", &json!("w")),
+            Ty::Text
+        );
+        assert_eq!(
+            col_type("coding_tasks", "workflow_id", &json!("x")),
+            Ty::Uuid
+        );
         assert_eq!(col_type("coding_tasks", "id", &json!("x")), Ty::Uuid);
         assert_eq!(col_type("coding_tasks", "created_at", &json!("x")), Ty::Ts);
         assert_eq!(col_type("coding_tasks", "revision", &json!(3)), Ty::Int);
@@ -3077,8 +3062,14 @@ mod tests {
         assert_eq!(col_type("coding_tasks", "snapshot", &json!({})), Ty::Json);
         assert_eq!(col_type("coding_tasks", "title", &json!("t")), Ty::Text);
         // A null falls back to the name rules.
-        assert_eq!(col_type("coding_tasks", "plan_decision_id", &Value::Null), Ty::Uuid);
-        assert_eq!(col_type("coding_tasks", "cancelled_at", &Value::Null), Ty::Ts);
+        assert_eq!(
+            col_type("coding_tasks", "plan_decision_id", &Value::Null),
+            Ty::Uuid
+        );
+        assert_eq!(
+            col_type("coding_tasks", "cancelled_at", &Value::Null),
+            Ty::Ts
+        );
     }
 
     #[test]

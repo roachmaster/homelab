@@ -14,12 +14,8 @@ use forge_work::external_review::{ExternalSourceIntegration, EXTERNAL_DIFF_FLAGS
 use crate::artifact_identity::VerificationPolicySnapshot;
 use crate::ci_contract::SCOPED_PROFILE;
 use crate::ci_phases::EVENT_PROFILE;
-use crate::durable_files::{
-    durable_json, effective_uid, group_id, home_dir, read_private,
-};
-use crate::external_delivery::{
-    BranchUpsert, ExternalDeliveryLease, ExternalDeliveryStorePort,
-};
+use crate::durable_files::{durable_json, effective_uid, group_id, home_dir, read_private};
+use crate::external_delivery::{BranchUpsert, ExternalDeliveryLease, ExternalDeliveryStorePort};
 use crate::external_identity::{ci_policy_body, ExternalCandidateIdentityProvider};
 use crate::identity_contract::content_policy_path;
 use crate::identity_store::{
@@ -28,8 +24,8 @@ use crate::identity_store::{
 use crate::publication_clients::{artifact_guard, CommandExecutor, PublicationError};
 use crate::trusted_delivery::{
     canonical_branch_slug, canonical_bytes, contract_for_config, digest as validate_digest,
-    gate_ref, jenkins_gate_manifest, protected_delivery_gate, protected_delivery_gate_for,
-    sha, validate_branch_name, validate_uid, DeliveryConfig, DeliveryError, DeliveryResult,
+    gate_ref, jenkins_gate_manifest, protected_delivery_gate, protected_delivery_gate_for, sha,
+    validate_branch_name, validate_uid, DeliveryConfig, DeliveryError, DeliveryResult,
     ForgeJenkinsPort, RequireLease, SourceArtifactRejected, ARTIFACT_REJECTION_CODES,
     EPHEMERAL_BRANCH_PREFIX, PARAMETERS,
 };
@@ -91,9 +87,18 @@ impl TrustedDeliveryPort {
             ("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()),
             ("GIT_NO_REPLACE_OBJECTS".to_string(), "1".to_string()),
             ("GIT_AUTHOR_NAME".to_string(), "Forge publisher".to_string()),
-            ("GIT_COMMITTER_NAME".to_string(), "Forge publisher".to_string()),
-            ("GIT_AUTHOR_EMAIL".to_string(), "forge@thedevex.com".to_string()),
-            ("GIT_COMMITTER_EMAIL".to_string(), "forge@thedevex.com".to_string()),
+            (
+                "GIT_COMMITTER_NAME".to_string(),
+                "Forge publisher".to_string(),
+            ),
+            (
+                "GIT_AUTHOR_EMAIL".to_string(),
+                "forge@thedevex.com".to_string(),
+            ),
+            (
+                "GIT_COMMITTER_EMAIL".to_string(),
+                "forge@thedevex.com".to_string(),
+            ),
         ];
         TrustedDeliveryPort {
             config,
@@ -192,7 +197,13 @@ impl TrustedDeliveryPort {
         let observed = sha(result["object"]["sha"].as_str().unwrap_or_default())?;
         let repository = project.canonical_repo.clone();
         let verify = format!("{observed}^{{commit}}");
-        let available = self.git_text(Some(&repository), &["rev-parse", "--verify", &verify], None, None, 45.0);
+        let available = self.git_text(
+            Some(&repository),
+            &["rev-parse", "--verify", &verify],
+            None,
+            None,
+            45.0,
+        );
         let available = match available {
             Ok(text) => text,
             Err(DeliveryError::Publication(_)) => {
@@ -214,7 +225,13 @@ impl TrustedDeliveryPort {
                     None,
                     45.0,
                 )?;
-                self.git_text(Some(&repository), &["rev-parse", "--verify", &verify], None, None, 45.0)?
+                self.git_text(
+                    Some(&repository),
+                    &["rev-parse", "--verify", &verify],
+                    None,
+                    None,
+                    45.0,
+                )?
             }
             Err(error) => return Err(error),
         };
@@ -329,7 +346,9 @@ impl TrustedDeliveryPort {
             };
             if head_sha != raw {
                 if raw == expected {
-                    return value_error("Requested source branch does not point at candidate commit");
+                    return value_error(
+                        "Requested source branch does not point at candidate commit",
+                    );
                 }
                 self.git(
                     Some(repository),
@@ -427,10 +446,8 @@ impl TrustedDeliveryPort {
                 return value_error("Prepared candidate replay conflict");
             }
             if protocol == "content-v2" {
-                let record = read_identity_snapshot(
-                    &directory.join("identity-manifest.json"),
-                    self.owner,
-                )?;
+                let record =
+                    read_identity_snapshot(&directory.join("identity-manifest.json"), self.owner)?;
                 ExternalCandidateIdentityProvider::validate_snapshot(
                     &record["snapshot"],
                     &previous["candidate"]["content_identity"],
@@ -444,12 +461,21 @@ impl TrustedDeliveryPort {
             return Ok(previous["candidate"].clone());
         }
         require_lease()?;
-        let project_alias = request["project_alias"].as_str().unwrap_or_default().to_string();
+        let project_alias = request["project_alias"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let project = self.config.projects[&project_alias].clone();
         let remote = format!("https://github.com/{}.git", project.repository);
         let repository = directory.join("quarantine");
         if !repository.exists() {
-            self.git(None, &["init", "--bare", &repository.to_string_lossy()], None, None, 45.0)?;
+            self.git(
+                None,
+                &["init", "--bare", &repository.to_string_lossy()],
+                None,
+                None,
+                45.0,
+            )?;
         } else if repository
             .symlink_metadata()
             .map(|meta| meta.file_type().is_symlink())
@@ -484,7 +510,8 @@ impl TrustedDeliveryPort {
         } else if protocol == "content-v2" && directory.join("identity-manifest.json").exists() {
             // Resume pre-upgrade preparation without
             // retargeting its snapshot.
-            let prior = read_identity_snapshot(&directory.join("identity-manifest.json"), self.owner)?;
+            let prior =
+                read_identity_snapshot(&directory.join("identity-manifest.json"), self.owner)?;
             if prior["intent_sha256"].as_str() != Some(identity.as_str()) {
                 return value_error("Prepared content replay conflict");
             }
@@ -517,7 +544,14 @@ impl TrustedDeliveryPort {
         )?;
         require_lease()?;
         let tree_arg = format!("{raw}^{{tree}}");
-        if self.git_text(Some(&repository), &["rev-parse", &tree_arg], None, None, 45.0)? != claimed_tree {
+        if self.git_text(
+            Some(&repository),
+            &["rev-parse", &tree_arg],
+            None,
+            None,
+            45.0,
+        )? != claimed_tree
+        {
             return value_error("Author candidate tree mismatch");
         }
         for descendant in [&raw, &expected] {
@@ -578,7 +612,10 @@ impl TrustedDeliveryPort {
             }
         }
         let integration = ExternalSourceIntegration {
-            prepare_action_id: request["action_id"].as_str().unwrap_or_default().to_string(),
+            prepare_action_id: request["action_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             source_base_revision: authored_base.clone(),
             source_candidate_commit: raw.clone(),
             source_candidate_tree: claimed_original.clone(),
@@ -624,7 +661,10 @@ impl TrustedDeliveryPort {
             };
             let descriptor = std::str::from_utf8(&record[..tab]).unwrap_or_default();
             let path_bytes = &record[tab + 1..];
-            let parts: Vec<&str> = descriptor.split(' ').filter(|part| !part.is_empty()).collect();
+            let parts: Vec<&str> = descriptor
+                .split(' ')
+                .filter(|part| !part.is_empty())
+                .collect();
             if parts.len() != 3 {
                 return value_error(scope_error);
             }
@@ -643,7 +683,13 @@ impl TrustedDeliveryPort {
             {
                 return value_error(scope_error);
             }
-            let data = self.git(Some(&repository), &["cat-file", "blob", blob], None, None, 45.0)?;
+            let data = self.git(
+                Some(&repository),
+                &["cat-file", "blob", blob],
+                None,
+                None,
+                45.0,
+            )?;
             total += data.len();
             if total > 256 * 1024 * 1024 {
                 return value_error("External source exceeds checkout bounds");
@@ -702,25 +748,33 @@ impl TrustedDeliveryPort {
             self.git_text(
                 Some(&repository),
                 &["commit-tree", &claimed_tree, "-p", &expected],
-                Some(format!("Verified Forge workflow {}\n", request["workflow_id"].as_str().unwrap_or_default()).as_bytes()),
+                Some(
+                    format!(
+                        "Verified Forge workflow {}\n",
+                        request["workflow_id"].as_str().unwrap_or_default()
+                    )
+                    .as_bytes(),
+                ),
                 Some(&env),
                 45.0,
             )?
         };
-        let (resolved_source_branch, branch_scope) =
-            if raw == authored_base && clean == expected && matches!(requested_branch.as_deref(), None | Some("main")) {
-                (Some("main".to_string()), "main".to_string())
-            } else {
-                self.resolve_branch_scope(
-                    &repository,
-                    &remote,
-                    &expected,
-                    &raw,
-                    &clean,
-                    requested_branch.as_deref(),
-                    require_lease,
-                )?
-            };
+        let (resolved_source_branch, branch_scope) = if raw == authored_base
+            && clean == expected
+            && matches!(requested_branch.as_deref(), None | Some("main"))
+        {
+            (Some("main".to_string()), "main".to_string())
+        } else {
+            self.resolve_branch_scope(
+                &repository,
+                &remote,
+                &expected,
+                &raw,
+                &clean,
+                requested_branch.as_deref(),
+                require_lease,
+            )?
+        };
         let contract = contract_for_config(&self.config)?;
         let identity_path = directory.join("identity-manifest.json");
         let mut content_reference: Option<Value> = None;
@@ -744,22 +798,31 @@ impl TrustedDeliveryPort {
             }
             let identities = self.identities.as_mut().unwrap();
             let current = identities.artifacts.acquire(repository.as_path(), &clean)?;
-            let current_base = identities.artifacts.acquire(repository.as_path(), &expected)?;
+            let current_base = identities
+                .artifacts
+                .acquire(repository.as_path(), &expected)?;
             if current.artifact_id() != reference["artifact_id"].as_str().unwrap_or_default()
                 || current_base.artifact_id()
                     != reference["base_artifact_id"].as_str().unwrap_or_default()
             {
                 return value_error("Persisted source content changed");
             }
-            let transport = record["legacy_transport"].as_array().cloned().unwrap_or_default();
+            let transport = record["legacy_transport"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             if transport.len() != 3 {
                 return value_error("Persisted content preparation cannot be retargeted");
             }
             source_digest = transport[0].as_str().unwrap_or_default().to_string();
             helper_digest = transport[1].as_str().unwrap_or_default().to_string();
             gate = transport[2].as_str().unwrap_or_default().to_string();
-            if sha256_hex(&read_private(&self.config.verifier, 1024 * 1024, Some(0))?) != helper_digest {
-                return value_error("Frozen verification executor changed; create a new generation");
+            if sha256_hex(&read_private(&self.config.verifier, 1024 * 1024, Some(0))?)
+                != helper_digest
+            {
+                return value_error(
+                    "Frozen verification executor changed; create a new generation",
+                );
             }
             let policy_snapshot = VerificationPolicySnapshot::parse_dict(&reference["policy"])
                 .map_err(DeliveryError::value)?;
@@ -770,13 +833,20 @@ impl TrustedDeliveryPort {
             if policy != expected_policy {
                 return value_error("Frozen CI policy requires a new generation");
             }
-            gate_changes = record["protected_gate_changes"].as_array().cloned().unwrap_or_default();
+            gate_changes = record["protected_gate_changes"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
         } else {
             let scoped = contract.profile == SCOPED_PROFILE || contract.profile == EVENT_PROFILE;
             let (source, helper, gate_value) = jenkins_gate_manifest(
                 &self.config,
                 &files,
-                if scoped { Some(branch_scope.as_str()) } else { None },
+                if scoped {
+                    Some(branch_scope.as_str())
+                } else {
+                    None
+                },
                 false,
             )?;
             source_digest = source;
@@ -795,9 +865,7 @@ impl TrustedDeliveryPort {
                     &policy_body,
                     generation,
                     &|path: &str| {
-                        content_policy_path(path, |name| {
-                            protected_delivery_gate(name, &profile)
-                        })
+                        content_policy_path(path, |name| protected_delivery_gate(name, &profile))
                     },
                 )?;
                 content_reference = Some(reference);
@@ -807,7 +875,12 @@ impl TrustedDeliveryPort {
                         .cloned()
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|entry| (entry["path"].as_str().unwrap_or_default().to_string(), entry))
+                        .map(|entry| {
+                            (
+                                entry["path"].as_str().unwrap_or_default().to_string(),
+                                entry,
+                            )
+                        })
                         .collect()
                 };
                 let before = entry_map(&snapshot["base_artifact"]);
@@ -817,9 +890,7 @@ impl TrustedDeliveryPort {
                 paths.dedup();
                 for path in paths {
                     if before.get(path) != after.get(path)
-                        && content_policy_path(path, |name| {
-                            protected_delivery_gate(name, &profile)
-                        })
+                        && content_policy_path(path, |name| protected_delivery_gate(name, &profile))
                     {
                         gate_changes.push(json!({
                             "path": path,
@@ -860,7 +931,13 @@ impl TrustedDeliveryPort {
             "refs/forge/external-candidates/{}",
             request["action_id"].as_str().unwrap_or_default()
         );
-        self.git(Some(&repository), &["update-ref", &reference, &clean], None, None, 45.0)?;
+        self.git(
+            Some(&repository),
+            &["update-ref", &reference, &clean],
+            None,
+            None,
+            45.0,
+        )?;
         let bundle = directory.join("candidate.bundle");
         self.git(
             Some(&repository),
@@ -871,11 +948,8 @@ impl TrustedDeliveryPort {
         )?;
         // Git inherits its caller's umask; the trusted
         // private handoff does not.
-        std::fs::set_permissions(
-            &bundle,
-            std::os::unix::fs::PermissionsExt::from_mode(0o600),
-        )
-        .map_err(|error| DeliveryError::value(error.to_string()))?;
+        std::fs::set_permissions(&bundle, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .map_err(|error| DeliveryError::value(error.to_string()))?;
         let canonical_repo = project.canonical_repo.clone();
         self.git(
             Some(&canonical_repo),
@@ -950,7 +1024,11 @@ impl TrustedDeliveryPort {
             result["content_identity"] = reference.clone();
             result["identity_protocol"] = json!("content-v2");
         }
-        durable_json(&result_path, &json!({"intent_sha256": identity, "candidate": result}), 0o600)?;
+        durable_json(
+            &result_path,
+            &json!({"intent_sha256": identity, "candidate": result}),
+            0o600,
+        )?;
         Ok(result)
     }
 }
@@ -977,9 +1055,13 @@ impl TrustedDeliveryPort {
             .config
             .state_root
             .join("actions")
-            .join(validate_uid(request["prepare_action_id"].as_str().unwrap_or_default())?)
+            .join(validate_uid(
+                request["prepare_action_id"].as_str().unwrap_or_default(),
+            )?)
             .join("identity-manifest.json");
-        let reference = request.get("content_identity").filter(|value| !value.is_null());
+        let reference = request
+            .get("content_identity")
+            .filter(|value| !value.is_null());
         let protocol = request["identity_protocol"].as_str().unwrap_or("legacy-v1");
         if protocol != "legacy-v1" && protocol != "content-v2" {
             return value_error("Unknown CI identity protocol");
@@ -1009,9 +1091,7 @@ impl TrustedDeliveryPort {
         };
         let scope_matches = scope_keys.len() == expected_scope.len()
             && expected_scope.iter().all(|key| scope_keys.contains(key))
-            && expected_scope
-                .iter()
-                .all(|key| request[key] == scope[key]);
+            && expected_scope.iter().all(|key| request[key] == scope[key]);
         if reference != &record["reference"]
             || reference["verification"]["generation"].as_str()
                 != request["prepare_action_id"].as_str()
@@ -1021,8 +1101,7 @@ impl TrustedDeliveryPort {
             || record["integration_base"].as_str() != request["integration_base"].as_str()
             || record["branch_scope"].as_str() != request["branch_scope"].as_str()
             || record["profile"].as_str() != Some(plan.profile.as_str())
-            || request["gate_manifest_sha256"].as_str()
-                != record["legacy_transport"][2].as_str()
+            || request["gate_manifest_sha256"].as_str() != record["legacy_transport"][2].as_str()
         {
             return value_error("CI content generation or source scope changed");
         }
@@ -1047,8 +1126,11 @@ impl TrustedDeliveryPort {
             return value_error("CI submission requires a trusted branch_scope or source_branch");
         }
         let branch_scope = if let Some(scope) = raw_scope {
-            let validated =
-                crate::trusted_delivery::validate_branch_scope(scope, &candidate_commit, &expected_main)?;
+            let validated = crate::trusted_delivery::validate_branch_scope(
+                scope,
+                &candidate_commit,
+                &expected_main,
+            )?;
             if let Some(branch) = raw_branch {
                 let expected_scope = crate::trusted_delivery::derive_branch_scope(
                     &candidate_commit,
@@ -1068,7 +1150,9 @@ impl TrustedDeliveryPort {
             )?
         };
         let contract = contract_for_config(&self.config)?;
-        if request["verification_profile"].as_str().unwrap_or(crate::ci_contract::LEGACY_PROFILE)
+        if request["verification_profile"]
+            .as_str()
+            .unwrap_or(crate::ci_contract::LEGACY_PROFILE)
             != contract.profile
         {
             return value_error("CI verification profile changed");
@@ -1079,13 +1163,14 @@ impl TrustedDeliveryPort {
             .config
             .state_root
             .join("actions")
-            .join(validate_uid(request["prepare_action_id"].as_str().unwrap_or_default())?)
+            .join(validate_uid(
+                request["prepare_action_id"].as_str().unwrap_or_default(),
+            )?)
             .join("candidate.bundle");
         let bundle = read_private(&prepared, 128 * 1024 * 1024, Some(self.owner))?;
-        let path = self
-            .config
-            .spool_root
-            .join(validate_uid(request["action_id"].as_str().unwrap_or_default())?);
+        let path = self.config.spool_root.join(validate_uid(
+            request["action_id"].as_str().unwrap_or_default(),
+        )?);
         let jenkins_gid = group_id("jenkins")
             .ok_or_else(|| DeliveryError::value("Unknown jenkins group".to_string()))?;
         if !path.exists() {
@@ -1170,7 +1255,11 @@ impl TrustedDeliveryPort {
         let (_submission, record) = self.submission(request)?;
         let journal = directory.join("jenkins.json");
         let previous: Option<Value> = if journal.exists() {
-            Some(parse_json(&read_private(&journal, 65536, Some(self.owner))?)?)
+            Some(parse_json(&read_private(
+                &journal,
+                65536,
+                Some(self.owner),
+            )?)?)
         } else {
             None
         };
@@ -1266,10 +1355,10 @@ impl TrustedDeliveryPort {
         }
         receipt["result"] = value["result"].clone();
         require_lease()?;
-        let result_file = self
-            .config
-            .results_root
-            .join(format!("{}.json", request["action_id"].as_str().unwrap_or_default()));
+        let result_file = self.config.results_root.join(format!(
+            "{}.json",
+            request["action_id"].as_str().unwrap_or_default()
+        ));
         if !result_file.exists() {
             receipt["jenkins_result"] = value["result"].clone();
             return Ok(json!({
@@ -1388,17 +1477,14 @@ impl TrustedDeliveryPort {
             for check in items {
                 let returncode = &check["returncode"];
                 if !returncode.is_null() && returncode.as_i64() != Some(0) {
-                    summary += &format!(
-                        "; fixed check {}, exit {}",
-                        check["index"], returncode
-                    );
+                    summary += &format!("; fixed check {}, exit {}", check["index"], returncode);
                 }
             }
         }
-        let log_path = self
-            .config
-            .results_root
-            .join(format!("{}.log", request["action_id"].as_str().unwrap_or_default()));
+        let log_path = self.config.results_root.join(format!(
+            "{}.log",
+            request["action_id"].as_str().unwrap_or_default()
+        ));
         if log_path.exists() {
             let raw_log = read_private(&log_path, 64 * 1024 * 1024, Some(0))?;
             if sha256_hex(&raw_log) != result["log_sha256"].as_str().unwrap_or_default() {
@@ -1429,7 +1515,10 @@ impl TrustedDeliveryPort {
         request: &Value,
         require_lease: &RequireLease,
     ) -> DeliveryResult<Value> {
-        let project = request["project_alias"].as_str().unwrap_or_default().to_string();
+        let project = request["project_alias"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let candidate = sha(request["candidate_commit"].as_str().unwrap_or_default())?;
         let expected = sha(request["integration_base"].as_str().unwrap_or_default())?;
         let tree = sha(request["candidate_tree"].as_str().unwrap_or_default())?;
@@ -1582,8 +1671,12 @@ impl TrustedDeliveryPort {
         require_lease: &RequireLease,
     ) -> DeliveryResult<Value> {
         let mut target = request["target_request"].clone();
-        target["action_id"] = json!(validate_uid(request["target_action_id"].as_str().unwrap_or_default())?);
-        target["workflow_id"] = json!(validate_uid(request["workflow_id"].as_str().unwrap_or_default())?);
+        target["action_id"] = json!(validate_uid(
+            request["target_action_id"].as_str().unwrap_or_default()
+        )?);
+        target["workflow_id"] = json!(validate_uid(
+            request["workflow_id"].as_str().unwrap_or_default()
+        )?);
         target["project_alias"] = request["project_alias"].clone();
         if request["target_kind"].as_str() != Some("verify") {
             return value_error("Only a Jenkins verification can require process cancellation");
@@ -1639,7 +1732,9 @@ impl TrustedDeliveryPort {
                         Value::String(text) => text.clone(),
                         other => other.to_string(),
                     };
-                    let observation = self.jenkins.call("queue", std::slice::from_ref(&queue_text), false)?;
+                    let observation =
+                        self.jenkins
+                            .call("queue", std::slice::from_ref(&queue_text), false)?;
                     if observation["queue_id"].as_str() == Some(queue_text.as_str())
                         && observation["cancelled"].as_str() == Some("true")
                         && observation["build_number"].as_str() == Some("not_reported")
@@ -1668,7 +1763,8 @@ impl TrustedDeliveryPort {
             }));
         };
         if kind == "queue" {
-            self.jenkins.stop(Some(value["id"].as_i64().unwrap_or_default()), None)?;
+            self.jenkins
+                .stop(Some(value["id"].as_i64().unwrap_or_default()), None)?;
             let mut queued = receipt.clone();
             queued["queue_id"] = value["id"].clone();
             return Ok(json!({
@@ -1679,17 +1775,18 @@ impl TrustedDeliveryPort {
         }
         receipt["build_number"] = value["number"].clone();
         if value["building"] == Value::Bool(true) {
-            self.jenkins.stop(None, Some(value["number"].as_i64().unwrap_or_default()))?;
+            self.jenkins
+                .stop(None, Some(value["number"].as_i64().unwrap_or_default()))?;
             return Ok(json!({
                 "status": "pending",
                 "receipt": receipt,
                 "summary": "Jenkins process stop requested; awaiting the trusted cleanup receipt.",
             }));
         }
-        let result_path = self
-            .config
-            .results_root
-            .join(format!("{}.json", target["action_id"].as_str().unwrap_or_default()));
+        let result_path = self.config.results_root.join(format!(
+            "{}.json",
+            target["action_id"].as_str().unwrap_or_default()
+        ));
         if result_path.exists() {
             let raw = read_private(&result_path, 262144, Some(0))?;
             let result = parse_json(&raw)?;
@@ -1731,18 +1828,29 @@ impl DeliveryProviderFactory {
         execute: Box<dyn CommandExecutor>,
         git_port: std::sync::Arc<dyn crate::artifact_source::GitArtifactGitPort + Send + Sync>,
     ) -> DeliveryResult<TrustedDeliveryPort> {
-        let selected = parse_json(&read_private(&self.config.jenkins_config, 65536, Some(effective_uid()))?)?;
+        let selected = parse_json(&read_private(
+            &self.config.jenkins_config,
+            65536,
+            Some(effective_uid()),
+        )?)?;
         let parameters: Vec<Value> = PARAMETERS.iter().map(|item| json!(item)).collect();
         if selected["endpoint"].as_str() != Some("http://127.0.0.1:18084/")
             || selected["allow_mutations"] != Value::Bool(true)
-            || selected["observed_parameters"].as_array().cloned().unwrap_or_default() != parameters
+            || selected["observed_parameters"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                != parameters
         {
             return value_error(
                 "Jenkins must explicitly expose the complete public correlation contract",
             );
         }
-        if sha256_hex(&read_private(&self.config.jenkins_binary, 64 * 1024 * 1024, None)?)
-            != self.config.jenkins_binary_sha256
+        if sha256_hex(&read_private(
+            &self.config.jenkins_binary,
+            64 * 1024 * 1024,
+            None,
+        )?) != self.config.jenkins_binary_sha256
         {
             return value_error("Pinned Jenkins executable changed");
         }
@@ -1754,7 +1862,10 @@ impl DeliveryProviderFactory {
                 .symlink_metadata()
                 .map(|meta| meta.file_type().is_symlink())
                 .unwrap_or(false);
-        if contract.profile == SCOPED_PROFILE || contract.profile == EVENT_PROFILE || verifier_exists {
+        if contract.profile == SCOPED_PROFILE
+            || contract.profile == EVENT_PROFILE
+            || verifier_exists
+        {
             let verifier_source = read_private(&self.config.verifier, 1024 * 1024, Some(0))?;
             crate::verifier_parity::verify_verifier_policy_parity_contract(
                 &contract,
@@ -1768,7 +1879,10 @@ impl DeliveryProviderFactory {
                 .assert_scope(
                     &self.config.jenkins_job,
                     selected["endpoint"].as_str().unwrap_or_default(),
-                    &PARAMETERS.iter().map(|item| item.to_string()).collect::<Vec<_>>(),
+                    &PARAMETERS
+                        .iter()
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>(),
                 )
                 .map_err(|error| {
                     let message = match error {
@@ -1809,9 +1923,7 @@ impl DeliveryProviderFactory {
 /// both need it, one call at a time (single-threaded
 /// worker, as in Python).
 pub struct ExternalDeliveryWorker {
-    pub dao: std::rc::Rc<
-        std::cell::RefCell<Box<dyn ExternalDeliveryStorePort>>,
-    >,
+    pub dao: std::rc::Rc<std::cell::RefCell<Box<dyn ExternalDeliveryStorePort>>>,
     pub delivery: TrustedDeliveryPort,
     pub worker_id: String,
     pub stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1867,7 +1979,11 @@ impl ExternalDeliveryWorker {
                 let selected = request["source_branch"]
                     .as_str()
                     .map(str::to_string)
-                    .or_else(|| request["expected_agent_branch"].as_str().map(str::to_string))
+                    .or_else(|| {
+                        request["expected_agent_branch"]
+                            .as_str()
+                            .map(str::to_string)
+                    })
                     .or_else(|| {
                         forge_work_worker::config_profile::default_agent_branch(profile).ok()
                     });
@@ -1917,182 +2033,180 @@ impl ExternalDeliveryWorker {
                 }
             }
         }
-        let outcome: DeliveryResult<Value> = (|| {
-            match action.kind.as_str() {
-                "source" => {
-                    let head = self.delivery.source_head(&action.project_alias)?;
-                    Ok(json!({
-                        "status": "passed",
-                        "receipt": {"base_revision": head},
-                        "summary": "Current configured source head observed.",
-                    }))
-                }
-                "prepare" => {
-                    let candidate = self.delivery.prepare_candidate(&request, &require)?;
-                    let status = candidate["status"].as_str().unwrap_or("passed").to_string();
-                    let summary = if candidate["reason"].as_str() == Some("source_conflict") {
-                        "Trusted source integration found conflicts; the preserved candidate needs its original author."
-                    } else {
-                        "Exact external candidate prepared for independent review."
-                    };
-                    let result = json!({
-                        "status": status,
-                        "receipt": candidate.clone(),
-                        "summary": summary,
-                    });
-                    if branch_reservation.is_some() && status == "passed" {
-                        let resolved = candidate["source_branch"]
-                            .as_str()
-                            .map(str::to_string)
-                            .or_else(|| branch_name_selected.clone());
-                        if let Some(resolved) = resolved {
-                            if resolved != "main" {
-                                let scope = forge_work_worker::agent_branch::branch_scope_for_branch(&resolved)
+        let outcome: DeliveryResult<Value> = (|| match action.kind.as_str() {
+            "source" => {
+                let head = self.delivery.source_head(&action.project_alias)?;
+                Ok(json!({
+                    "status": "passed",
+                    "receipt": {"base_revision": head},
+                    "summary": "Current configured source head observed.",
+                }))
+            }
+            "prepare" => {
+                let candidate = self.delivery.prepare_candidate(&request, &require)?;
+                let status = candidate["status"].as_str().unwrap_or("passed").to_string();
+                let summary = if candidate["reason"].as_str() == Some("source_conflict") {
+                    "Trusted source integration found conflicts; the preserved candidate needs its original author."
+                } else {
+                    "Exact external candidate prepared for independent review."
+                };
+                let result = json!({
+                    "status": status,
+                    "receipt": candidate.clone(),
+                    "summary": summary,
+                });
+                if branch_reservation.is_some() && status == "passed" {
+                    let resolved = candidate["source_branch"]
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| branch_name_selected.clone());
+                    if let Some(resolved) = resolved {
+                        if resolved != "main" {
+                            let scope =
+                                forge_work_worker::agent_branch::branch_scope_for_branch(&resolved)
                                     .map_err(|error| DeliveryError::value(error.to_string()))?;
-                                self.dao
-                                    .borrow_mut()
-                                    .agent_branch_upsert(
-                                        &action.project_alias,
-                                        agent_profile.as_deref().unwrap_or_default(),
-                                        &resolved,
-                                        &scope,
-                                        &BranchUpsert {
-                                            head_commit_sha: candidate["candidate_commit"]
-                                                .as_str()
-                                                .map(str::to_string),
-                                            fetched_main_sha: candidate["integration_base"]
-                                                .as_str()
-                                                .map(str::to_string),
-                                            fetched_main_at: Some(
-                                                crate::publication_clients::utc_now_iso(),
-                                            ),
-                                            sync_status: Some("synced_with_main".to_string()),
-                                            conflict_paths: Some(Vec::new()),
-                                            cache_status: None,
-                                            last_task_id: request["source_task_id"]
-                                                .as_str()
-                                                .map(str::to_string),
-                                            last_correlation_id: request["correlation_id"]
-                                                .as_str()
-                                                .map(str::to_string),
-                                        },
-                                    )
-                                    .map_err(|error| DeliveryError::value(error.to_string()))?;
-                            }
-                        }
-                    }
-                    Ok(result)
-                }
-                "verify" => {
-                    let result = self.delivery.verify(&request, &require)?;
-                    if branch_reservation.is_some() {
-                        let cache = &result["receipt"]["cache"];
-                        let cache_status = if cache.is_object() {
-                            let raw = cache["restore_status"]
-                                .as_str()
-                                .or_else(|| cache["status"].as_str());
-                            match raw {
-                                Some("hit_main_seed") => Some("hit_main".to_string()),
-                                Some(status @ ("hit_branch" | "hit_main" | "miss" | "disabled")) => {
-                                    Some(status.to_string())
-                                }
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        };
-                        if let (Some(status), Some(selected)) =
-                            (cache_status, &branch_name_selected)
-                        {
-                            let scope = forge_work_worker::agent_branch::branch_scope_for_branch(selected)
-                                .map_err(|error| DeliveryError::value(error.to_string()))?;
                             self.dao
                                 .borrow_mut()
                                 .agent_branch_upsert(
                                     &action.project_alias,
                                     agent_profile.as_deref().unwrap_or_default(),
-                                    selected,
+                                    &resolved,
                                     &scope,
                                     &BranchUpsert {
-                                        cache_status: Some(status),
+                                        head_commit_sha: candidate["candidate_commit"]
+                                            .as_str()
+                                            .map(str::to_string),
+                                        fetched_main_sha: candidate["integration_base"]
+                                            .as_str()
+                                            .map(str::to_string),
+                                        fetched_main_at: Some(
+                                            crate::publication_clients::utc_now_iso(),
+                                        ),
+                                        sync_status: Some("synced_with_main".to_string()),
+                                        conflict_paths: Some(Vec::new()),
+                                        cache_status: None,
                                         last_task_id: request["source_task_id"]
                                             .as_str()
                                             .map(str::to_string),
                                         last_correlation_id: request["correlation_id"]
                                             .as_str()
                                             .map(str::to_string),
-                                        ..Default::default()
                                     },
                                 )
                                 .map_err(|error| DeliveryError::value(error.to_string()))?;
                         }
                     }
-                    Ok(result)
                 }
-                "merge" => {
-                    if let Some(reservation) = &branch_reservation {
-                        let epoch = reservation["reservation_epoch"].as_i64().unwrap_or_default();
-                        let check = self
-                            .dao
-                            .borrow_mut()
-                            .agent_branch_verify_owner(
-                                &action.project_alias,
-                                agent_profile.as_deref().unwrap_or_default(),
-                                &action.workflow_id,
-                                epoch,
-                            )
-                            .map_err(|error| DeliveryError::value(error.to_string()))?;
-                        if check["valid"] != Value::Bool(true) {
-                            return value_error(
-                                "Persistent branch ownership lost before external merge",
-                            );
-                        }
-                    }
-                    let result = self.delivery.merge(&request, &require)?;
-                    if branch_reservation.is_some() && result["status"].as_str() == Some("merged") {
-                        let epoch = branch_reservation.as_ref().unwrap()["reservation_epoch"]
-                            .as_i64()
-                            .unwrap_or_default();
-                        self.dao
-                            .borrow_mut()
-                            .agent_branch_release(
-                                &action.project_alias,
-                                agent_profile.as_deref().unwrap_or_default(),
-                                &action.workflow_id,
-                                epoch,
-                                "merged",
-                                true,
-                                result["receipt"]["merge_commit"].as_str(),
-                            )
-                            .map_err(|error| DeliveryError::value(error.to_string()))?;
-                    }
-                    Ok(result)
-                }
-                "cancel" => {
-                    let result = self.delivery.cancel(&request, &require)?;
-                    if branch_reservation.is_some()
-                        && result["status"].as_str() == Some("cancelled")
-                    {
-                        let epoch = branch_reservation.as_ref().unwrap()["reservation_epoch"]
-                            .as_i64()
-                            .unwrap_or_default();
-                        self.dao
-                            .borrow_mut()
-                            .agent_branch_release(
-                                &action.project_alias,
-                                agent_profile.as_deref().unwrap_or_default(),
-                                &action.workflow_id,
-                                epoch,
-                                "cancelled",
-                                true,
-                                None,
-                            )
-                            .map_err(|error| DeliveryError::value(error.to_string()))?;
-                    }
-                    Ok(result)
-                }
-                _ => value_error("Unknown delivery action"),
+                Ok(result)
             }
+            "verify" => {
+                let result = self.delivery.verify(&request, &require)?;
+                if branch_reservation.is_some() {
+                    let cache = &result["receipt"]["cache"];
+                    let cache_status = if cache.is_object() {
+                        let raw = cache["restore_status"]
+                            .as_str()
+                            .or_else(|| cache["status"].as_str());
+                        match raw {
+                            Some("hit_main_seed") => Some("hit_main".to_string()),
+                            Some(status @ ("hit_branch" | "hit_main" | "miss" | "disabled")) => {
+                                Some(status.to_string())
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+                    if let (Some(status), Some(selected)) = (cache_status, &branch_name_selected) {
+                        let scope =
+                            forge_work_worker::agent_branch::branch_scope_for_branch(selected)
+                                .map_err(|error| DeliveryError::value(error.to_string()))?;
+                        self.dao
+                            .borrow_mut()
+                            .agent_branch_upsert(
+                                &action.project_alias,
+                                agent_profile.as_deref().unwrap_or_default(),
+                                selected,
+                                &scope,
+                                &BranchUpsert {
+                                    cache_status: Some(status),
+                                    last_task_id: request["source_task_id"]
+                                        .as_str()
+                                        .map(str::to_string),
+                                    last_correlation_id: request["correlation_id"]
+                                        .as_str()
+                                        .map(str::to_string),
+                                    ..Default::default()
+                                },
+                            )
+                            .map_err(|error| DeliveryError::value(error.to_string()))?;
+                    }
+                }
+                Ok(result)
+            }
+            "merge" => {
+                if let Some(reservation) = &branch_reservation {
+                    let epoch = reservation["reservation_epoch"]
+                        .as_i64()
+                        .unwrap_or_default();
+                    let check = self
+                        .dao
+                        .borrow_mut()
+                        .agent_branch_verify_owner(
+                            &action.project_alias,
+                            agent_profile.as_deref().unwrap_or_default(),
+                            &action.workflow_id,
+                            epoch,
+                        )
+                        .map_err(|error| DeliveryError::value(error.to_string()))?;
+                    if check["valid"] != Value::Bool(true) {
+                        return value_error(
+                            "Persistent branch ownership lost before external merge",
+                        );
+                    }
+                }
+                let result = self.delivery.merge(&request, &require)?;
+                if branch_reservation.is_some() && result["status"].as_str() == Some("merged") {
+                    let epoch = branch_reservation.as_ref().unwrap()["reservation_epoch"]
+                        .as_i64()
+                        .unwrap_or_default();
+                    self.dao
+                        .borrow_mut()
+                        .agent_branch_release(
+                            &action.project_alias,
+                            agent_profile.as_deref().unwrap_or_default(),
+                            &action.workflow_id,
+                            epoch,
+                            "merged",
+                            true,
+                            result["receipt"]["merge_commit"].as_str(),
+                        )
+                        .map_err(|error| DeliveryError::value(error.to_string()))?;
+                }
+                Ok(result)
+            }
+            "cancel" => {
+                let result = self.delivery.cancel(&request, &require)?;
+                if branch_reservation.is_some() && result["status"].as_str() == Some("cancelled") {
+                    let epoch = branch_reservation.as_ref().unwrap()["reservation_epoch"]
+                        .as_i64()
+                        .unwrap_or_default();
+                    self.dao
+                        .borrow_mut()
+                        .agent_branch_release(
+                            &action.project_alias,
+                            agent_profile.as_deref().unwrap_or_default(),
+                            &action.workflow_id,
+                            epoch,
+                            "cancelled",
+                            true,
+                            None,
+                        )
+                        .map_err(|error| DeliveryError::value(error.to_string()))?;
+                }
+                Ok(result)
+            }
+            _ => value_error("Unknown delivery action"),
         })();
         let result = match outcome {
             Ok(result) => result,

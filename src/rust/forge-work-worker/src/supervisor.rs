@@ -284,21 +284,19 @@ impl SupervisorPort for SystemdSupervisor {
                         )
                     })
                     .collect();
-                let git_configs = crate::grok_acp::git_config_paths(
-                    &invocation.workspace.git_directory,
-                )
-                .map(|(common, worktree, system)| vec![common, worktree, system])
-                .unwrap_or_default();
+                let git_configs =
+                    crate::grok_acp::git_config_paths(&invocation.workspace.git_directory)
+                        .map(|(common, worktree, system)| vec![common, worktree, system])
+                        .unwrap_or_default();
                 if invocation.implement != (lease.mode == "implement")
                     || boundary.permissions.mode != lease.mode
                     || boundary.permissions.paths.workspace != invocation.workspace.path
                     || boundary.permissions.paths.notes != expected_notes
                     || boundary.permissions.paths.git_configs != git_configs
                     || boundary.permissions.progress
-                        != invocation
-                            .readonly_files
-                            .iter()
-                            .any(|path| path.file_name().and_then(|n| n.to_str()) == Some("report_progress.py"))
+                        != invocation.readonly_files.iter().any(|path| {
+                            path.file_name().and_then(|n| n.to_str()) == Some("report_progress.py")
+                        })
                     || boundary.phase != "initialize"
                 {
                     return Err(failed(
@@ -517,7 +515,9 @@ impl SupervisorPort for SystemdSupervisor {
             }
             if path.file_name().and_then(|n| n.to_str()) == Some("report_progress.py")
                 && (invocation.transport.is_none()
-                    || std::fs::read(path).map(|bytes| bytes != crate::progress_helper::PROGRESS_HELPER).unwrap_or(true))
+                    || std::fs::read(path)
+                        .map(|bytes| bytes != crate::progress_helper::PROGRESS_HELPER)
+                        .unwrap_or(true))
             {
                 return Err(failed("The immutable public progress helper changed."));
             }

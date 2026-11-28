@@ -51,7 +51,8 @@ fn last_rustc_version(log: &[u8]) -> Option<String> {
     let mut index = 0;
     while index + 5 <= bytes.len() {
         if &bytes[index..index + 5] == b"rustc"
-            && (index == 0 || !(bytes[index - 1].is_ascii_alphanumeric() || bytes[index - 1] == b'_'))
+            && (index == 0
+                || !(bytes[index - 1].is_ascii_alphanumeric() || bytes[index - 1] == b'_'))
         {
             let mut cursor = index + 5;
             if cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
@@ -83,9 +84,7 @@ fn last_rustc_version(log: &[u8]) -> Option<String> {
                     }
                 }
                 if valid && parts == 3 {
-                    found = Some(
-                        String::from_utf8_lossy(&bytes[start..current]).into_owned(),
-                    );
+                    found = Some(String::from_utf8_lossy(&bytes[start..current]).into_owned());
                     index = current;
                     continue;
                 }
@@ -132,9 +131,7 @@ impl GitHubHostedChecksProvider {
         ]
         .iter()
         .map(|part| part.to_string())
-        .chain([format!(
-            "repos/{repository}/actions/jobs/{job_id}/logs"
-        )])
+        .chain([format!("repos/{repository}/actions/jobs/{job_id}/logs")])
         .collect();
         match self
             .execute
@@ -149,9 +146,14 @@ impl GitHubHostedChecksProvider {
     }
 
     pub fn observe_inner(&mut self, job: &Value) -> Result<HostedCheckReport, PublicationError> {
-        let head = job.get("candidate_commit").and_then(|value| value.as_str()).unwrap_or_default();
+        let head = job
+            .get("candidate_commit")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
         if !is_sha(head) {
-            return Err(PublicationError::Code("invalid_hosted_review_head".to_string()));
+            return Err(PublicationError::Code(
+                "invalid_hosted_review_head".to_string(),
+            ));
         }
         let head = head.to_string();
         let repository = self
@@ -161,7 +163,10 @@ impl GitHubHostedChecksProvider {
             .cloned()
             .ok_or_else(|| PublicationError::Code("invalid_hosted_review_target".to_string()))?;
         let target = uuid(Some(&job["target_publication_id"]))?;
-        let url = job.get("pr_url").and_then(|value| value.as_str()).unwrap_or_default();
+        let url = job
+            .get("pr_url")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
         let prefix = format!("https://github.com/{repository}/pull/");
         let number = url.strip_prefix(&prefix).unwrap_or_default();
         if number.is_empty()
@@ -169,7 +174,9 @@ impl GitHubHostedChecksProvider {
             || number.parse::<i64>().unwrap_or(0) < 1
             || number.parse::<i64>().unwrap_or(0).to_string() != number
         {
-            return Err(PublicationError::Code("invalid_hosted_review_target".to_string()));
+            return Err(PublicationError::Code(
+                "invalid_hosted_review_target".to_string(),
+            ));
         }
         let number = number.to_string();
         let mut identity = job.clone();
@@ -177,33 +184,47 @@ impl GitHubHostedChecksProvider {
         identity["target_publication_id"] = json!(target);
         let pr = self
             .client
-            .api("GET", &format!("repos/{repository}/pulls/{number}"), None)
-            ?;
+            .api("GET", &format!("repos/{repository}/pulls/{number}"), None)?;
         self.client.validated(&identity, &head, &pr)?;
         if pr.get("state").and_then(|value| value.as_str()) != Some("open")
-            || !pr.get("merged_at").map(|value| value.is_null()).unwrap_or(false)
+            || !pr
+                .get("merged_at")
+                .map(|value| value.is_null())
+                .unwrap_or(false)
         {
-            return Err(PublicationError::Code("hosted_review_target_closed".to_string()));
+            return Err(PublicationError::Code(
+                "hosted_review_target_closed".to_string(),
+            ));
         }
         let run_query = query(&[
             ("head_sha", head.clone()),
             ("event", "pull_request".to_string()),
             ("per_page", "100".to_string()),
         ]);
-        let data = self
-            .client
-            .api("GET", &format!("repos/{repository}/actions/runs?{run_query}"), None)
-            ?;
+        let data = self.client.api(
+            "GET",
+            &format!("repos/{repository}/actions/runs?{run_query}"),
+            None,
+        )?;
         let runs = validated_runs(&data)?;
         for run in &runs {
             if !run.is_object()
-                || run.get("id").and_then(|value| value.as_i64()).map(|id| id < 1).unwrap_or(true)
+                || run
+                    .get("id")
+                    .and_then(|value| value.as_i64())
+                    .map(|id| id < 1)
+                    .unwrap_or(true)
                 || run.get("head_sha").and_then(|value| value.as_str()) != Some(head.as_str())
                 || run.get("event").and_then(|value| value.as_str()) != Some("pull_request")
-                || run.get("repository").and_then(|value| value.get("full_name")).and_then(|value| value.as_str())
+                || run
+                    .get("repository")
+                    .and_then(|value| value.get("full_name"))
+                    .and_then(|value| value.as_str())
                     != Some(repository.as_str())
             {
-                return Err(PublicationError::Code("hosted_run_identity_changed".to_string()));
+                return Err(PublicationError::Code(
+                    "hosted_run_identity_changed".to_string(),
+                ));
             }
         }
         let required = self.config.required_hosted_checks.clone();
@@ -211,14 +232,18 @@ impl GitHubHostedChecksProvider {
         for [path, _name, _check] in &required {
             let matching: Vec<&Value> = runs
                 .iter()
-                .filter(|run| run.get("path").and_then(|value| value.as_str()) == Some(path.as_str()))
+                .filter(|run| {
+                    run.get("path").and_then(|value| value.as_str()) == Some(path.as_str())
+                })
                 .collect();
             let selected = matching
                 .into_iter()
                 .max_by_key(|run| {
                     (
                         run.get("id").and_then(|value| value.as_i64()).unwrap_or(0),
-                        run.get("run_attempt").and_then(|value| value.as_i64()).unwrap_or(1),
+                        run.get("run_attempt")
+                            .and_then(|value| value.as_i64())
+                            .unwrap_or(1),
                     )
                 })
                 .cloned();
@@ -237,50 +262,63 @@ impl GitHubHostedChecksProvider {
             // run is diagnostic failure only; a successful PUSH
             // never satisfies required PR verification.
             let push_query = query(&[("head_sha", head.clone()), ("per_page", "100".to_string())]);
-            let extra = self
-                .client
-                .api("GET", &format!("repos/{repository}/actions/runs?{push_query}"), None)
-                ?;
+            let extra = self.client.api(
+                "GET",
+                &format!("repos/{repository}/actions/runs?{push_query}"),
+                None,
+            )?;
             let extra_runs = validated_runs(&extra)?;
             for path in &missing {
                 let matches: Vec<&Value> = extra_runs
                     .iter()
                     .filter(|run| {
                         run.is_object()
-                            && run.get("path").and_then(|value| value.as_str()) == Some(path.as_str())
+                            && run.get("path").and_then(|value| value.as_str())
+                                == Some(path.as_str())
                             && run.get("event").and_then(|value| value.as_str()) == Some("push")
-                            && run.get("head_sha").and_then(|value| value.as_str()) == Some(head.as_str())
-                            && run.get("repository").and_then(|value| value.get("full_name")).and_then(|value| value.as_str())
+                            && run.get("head_sha").and_then(|value| value.as_str())
+                                == Some(head.as_str())
+                            && run
+                                .get("repository")
+                                .and_then(|value| value.get("full_name"))
+                                .and_then(|value| value.as_str())
                                 == Some(repository.as_str())
-                            && run.get("status").and_then(|value| value.as_str()) == Some("completed")
-                            && run.get("conclusion").and_then(|value| value.as_str()) == Some("failure")
-                            && run.get("id").and_then(|value| value.as_i64()).map(|id| id > 0).unwrap_or(false)
+                            && run.get("status").and_then(|value| value.as_str())
+                                == Some("completed")
+                            && run.get("conclusion").and_then(|value| value.as_str())
+                                == Some("failure")
+                            && run
+                                .get("id")
+                                .and_then(|value| value.as_i64())
+                                .map(|id| id > 0)
+                                .unwrap_or(false)
                     })
                     .collect();
-                let failed = match matches
-                    .into_iter()
-                    .max_by_key(|run| {
-                        (
-                            run.get("id").and_then(|value| value.as_i64()).unwrap_or(0),
-                            run.get("run_attempt").and_then(|value| value.as_i64()).unwrap_or(1),
-                        )
-                    }) {
+                let failed = match matches.into_iter().max_by_key(|run| {
+                    (
+                        run.get("id").and_then(|value| value.as_i64()).unwrap_or(0),
+                        run.get("run_attempt")
+                            .and_then(|value| value.as_i64())
+                            .unwrap_or(1),
+                    )
+                }) {
                     Some(run) => run.clone(),
                     None => continue,
                 };
-                let payload = self
-                    .client
-                    .api(
-                        "GET",
-                        &format!(
-                            "repos/{repository}/actions/runs/{}/jobs?filter=latest&per_page=100",
-                            failed["id"]
-                        ),
-                        None,
-                    )
-                    ?;
+                let payload = self.client.api(
+                    "GET",
+                    &format!(
+                        "repos/{repository}/actions/runs/{}/jobs?filter=latest&per_page=100",
+                        failed["id"]
+                    ),
+                    None,
+                )?;
                 if payload.get("jobs") == Some(&Value::Array(Vec::new()))
-                    && payload.get("total_count").and_then(|value| value.as_i64()).unwrap_or(0) == 0
+                    && payload
+                        .get("total_count")
+                        .and_then(|value| value.as_i64())
+                        .unwrap_or(0)
+                        == 0
                 {
                     let run_id = failed["id"].as_i64().unwrap_or(0);
                     validation_failures.insert(path.clone(), failed);
@@ -306,7 +344,8 @@ impl GitHubHostedChecksProvider {
             let mut selected: Option<Value> = None;
             let mut invalid_workflow = false;
             if let Some(run) = &run {
-                if run.get("name").and_then(|value| value.as_str()) != Some(workflow_name.as_str()) {
+                if run.get("name").and_then(|value| value.as_str()) != Some(workflow_name.as_str())
+                {
                     invalid_workflow = true;
                 }
                 let run_id = run["id"].as_i64().unwrap_or(0);
@@ -321,8 +360,14 @@ impl GitHubHostedChecksProvider {
                             None,
                         )
                         ?;
-                    let jobs = payload.get("jobs").and_then(|value| value.as_array()).cloned();
-                    let total = payload.get("total_count").and_then(|value| value.as_i64()).unwrap_or(0);
+                    let jobs = payload
+                        .get("jobs")
+                        .and_then(|value| value.as_array())
+                        .cloned();
+                    let total = payload
+                        .get("total_count")
+                        .and_then(|value| value.as_i64())
+                        .unwrap_or(0);
                     match jobs {
                         Some(jobs) if jobs.len() <= 100 && total <= 100 => {
                             jobs_by_run.insert(run_id, jobs);
@@ -337,9 +382,14 @@ impl GitHubHostedChecksProvider {
                 let jobs = jobs_by_run.get(&run_id).cloned().unwrap_or_default();
                 for item in &jobs {
                     if !item.is_object()
-                        || item.get("head_sha").and_then(|value| value.as_str()) != Some(head.as_str())
+                        || item.get("head_sha").and_then(|value| value.as_str())
+                            != Some(head.as_str())
                         || item.get("run_id").and_then(|value| value.as_i64()) != Some(run_id)
-                        || item.get("id").and_then(|value| value.as_i64()).map(|id| id < 1).unwrap_or(true)
+                        || item
+                            .get("id")
+                            .and_then(|value| value.as_i64())
+                            .map(|id| id < 1)
+                            .unwrap_or(true)
                     {
                         return Err(PublicationError::Code(
                             "hosted_job_identity_changed".to_string(),
@@ -348,7 +398,10 @@ impl GitHubHostedChecksProvider {
                 }
                 let matching: Vec<&Value> = jobs
                     .iter()
-                    .filter(|item| item.get("name").and_then(|value| value.as_str()) == Some(check_name.as_str()))
+                    .filter(|item| {
+                        item.get("name").and_then(|value| value.as_str())
+                            == Some(check_name.as_str())
+                    })
                     .collect();
                 if matching.len() > 1 {
                     return Err(PublicationError::Code(
@@ -358,7 +411,10 @@ impl GitHubHostedChecksProvider {
                 selected = matching.first().map(|item| (*item).clone());
                 if let Some(item) = &selected {
                     if item.get("status").and_then(|value| value.as_str()) == Some("completed") {
-                        let conclusion = item.get("conclusion").and_then(|value| value.as_str()).unwrap_or_default();
+                        let conclusion = item
+                            .get("conclusion")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default();
                         observed["status"] = json!(if conclusion == "success" {
                             "success"
                         } else if matches!(conclusion, "cancelled" | "skipped") {
@@ -406,7 +462,11 @@ impl GitHubHostedChecksProvider {
                     true,
                     None,
                 );
-                let mut finding = projection.findings.first().cloned().unwrap_or_else(|| json!({}));
+                let mut finding = projection
+                    .findings
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
                 let finding_id = format!(
                     "hosted-{}",
                     &format!(
@@ -432,7 +492,10 @@ impl GitHubHostedChecksProvider {
                         )),
                     );
                     if invalid_workflow || selected.is_none() {
-                        object.insert("diagnostic_code".to_string(), json!("required_workflow_identity"));
+                        object.insert(
+                            "diagnostic_code".to_string(),
+                            json!("required_workflow_identity"),
+                        );
                         object.insert(
                             "summary".to_string(),
                             json!("The required hosted workflow/job is missing or changed."),
@@ -444,7 +507,10 @@ impl GitHubHostedChecksProvider {
                     }
                     if validation_failure {
                         let summary = "GitHub rejected the required workflow before pull-request jobs could start.";
-                        object.insert("diagnostic_code".to_string(), json!("workflow_validation_failed"));
+                        object.insert(
+                            "diagnostic_code".to_string(),
+                            json!("workflow_validation_failed"),
+                        );
                         object.insert("path".to_string(), json!(path));
                         object.insert("summary".to_string(), json!(summary));
                         object.insert("actual".to_string(), json!(summary));
@@ -464,14 +530,18 @@ impl GitHubHostedChecksProvider {
             .iter()
             .filter_map(|item| item["status"].as_str())
             .collect();
-        let status = if statuses.iter().any(|status| *status != "pending" && *status != "success") {
+        let status = if statuses
+            .iter()
+            .any(|status| *status != "pending" && *status != "success")
+        {
             "failed"
         } else if statuses == ["success"].into_iter().collect() {
             "passed"
         } else {
             "pending"
         };
-        let evidence_json = serde_json::to_string(&Value::Array(evidence.clone())).unwrap_or_default();
+        let evidence_json =
+            serde_json::to_string(&Value::Array(evidence.clone())).unwrap_or_default();
         let digest = format!("{:x}", Sha256::digest(evidence_json.as_bytes()));
         let summary = match status {
             "passed" => "Every required hosted check passed on the exact PR head.",
@@ -483,8 +553,7 @@ impl GitHubHostedChecksProvider {
         // pass for this leased candidate.
         let pr = self
             .client
-            .api("GET", &format!("repos/{repository}/pulls/{number}"), None)
-            ?;
+            .api("GET", &format!("repos/{repository}/pulls/{number}"), None)?;
         self.client.validated(&identity, &head, &pr)?;
         Ok(HostedCheckReport {
             status: status.to_string(),
@@ -499,7 +568,10 @@ impl GitHubHostedChecksProvider {
 
 fn validated_runs(data: &Value) -> Result<Vec<Value>, PublicationError> {
     let runs = data.get("workflow_runs").and_then(|value| value.as_array());
-    let total = data.get("total_count").and_then(|value| value.as_i64()).unwrap_or(0);
+    let total = data
+        .get("total_count")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(0);
     match runs {
         Some(runs) if runs.len() <= 100 && total <= 100 => Ok(runs.clone()),
         _ => Err(PublicationError::Code(

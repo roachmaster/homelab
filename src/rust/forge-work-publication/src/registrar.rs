@@ -139,7 +139,10 @@ mod tests {
         let reg = Registry::new()
             .register(register_publication().unwrap())
             .expect("staging succeeds");
-        assert!(reg.freeze().is_err(), "freeze must fail without process_exec");
+        assert!(
+            reg.freeze().is_err(),
+            "freeze must fail without process_exec"
+        );
     }
 
     #[test]

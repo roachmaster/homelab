@@ -73,8 +73,7 @@ fn validate_digest(value: &str) -> Result<(), String> {
 }
 
 fn exact_keys(object: &Map<String, Value>, expected: &[&str]) -> bool {
-    object.len() == expected.len()
-        && expected.iter().all(|key| object.contains_key(*key))
+    object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
 }
 
 fn is_int(value: &Value) -> bool {
@@ -300,8 +299,7 @@ impl VerificationPolicySnapshot {
     }
 
     pub fn to_dict(&self) -> Value {
-        json_bytes(&self.content, MAX_POLICY_BYTES)
-            .expect("stored snapshot content re-parses")
+        json_bytes(&self.content, MAX_POLICY_BYTES).expect("stored snapshot content re-parses")
     }
 
     pub fn canonical_bytes(&self) -> &[u8] {
@@ -389,7 +387,13 @@ impl VerificationIdentity {
             .filter(|object| {
                 exact_keys(
                     object,
-                    &["domain", "version", "artifact_id", "policy_sha256", "generation"],
+                    &[
+                        "domain",
+                        "version",
+                        "artifact_id",
+                        "policy_sha256",
+                        "generation",
+                    ],
                 ) && object["domain"] == json!(VERIFICATION_DOMAIN)
                     && is_int(&object["version"])
                     && object["version"].as_i64() == Some(VERSION)

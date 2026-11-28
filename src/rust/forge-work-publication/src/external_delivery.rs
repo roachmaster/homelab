@@ -83,10 +83,7 @@ pub trait ExternalDeliveryStorePort {
         worker_id: &str,
     ) -> Result<Option<ExternalDeliveryLease>, DeliveryStoreError>;
 
-    fn renew(
-        &mut self,
-        lease: &ExternalDeliveryLease,
-    ) -> Result<Value, DeliveryStoreError>;
+    fn renew(&mut self, lease: &ExternalDeliveryLease) -> Result<Value, DeliveryStoreError>;
 
     fn checkpoint(
         &mut self,

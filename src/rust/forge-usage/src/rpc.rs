@@ -159,11 +159,7 @@ impl MetadataProcessConfig {
         match (run_uid, run_gid) {
             (None, None) => {}
             (Some(uid), Some(gid)) if uid > 0 && gid > 0 => {}
-            _ => {
-                return Err(
-                    "Metadata UID/GID must select a non-root account together".to_string(),
-                )
-            }
+            _ => return Err("Metadata UID/GID must select a non-root account together".to_string()),
         }
         if !timeout_seconds.is_finite() || !(1.0..=30.0).contains(&timeout_seconds) {
             return Err("Invalid metadata timeout".to_string());
@@ -475,8 +471,8 @@ impl CodexMetadataRPC {
             let timeout = self.config.timeout().min(Duration::from_secs(5));
             let mut connection = Connection::new(&mut *process, timeout);
             let line = connection.line()?;
-            let value = String::from_utf8(line)
-                .map_err(|_| ProviderFailure::new("unsupported_version"))?;
+            let value =
+                String::from_utf8(line).map_err(|_| ProviderFailure::new("unsupported_version"))?;
             let value = value.trim();
             if !value.starts_with("codex-cli ") || value.len() > 80 {
                 return Err(ProviderFailure::new("unsupported_version"));
@@ -499,8 +495,7 @@ impl CodexMetadataRPC {
             "analytics.enabled=false",
         ])?;
         let result = (|| {
-            let mut connection =
-                Connection::new(&mut *process, self.config.timeout());
+            let mut connection = Connection::new(&mut *process, self.config.timeout());
             let mut client_info = Map::new();
             client_info.insert("name".into(), Value::String("forge_usage".to_string()));
             client_info.insert("version".into(), Value::String("1".to_string()));
@@ -513,7 +508,8 @@ impl CodexMetadataRPC {
             connection.send(&Value::Object(initialized))?;
             let mut read_params = Map::new();
             read_params.insert("refreshToken".into(), Value::Bool(false));
-            let account = connection.request(2, "account/read", Some(Value::Object(read_params)))?;
+            let account =
+                connection.request(2, "account/read", Some(Value::Object(read_params)))?;
             let current = account.get("account").cloned().unwrap_or(Value::Null);
             if current.is_null() {
                 return Err(ProviderFailure::new("auth_required"));
@@ -768,7 +764,8 @@ pub(crate) mod tests {
             r#"{"id": 4, "error": {"code": -1}}"#,
             r#"{"id": 5, "result": {"accountId": "a1"}}"#,
         ];
-        let rpc = CodexMetadataRPC::new(config(), ports(vec![FakeProcess::with_lines(777, &lines)]));
+        let rpc =
+            CodexMetadataRPC::new(config(), ports(vec![FakeProcess::with_lines(777, &lines)]));
         let result = rpc.read().unwrap();
         assert_eq!(result["quota"]["accountId"], json!("a1"));
         // The unavailable usage read degrades to null activity.
@@ -781,7 +778,8 @@ pub(crate) mod tests {
             r#"{"id": 1, "result": {}}"#,
             r#"{"id": 2, "result": {"account": null}}"#,
         ];
-        let rpc = CodexMetadataRPC::new(config(), ports(vec![FakeProcess::with_lines(777, &lines)]));
+        let rpc =
+            CodexMetadataRPC::new(config(), ports(vec![FakeProcess::with_lines(777, &lines)]));
         assert_eq!(rpc.read().unwrap_err().code, "auth_required");
     }
 }

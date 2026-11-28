@@ -15,7 +15,9 @@ use uuid::Uuid;
 
 use forge_work_worker::native_identity::{admitted_after, NativeIdentityConfig, PROTOCOL};
 
-use crate::artifact_identity::{ArtifactManifest, VerificationIdentity, VerificationPolicySnapshot};
+use crate::artifact_identity::{
+    ArtifactManifest, VerificationIdentity, VerificationPolicySnapshot,
+};
 use crate::ci_contract::CiGatePlan;
 use crate::ci_phases::CiPhase;
 use crate::identity_store::{
@@ -46,7 +48,11 @@ pub const SCOPE: [&str; 7] = [
 
 /// The injected artifact source (composition-owned).
 pub trait NativeArtifactsPort: Send {
-    fn acquire(&mut self, repository: &Path, commit: &str) -> Result<ArtifactManifest, PublicationError>;
+    fn acquire(
+        &mut self,
+        repository: &Path,
+        commit: &str,
+    ) -> Result<ArtifactManifest, PublicationError>;
 }
 
 fn unavailable() -> PublicationError {
@@ -65,8 +71,14 @@ impl NativeVerificationIdentityProvider {
     fn directory(&self, review: &str) -> Result<PathBuf, PublicationError> {
         let directory = self.config.state_root.join(validate_uuid(review)?);
         let parent = directory.parent().unwrap();
-        if directory.symlink_metadata().map(|meta| meta.file_type().is_symlink()).unwrap_or(false)
-            || parent.symlink_metadata().map(|meta| meta.file_type().is_symlink()).unwrap_or(false)
+        if directory
+            .symlink_metadata()
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false)
+            || parent
+                .symlink_metadata()
+                .map(|meta| meta.file_type().is_symlink())
+                .unwrap_or(false)
         {
             return Err(unavailable());
         }
@@ -80,7 +92,9 @@ impl NativeVerificationIdentityProvider {
     /// Whether a frozen snapshot already exists for the review
     /// (the Python provider's _path(review).exists() probes).
     pub fn snapshot_exists(&self, review_id: &str) -> bool {
-        self.path(review_id).map(|path| path.exists()).unwrap_or(false)
+        self.path(review_id)
+            .map(|path| path.exists())
+            .unwrap_or(false)
     }
 
     pub fn selected(&self, job: &Value) -> Result<bool, PublicationError> {
@@ -122,14 +136,23 @@ impl NativeVerificationIdentityProvider {
             let scope_keys: std::collections::BTreeSet<&str> =
                 scope.keys().map(|key| key.as_str()).collect();
             if !snapshot.is_object()
-                || snapshot
-                    .as_object()
-                    .map(|object| object.keys().map(|key| key.as_str()).collect::<std::collections::BTreeSet<&str>>())
-                    != Some(
-                        ["version", "scope", "artifact", "policy", "identity", "provenance"]
-                            .into_iter()
-                            .collect(),
-                    )
+                || snapshot.as_object().map(|object| {
+                    object
+                        .keys()
+                        .map(|key| key.as_str())
+                        .collect::<std::collections::BTreeSet<&str>>()
+                }) != Some(
+                    [
+                        "version",
+                        "scope",
+                        "artifact",
+                        "policy",
+                        "identity",
+                        "provenance",
+                    ]
+                    .into_iter()
+                    .collect(),
+                )
                 || snapshot["version"] != VERSION
                 || scope_keys != SCOPE.into_iter().collect()
                 || scope["review_id"].as_str() != Some(review)
@@ -139,8 +162,13 @@ impl NativeVerificationIdentityProvider {
             let artifact = ArtifactManifest::from_dict(&snapshot["artifact"])?;
             let policy = VerificationPolicySnapshot::parse_dict(&snapshot["policy"])?;
             let identity = VerificationIdentity::from_dict(&snapshot["identity"])?;
-            let review_uuid = Uuid::parse_str(review).map_err(|_| "Invalid native identity snapshot".to_string())?;
-            let expected = VerificationIdentity::new(&artifact.artifact_id(), &policy.policy_sha256(), review_uuid)?;
+            let review_uuid = Uuid::parse_str(review)
+                .map_err(|_| "Invalid native identity snapshot".to_string())?;
+            let expected = VerificationIdentity::new(
+                &artifact.artifact_id(),
+                &policy.policy_sha256(),
+                review_uuid,
+            )?;
             if identity.artifact_id != expected.artifact_id
                 || identity.policy_sha256 != expected.policy_sha256
                 || identity.verification_id() != expected.verification_id()
@@ -154,7 +182,8 @@ impl NativeVerificationIdentityProvider {
     }
 
     pub fn reference(snapshot: &Value) -> Result<Value, PublicationError> {
-        let identity = VerificationIdentity::from_dict(&snapshot["identity"]).map_err(PublicationError::Code)?;
+        let identity = VerificationIdentity::from_dict(&snapshot["identity"])
+            .map_err(PublicationError::Code)?;
         let canonical = forge_work::canonical::canonical_json(snapshot);
         let digest = format!("{:x}", Sha256::digest(canonical.as_bytes()));
         Ok(json!({
@@ -180,7 +209,8 @@ impl NativeVerificationIdentityProvider {
             Some(object) => object,
             None => return false,
         };
-        let keys: std::collections::BTreeSet<&str> = object.keys().map(|key| key.as_str()).collect();
+        let keys: std::collections::BTreeSet<&str> =
+            object.keys().map(|key| key.as_str()).collect();
         if keys
             != [
                 "version",
@@ -214,16 +244,27 @@ impl NativeVerificationIdentityProvider {
             .map(|object| object.keys().map(|key| key.as_str()).collect())
             .unwrap_or_default();
         if keys
-            != ["profile", "scope", "checks", "labels", "logical_checks", "phases"]
-                .into_iter()
-                .collect()
+            != [
+                "profile",
+                "scope",
+                "checks",
+                "labels",
+                "logical_checks",
+                "phases",
+            ]
+            .into_iter()
+            .collect()
         {
             return Err("Invalid frozen native plan".to_string());
         }
         let strings = |value: &Value| -> Vec<String> {
             value
                 .as_array()
-                .map(|rows| rows.iter().filter_map(|row| row.as_str().map(str::to_string)).collect())
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|row| row.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default()
         };
         let checks: Vec<Vec<String>> = declaration["checks"]
@@ -238,14 +279,23 @@ impl NativeVerificationIdentityProvider {
                         phase_id: phase["phase_id"].as_str().unwrap_or_default().to_string(),
                         kind: phase["kind"].as_str().unwrap_or_default().to_string(),
                         argv: strings(&phase["argv"]),
-                        logical_gate: phase["logical_gate"].as_str().unwrap_or_default().to_string(),
+                        logical_gate: phase["logical_gate"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
                     })
                     .collect()
             })
             .unwrap_or_default();
         Ok(CiGatePlan {
-            profile: declaration["profile"].as_str().unwrap_or_default().to_string(),
-            scope: declaration["scope"].as_str().unwrap_or_default().to_string(),
+            profile: declaration["profile"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            scope: declaration["scope"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             checks,
             labels: strings(&declaration["labels"]),
             logical_checks: strings(&declaration["logical_checks"]),
@@ -280,7 +330,9 @@ impl NativeVerificationIdentityProvider {
                 .get("gate_manifest_sha256")
                 .unwrap_or(&provenance["native_gate_manifest_sha256"])
                 != &provenance["native_gate_manifest_sha256"]
-            || reference.map(|value| !Self::reference_matches(value, snapshot)).unwrap_or(false)
+            || reference
+                .map(|value| !Self::reference_matches(value, snapshot))
+                .unwrap_or(false)
         {
             return Err(PublicationError::Code(
                 "native_identity_source_changed".to_string(),
@@ -290,7 +342,8 @@ impl NativeVerificationIdentityProvider {
             repository,
             job["candidate_commit"].as_str().unwrap_or_default(),
         )?;
-        let expected = ArtifactManifest::from_dict(&snapshot["artifact"]).map_err(PublicationError::Code)?;
+        let expected =
+            ArtifactManifest::from_dict(&snapshot["artifact"]).map_err(PublicationError::Code)?;
         if actual.artifact_id() != expected.artifact_id() || actual.entries != expected.entries {
             return Err(PublicationError::Code(
                 "native_identity_artifact_changed".to_string(),
@@ -332,9 +385,10 @@ impl NativeVerificationIdentityProvider {
         if !self.selected(job)? {
             return Ok(None);
         }
-        let artifact = self
-            .artifacts
-            .acquire(repository, job["candidate_commit"].as_str().unwrap_or_default())?;
+        let artifact = self.artifacts.acquire(
+            repository,
+            job["candidate_commit"].as_str().unwrap_or_default(),
+        )?;
         let native = ArtifactManifest::new(
             artifact
                 .entries
@@ -377,8 +431,12 @@ impl NativeVerificationIdentityProvider {
         }))
         .map_err(PublicationError::Code)?;
         let review_uuid = Uuid::parse_str(review).map_err(|_| unavailable())?;
-        let identity = VerificationIdentity::new(&artifact.artifact_id(), &policy.policy_sha256(), review_uuid)
-            .map_err(PublicationError::Code)?;
+        let identity = VerificationIdentity::new(
+            &artifact.artifact_id(),
+            &policy.policy_sha256(),
+            review_uuid,
+        )
+        .map_err(PublicationError::Code)?;
         let mut scope_map = Map::new();
         for key in SCOPE {
             let value = scope.get(key).cloned().unwrap_or(Value::Null);
@@ -405,14 +463,13 @@ impl NativeVerificationIdentityProvider {
             ));
         }
         let path = self.path(review)?;
-        persist_identity_snapshot_bounded(&path, &snapshot, MAX_SNAPSHOT_BYTES, self.owner).map_err(
-            |error| match error {
+        persist_identity_snapshot_bounded(&path, &snapshot, MAX_SNAPSHOT_BYTES, self.owner)
+            .map_err(|error| match error {
                 IdentityStoreError::Busy => {
                     PublicationError::Code("content_identity_registration_busy".to_string())
                 }
                 IdentityStoreError::Invalid(message) => PublicationError::Code(message),
-            },
-        )?;
+            })?;
         self.validate(&snapshot, job, repository, None).map(Some)
     }
 }
@@ -421,9 +478,7 @@ impl NativeVerificationIdentityProvider {
 /// acquire are required at construction.
 /// The candidate provider's content-identity surface over this
 /// provider (the factory passes the same provider Python shares).
-impl forge_work_worker::review_ports::ContentIdentityPort
-    for NativeVerificationIdentityProvider
-{
+impl forge_work_worker::review_ports::ContentIdentityPort for NativeVerificationIdentityProvider {
     fn acquire(
         &mut self,
         job: &Value,
@@ -473,16 +528,22 @@ mod tests {
         }))
         .unwrap();
         let generation = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174000").unwrap();
-        let identity = VerificationIdentity::new(&artifact.artifact_id(), &policy.policy_sha256(), generation).unwrap();
+        let identity =
+            VerificationIdentity::new(&artifact.artifact_id(), &policy.policy_sha256(), generation)
+                .unwrap();
         let snapshot = json!({
             "version": VERSION,
             "scope": {"review_id": "123e4567-e89b-42d3-a456-426614174000"},
             "identity": identity.to_dict(),
         });
         let reference = NativeVerificationIdentityProvider::reference(&snapshot).unwrap();
-        assert!(NativeVerificationIdentityProvider::reference_matches(&reference, &snapshot));
+        assert!(NativeVerificationIdentityProvider::reference_matches(
+            &reference, &snapshot
+        ));
         let mut changed = reference.clone();
         changed["artifact_id"] = json!("0".repeat(64));
-        assert!(!NativeVerificationIdentityProvider::reference_matches(&changed, &snapshot));
+        assert!(!NativeVerificationIdentityProvider::reference_matches(
+            &changed, &snapshot
+        ));
     }
 }

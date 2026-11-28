@@ -17,8 +17,7 @@ use crate::util::{epoch_now, hmac_sha256, sha256_hex};
 
 pub const SERVER_NAME: &str = "homelab-mcp-postgres";
 pub const SERVER_VERSION: &str = "0.1.0";
-pub const PROTOCOL_VERSIONS: [&str; 4] =
-    ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+pub const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 pub const MCP_PATH: &str = "/mcp";
 pub const PRESENCE_PATH: &str = "/internal/agent-presence";
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -211,18 +210,24 @@ pub fn json_value(cell: &Cell, max_chars: usize) -> Value {
             Value::String(text)
         }
         Cell::Json(value) => json_value_json(value, max_chars),
-        Cell::Array(items) => {
-            Value::Array(items.iter().map(|item| json_value(item, max_chars)).collect())
-        }
+        Cell::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| json_value(item, max_chars))
+                .collect(),
+        ),
     }
 }
 
 fn json_value_json(value: &Value, max_chars: usize) -> Value {
     match value {
         Value::String(text) => Value::String(truncate(text, max_chars)),
-        Value::Array(items) => {
-            Value::Array(items.iter().map(|item| json_value_json(item, max_chars)).collect())
-        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| json_value_json(item, max_chars))
+                .collect(),
+        ),
         Value::Object(map) => Value::Object(
             map.iter()
                 .map(|(key, item)| (key.clone(), json_value_json(item, max_chars)))
@@ -266,7 +271,6 @@ pub struct McpApp {
     /// OAuth server; None when OAuth is disabled or failed to open.
     pub oauth: Option<Arc<crate::oauth::OAuthServer>>,
 }
-
 
 impl McpApp {
     pub fn new(
@@ -357,10 +361,7 @@ impl McpApp {
                     .as_ref()
                     .is_some_and(|presence| presence.is_mapped(Some(principal)))
                 {
-                    tools
-                        .as_array_mut()
-                        .unwrap()
-                        .push(heartbeat_tool_json());
+                    tools.as_array_mut().unwrap().push(heartbeat_tool_json());
                 }
                 Some(result_response(request_id, json!({"tools": tools})))
             }
@@ -390,21 +391,16 @@ impl McpApp {
         if !principal.has_scope(scope) {
             return tool_error("token lacks the required scope");
         }
-        let mut arguments = params
-            .get("arguments")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let mut arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
         if is_falsy(&arguments) {
             arguments = Value::Object(Map::new());
         }
         if name == "heartbeat" {
-            let keys_ok = params
-                .as_object()
-                .is_some_and(|object| {
-                    object
-                        .keys()
-                        .all(|key| ["name", "arguments", "_meta"].contains(&key.as_str()))
-                });
+            let keys_ok = params.as_object().is_some_and(|object| {
+                object
+                    .keys()
+                    .all(|key| ["name", "arguments", "_meta"].contains(&key.as_str()))
+            });
             if !keys_ok {
                 return tool_error("heartbeat does not accept identity or other parameters");
             }
@@ -442,7 +438,10 @@ impl McpApp {
     }
 
     fn tool_heartbeat(&self, arguments: &Value, principal: &Principal) -> Result<Value, String> {
-        if arguments.as_object().is_some_and(|object| !object.is_empty()) {
+        if arguments
+            .as_object()
+            .is_some_and(|object| !object.is_empty())
+        {
             return Err("heartbeat accepts only an empty arguments object".to_string());
         }
         let Some(presence) = &self.presence else {
@@ -464,16 +463,15 @@ impl McpApp {
             .cloned()
             .unwrap_or(Value::from(self.config.default_page_size));
         match size.as_i64() {
-            Some(value) if !size.is_f64() && value >= 1 => {
-                Ok(value.min(self.config.max_rows))
-            }
-            _ => Err(ToolError("page_size must be a positive integer".to_string())),
+            Some(value) if !size.is_f64() && value >= 1 => Ok(value.min(self.config.max_rows)),
+            _ => Err(ToolError(
+                "page_size must be a positive integer".to_string(),
+            )),
         }
     }
 
     fn binding(&self, tool: &str, principal: &Principal, subject: &Value) -> String {
-        let material = serde_json::to_string(&json!([tool, principal.token_id, subject]))
-            .unwrap();
+        let material = serde_json::to_string(&json!([tool, principal.token_id, subject])).unwrap();
         sha256_hex(material.as_bytes())[..32].to_string()
     }
 
@@ -485,9 +483,7 @@ impl McpApp {
         }))
         .unwrap();
         let mac = hmac_sha256(&self.cursor_key, payload.as_bytes());
-        let encode = |data: &[u8]| {
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(data)
-        };
+        let encode = |data: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(data);
         format!("{}.{}", encode(payload.as_bytes()), encode(&mac))
     }
 
@@ -509,9 +505,7 @@ impl McpApp {
         let decode = |text: &str| {
             base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .decode(text)
-                .or_else(|_| {
-                    base64::engine::general_purpose::URL_SAFE.decode(text)
-                })
+                .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(text))
         };
         let (payload_part, mac_part) = cursor.split_once('.').unwrap();
         let (Ok(payload), Ok(mac)) = (decode(payload_part), decode(mac_part)) else {
@@ -520,15 +514,13 @@ impl McpApp {
         let expected = hmac_sha256(&self.cursor_key, &payload);
         if !crate::util::constant_time_eq(&mac, &expected) {
             return Err(ToolError(
-                "invalid or expired cursor (cursors do not survive a server restart)"
-                    .to_string(),
+                "invalid or expired cursor (cursors do not survive a server restart)".to_string(),
             ));
         }
         let data: Value = serde_json::from_slice(&payload).map_err(|_| invalid())?;
         if data.get("b").and_then(Value::as_str) != Some(binding) {
             return Err(ToolError(
-                "cursor does not match this request; resend the same arguments with it"
-                    .to_string(),
+                "cursor does not match this request; resend the same arguments with it".to_string(),
             ));
         }
         if data.get("e").and_then(Value::as_i64).unwrap_or(0) < epoch_now() as i64 {
@@ -611,18 +603,14 @@ impl McpApp {
             .map_err(|error: GuardError| error.0)?;
         let page_size = self.page_args(arguments).map_err(|error| error.0)?;
         let stripped = strip_literals(&sql).map_err(|error: GuardError| error.0)?;
-        let first = first_word(&stripped)
-            .unwrap_or_default()
-            .to_lowercase();
+        let first = first_word(&stripped).unwrap_or_default().to_lowercase();
         let pageable = PAGEABLE_FIRST.contains(&first.as_str());
         let cursor = arguments.get("cursor");
         let (binding, offset) = if pageable {
-            let binding = self.binding(
-                "query",
-                principal,
-                &json!([sql, page_size]),
-            );
-            let offset = self.read_cursor(cursor, &binding).map_err(|error| error.0)?;
+            let binding = self.binding("query", principal, &json!([sql, page_size]));
+            let offset = self
+                .read_cursor(cursor, &binding)
+                .map_err(|error| error.0)?;
             (Some(binding), offset)
         } else if cursor.is_some() {
             let offset = self
@@ -646,11 +634,7 @@ impl McpApp {
         ))
     }
 
-    fn tool_list_tables(
-        &self,
-        arguments: &Value,
-        principal: &Principal,
-    ) -> Result<Value, String> {
+    fn tool_list_tables(&self, arguments: &Value, principal: &Principal) -> Result<Value, String> {
         let schema = arguments.get("schema").cloned().unwrap_or(Value::Null);
         let keys_ok = arguments
             .as_object()
@@ -658,9 +642,7 @@ impl McpApp {
             .keys()
             .all(|key| ["schema", "page_size", "cursor"].contains(&key.as_str()));
         if !keys_ok || !(schema.is_null() || schema.is_string()) {
-            return Err(
-                "arguments are schema (string), page_size and cursor".to_string(),
-            );
+            return Err("arguments are schema (string), page_size and cursor".to_string());
         }
         let page_size = self.page_args(arguments).map_err(|error| error.0)?;
         let binding = self.binding("list_tables", principal, &json!([schema, page_size]));
@@ -677,11 +659,7 @@ impl McpApp {
             .run(LIST_TABLES_SQL, &params, page_size + 1, 0, false)
             .map_err(|error| error.0)?;
         let has_more = outcome.rows.len() as i64 > page_size;
-        let rows: Vec<Vec<Cell>> = outcome
-            .rows
-            .into_iter()
-            .take(page_size as usize)
-            .collect();
+        let rows: Vec<Vec<Cell>> = outcome.rows.into_iter().take(page_size as usize).collect();
         Ok(self.rows_result(
             outcome.columns,
             rows,
@@ -704,9 +682,7 @@ impl McpApp {
             .unwrap()
             .keys()
             .all(|key| ["schema", "table"].contains(&key.as_str()));
-        if !keys_ok
-            || !schema.is_some_and(Value::is_string)
-            || !table.is_some_and(Value::is_string)
+        if !keys_ok || !schema.is_some_and(Value::is_string) || !table.is_some_and(Value::is_string)
         {
             return Err("schema and table must be strings".to_string());
         }

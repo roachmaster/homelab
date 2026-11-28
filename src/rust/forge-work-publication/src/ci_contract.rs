@@ -46,10 +46,7 @@ pub fn scope_kind(scope: &str) -> Result<String, String> {
         return Ok("main".to_string());
     }
     if scope == "detached"
-        || (!scope.contains("..")
-            && scope
-                .strip_prefix("branch/")
-                .is_some_and(is_branch_slug))
+        || (!scope.contains("..") && scope.strip_prefix("branch/").is_some_and(is_branch_slug))
     {
         return Ok("branch".to_string());
     }
@@ -249,9 +246,7 @@ impl CiGatePlan {
             // byte-for-byte.
             return crate::verification::DEFAULT_REQUIRED_HOSTED_CHECKS
                 .iter()
-                .map(|(path, name, gate)| {
-                    [path.to_string(), name.to_string(), gate.to_string()]
-                })
+                .map(|(path, name, gate)| [path.to_string(), name.to_string(), gate.to_string()])
                 .collect();
         }
         let version = if self.profile == EVENT_PROFILE { 3 } else { 2 };
@@ -335,10 +330,14 @@ impl CiGateContract {
             profile: self.profile.clone(),
             scope: kind,
             checks: scoped_branch_checks(),
-            labels: ["source and Python preflight", "make ci", "in-memory backend"]
-                .iter()
-                .map(|item| item.to_string())
-                .collect(),
+            labels: [
+                "source and Python preflight",
+                "make ci",
+                "in-memory backend",
+            ]
+            .iter()
+            .map(|item| item.to_string())
+            .collect(),
             logical_checks: ["source-preflight", "check", "in-memory-backend"]
                 .iter()
                 .map(|item| item.to_string())
@@ -453,10 +452,7 @@ mod tests {
             "deploy/mission-control/sql/migrations/0031_anything.sql",
             |_| false
         ));
-        assert!(contract.protects(
-            "deploy/mission-control/agent-runner/work_api.py",
-            |_| false
-        ));
+        assert!(contract.protects("deploy/mission-control/agent-runner/work_api.py", |_| false));
         assert!(!contract.protects("src/main.rs", |_| false));
         assert!(CiGateContractFactory::new("v9").is_err());
     }

@@ -108,9 +108,9 @@ pub fn parse_author_handoff(
 ) -> Result<AuthorHandoffContext, AuthorHandoffContextError> {
     require(kind == "peer" || kind == "build")?;
     let extension: &[&str] = if kind == "peer" { &PEER } else { &BUILD };
-    let object = value
-        .as_object()
-        .ok_or_else(|| AuthorHandoffContextError("Author handoff does not match the admitted context."))?;
+    let object = value.as_object().ok_or_else(|| {
+        AuthorHandoffContextError("Author handoff does not match the admitted context.")
+    })?;
     require(
         object.len() == COMMON.len() + extension.len()
             && COMMON.iter().all(|key| object.contains_key(*key))

@@ -18,8 +18,8 @@ use forge_work::execution_policy::{
 use forge_work::model_route::{BinaryProofPort, QuotaProofPort};
 use forge_work::quota_diagnostics::quota_diagnostic;
 use forge_work::strict_json::parse_strict;
-use forge_work::workflow_policy::WorkflowCatalog;
 use forge_work::work_error::WorkError;
+use forge_work::workflow_policy::WorkflowCatalog;
 use forge_work_worker::config::{parse_config, verify_recipe};
 use forge_work_worker::lease::Lease;
 use serde_json::{json, Value};
@@ -45,11 +45,7 @@ fn ts_nanos(value: &str) -> Option<i64> {
 /// read_private: O_NOFOLLOW open; regular file, single link,
 /// no group/other write bits, size within the bound, and the
 /// declared owner when one is required.
-fn read_private(
-    path: &Path,
-    maximum: usize,
-    owner: Option<u32>,
-) -> Result<Vec<u8>, WorkError> {
+fn read_private(path: &Path, maximum: usize, owner: Option<u32>) -> Result<Vec<u8>, WorkError> {
     use nix::fcntl::{open, OFlag};
     use nix::sys::stat::Mode;
 
@@ -60,9 +56,7 @@ fn read_private(
     )
     .map_err(|error| store(error.to_string()))?;
     let file = std::fs::File::from(fd);
-    let stat = file
-        .metadata()
-        .map_err(|error| store(error.to_string()))?;
+    let stat = file.metadata().map_err(|error| store(error.to_string()))?;
     if !stat.is_file()
         || stat.size() as usize > maximum
         || stat.nlink() != 1
@@ -95,8 +89,7 @@ fn key_set(value: &Value, keys: &[&str]) -> bool {
     value
         .as_object()
         .map(|object| {
-            object.len() == keys.len()
-                && keys.iter().all(|key| object.contains_key(*key))
+            object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key))
         })
         .unwrap_or(false)
 }
@@ -194,12 +187,7 @@ fn error_stamp(line: &str) -> Option<(u32, u32, String)> {
         return None;
     }
     let pid_start = cursor;
-    while line
-        .as_bytes()
-        .get(cursor)
-        .map(u8::is_ascii_digit)
-        == Some(true)
-    {
+    while line.as_bytes().get(cursor).map(u8::is_ascii_digit) == Some(true) {
         cursor += 1;
     }
     if cursor == pid_start {
@@ -234,7 +222,13 @@ impl QuotaProofPort for QuotaAuditProof {
         let value = strict(&raw)?;
         if !key_set(
             &value,
-            &["version", "owner", "model", "source_config_sha256", "observations"],
+            &[
+                "version",
+                "owner",
+                "model",
+                "source_config_sha256",
+                "observations",
+            ],
         ) || !is_int(&value["version"])
             || value["version"].as_i64() != Some(1)
             || value["owner"].as_str() != task["owner_id"].as_str()
@@ -252,9 +246,7 @@ impl QuotaProofPort for QuotaAuditProof {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|item| {
-                item["attempt_id"].as_str() == Some(&command.attempt_id.to_string())
-            })
+            .filter(|item| item["attempt_id"].as_str() == Some(&command.attempt_id.to_string()))
             .collect();
         if matches.len() != 1 {
             return Err(mismatch());
@@ -276,10 +268,7 @@ impl QuotaProofPort for QuotaAuditProof {
             || !is_int(&item["source_revision"])
             || item["source_revision"].as_i64() != Some(command.expected_revision)
             || item["recipe_digest"].as_str() != attempt["recipe_digest"].as_str()
-            || !item["log_file"]
-                .as_str()
-                .map(log_file_ok)
-                .unwrap_or(false)
+            || !item["log_file"].as_str().map(log_file_ok).unwrap_or(false)
         {
             return Err(mismatch());
         }
@@ -315,9 +304,7 @@ impl QuotaProofPort for QuotaAuditProof {
             let observed = (|| {
                 let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
                 let clock = chrono::NaiveTime::parse_from_str(&time, "%H:%M:%S%.f").ok()?;
-                date.and_time(clock)
-                    .and_utc()
-                    .timestamp_nanos_opt()
+                date.and_time(clock).and_utc().timestamp_nanos_opt()
             })();
             if let Some(observed) = observed {
                 if started <= observed && observed <= finished {
@@ -406,9 +393,7 @@ fn immutable_binary_sha256(path: &Path) -> Result<String, WorkError> {
     )
     .map_err(|error| store(error.to_string()))?;
     let mut file = std::fs::File::from(target);
-    let before = file
-        .metadata()
-        .map_err(|error| store(error.to_string()))?;
+    let before = file.metadata().map_err(|error| store(error.to_string()))?;
     if !before.is_file()
         || before.uid() != 0
         || before.mode() & 0o022 != 0
@@ -435,19 +420,22 @@ fn immutable_binary_sha256(path: &Path) -> Result<String, WorkError> {
         }
         hasher.update(&buffer[..read]);
     }
-    let after = file
-        .metadata()
-        .map_err(|error| store(error.to_string()))?;
-    if (before.ino(), before.len(), before.mtime(), before.mtime_nsec(), before.ctime(), before.ctime_nsec())
-        != (
-            after.ino(),
-            after.len(),
-            after.mtime(),
-            after.mtime_nsec(),
-            after.ctime(),
-            after.ctime_nsec(),
-        )
-        || total != before.len()
+    let after = file.metadata().map_err(|error| store(error.to_string()))?;
+    if (
+        before.ino(),
+        before.len(),
+        before.mtime(),
+        before.mtime_nsec(),
+        before.ctime(),
+        before.ctime_nsec(),
+    ) != (
+        after.ino(),
+        after.len(),
+        after.mtime(),
+        after.mtime_nsec(),
+        after.ctime(),
+        after.ctime_nsec(),
+    ) || total != before.len()
     {
         return Err(store("Immutable binary changed during observation"));
     }
@@ -497,9 +485,7 @@ impl BinaryProofPort for PinnedBinaryProof {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|item| {
-                item["attempt_id"].as_str() == Some(&command.attempt_id.to_string())
-            })
+            .filter(|item| item["attempt_id"].as_str() == Some(&command.attempt_id.to_string()))
             .collect();
         let expected = json!({
             "workflow_id": workflow["workflow_id"],
@@ -534,16 +520,11 @@ impl BinaryProofPort for PinnedBinaryProof {
         if ts_nanos(&evidence.activated_at).is_none() {
             return Err(invalid("Invalid immutable binary-pin evidence"));
         }
-        if immutable_binary_sha256(Path::new(&evidence.binary_path))? != evidence.binary_sha256
-        {
+        if immutable_binary_sha256(Path::new(&evidence.binary_path))? != evidence.binary_sha256 {
             return Err(invalid("Immutable binary digest changed"));
         }
         let selected = PathBuf::from(worker["config_path"].as_str().unwrap_or(""));
-        if !selected.is_absolute()
-            || selected
-                .components()
-                .any(|part| part.as_os_str() == "..")
-        {
+        if !selected.is_absolute() || selected.components().any(|part| part.as_os_str() == "..") {
             return Err(invalid("Invalid selected worker path"));
         }
         let config_raw = read_private(
@@ -639,7 +620,10 @@ mod tests {
             ts_nanos("2000-02-29T12:00:00.5+00:00"),
             Some(951_825_600_500_000_000)
         );
-        assert_eq!(ts_nanos("2000-02-29T12:00:00Z"), Some(951_825_600_000_000_000));
+        assert_eq!(
+            ts_nanos("2000-02-29T12:00:00Z"),
+            Some(951_825_600_000_000_000)
+        );
         assert_eq!(ts_nanos("2000-02-29 12:00:00"), None);
     }
 }
