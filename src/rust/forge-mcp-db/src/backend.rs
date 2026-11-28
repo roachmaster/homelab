@@ -40,6 +40,35 @@ pub struct QueryOutcome {
     pub has_more: bool,
 }
 
+/// The read-only query port the MCP tools run against. `Backend` is
+/// the PostgreSQL implementation; tests bind fakes.
+pub trait QueryBackend: Send + Sync {
+    /// Return (columns, rows, has_more) for up to `limit` rows
+    /// starting at `offset`.
+    fn run(
+        &self,
+        sql: &str,
+        params: &[Param],
+        limit: i64,
+        offset: i64,
+        server_side: bool,
+    ) -> Result<QueryOutcome, ToolError>;
+}
+
+impl QueryBackend for Backend {
+    fn run(
+        &self,
+        sql: &str,
+        params: &[Param],
+        limit: i64,
+        offset: i64,
+        server_side: bool,
+    ) -> Result<QueryOutcome, ToolError> {
+        Backend::run(self, sql, params, limit, offset, server_side)
+    }
+}
+
+/// The PostgreSQL query backend.
 pub struct Backend {
     dsn: String,
     timeout_ms: i64,

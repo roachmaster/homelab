@@ -543,6 +543,101 @@ impl PresenceProvider {
     }
 }
 
+/// What a presence read answers over HTTP.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresenceReply {
+    pub status: u16,
+    pub body: JsonValue,
+    pub headers: Vec<(&'static str, String)>,
+}
+
+impl PresenceReply {
+    fn json(status: u16, body: JsonValue) -> Self {
+        PresenceReply {
+            status,
+            body,
+            headers: Vec::new(),
+        }
+    }
+}
+
+/// The connection-presence port. `PresenceProvider` is the live
+/// implementation; `NoPresence` is what a server without presence
+/// answers, so callers never check whether presence is enabled.
+pub trait PresencePort: Send + Sync {
+    /// Whether tools/list offers this principal the heartbeat tool.
+    fn offers_heartbeat(&self, principal: &Principal) -> bool;
+    /// The heartbeat tool's result, or its error text.
+    fn heartbeat(&self, principal: &Principal) -> Result<JsonValue, String>;
+    /// The local presence read: rate limit, reader token, snapshot.
+    fn read(
+        &self,
+        headers: &[(String, String)],
+        limiter: &crate::auth::FailureLimiter,
+        peer: std::net::IpAddr,
+    ) -> PresenceReply;
+}
+
+impl PresencePort for PresenceProvider {
+    fn offers_heartbeat(&self, principal: &Principal) -> bool {
+        self.is_mapped(Some(principal))
+    }
+
+    fn heartbeat(&self, principal: &Principal) -> Result<JsonValue, String> {
+        PresenceProvider::heartbeat(self, principal).map_err(|error| error.0)
+    }
+
+    fn read(
+        &self,
+        headers: &[(String, String)],
+        limiter: &crate::auth::FailureLimiter,
+        peer: std::net::IpAddr,
+    ) -> PresenceReply {
+        let key = format!("presence-reader:{peer}");
+        let wait = limiter.retry_after(&key);
+        if wait > 0 {
+            return PresenceReply {
+                status: 429,
+                body: json!({"error": "too_many_failed_attempts"}),
+                headers: vec![("Retry-After", wait.to_string())],
+            };
+        }
+        if !self.reader.authenticate(headers) {
+            limiter.record_failure(&key);
+            return PresenceReply::json(401, json!({"error": "invalid_reader_token"}));
+        }
+        limiter.record_success(&key);
+        match self.snapshot() {
+            Ok(result) => PresenceReply::json(200, result),
+            Err(_) => PresenceReply::json(503, json!({"error": "presence_unavailable"})),
+        }
+    }
+}
+
+/// Null-object presence: the server has connection presence turned
+/// off. It offers no heartbeat tool, refuses heartbeats, and reads as
+/// unavailable, exactly what the server answered with presence absent.
+pub struct NoPresence;
+
+impl PresencePort for NoPresence {
+    fn offers_heartbeat(&self, _principal: &Principal) -> bool {
+        false
+    }
+
+    fn heartbeat(&self, _principal: &Principal) -> Result<JsonValue, String> {
+        Err("connection presence is not enabled".to_string())
+    }
+
+    fn read(
+        &self,
+        _headers: &[(String, String)],
+        _limiter: &crate::auth::FailureLimiter,
+        _peer: std::net::IpAddr,
+    ) -> PresenceReply {
+        PresenceReply::json(503, json!({"error": "presence_unavailable"}))
+    }
+}
+
 /// PresenceProviderFactory.create()
 pub fn create_provider(
     config: &PresenceConfig,
