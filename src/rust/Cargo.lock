@@ -438,6 +438,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-scene"
+version = "0.1.0"
+dependencies = [
+ "forge-core",
+ "forge-foundation",
+ "forge-template",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+]
+
+[[package]]
 name = "forge-system"
 version = "0.1.0"
 dependencies = [
