@@ -11,9 +11,8 @@ WorkingDirectory=/opt/homelab-forge/mcp/current
 # OAuth codes/grants/tokens (hashed) live in /var/lib/homelab-forge/mcp/oauth.sqlite3.
 StateDirectory=homelab-forge/mcp
 StateDirectoryMode=0700
-ExecStartPre=/usr/bin/python3 /opt/homelab-forge/mcp/current/mcp_server.py --config /etc/homelab-forge/mcp/server.json --check-config
-ExecStart=/usr/bin/python3 /opt/homelab-forge/mcp/current/mcp_server.py --config /etc/homelab-forge/mcp/server.json
-Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ExecStartPre=/opt/homelab-forge/mcp/current/forge-mcp-db --config /etc/homelab-forge/mcp/server.json --check-config
+ExecStart=/opt/homelab-forge/mcp/current/forge-mcp-db --config /etc/homelab-forge/mcp/server.json
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes

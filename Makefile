@@ -147,7 +147,12 @@ ci:
 # Run the backend crates against this checkout. The main gate requires the
 # disposable PostgreSQL fixture to start and verify the candidate SQL.
 backend-suites:
-	@FORGE_REQUIRE_DISPOSABLE_POSTGRES=1 cargo test --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked --all-features \
+	@set -eu; case "$$SCOPE" in \
+	  branch) export FORGE_DISABLE_DISPOSABLE_POSTGRES=1; set -- ;; \
+	  main|all) export FORGE_REQUIRE_DISPOSABLE_POSTGRES=1; set -- --all-features ;; \
+	  *) echo 'backend-suites requires SCOPE=branch or SCOPE=main' >&2; exit 2 ;; \
+	esac; \
+	cargo test --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked "$$@" \
 		-p forge-host -p forge-work -p forge-work-worker -p forge-work-publication -p forge-postgres \
 		-p forge-portal-release-actor -p forge-jenkins -p forge-usage -p forge-agent-driver \
 		-p forge-services -p forge-studio -p forge-mcp-db

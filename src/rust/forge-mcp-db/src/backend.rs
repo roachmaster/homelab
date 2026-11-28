@@ -8,7 +8,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde_json::Value;
-use tokio_postgres::types::{Kind, Type};
+use tokio_postgres::types::{FromSql, Kind, Type};
 use tokio_postgres::{Config as PgConfig, NoTls, Row};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -177,7 +177,7 @@ impl Backend {
                     .iter()
                     .take(limit as usize)
                     .map(row_to_cells)
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
                 Ok(QueryOutcome {
                     columns,
                     rows,
@@ -219,7 +219,7 @@ impl Backend {
                     .iter()
                     .take(limit as usize)
                     .map(row_to_cells)
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
                 Ok(QueryOutcome {
                     columns,
                     rows,
@@ -233,136 +233,142 @@ impl Backend {
     }
 }
 
-fn row_to_cells(row: &Row) -> Vec<Cell> {
+fn row_to_cells(row: &Row) -> Result<Vec<Cell>, ToolError> {
     row.columns()
         .iter()
         .enumerate()
-        .map(|(index, column)| cell_from(row, index, column.type_()))
+        .map(|(index, column)| {
+            let ty = column.type_();
+            row.try_get::<_, Option<WireValue<'_>>>(index)
+                .map_err(|_| ToolError(format!("Cannot read column {}", column.name())))?
+                .map_or(Ok(Cell::Null), |v| decode_cell(ty, v.0))
+        })
         .collect()
 }
 
-fn cell_from(row: &Row, index: usize, ty: &Type) -> Cell {
-    macro_rules! get {
-        ($rust:ty) => {
-            match row.try_get::<usize, Option<$rust>>(index) {
-                Ok(Some(value)) => value,
-                Ok(None) => return Cell::Null,
-                Err(_) => return fallback_cell(row, index, ty),
-            }
-        };
+// postgres-types restricts Vec<u8> to BYTEA. Read the field once using its
+// actual type, including nested arrays and SQL domains. Only SQL NULL is null.
+struct WireValue<'a>(&'a [u8]);
+
+impl<'a> FromSql<'a> for WireValue<'a> {
+    fn from_sql(
+        _ty: &Type,
+        bytes: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        Ok(Self(bytes))
     }
-    match ty.oid() {
-        16 => Cell::Bool(get!(bool)),
-        21 => Cell::Int(i64::from(get!(i16))),
-        23 => Cell::Int(i64::from(get!(i32))),
-        20 => Cell::Int(get!(i64)),
-        700 => Cell::Float(f64::from(get!(f32))),
-        701 => Cell::Float(get!(f64)),
-        1700 => {
-            // NUMERIC: decode the binary form manually (exact).
-            match row.try_get::<usize, Option<Vec<u8>>>(index) {
-                Ok(Some(bytes)) => Cell::Text(decode_numeric(&bytes)),
-                Ok(None) => Cell::Null,
-                Err(_) => fallback_cell(row, index, ty),
-            }
-        }
-        2950 => Cell::Text(get!(uuid::Uuid).to_string()),
-        1082 => Cell::Text(get!(chrono::NaiveDate).to_string()),
-        1083 => Cell::Text(iso_time(get!(chrono::NaiveTime))),
-        1114 => {
-            let value = get!(chrono::NaiveDateTime);
-            Cell::Text(format!("{}T{}", value.date(), iso_time(value.time())))
-        }
-        1184 => {
-            let value = get!(chrono::DateTime<chrono::Utc>);
-            Cell::Text(format!(
-                "{}T{}+00:00",
-                value.date_naive(),
-                iso_time(value.time())
-            ))
-        }
-        1186 => {
-            // INTERVAL binary: i64 microseconds, i32 days, i32 months.
-            match row.try_get::<usize, Option<Vec<u8>>>(index) {
-                Ok(Some(bytes)) if bytes.len() == 16 => {
-                    let micros = i64::from_be_bytes(bytes[0..8].try_into().unwrap());
-                    let days = i32::from_be_bytes(bytes[8..12].try_into().unwrap());
-                    let months = i32::from_be_bytes(bytes[12..16].try_into().unwrap());
-                    Cell::Text(format_interval(months, days, micros))
-                }
-                Ok(None) => Cell::Null,
-                Ok(_) | Err(_) => fallback_cell(row, index, ty),
-            }
-        }
-        1266 => {
-            // TIMETZ binary: i64 microseconds + i32 zone seconds.
-            match row.try_get::<usize, Option<Vec<u8>>>(index) {
-                Ok(Some(bytes)) if bytes.len() == 12 => {
-                    let micros = i64::from_be_bytes(bytes[0..8].try_into().unwrap());
-                    let zone = i32::from_be_bytes(bytes[8..12].try_into().unwrap());
-                    Cell::Text(format_timetz(micros, zone))
-                }
-                Ok(None) => Cell::Null,
-                Ok(_) | Err(_) => fallback_cell(row, index, ty),
-            }
-        }
-        17 => Cell::Bytes(get!(Vec<u8>)),
-        114 | 3802 => Cell::Json(get!(Value)),
-        25 | 1042 | 1043 | 19 | 18 => Cell::Text(get!(String)),
-        _ => {
-            if let Kind::Array(element) = ty.kind() {
-                return array_cell(row, index, element);
-            }
-            fallback_cell(row, index, ty)
-        }
+    fn accepts(_: &Type) -> bool {
+        true
     }
 }
 
-fn array_cell(row: &Row, index: usize, element: &Type) -> Cell {
-    macro_rules! get_vec {
-        ($rust:ty, $map:expr) => {
-            match row.try_get::<usize, Option<Vec<Option<$rust>>>>(index) {
-                Ok(Some(items)) => {
-                    let map: fn(Option<$rust>) -> Cell = $map;
-                    return Cell::Array(items.into_iter().map(map).collect());
-                }
-                Ok(None) => return Cell::Null,
-                Err(_) => return fallback_cell(row, index, element),
-            }
+fn decode_cell(ty: &Type, bytes: &[u8]) -> Result<Cell, ToolError> {
+    let invalid = || {
+        ToolError(format!(
+            "Cannot decode PostgreSQL type {}. Cast this column to text.",
+            ty.name()
+        ))
+    };
+    macro_rules! read {
+        ($kind:ty) => {
+            <$kind as FromSql>::from_sql(ty, bytes).map_err(|_| invalid())?
         };
     }
-    match element.oid() {
-        16 => get_vec!(bool, |v| v.map(Cell::Bool).unwrap_or(Cell::Null)),
-        21 => get_vec!(i16, |v| v
-            .map(|n| Cell::Int(i64::from(n)))
-            .unwrap_or(Cell::Null)),
-        23 => get_vec!(i32, |v| v
-            .map(|n| Cell::Int(i64::from(n)))
-            .unwrap_or(Cell::Null)),
-        20 => get_vec!(i64, |v| v.map(Cell::Int).unwrap_or(Cell::Null)),
-        700 => get_vec!(f32, |v| v
-            .map(|n| Cell::Float(f64::from(n)))
-            .unwrap_or(Cell::Null)),
-        701 => get_vec!(f64, |v| v.map(Cell::Float).unwrap_or(Cell::Null)),
-        25 | 1042 | 1043 => get_vec!(String, |v| v.map(Cell::Text).unwrap_or(Cell::Null)),
-        2950 => get_vec!(uuid::Uuid, |v| v
-            .map(|u| Cell::Text(u.to_string()))
-            .unwrap_or(Cell::Null)),
-        _ => fallback_cell(row, index, element),
-    }
+    Ok(match *ty {
+        Type::BOOL => Cell::Bool(read!(bool)),
+        Type::INT2 => Cell::Int(i64::from(read!(i16))),
+        Type::INT4 => Cell::Int(i64::from(read!(i32))),
+        Type::INT8 => Cell::Int(read!(i64)),
+        Type::OID => Cell::Int(i64::from(read!(u32))),
+        Type::FLOAT4 => Cell::Float(f64::from(read!(f32))),
+        Type::FLOAT8 => Cell::Float(read!(f64)),
+        Type::NUMERIC if bytes.len() >= 8 => Cell::Text(decode_numeric(bytes)),
+        Type::UUID => Cell::Text(read!(uuid::Uuid).to_string()),
+        Type::DATE => Cell::Text(read!(chrono::NaiveDate).to_string()),
+        Type::TIME => Cell::Text(iso_time(read!(chrono::NaiveTime))),
+        Type::TIMESTAMP => {
+            let v = read!(chrono::NaiveDateTime);
+            Cell::Text(format!("{}T{}", v.date(), iso_time(v.time())))
+        }
+        Type::TIMESTAMPTZ => {
+            let v = read!(chrono::DateTime<chrono::Utc>);
+            Cell::Text(format!("{}T{}+00:00", v.date_naive(), iso_time(v.time())))
+        }
+        Type::INTERVAL if bytes.len() == 16 => Cell::Text(format_interval(
+            i32::from_be_bytes(bytes[12..16].try_into().unwrap()),
+            i32::from_be_bytes(bytes[8..12].try_into().unwrap()),
+            i64::from_be_bytes(bytes[..8].try_into().unwrap()),
+        )),
+        Type::TIMETZ if bytes.len() == 12 => Cell::Text(format_timetz(
+            i64::from_be_bytes(bytes[..8].try_into().unwrap()),
+            i32::from_be_bytes(bytes[8..].try_into().unwrap()),
+        )),
+        Type::BYTEA => Cell::Bytes(bytes.to_vec()),
+        Type::JSON | Type::JSONB => Cell::Json(read!(Value)),
+        Type::CHAR | Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::UNKNOWN => {
+            Cell::Text(std::str::from_utf8(bytes).map_err(|_| invalid())?.into())
+        }
+        _ => match ty.kind() {
+            Kind::Enum(_) => Cell::Text(std::str::from_utf8(bytes).map_err(|_| invalid())?.into()),
+            Kind::Domain(base) => decode_cell(base, bytes)?,
+            Kind::Array(element) => decode_array(element, bytes).ok_or_else(invalid)??,
+            _ => return Err(invalid()),
+        },
+    })
 }
 
-fn fallback_cell(row: &Row, index: usize, _ty: &Type) -> Cell {
-    if let Ok(value) = row.try_get::<usize, Option<String>>(index) {
-        return value.map(Cell::Text).unwrap_or(Cell::Null);
+fn decode_array(element: &Type, mut bytes: &[u8]) -> Option<Result<Cell, ToolError>> {
+    fn integer(bytes: &mut &[u8]) -> Option<i32> {
+        let (value, rest) = bytes.split_at_checked(4)?;
+        *bytes = rest;
+        Some(i32::from_be_bytes(value.try_into().ok()?))
     }
-    if let Ok(value) = row.try_get::<usize, Option<Vec<u8>>>(index) {
-        return value.map(Cell::Bytes).unwrap_or(Cell::Null);
+    fn level(
+        element: &Type,
+        dimensions: &[usize],
+        bytes: &mut &[u8],
+    ) -> Option<Result<Cell, ToolError>> {
+        let Some((&count, rest)) = dimensions.split_first() else {
+            let length = integer(bytes)?;
+            if length == -1 {
+                return Some(Ok(Cell::Null));
+            }
+            let (raw, tail) = bytes.split_at_checked(usize::try_from(length).ok()?)?;
+            *bytes = tail;
+            return Some(decode_cell(element, raw));
+        };
+        let mut items = Vec::new();
+        for _ in 0..count {
+            match level(element, rest, bytes)? {
+                Ok(cell) => items.push(cell),
+                Err(e) => return Some(Err(e)),
+            }
+        }
+        Some(Ok(Cell::Array(items)))
     }
-    if let Ok(value) = row.try_get::<usize, Option<Value>>(index) {
-        return value.map(Cell::Json).unwrap_or(Cell::Null);
+    let ndims = usize::try_from(integer(&mut bytes)?).ok()?;
+    if ndims > 6 {
+        return None;
     }
-    Cell::Null
+    let _flags = integer(&mut bytes)?;
+    if integer(&mut bytes)? as u32 != element.oid() {
+        return None;
+    }
+    let mut dimensions = Vec::new();
+    for _ in 0..ndims {
+        let n = usize::try_from(integer(&mut bytes)?).ok()?;
+        if n == 0 {
+            return None;
+        }
+        dimensions.push(n);
+        let _lower_bound = integer(&mut bytes)?;
+    }
+    let value = if dimensions.is_empty() {
+        Ok(Cell::Array(Vec::new()))
+    } else {
+        level(element, &dimensions, &mut bytes)?
+    };
+    bytes.is_empty().then_some(value)
 }
 
 /// Python's time.isoformat(): fraction only when sub-second,
@@ -397,15 +403,16 @@ fn format_timetz(micros: i64, zone_seconds: i32) -> String {
     } else {
         format!("{time}.{sub:06}")
     };
-    let sign = if zone_seconds < 0 { "-" } else { "+" };
-    let zone = zone_seconds.abs();
+    let sign = if zone_seconds > 0 { "-" } else { "+" };
+    let zone = zone_seconds.unsigned_abs();
     format!("{time}{sign}{:02}:{:02}", zone / 3600, (zone / 60) % 60)
 }
 
 /// str(datetime.timedelta) for months*30 + days + microseconds
 /// (psycopg2's interval conversion).
 fn format_interval(months: i32, days: i32, micros: i64) -> String {
-    let total_us = (i64::from(months) * 30 + i64::from(days)) * 86_400_000_000 + micros;
+    let total_us =
+        (i128::from(months) * 30 + i128::from(days)) * 86_400_000_000 + i128::from(micros);
     let days_out = total_us.div_euclid(86_400_000_000);
     let rest = total_us.rem_euclid(86_400_000_000);
     let seconds = rest / 1_000_000;
@@ -548,6 +555,30 @@ mod tests {
         // 0.00: no digits, dscale 2.
         assert_eq!(decode_numeric(&numeric_bytes(&[], 0, 0, 2)), "0.00");
         assert_eq!(decode_numeric(&numeric_bytes(&[], 0, 0xC000, 0)), "NaN");
+    }
+
+    #[test]
+    fn native_field_decoding_preserves_typed_values() {
+        let numeric = numeric_bytes(&[61, 7000], 0, 0, 2);
+        assert!(
+            matches!(decode_cell(&Type::NUMERIC,&numeric),Ok(Cell::Text(value)) if value=="61.70")
+        );
+        assert_eq!(
+            decode_numeric(&numeric_bytes(&[123], -2, 0, 8)),
+            "0.00000123"
+        );
+        let mut timetz = 3_600_000_000i64.to_be_bytes().to_vec();
+        timetz.extend(7200i32.to_be_bytes());
+        assert!(
+            matches!(decode_cell(&Type::TIMETZ,&timetz),Ok(Cell::Text(value)) if value=="01:00:00-02:00")
+        );
+        let mut interval = 0i64.to_be_bytes().to_vec();
+        interval.extend(3i32.to_be_bytes());
+        interval.extend(0i32.to_be_bytes());
+        assert!(
+            matches!(decode_cell(&Type::INTERVAL,&interval),Ok(Cell::Text(value)) if value=="3 days, 0:00:00")
+        );
+        assert!(decode_cell(&Type::POINT, &[0; 16]).is_err());
     }
 
     #[test]

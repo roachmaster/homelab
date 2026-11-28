@@ -57,13 +57,20 @@ fn main() {
         match OAuthServer::new(&config.oauth) {
             Ok(server) => {
                 let server = Arc::new(server);
-                for problem in server.problems() {
+                let problems = server.problems();
+                for problem in &problems {
                     eprintln!("OAuth: {problem}");
+                }
+                if check_config && !problems.is_empty() {
+                    std::process::exit(2);
                 }
                 oauth = Some(server);
             }
             Err(error) => {
                 eprintln!("OAuth disabled: cannot open state database: {error}");
+                if check_config {
+                    std::process::exit(2);
+                }
             }
         }
     }
