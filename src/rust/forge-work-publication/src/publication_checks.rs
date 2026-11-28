@@ -11,7 +11,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -126,18 +126,6 @@ impl IsolatedCheckRunner {
             supervisor,
             timeout: 1800.0,
         }
-    }
-
-    fn failure_report(&self, code: &str, returncode: i64, cleanup: bool) -> VerificationReport {
-        project_verification(
-            &self.config.checks,
-            Some(code),
-            returncode,
-            b"",
-            &format!("{:x}", Sha256::digest(b"")),
-            cleanup,
-            None,
-        )
     }
 
     fn run_inner(
@@ -314,10 +302,9 @@ impl IsolatedCheckRunner {
         let mut total: usize = 0;
         let mut failure: Option<PublicationError> = None;
         let mut returncode: i64 = -1;
-        let mut cleanup = false;
         let mut log: Option<File> = None;
         let mut process: Option<Child> = None;
-        let mut outcome = (|| {
+        let mut outcome = || {
             if stop.load(Ordering::SeqCst) {
                 failure = Some(PublicationError::Code("publication_lease_lost".to_string()));
                 return;
@@ -471,7 +458,7 @@ impl IsolatedCheckRunner {
                 }
             }
             process = Some(child);
-        });
+        };
         outcome();
         // finally: stop the scope and reap the process.
         let proof = self.supervisor.stop(&unit);
@@ -479,7 +466,7 @@ impl IsolatedCheckRunner {
             Some(child) => terminate_and_reap(child, 2.0, 2.0).unwrap_or(false),
             None => true,
         };
-        cleanup = reaped && proof.map(|proof| proof.scope_stopped).unwrap_or(false);
+        let cleanup = reaped && proof.map(|proof| proof.scope_stopped).unwrap_or(false);
         if let Some(file) = log.take() {
             drop(file);
         }

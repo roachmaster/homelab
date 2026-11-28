@@ -40,8 +40,7 @@ fn scope(path: &Path, maximum: usize) -> Result<(), String> {
     if !path.is_absolute()
         || path.components().any(|part| part == Component::ParentDir)
         || path.file_name().map(|name| name.is_empty()).unwrap_or(true)
-        || maximum < 1
-        || maximum > MAX_SNAPSHOT_BYTES
+        || !(1..=MAX_SNAPSHOT_BYTES).contains(&maximum)
     {
         return Err(invalid());
     }

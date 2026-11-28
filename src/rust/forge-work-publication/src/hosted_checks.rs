@@ -5,7 +5,6 @@
 //! allowance endpoints, selects another account or merges.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -349,7 +348,7 @@ impl GitHubHostedChecksProvider {
                     invalid_workflow = true;
                 }
                 let run_id = run["id"].as_i64().unwrap_or(0);
-                if !jobs_by_run.contains_key(&run_id) {
+                if let std::collections::btree_map::Entry::Vacant(e) = jobs_by_run.entry(run_id) {
                     let payload = self
                         .client
                         .api(
@@ -370,7 +369,7 @@ impl GitHubHostedChecksProvider {
                         .unwrap_or(0);
                     match jobs {
                         Some(jobs) if jobs.len() <= 100 && total <= 100 => {
-                            jobs_by_run.insert(run_id, jobs);
+                            e.insert(jobs);
                         }
                         _ => {
                             return Err(PublicationError::Code(

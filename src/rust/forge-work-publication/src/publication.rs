@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -582,7 +582,7 @@ impl PublicationWorker {
     fn publish_reserved(
         &mut self,
         job: &Value,
-        repository: &PathBuf,
+        repository: &Path,
         head: &str,
         existing_head: Option<&str>,
         previous: Option<&str>,
@@ -596,10 +596,11 @@ impl PublicationWorker {
             previous.map(|value| value.to_string()),
             reservation.head_commit_sha.clone(),
             reservation.active_candidate_commit.clone(),
-        ] {
-            if let Some(known) = known {
-                allowed.insert(Some(known));
-            }
+        ]
+        .into_iter()
+        .flatten()
+        {
+            allowed.insert(Some(known));
         }
         if !allowed.contains(&existing_head.map(|value| value.to_string())) {
             return Err(failure("remote_branch_identity_changed"));
@@ -715,7 +716,7 @@ impl PublicationWorker {
     fn publish_legacy(
         &mut self,
         job: &Value,
-        repository: &PathBuf,
+        repository: &Path,
         head: &str,
         existing_head: Option<&str>,
         previous: Option<&str>,
@@ -866,17 +867,13 @@ impl PublicationWorker {
                 return Ok(true);
             }
         }
-        if self.merger.is_some() {
+        if let Some(merger) = &mut self.merger {
             let merge = self
                 .store
                 .merge_claim(&format!("{worker_id}-merger"))
                 .map_err(provider_publication)?;
             if let Some(merge) = merge {
-                self.merger
-                    .as_mut()
-                    .expect("checked")
-                    .process(&merge)
-                    .map_err(provider_publication)?;
+                merger.process(&merge).map_err(provider_publication)?;
                 return Ok(true);
             }
         }

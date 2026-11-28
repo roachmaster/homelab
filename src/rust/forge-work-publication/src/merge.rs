@@ -16,7 +16,6 @@ use forge_work_worker::review_candidate::{sha1_hex, ReviewedCandidateProvider};
 use forge_work_worker::review_ports::{HostedChecksPort, ReviewError};
 
 use crate::delivery_stores::{error_code, MergeStorePort, NativeMergeFailureError, RequireLease};
-use crate::hosted_checks::GitHubHostedChecksProvider;
 use crate::publication_clients::{
     uuid, GitHubPullRequestClient, GitRepositoryProvider, ProviderError, PublicationError,
 };
@@ -592,7 +591,6 @@ impl MergeWorker {
         let stop = self.stop.clone();
         let job_lease = job.clone();
         let lost_flag = lost.clone();
-        let done_flag = done.clone();
         let require_lease = move || -> Result<(), PublicationError> {
             if stop.load(Ordering::SeqCst)
                 || lost_flag.load(Ordering::SeqCst)
@@ -761,12 +759,11 @@ impl MergeWorker {
             let no_merge_confirmed = !remote_merged;
             let mut merged = false;
             if remote_merged {
-                match self
+                if let Ok(()) = self
                     .source_sync
                     .synchronize(job, intent.unwrap(), require_lease)
                 {
-                    Ok(()) => merged = true,
-                    Err(_) => {}
+                    merged = true
                 }
             }
             let mutable = mutable || (remote_merged && !merged);
@@ -780,20 +777,19 @@ impl MergeWorker {
                 && current_main.is_some()
                 && current_main.as_deref()
                     != intent.map(|value| value["expected_main"].as_str().unwrap_or_default());
-            if no_merge_confirmed
-                && self.repair_sources.is_some()
-                && (matches!(
-                    code.as_str(),
-                    "merge_main_requires_reverification" | "reference_not_fast_forward"
-                ) || main_raced)
-            {
+            if let Some(repair) = self.repair_sources.as_mut().filter(|_| {
+                no_merge_confirmed
+                    && (matches!(
+                        code.as_str(),
+                        "merge_main_requires_reverification" | "reference_not_fast_forward"
+                    ) || main_raced)
+            }) {
                 // A read-only exact-reference reconciliation
                 // above has ruled out a successful main update.
                 // Preserve the approved candidate; a new
                 // unapproved source receipt alone may start the
                 // bounded author repair cycle.
                 let outcome = {
-                    let repair = self.repair_sources.as_mut().unwrap();
                     repair.prepare(
                         job,
                         current_main.as_deref().unwrap_or_default(),

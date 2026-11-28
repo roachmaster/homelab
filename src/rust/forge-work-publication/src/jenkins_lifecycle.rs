@@ -581,7 +581,6 @@ impl IntentDrain {
             }
             counts.pending += 1;
             let event = read_private(&path, 65536, Some(self.owner))
-                .map_err(|error| error)
                 .and_then(|raw| {
                     serde_json::from_slice::<Value>(&raw).map_err(|error| error.to_string())
                 })
@@ -652,9 +651,9 @@ mod tests {
         }
     }
 
-    fn tracker(root: &PathBuf) -> LifecycleTracker {
+    fn tracker(root: &Path) -> LifecycleTracker {
         LifecycleTracker::new(
-            root.clone(),
+            root.to_path_buf(),
             "123e4567-e89b-12d3-a456-426614174000",
             "homelab",
             "main",
@@ -1002,11 +1001,9 @@ fn display_value(value: &Value) -> String {
     }
 }
 
-fn json_i64(value: Option<&Value>) -> Option<i64> {
-    value.and_then(Value::as_i64)
-}
-
 // -- the producer ---------------------------------------------------------------
+
+type ProgressRecords = Vec<(i64, serde_json::Map<String, Value>)>;
 
 struct ProducerIdentity {
     project_alias: Option<Value>,
@@ -1115,9 +1112,7 @@ impl LifecycleProducer {
         let config_instance = self.config.jenkins_instance.as_deref();
         let instance = journal_instance.or(config_instance)?.to_string();
         if let Some(config) = &self.jenkins_config {
-            if config.instance_origin(&instance).is_none() {
-                return None;
-            }
+            config.instance_origin(&instance)?;
         }
         let origin = self
             .jenkins_config
@@ -1252,11 +1247,10 @@ impl LifecycleProducer {
         identity: &ProducerIdentity,
         kind: &str,
         occurred_at: &str,
-        build_number: Option<&Value>,
-        queue_id: Option<&Value>,
-        build_result: Option<&str>,
+        build: (Option<&Value>, Option<&Value>, Option<&str>),
         backfilled: bool,
     ) -> serde_json::Map<String, Value> {
+        let (build_number, queue_id, build_result) = build;
         let summary = if kind == "build_queued" {
             format!(
                 "Build queued as queue entry {}",
@@ -1401,10 +1395,10 @@ impl LifecycleProducer {
         binding: &Value,
         journal: &serde_json::Map<String, Value>,
         observation: Option<&Value>,
-        new_state: &str,
-        source: &str,
+        transition: (&str, &str),
         now: f64,
     ) -> Vec<serde_json::Map<String, Value>> {
+        let (new_state, source) = transition;
         let mut history = read_history(directory);
         if history.is_empty() {
             history = self.init_history(directory, journal);
@@ -1465,9 +1459,7 @@ impl LifecycleProducer {
                         &identity,
                         kind,
                         &submitted_at,
-                        None,
-                        Some(queue),
-                        None,
+                        (None, Some(queue), None),
                         false,
                     )
                 });
@@ -1496,9 +1488,7 @@ impl LifecycleProducer {
                         &identity,
                         kind,
                         &occurred_at,
-                        Some(number),
-                        queue_id.as_ref(),
-                        None,
+                        (Some(number), queue_id.as_ref(), None),
                         backfilled,
                     )
                 });
@@ -1527,9 +1517,7 @@ impl LifecycleProducer {
                         &identity,
                         kind,
                         &occurred_at,
-                        Some(number),
-                        queue_id.as_ref(),
-                        Some(result),
+                        (Some(number), queue_id.as_ref(), Some(result)),
                         any_backfilled,
                     )),
                     _ => None,
@@ -1652,7 +1640,7 @@ impl LifecycleProducer {
         &self,
         binding: &Value,
         state: &ProgressState,
-    ) -> (Vec<(i64, serde_json::Map<String, Value>)>, ProgressState) {
+    ) -> (ProgressRecords, ProgressState) {
         let action_id = binding
             .get("request")
             .and_then(|request| request.get("action_id"))
@@ -2483,8 +2471,7 @@ impl LifecycleProducer {
                 &binding,
                 &journal,
                 observation.as_ref(),
-                state,
-                source,
+                (state, source),
                 now,
             );
         }

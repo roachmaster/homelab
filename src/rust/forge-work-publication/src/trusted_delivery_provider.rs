@@ -21,13 +21,12 @@ use crate::identity_contract::content_policy_path;
 use crate::identity_store::{
     persist_identity_snapshot_bounded, read_identity_snapshot, read_identity_snapshot_bounded,
 };
-use crate::publication_clients::{artifact_guard, CommandExecutor, PublicationError};
+use crate::publication_clients::{artifact_guard, CommandExecutor};
 use crate::trusted_delivery::{
-    canonical_branch_slug, canonical_bytes, contract_for_config, digest as validate_digest,
-    gate_ref, jenkins_gate_manifest, protected_delivery_gate, protected_delivery_gate_for, sha,
-    validate_branch_name, validate_uid, DeliveryConfig, DeliveryError, DeliveryResult,
-    ForgeJenkinsPort, RequireLease, SourceArtifactRejected, ARTIFACT_REJECTION_CODES,
-    EPHEMERAL_BRANCH_PREFIX, PARAMETERS,
+    canonical_branch_slug, canonical_bytes, contract_for_config, gate_ref, jenkins_gate_manifest,
+    protected_delivery_gate, protected_delivery_gate_for, sha, validate_branch_name, validate_uid,
+    DeliveryConfig, DeliveryError, DeliveryResult, ForgeJenkinsPort, RequireLease,
+    SourceArtifactRejected, ARTIFACT_REJECTION_CODES, EPHEMERAL_BRANCH_PREFIX, PARAMETERS,
 };
 use crate::verifier_parity::PythonAstPort;
 
@@ -778,9 +777,7 @@ impl TrustedDeliveryPort {
         let contract = contract_for_config(&self.config)?;
         let identity_path = directory.join("identity-manifest.json");
         let mut content_reference: Option<Value> = None;
-        let mut source_digest = String::new();
-        let mut helper_digest = String::new();
-        let mut gate = String::new();
+        let (source_digest, helper_digest, gate);
         let mut gate_changes: Vec<Value> = Vec::new();
         if protocol == "content-v2" && identity_path.exists() {
             let record = read_identity_snapshot(&identity_path, self.owner)?;
@@ -1939,7 +1936,7 @@ impl ExternalDeliveryWorker {
             return Err(DeliveryError::LeaseLost);
         }
         match dao.borrow_mut().renew(action) {
-            Ok(value) if value == Value::Bool(true) => Ok(()),
+            Ok(Value::Bool(true)) => Ok(()),
             Ok(_) => Err(DeliveryError::LeaseLost),
             // A store failure while renewing abandons the
             // action to its lease lapse rather than forging
@@ -2166,8 +2163,11 @@ impl ExternalDeliveryWorker {
                     }
                 }
                 let result = self.delivery.merge(&request, &require)?;
-                if branch_reservation.is_some() && result["status"].as_str() == Some("merged") {
-                    let epoch = branch_reservation.as_ref().unwrap()["reservation_epoch"]
+                if let Some(reservation) = branch_reservation
+                    .as_ref()
+                    .filter(|_| result["status"].as_str() == Some("merged"))
+                {
+                    let epoch = reservation["reservation_epoch"]
                         .as_i64()
                         .unwrap_or_default();
                     self.dao
@@ -2187,8 +2187,11 @@ impl ExternalDeliveryWorker {
             }
             "cancel" => {
                 let result = self.delivery.cancel(&request, &require)?;
-                if branch_reservation.is_some() && result["status"].as_str() == Some("cancelled") {
-                    let epoch = branch_reservation.as_ref().unwrap()["reservation_epoch"]
+                if let Some(reservation) = branch_reservation
+                    .as_ref()
+                    .filter(|_| result["status"].as_str() == Some("cancelled"))
+                {
+                    let epoch = reservation["reservation_epoch"]
                         .as_i64()
                         .unwrap_or_default();
                     self.dao

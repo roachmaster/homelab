@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -433,6 +433,7 @@ impl ReleaseWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn identity() -> Value {
         json!({

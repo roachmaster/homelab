@@ -476,6 +476,12 @@ pub struct ActivePublicationGuard<'a> {
     pub module: PathBuf,
 }
 
+impl Default for ActivePublicationSelector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ActivePublicationSelector {
     pub fn new() -> Self {
         Self {

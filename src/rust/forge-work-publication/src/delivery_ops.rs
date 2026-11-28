@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -196,12 +196,13 @@ pub trait ActorPort: Send {
     ) -> Result<Value, String>;
 }
 
+pub type RootActorExecute = Box<
+    dyn Fn(&[String], &[(String, String)], &[u8], f64) -> Result<Vec<u8>, PublicationError> + Send,
+>;
+
 pub struct RootActorPort {
     pub expected_sha256: String,
-    pub execute: Box<
-        dyn Fn(&[String], &[(String, String)], &[u8], f64) -> Result<Vec<u8>, PublicationError>
-            + Send,
-    >,
+    pub execute: RootActorExecute,
 }
 
 impl RootActorPort {

@@ -315,9 +315,9 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
     // FAILED.
     for index in 0..count {
         if started[index] || completed_status[index].is_some() {
-            for earlier in 0..index {
-                if completed_status[earlier].is_none() {
-                    completed_status[earlier] = Some("passed");
+            for status in completed_status.iter_mut().take(index) {
+                if status.is_none() {
+                    *status = Some("passed");
                 }
             }
         }
@@ -382,12 +382,6 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
             "not_run"
         } else if running_index.is_some() && index > running_index.unwrap() {
             "waiting"
-        } else if completed_event.is_some() && build_result.as_deref() == Some("aborted") {
-            "unknown"
-        } else if stale && started[index] {
-            "unknown"
-        } else if completed_event.is_some() {
-            "unknown"
         } else {
             "unknown"
         };

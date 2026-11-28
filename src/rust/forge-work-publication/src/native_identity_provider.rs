@@ -119,7 +119,7 @@ impl NativeVerificationIdentityProvider {
             return Ok(false);
         }
         let after = self.config.after.as_deref().unwrap_or_default();
-        admitted_after(job, after).map_err(|code| PublicationError::Code(code))
+        admitted_after(job, after).map_err(PublicationError::Code)
     }
 
     pub fn read(&self, review: &str) -> Result<Value, PublicationError> {
@@ -269,7 +269,7 @@ impl NativeVerificationIdentityProvider {
         };
         let checks: Vec<Vec<String>> = declaration["checks"]
             .as_array()
-            .map(|rows| rows.iter().map(|row| strings(row)).collect())
+            .map(|rows| rows.iter().map(&strings).collect())
             .unwrap_or_default();
         let phases: Vec<CiPhase> = declaration["phases"]
             .as_array()

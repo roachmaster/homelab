@@ -219,9 +219,10 @@ fn policy_value(value: &Value, depth: u32, remaining: &mut i64) -> Result<Value,
     match value {
         Value::Null | Value::Bool(_) | Value::String(_) => Ok(value.clone()),
         Value::Number(number) => {
-            if number.is_i64() || number.is_u64() {
-                Ok(value.clone())
-            } else if number.as_f64().is_some_and(|float| float.is_finite()) {
+            if number.is_i64()
+                || number.is_u64()
+                || number.as_f64().is_some_and(|float| float.is_finite())
+            {
                 Ok(value.clone())
             } else {
                 Err("Unsupported verification policy value".to_string())

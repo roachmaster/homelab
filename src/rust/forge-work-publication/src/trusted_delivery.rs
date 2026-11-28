@@ -10,7 +10,7 @@
 //! trusted_delivery_provider.rs.
 
 use std::collections::BTreeMap;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, PathBuf};
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -460,12 +460,7 @@ pub fn jenkins_gate_manifest(
         .filter(|(path, _)| protected_delivery_gate_for(path, &contract))
         .map(|(path, value)| (path.clone(), value.clone()))
         .collect();
-    let protected_value = Value::Object(
-        protected
-            .into_iter()
-            .map(|(key, value)| (key, value))
-            .collect::<Map<_, _>>(),
-    );
+    let protected_value = Value::Object(protected.into_iter().collect::<Map<_, _>>());
     let source_digest = format!("{:x}", Sha256::digest(canonical_bytes(&protected_value)));
     let helper_digest = format!(
         "{:x}",
@@ -813,7 +808,7 @@ impl ForgeJenkinsPort {
             let line = line.strip_suffix('\r').unwrap_or(line);
             if line.is_empty()
                 && text.ends_with('\n')
-                && line == text.split('\n').last().unwrap_or_default()
+                && line == text.split('\n').next_back().unwrap_or_default()
             {
                 continue;
             }

@@ -829,10 +829,6 @@ impl From<ProviderError> for ReviewError {
 
 pub type ProviderResult<T> = Result<T, ProviderError>;
 
-fn other<T>(message: impl Into<String>) -> ProviderResult<T> {
-    Err(ProviderError::Other(message.into()))
-}
-
 /// One branch sync record (the keyword arguments of
 /// AgentBranchProvider.record_sync).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -868,10 +864,12 @@ impl PublicationPullRequestsPort for GitHubPullRequestClient {
 
 /// GitRepositoryProvider: private per-publication clones,
 /// persistent agent-branch cache clones, and the push path.
+pub type RemoteUrlFactory = Box<dyn Fn(&str) -> String + Send>;
+
 pub struct GitRepositoryProvider {
     config: PublicationConfig,
     execute: Box<dyn CommandExecutor>,
-    remote_url_factory: Box<dyn Fn(&str) -> String + Send>,
+    remote_url_factory: RemoteUrlFactory,
     branch_provider: Option<Box<dyn PublicationBranchPort>>,
 }
 
@@ -879,7 +877,7 @@ impl GitRepositoryProvider {
     pub fn new(
         config: PublicationConfig,
         execute: Box<dyn CommandExecutor>,
-        remote_url_factory: Option<Box<dyn Fn(&str) -> String + Send>>,
+        remote_url_factory: Option<RemoteUrlFactory>,
         branch_provider: Option<Box<dyn PublicationBranchPort>>,
     ) -> GitRepositoryProvider {
         let fallback_config = config.clone();
@@ -938,13 +936,13 @@ impl GitRepositoryProvider {
             argv.push(repository.to_string_lossy().into_owned());
         }
         argv.extend(args.iter().map(|arg| arg.to_string()));
-        Ok(self.execute.execute(
+        self.execute.execute(
             &argv,
             &parent_environment(&self.config),
             None,
             None,
             timeout_seconds,
-        )?)
+        )
     }
 
     pub fn git_text(
@@ -981,14 +979,13 @@ impl GitRepositoryProvider {
         if !git_dir.is_dir() {
             return;
         }
-        if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
-            if self
+        if (git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists())
+            && self
                 .git(Some(clone_dir), &["rebase", "--abort"], false, 60.0)
                 .is_err()
-            {
-                let _ = std::fs::remove_dir_all(git_dir.join("rebase-merge"));
-                let _ = std::fs::remove_dir_all(git_dir.join("rebase-apply"));
-            }
+        {
+            let _ = std::fs::remove_dir_all(git_dir.join("rebase-merge"));
+            let _ = std::fs::remove_dir_all(git_dir.join("rebase-apply"));
         }
         if git_dir.join("MERGE_HEAD").exists()
             && self
@@ -1492,7 +1489,6 @@ impl GitRepositoryProvider {
                                 .get("correlation_id")
                                 .and_then(Value::as_str)
                                 .map(|text| text.to_string()),
-                            ..Default::default()
                         })?;
                         return Err(PublicationError::new("main_merge_conflict").into());
                     }
@@ -1575,7 +1571,6 @@ impl GitRepositoryProvider {
                     .get("correlation_id")
                     .and_then(Value::as_str)
                     .map(|text| text.to_string()),
-                ..Default::default()
             })?;
         }
         if branch_first {
@@ -1966,9 +1961,7 @@ fn nix_uid() -> u32 {
 
 impl ReviewGitPort for GitRepositoryProvider {
     fn git_bytes(&mut self, repo: Option<&Path>, args: &[&str]) -> Result<Vec<u8>, ReviewError> {
-        Ok(self
-            .git(repo, args, false, 60.0)
-            .map_err(ReviewError::from)?)
+        self.git(repo, args, false, 60.0).map_err(ReviewError::from)
     }
 
     fn verify(&mut self, repo: &Path, head: &str) -> Result<(), ReviewError> {
@@ -1980,7 +1973,7 @@ impl ReviewGitPort for GitRepositoryProvider {
         job: &Value,
         snapshot: &ReviewSnapshot,
     ) -> Result<(PathBuf, String), ReviewError> {
-        Ok(self.prepare(job, snapshot).map_err(ReviewError::from)?)
+        self.prepare(job, snapshot).map_err(ReviewError::from)
     }
 
     fn prepare_source(
@@ -1988,9 +1981,8 @@ impl ReviewGitPort for GitRepositoryProvider {
         job: &Value,
         snapshot: &ReviewSnapshot,
     ) -> Result<(PathBuf, String), ReviewError> {
-        Ok(self
-            .prepare_source(job, snapshot)
-            .map_err(ReviewError::from)?)
+        self.prepare_source(job, snapshot)
+            .map_err(ReviewError::from)
     }
 }
 

@@ -165,10 +165,7 @@ fn find_key_marker(text: &str, from: usize, kind: &str) -> Option<(usize, usize)
 fn redact_private_keys(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
-    loop {
-        let Some((start, begin_end)) = find_key_marker(text, cursor, "BEGIN") else {
-            break;
-        };
+    while let Some((start, begin_end)) = find_key_marker(text, cursor, "BEGIN") {
         let Some((_end_start, end)) = find_key_marker(text, start, "END") else {
             // No closing marker: the begin marker stays literal and
             // the scan continues after it.
@@ -864,7 +861,7 @@ pub fn extract_stage_evidence_from_receipt(
             if !name.starts_with("check_") {
                 continue;
             }
-            let suffix = name.splitn(2, '_').nth(1).unwrap_or_default();
+            let suffix = name.split_once('_').map(|x| x.1).unwrap_or_default();
             if let Ok(idx) = suffix.trim().parse::<i64>() {
                 stage_meta.insert(idx, row.clone());
             }

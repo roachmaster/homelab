@@ -44,8 +44,7 @@ impl SourceLimits {
         max_total_bytes: i64,
         timeout_seconds: i64,
     ) -> Result<Self, String> {
-        let valid = max_files >= 1
-            && max_files <= MAX_FILES
+        let valid = (1..=MAX_FILES).contains(&max_files)
             && (1..=MAX_FILE_BYTES).contains(&max_file_bytes)
             && (1..=MAX_TOTAL_BYTES).contains(&max_total_bytes)
             && (1..=600).contains(&timeout_seconds);
