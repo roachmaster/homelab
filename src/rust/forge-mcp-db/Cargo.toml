@@ -1,0 +1,20 @@
+[package]
+name = "forge-mcp-db"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Homelab MCP server: read-only PostgreSQL tools over MCP Streamable HTTP, with static bearer tokens, a built-in OAuth 2.1 authorization server and connection presence (Rust port of deploy/mission-control/mcp-postgres)."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+tokio = { version = "1", features = ["rt"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+nix = { version = "0.30", features = ["fs", "user"] }
+
+[[bin]]
+name = "forge-mcp-tokens"
+path = "src/bin/forge-mcp-tokens.rs"
