@@ -8,9 +8,9 @@ builds the cluster from initdb (trust auth for the functional
 cluster; the admission cluster installs the real HBA template),
 applies provision.sql + migrations to a target version, and tears
 the cluster down afterwards. The suite runs inside the
-py-agent-runner gate (unittest discover); the
-disposable-Postgres flag does not affect it (this suite owns its
-cluster, it does not use the shared fixture).
+py-agent-runner gate (unittest discover). It owns its cluster but
+honors the shared PG16 availability policy: branch scope declares
+these database tests not run; main scope executes them with zero skips.
 """
 
 import http.client
@@ -30,6 +30,7 @@ import psycopg2.extras
 
 import forge_pg_proxy as proxy
 import proxy_verify
+from work_pg_fixture import PG16_AVAILABLE
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
@@ -288,6 +289,7 @@ class ScratchCluster:
         return result.returncode == 0, result.stdout + result.stderr
 
 
+@unittest.skipUnless(PG16_AVAILABLE, "Requires owned PostgreSQL16")
 class ProxyDbTestCase(unittest.TestCase):
     """Base: one scratch cluster per test class, at M50 + grants."""
 
@@ -2157,6 +2159,7 @@ class CutoverStageTest(ProxyDbTestCase, FixtureMixin):
         self.assertTrue(ok, output)
 
 
+@unittest.skipUnless(PG16_AVAILABLE, "Requires owned PostgreSQL16")
 class AdmissionTest(unittest.TestCase):
     """Finding 11: the real HBA templates admit and refuse on real
     TCP (SCRAM) and local (peer) connections."""
@@ -2223,6 +2226,7 @@ class AdmissionTest(unittest.TestCase):
                 self.cluster.connect("forge_agent", user)
 
 
+@unittest.skipUnless(PG16_AVAILABLE, "Requires owned PostgreSQL16")
 class PreparationAdmissionTest(unittest.TestCase):
     """Finding 3: the preparation HBA template admits the proxy OS
     user as each caller role via local peer auth (six peer rules +
