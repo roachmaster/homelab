@@ -566,6 +566,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-ci-verifier"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "forge-core",
+ "forge-jenkins",
+ "nix 0.30.1",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
+]
+
+[[package]]
 name = "forge-core"
 version = "0.1.0"
 
