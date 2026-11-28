@@ -858,6 +858,55 @@ pub trait PublicationBranchPort: Send {
 /// The pull-request listing surface push() consults.
 pub trait PublicationPullRequestsPort: Send {
     fn list_open(&mut self, job: &Value) -> ProviderResult<Vec<Value>>;
+
+    /// Refuse a push to a reserved branch whose open pull requests do
+    /// not match the reservation: none when the reservation has no
+    /// active PR, exactly the active one otherwise.
+    fn check_reserved_branch(
+        &mut self,
+        listing_job: &Value,
+        reservation: &Value,
+    ) -> ProviderResult<()> {
+        let open_prs = self.list_open(listing_job)?;
+        let active = reservation
+            .get("active_pr_url")
+            .and_then(Value::as_str)
+            .map(|text| text.to_string());
+        match active {
+            None => {
+                if !open_prs.is_empty() {
+                    return Err(PublicationError::new("branch_open_pr_conflict").into());
+                }
+            }
+            Some(active) => {
+                if open_prs.len() != 1
+                    || open_prs[0].get("html_url").and_then(Value::as_str) != Some(active.as_str())
+                {
+                    return Err(PublicationError::new("branch_open_pr_conflict").into());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Null pull-request listing: no pull-request client is selected, so
+/// there is nothing to list and a reserved-branch push is not guarded.
+#[derive(Default)]
+pub struct NoPullRequests;
+
+impl PublicationPullRequestsPort for NoPullRequests {
+    fn list_open(&mut self, _job: &Value) -> ProviderResult<Vec<Value>> {
+        Ok(Vec::new())
+    }
+
+    fn check_reserved_branch(
+        &mut self,
+        _listing_job: &Value,
+        _reservation: &Value,
+    ) -> ProviderResult<()> {
+        Ok(())
+    }
 }
 
 impl PublicationPullRequestsPort for GitHubPullRequestClient {
@@ -1905,26 +1954,7 @@ impl GitRepositoryProvider {
             if let Some(pull_requests) = pull_requests {
                 let mut listing_job = job.clone();
                 listing_job["branch_name"] = json!(branch);
-                let open_prs = pull_requests.list_open(&listing_job)?;
-                let active = reservation
-                    .get("active_pr_url")
-                    .and_then(Value::as_str)
-                    .map(|text| text.to_string());
-                match active {
-                    None => {
-                        if !open_prs.is_empty() {
-                            return Err(PublicationError::new("branch_open_pr_conflict").into());
-                        }
-                    }
-                    Some(active) => {
-                        if open_prs.len() != 1
-                            || open_prs[0].get("html_url").and_then(Value::as_str)
-                                != Some(active.as_str())
-                        {
-                            return Err(PublicationError::new("branch_open_pr_conflict").into());
-                        }
-                    }
-                }
+                pull_requests.check_reserved_branch(&listing_job, reservation)?;
             }
             let lease_expected = expected_remote_head.unwrap_or("");
             let lease_arg = format!("--force-with-lease=refs/heads/{branch}:{lease_expected}");

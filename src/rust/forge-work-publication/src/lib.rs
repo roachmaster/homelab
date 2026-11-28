@@ -30,6 +30,7 @@ pub mod identity_store;
 pub mod native_identity_provider;
 pub mod native_ci_proofs;
 pub mod native_jenkins;
+pub mod native_ports;
 pub mod native_repair;
 pub mod post_merge;
 pub mod pipeline_projection;
