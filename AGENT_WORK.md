@@ -1,3 +1,19 @@
+## MCP host library ownership — isolated correction, 2026-11-28
+
+The incoming MCP host library defined Backend and input_schema directly in its
+crate root, violating the existing R3 declaration-only root rule. Both existing
+bodies now live unchanged in private owned backend/schema modules. Root public
+re-exports preserve Backend, input_schema, FakePort, LivePort, McpServer and
+ServerHandler; existing public modules and feature/dependency selection remain
+unchanged. No checker exemption or additional helper visibility was introduced.
+
+Validation: all 129 Rust-script tests; whole-workspace imports/core-layer,
+dependency, rustfmt and portal-style checks; strict all-target/all-feature MCP
+host Clippy; six MCP host unit tests; and its existing external scene BDD feature
+all passed. Moved enum/trait implementation and schema body compare byte-for-byte
+against the base. Evidence: /mnt/data/homelab-build/mcp-host-r3-evidence-20261128.
+No live configuration, SQL, CI policy, service or remote Git state changed.
+
 ## Main-stage evidence and failure-tail projection — 2026-11-28
 
 DeliveryVerificationStore now delegates the existing typed main-stage evidence
