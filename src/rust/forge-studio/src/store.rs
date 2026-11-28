@@ -484,3 +484,79 @@ async fn claim_body(tx: &mut Transaction<'_>) -> StoreResult<Option<BuildRow>> {
     event(tx, &claim.build_id, "running").await?;
     Ok(Some(claim))
 }
+
+/// Studio's build store port: admission, status and cancellation for
+/// the API, and claim/renew/finish attempt fencing for the worker.
+/// `Store` is the PostgreSQL implementation; tests bind fakes.
+pub trait BuildStore: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
+    fn submit(
+        &self,
+        project: &(String, String),
+        revision: &str,
+        profile: &str,
+        key: &str,
+        max_builds: i32,
+        approved_revision: &str,
+        source_recipe: &str,
+    ) -> StoreResult<BuildRow>;
+    fn status(
+        &self,
+        project: &(String, String),
+        build_id: &str,
+        after_sequence: i32,
+    ) -> StoreResult<BuildRow>;
+    fn cancel(&self, project: &(String, String), build_id: &str) -> StoreResult<BuildRow>;
+    fn claim(&self) -> StoreResult<Option<BuildRow>>;
+    fn renew(&self, claim: &BuildRow) -> StoreResult<bool>;
+    fn finish(&self, claim: &BuildRow, artifact: Option<(&str, i64)>) -> StoreResult<bool>;
+}
+
+impl BuildStore for Store {
+    fn submit(
+        &self,
+        project: &(String, String),
+        revision: &str,
+        profile: &str,
+        key: &str,
+        max_builds: i32,
+        approved_revision: &str,
+        source_recipe: &str,
+    ) -> StoreResult<BuildRow> {
+        Store::submit(
+            self,
+            project,
+            revision,
+            profile,
+            key,
+            max_builds,
+            approved_revision,
+            source_recipe,
+        )
+    }
+
+    fn status(
+        &self,
+        project: &(String, String),
+        build_id: &str,
+        after_sequence: i32,
+    ) -> StoreResult<BuildRow> {
+        Store::status(self, project, build_id, after_sequence)
+    }
+
+    fn cancel(&self, project: &(String, String), build_id: &str) -> StoreResult<BuildRow> {
+        Store::cancel(self, project, build_id)
+    }
+
+    fn claim(&self) -> StoreResult<Option<BuildRow>> {
+        Store::claim(self)
+    }
+
+    fn renew(&self, claim: &BuildRow) -> StoreResult<bool> {
+        Store::renew(self, claim)
+    }
+
+    fn finish(&self, claim: &BuildRow, artifact: Option<(&str, i64)>) -> StoreResult<bool> {
+        Store::finish(self, claim, artifact)
+    }
+}
