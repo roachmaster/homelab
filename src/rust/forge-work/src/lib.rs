@@ -22,6 +22,7 @@ pub mod flow_config;
 pub mod handoff_context;
 pub mod execution_policy;
 pub mod muse_intake;
+pub mod native_ci_completion;
 pub mod native_ci_postfix;
 pub mod pinned_recipe;
 pub mod plan_lineage;

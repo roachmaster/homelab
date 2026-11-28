@@ -811,6 +811,24 @@ pub trait WorkflowTx: RetryEvents {
         project: &str,
         task_ids: &[Uuid],
     ) -> Result<bool, WorkError>;
+    /// The M38 completion's candidate scan: the workflow's
+    /// local reviews whose verification passed and cleaned
+    /// up, newest first, at most 64 review ids.
+    fn verified_local_reviews(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<Vec<Uuid>, WorkError>;
+    /// The M38 completion's bound retry-event state:
+    /// {used, limit, status, admissions} for the workflow's
+    /// infrastructure event, or None when no such event row
+    /// exists.
+    fn postfix_event_state(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        event_id: Uuid,
+    ) -> Result<Option<Value>, WorkError>;
 }
 
 /// Vends workflow transactions (WorkflowStore._transaction with

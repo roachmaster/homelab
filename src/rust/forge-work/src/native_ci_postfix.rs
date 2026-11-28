@@ -55,7 +55,7 @@ fn mismatch() -> WorkError {
     rejected(409, "result_mismatch")
 }
 
-fn hex_ok(value: &str, len: usize) -> bool {
+pub(crate) fn hex_ok(value: &str, len: usize) -> bool {
     value.len() == len
         && value
             .bytes()

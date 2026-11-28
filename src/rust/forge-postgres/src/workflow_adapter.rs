@@ -2061,6 +2061,41 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
             .map_err(work_err)
     }
 
+    fn verified_local_reviews(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+    ) -> Result<Vec<Uuid>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&workflow_id, &self.owner, &project];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT q.review_id FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=$1 AND q.owner_id=$2 AND q.project_alias=$3 AND q.phase='local' AND q.verification->'checks_passed'='true'::jsonb AND q.verification->'cleanup_confirmed'='true'::jsonb ORDER BY q.created_at DESC LIMIT 64",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows.iter().map(|row| row.get::<usize, Uuid>(0)).collect())
+    }
+
+    fn postfix_event_state(
+        &mut self,
+        project: &str,
+        workflow_id: Uuid,
+        event_id: Uuid,
+    ) -> Result<Option<Value>, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&self.owner, &project, &workflow_id, &event_id];
+        let rows = self
+            .tx
+            .query_rows(
+                "SELECT to_jsonb(t) AS doc FROM (SELECT e.used, e.attempt_limit AS \"limit\", e.status, (SELECT count(*) FROM forge_agent.coding_retry_event_admissions a WHERE a.event_id=e.event_id) AS admissions FROM forge_agent.coding_retry_events e WHERE e.owner_id=$1 AND e.project_alias=$2 AND e.scope_kind='native_workflow' AND e.scope_id=$3 AND e.kind='infrastructure' AND e.phase_id='infrastructure' AND e.event_id=$4) t",
+                params,
+            )
+            .map_err(work_err)?;
+        Ok(rows
+            .first()
+            .and_then(|row| row.get::<usize, Option<Value>>(0)))
+    }
+
     fn unstarted_busy(
         &mut self,
         task_id: Uuid,

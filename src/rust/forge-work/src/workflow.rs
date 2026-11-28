@@ -2750,6 +2750,8 @@ mod tests {
         unused!(plan_source_present, => Result<bool, WorkError>);
         unused!(plan_lineage_busy, Uuid, Uuid, Uuid => Result<bool, WorkError>);
         unused!(cancel_receipt_exists, &str, &[Uuid] => Result<bool, WorkError>);
+        unused!(verified_local_reviews, &str, Uuid => Result<Vec<Uuid>, WorkError>);
+        unused!(postfix_event_state, &str, Uuid, Uuid => Result<Option<Value>, WorkError>);
     }
 
     fn rows() -> (Value, Value, Value, Value, Value) {
