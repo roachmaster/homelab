@@ -83,10 +83,9 @@ pub fn validate_config(raw: Option<&Value>) -> Result<PresenceConfig, PresenceEr
     let Some(object) = raw.as_object() else {
         return Err(error("presence must be an object with known keys only"));
     };
-    if object
-        .keys()
-        .any(|key| !["enabled", "store_path", "reader_token_file", "subjects"].contains(&key.as_str()))
-    {
+    if object.keys().any(|key| {
+        !["enabled", "store_path", "reader_token_file", "subjects"].contains(&key.as_str())
+    }) {
         return Err(error("presence must be an object with known keys only"));
     }
     if let Some(enabled) = object.get("enabled") {
@@ -167,9 +166,7 @@ pub fn validate_config(raw: Option<&Value>) -> Result<PresenceConfig, PresenceEr
             }
             if let Some(existing) = agents.get(agent_id) {
                 if existing != label {
-                    return Err(error(
-                        "presence labels for the same agent_id must agree",
-                    ));
+                    return Err(error("presence labels for the same agent_id must agree"));
                 }
             }
             agents.insert(agent_id.to_string(), label.to_string());
@@ -234,10 +231,7 @@ impl ReaderTokenAuth {
             .metadata()
             .map_err(|_| PresenceError("presence reader token cannot be read".to_string()))?;
         let euid = nix::unistd::geteuid().as_raw();
-        if !info.is_file()
-            || (info.uid() != 0 && info.uid() != euid)
-            || info.mode() & 0o027 != 0
-        {
+        if !info.is_file() || (info.uid() != 0 && info.uid() != euid) || info.mode() & 0o027 != 0 {
             return Err(PresenceError(
                 "presence reader token must be a private regular file".to_string(),
             ));
@@ -253,8 +247,7 @@ impl ReaderTokenAuth {
                 .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'-');
         if !valid {
             return Err(PresenceError(
-                "presence reader token must contain 32 to 256 URL-safe characters"
-                    .to_string(),
+                "presence reader token must contain 32 to 256 URL-safe characters".to_string(),
             ));
         }
         Ok(ReaderTokenAuth {
@@ -291,9 +284,7 @@ impl SqlitePresenceStore {
         let path_buf = std::path::PathBuf::from(path);
         let parent = path_buf.parent().ok_or_else(unavailable)?;
         let parent_info = std::fs::metadata(parent).map_err(|_| {
-            PresenceError(
-                "presence store parent must be service-owned and private".to_string(),
-            )
+            PresenceError("presence store parent must be service-owned and private".to_string())
         })?;
         let euid = nix::unistd::geteuid().as_raw();
         if !parent_info.is_dir()
@@ -461,9 +452,7 @@ impl SqlitePresenceStore {
             }
             seen.insert(agent_id, moment);
         }
-        if seen.len() > MAX_AGENTS
-            || seen.keys().any(|id| !self.agent_ids.contains(id))
-        {
+        if seen.len() > MAX_AGENTS || seen.keys().any(|id| !self.agent_ids.contains(id)) {
             return Err(PresenceError(
                 "presence store contains invalid timestamps or identities".to_string(),
             ));
@@ -504,8 +493,7 @@ impl PresenceProvider {
     pub fn heartbeat(&self, principal: &Principal) -> Result<JsonValue, PresenceError> {
         if !self.is_mapped(Some(principal)) {
             return Err(PresenceError(
-                "heartbeat identity is not configured for this authenticated client"
-                    .to_string(),
+                "heartbeat identity is not configured for this authenticated client".to_string(),
             ));
         }
         let now = self.now()?;
@@ -639,9 +627,7 @@ impl PresencePort for NoPresence {
 }
 
 /// PresenceProviderFactory.create()
-pub fn create_provider(
-    config: &PresenceConfig,
-) -> Result<Option<PresenceProvider>, PresenceError> {
+pub fn create_provider(config: &PresenceConfig) -> Result<Option<PresenceProvider>, PresenceError> {
     if !config.enabled {
         return Ok(None);
     }

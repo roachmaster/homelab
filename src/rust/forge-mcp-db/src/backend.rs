@@ -230,12 +230,14 @@ impl Backend {
                 let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
                     .iter()
                     .enumerate()
-                    .map(|(index, param)| -> &(dyn tokio_postgres::types::ToSql + Sync) {
-                        match param {
-                            Param::Text(_) => &text_params[index],
-                            Param::Int(value) => value,
-                        }
-                    })
+                    .map(
+                        |(index, param)| -> &(dyn tokio_postgres::types::ToSql + Sync) {
+                            match param {
+                                Param::Text(_) => &text_params[index],
+                                Param::Int(value) => value,
+                            }
+                        },
+                    )
                     .collect();
                 let fetched = tx
                     .query(&statement, refs.as_slice())
@@ -298,11 +300,7 @@ fn cell_from(row: &Row, index: usize, ty: &Type) -> Cell {
         1083 => Cell::Text(iso_time(get!(chrono::NaiveTime))),
         1114 => {
             let value = get!(chrono::NaiveDateTime);
-            Cell::Text(format!(
-                "{}T{}",
-                value.date(),
-                iso_time(value.time())
-            ))
+            Cell::Text(format!("{}T{}", value.date(), iso_time(value.time())))
         }
         1184 => {
             let value = get!(chrono::DateTime<chrono::Utc>);
