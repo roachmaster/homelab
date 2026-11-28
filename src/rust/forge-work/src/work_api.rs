@@ -2530,4 +2530,361 @@ mod tests {
         assert_eq!(body["event"]["task"]["progress"], 3);
         assert_eq!(body["event"]["task"]["status"], "queued");
     }
+
+    fn decode_body(kind: &str, extra: Value) -> Value {
+        let mut map = json!({
+            "kind": kind,
+            "request_id": "req-1",
+            "project_alias": "homelab",
+        });
+        map.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        map
+    }
+
+    fn invalid() -> WorkError {
+        WorkError::rejected(400, "invalid_request")
+    }
+
+    #[test]
+    fn decode_get_requires_a_task_id() {
+        let task_id = Uuid::from_u128(77);
+        let decoded = decode(
+            WorkDestination::Get,
+            "req-1",
+            &decode_body("work_get", json!({"task_id": task_id.to_string()})),
+        )
+        .expect("get");
+        match decoded {
+            WorkCommand::Get {
+                project_alias,
+                task_id: got,
+            } => {
+                assert_eq!(project_alias, "homelab");
+                assert_eq!(got, task_id);
+            }
+            other => panic!("decoded {other:?}"),
+        }
+        // Missing task_id, an unknown key, a malformed UUID and a
+        // correlation mismatch are all invalid.
+        assert_eq!(
+            decode(WorkDestination::Get, "req-1", &decode_body("work_get", json!({}))).err(),
+            Some(invalid())
+        );
+        assert_eq!(
+            decode(
+                WorkDestination::Get,
+                "req-1",
+                &decode_body(
+                    "work_get",
+                    json!({"task_id": task_id.to_string(), "surprise": 1}),
+                ),
+            )
+            .err(),
+            Some(invalid())
+        );
+        assert_eq!(
+            decode(
+                WorkDestination::Get,
+                "req-1",
+                &decode_body("work_get", json!({"task_id": "not-a-uuid"})),
+            )
+            .err(),
+            Some(invalid())
+        );
+        assert_eq!(
+            decode(
+                WorkDestination::Get,
+                "req-2",
+                &decode_body("work_get", json!({"task_id": task_id.to_string()})),
+            )
+            .err(),
+            Some(invalid())
+        );
+    }
+
+    #[test]
+    fn decode_list_defaults_and_bounds() {
+        let decoded = decode(
+            WorkDestination::List,
+            "req-1",
+            &decode_body("work_list", json!({})),
+        )
+        .expect("list");
+        match decoded {
+            WorkCommand::List {
+                project_alias,
+                status_filter,
+                limit,
+                cursor,
+                task_kind_filter,
+            } => {
+                assert_eq!(project_alias, "homelab");
+                assert_eq!(status_filter, None);
+                assert_eq!(limit, 20);
+                assert_eq!(cursor, None);
+                assert_eq!(task_kind_filter, None);
+            }
+            other => panic!("decoded {other:?}"),
+        }
+        assert_eq!(
+            decode(
+                WorkDestination::List,
+                "req-1",
+                &decode_body("work_list", json!({"status_filter": "bogus"})),
+            )
+            .err(),
+            Some(invalid())
+        );
+        assert_eq!(
+            decode(
+                WorkDestination::List,
+                "req-1",
+                &decode_body("work_list", json!({"limit": 0})),
+            )
+            .err(),
+            Some(invalid())
+        );
+        assert_eq!(
+            decode(
+                WorkDestination::List,
+                "req-1",
+                &decode_body("work_list", json!({"limit": 51})),
+            )
+            .err(),
+            Some(invalid())
+        );
+        let decoded = decode(
+            WorkDestination::List,
+            "req-1",
+            &decode_body("work_list", json!({"task_kind_filter": "defect"})),
+        )
+        .expect("defect list");
+        assert!(matches!(
+            decoded,
+            WorkCommand::List {
+                task_kind_filter: Some(ref filter),
+                ..
+            } if filter == "defect"
+        ));
+        assert_eq!(
+            decode(
+                WorkDestination::List,
+                "req-1",
+                &decode_body("work_list", json!({"task_kind_filter": "other"})),
+            )
+            .err(),
+            Some(WorkError::rejected(
+                400,
+                "invalid_request:defect.task_kind_filter"
+            ))
+        );
+    }
+
+    #[test]
+    fn decode_events_defaults_and_bounds() {
+        let task_id = Uuid::from_u128(78);
+        let decoded = decode(
+            WorkDestination::Events,
+            "req-1",
+            &decode_body("work_events", json!({"task_id": task_id.to_string()})),
+        )
+        .expect("events");
+        match decoded {
+            WorkCommand::Events {
+                project_alias,
+                task_id: got,
+                after_sequence,
+                limit,
+            } => {
+                assert_eq!(project_alias, "homelab");
+                assert_eq!(got, task_id);
+                assert_eq!(after_sequence, 0);
+                assert_eq!(limit, 50);
+            }
+            other => panic!("decoded {other:?}"),
+        }
+        assert_eq!(
+            decode(
+                WorkDestination::Events,
+                "req-1",
+                &decode_body(
+                    "work_events",
+                    json!({"task_id": task_id.to_string(), "limit": 101}),
+                ),
+            )
+            .err(),
+            Some(invalid())
+        );
+        assert_eq!(
+            decode(
+                WorkDestination::Events,
+                "req-1",
+                &decode_body(
+                    "work_events",
+                    json!({"task_id": task_id.to_string(), "after_sequence": -1}),
+                ),
+            )
+            .err(),
+            Some(invalid())
+        );
+    }
+
+    #[test]
+    fn decode_cancel_requires_the_full_key_set() {
+        let task_id = Uuid::from_u128(79);
+        let full = json!({
+            "task_id": task_id.to_string(),
+            "expected_revision": 3,
+            "idempotency_key": "cancel-1",
+        });
+        let decoded = decode(
+            WorkDestination::Cancel,
+            "req-1",
+            &decode_body("work_cancel", full.clone()),
+        )
+        .expect("cancel");
+        match decoded {
+            WorkCommand::Cancel(command) => {
+                assert_eq!(command.task_id, task_id);
+                assert_eq!(command.expected_revision, 3);
+                assert_eq!(command.idempotency_key, "cancel-1");
+            }
+            other => panic!("decoded {other:?}"),
+        }
+        let mut missing = full.clone();
+        missing.as_object_mut().unwrap().remove("idempotency_key");
+        assert_eq!(
+            decode(
+                WorkDestination::Cancel,
+                "req-1",
+                &decode_body("work_cancel", missing),
+            )
+            .err(),
+            Some(invalid())
+        );
+    }
+
+    #[test]
+    fn decode_accept_defaults_the_review_note() {
+        let task_id = Uuid::from_u128(80);
+        let decoded = decode(
+            WorkDestination::Accept,
+            "req-1",
+            &decode_body(
+                "work_accept",
+                json!({
+                    "task_id": task_id.to_string(),
+                    "expected_revision": 2,
+                    "idempotency_key": "accept-1",
+                }),
+            ),
+        )
+        .expect("accept");
+        match decoded {
+            WorkCommand::Accept(command) => {
+                assert_eq!(command.task_id, task_id);
+                assert_eq!(command.review_note, "");
+            }
+            other => panic!("decoded {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_resume_requires_agent_and_receipt() {
+        let task_id = Uuid::from_u128(81);
+        let receipt_id = Uuid::from_u128(82);
+        let full = json!({
+            "task_id": task_id.to_string(),
+            "expected_revision": 4,
+            "idempotency_key": "resume-1",
+            "agent_profile": "agy-author",
+            "reconciliation_receipt_id": receipt_id.to_string(),
+        });
+        let decoded = decode(
+            WorkDestination::Resume,
+            "req-1",
+            &decode_body("work_resume", full.clone()),
+        )
+        .expect("resume");
+        match decoded {
+            WorkCommand::Resume(command) => {
+                assert_eq!(command.agent_profile, "agy-author");
+                assert_eq!(command.reconciliation_receipt_id, receipt_id);
+                assert_eq!(command.note, "");
+            }
+            other => panic!("decoded {other:?}"),
+        }
+        let mut missing = full.clone();
+        missing.as_object_mut().unwrap().remove("agent_profile");
+        assert_eq!(
+            decode(
+                WorkDestination::Resume,
+                "req-1",
+                &decode_body("work_resume", missing),
+            )
+            .err(),
+            Some(invalid())
+        );
+    }
+
+    #[test]
+    fn decode_result_bounds_the_page_size() {
+        let task_id = Uuid::from_u128(83);
+        let attempt_id = Uuid::from_u128(84);
+        let base = json!({
+            "task_id": task_id.to_string(),
+            "attempt_id": attempt_id.to_string(),
+        });
+        let decoded = decode(
+            WorkDestination::Result,
+            "req-1",
+            &decode_body("work_result", base.clone()),
+        )
+        .expect("result");
+        assert!(matches!(
+            decoded,
+            WorkCommand::Result {
+                limit_bytes: 16384,
+                cursor: None,
+                ..
+            }
+        ));
+        let mut too_small = base.clone();
+        too_small["limit_bytes"] = json!(3);
+        assert_eq!(
+            decode(
+                WorkDestination::Result,
+                "req-1",
+                &decode_body("work_result", too_small),
+            )
+            .err(),
+            Some(invalid())
+        );
+        let mut too_big = base.clone();
+        too_big["limit_bytes"] = json!(16385);
+        assert_eq!(
+            decode(
+                WorkDestination::Result,
+                "req-1",
+                &decode_body("work_result", too_big),
+            )
+            .err(),
+            Some(invalid())
+        );
+        // The attempt id is required alongside the task id.
+        let mut no_attempt = base.clone();
+        no_attempt.as_object_mut().unwrap().remove("attempt_id");
+        assert_eq!(
+            decode(
+                WorkDestination::Result,
+                "req-1",
+                &decode_body("work_result", no_attempt),
+            )
+            .err(),
+            Some(invalid())
+        );
+    }
+
 }
