@@ -74,6 +74,23 @@ class PermissionTest(unittest.TestCase):
         for name in ('MCPTool','mcp__read','spawn_subagent','web_search','unknown'):
             self.assertFalse(self.plan.admit(tool(name,{'path':'file'})))
 
+    def test_shell_expansion_cannot_inject_unchecked_rg_operands(self):
+        import shlex
+        (self.workspace/'linked-note').symlink_to(self.note)
+        command='rg -n -- *'
+        lexical=shlex.split(command)
+        # Built-ins only: demonstrate expansion without executing rg, reading
+        # link contents or launching any native tool/account/model process.
+        observed=subprocess.run(['/bin/bash','--noprofile','--norc','-c',
+            'set -- rg -n -- *; printf "%s\\n" "$@"'],cwd=self.workspace,
+            env={'PATH':'/usr/bin:/bin'},capture_output=True,text=True,check=True).stdout.splitlines()
+        self.assertEqual(lexical,['rg','-n','--','*'])
+        self.assertIn('linked-note',observed);self.assertNotEqual(observed,lexical)
+        for expression in ('*','?','[fl]*','{file,linked-note}','~','@(file)'):
+            for quoted in (expression,"'"+expression+"'",'"'+expression+'"'):
+                with self.subTest(pattern=quoted):self.assertFalse(self.plan.terminal('rg -n -- '+quoted))
+        self.assertTrue(self.plan.terminal('rg -n -- source'))
+
     def test_native_file_paths_notes_and_symlinks_are_scoped(self):
         self.assertTrue(self.plan.admit(tool('read_file',{'target_file':'file','limit':100})))
         self.assertTrue(self.plan.admit(tool('read_file',{'target_file':STATE+'/approved-plan.md'})))

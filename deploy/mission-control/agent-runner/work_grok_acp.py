@@ -24,7 +24,8 @@ CONFIG_SUFFIX='\n[permission]\nask = ["Bash", "Read", "Edit", "Grep", "Glob", "r
 
 DIRECTION=('Use native read_file/grep/list_dir in the workspace, closed read-only git commands, '
            'or the exact report_progress.py helper. Implementation alone permits workspace edits and bounded build/test commands. '
-           'Do not use shell substitutions, redirections, publishing, network or external tools.')
+           'Use plain report text; do not use shell substitutions, glob/brace/tilde expansion, '
+           'redirections, publishing, network or external tools.')
 
 
 def wire(value):
@@ -199,7 +200,10 @@ class Permissions:
         # shlex is not a shell parser. Refuse all shell syntax outside the one
         # explicitly supported && sequence, even when quoted. No interpolation.
         command=command.replace('\\"','"')
-        if any(c in command for c in '$`\n\r;|<>\\\x00') or re.search(r'(?<!&)&(?!&)',command):return False
+        # Reject expansion syntax even inside quotes rather than pretending
+        # shlex proves what a shell will execute. Wildcards can become explicit
+        # symlink operands which were absent from the admitted argument list.
+        if any(c in command for c in '$`\n\r;|<>\\\x00*?[]{}~()') or re.search(r'(?<!&)&(?!&)',command):return False
         try:segments=[shlex.split(p,posix=True) for p in command.split('&&')]
         except ValueError:return False
         return 0<len(segments)<=16 and all(self._command(args) for args in segments)
