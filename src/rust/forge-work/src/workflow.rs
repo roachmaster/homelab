@@ -225,6 +225,16 @@ pub trait WorkflowDecisionPort {
         request: &ResumeRequest,
         authority: &crate::workflow_ingress::BoundNativeRetryAuthority,
     ) -> Result<Value, WorkError>;
+    /// WorkStore.resume under a BoundPlanLineageAuthority
+    /// (main delta 4c2ba8b, Plan lineage recovery): the
+    /// adapter validates the authority against the locked
+    /// task, then delegates to the S0 resume and returns the
+    /// Python receipt document (with recipe_digest).
+    fn resume_plan_lineage(
+        &self,
+        request: &ResumeRequest,
+        authority: &crate::plan_lineage::BoundPlanLineageAuthority,
+    ) -> Result<Value, WorkError>;
     /// WorkStore.review_decide under a BoundPreparationRetryAuthority
     /// (F5d owner verification v1): the adapter re-validates the
     /// authority against the locked task and review rows inside
@@ -2724,6 +2734,8 @@ mod tests {
         unused!(plan_direction_busy, Uuid => Result<bool, WorkError>);
         unused!(unstarted_busy, Uuid, Uuid, Uuid => Result<bool, WorkError>);
         unused!(continuation_busy, Uuid => Result<bool, WorkError>);
+        unused!(plan_source_present, => Result<bool, WorkError>);
+        unused!(plan_lineage_busy, Uuid, Uuid, Uuid => Result<bool, WorkError>);
     }
 
     fn rows() -> (Value, Value, Value, Value, Value) {

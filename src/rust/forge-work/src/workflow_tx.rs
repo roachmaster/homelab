@@ -775,6 +775,25 @@ pub trait WorkflowTx: RetryEvents {
     /// pending/checking/retry_infrastructure, publications
     /// in any state.
     fn continuation_busy(&mut self, workflow_id: Uuid) -> Result<bool, WorkError>;
+
+    // -- Plan lineage recovery probes (main delta 4c2ba8b) ---
+
+    /// The M52 read_plan source probe: true when the deployed
+    /// forge_coding_worker_api.read_plan(uuid, uuid) body
+    /// hashes to the pinned M52 source digest.
+    fn plan_source_present(&mut self) -> Result<bool, WorkError>;
+    /// The plan-lineage quiescence composite: result chunks
+    /// for the attempt, reviews for (task, attempt),
+    /// pending/leased workflow actions, live attempts anywhere
+    /// in the workflow, active workflow tasks, open
+    /// publications, or any plan-lineage-fix action already
+    /// recorded in the workflow.
+    fn plan_lineage_busy(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<bool, WorkError>;
 }
 
 /// Vends workflow transactions (WorkflowStore._transaction with

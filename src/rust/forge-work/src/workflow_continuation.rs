@@ -264,7 +264,11 @@ fn mismatch() -> WorkError {
     rejected(409, "result_mismatch")
 }
 
-fn recipe(flow: &WorkflowStore, snapshot: &Value, key: &str) -> Result<PinnedRecipe, WorkError> {
+pub(crate) fn recipe(
+    flow: &WorkflowStore,
+    snapshot: &Value,
+    key: &str,
+) -> Result<PinnedRecipe, WorkError> {
     PinnedRecipe::from_snapshot(snapshot, key, flow.native()).map_err(WorkError::store)
 }
 

@@ -218,6 +218,13 @@ mod tests {
         ) -> Result<Value, WorkError> {
             Ok(json!({}))
         }
+        fn resume_plan_lineage(
+            &self,
+            _request: &ResumeRequest,
+            _authority: &crate::plan_lineage::BoundPlanLineageAuthority,
+        ) -> Result<Value, WorkError> {
+            Ok(json!({}))
+        }
         fn review_decide_preparation(
             &self,
             _request: &ReviewDecideRequest,

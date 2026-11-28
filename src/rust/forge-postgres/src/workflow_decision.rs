@@ -223,6 +223,52 @@ impl WorkflowDecisionPort for PgWorkflowDecisions {
         }))
     }
 
+    fn resume_plan_lineage(
+        &self,
+        request: &ResumeRequest,
+        authority: &forge_work::plan_lineage::BoundPlanLineageAuthority,
+    ) -> Result<Value, WorkError> {
+        // Authority re-validation in its own transaction (the
+        // F4c/F5a fused split): the plan-lineage authority
+        // binds only the locked task row.
+        let mut session = self.store.session()?;
+        let project = request.project_alias.clone();
+        let task_id = request.task_id;
+        let verdict = session
+            .in_tx(|tx| {
+                let params: &[&(dyn ToSql + Sync)] =
+                    &[&self.store.owner, &project, &task_id];
+                let rows = tx.query_rows(
+                    "SELECT to_jsonb(t) AS doc FROM (SELECT * FROM forge_agent.coding_tasks WHERE (owner_id, project_alias, id) = ($1, $2, $3) FOR UPDATE) t",
+                    params,
+                )?;
+                let Some(task) = rows
+                    .first()
+                    .and_then(|row| row.get::<usize, Option<Value>>(0))
+                else {
+                    return Ok(json!({"found": false, "valid": false}));
+                };
+                let valid = authority.validate(&task, "plan_lineage_fix").is_ok();
+                Ok(json!({"found": true, "valid": valid}))
+            })
+            .map_err(work_err)?;
+        if verdict["found"] != json!(true) {
+            return Err(WorkError::not_found("task"));
+        }
+        if verdict["valid"] != json!(true) {
+            return Err(WorkError::rejected(403, "denied"));
+        }
+        let outcome = WorkAdmissionPort::resume(&self.store, request)?;
+        Ok(json!({
+            "project_alias": request.project_alias,
+            "task_id": request.task_id.to_string(),
+            "base_revision": request.expected_revision,
+            "revision": outcome.task.revision,
+            "status": "queued",
+            "recipe_digest": request.recipe_digest,
+        }))
+    }
+
     fn resume(&self, request: &ResumeRequest) -> Result<Value, WorkError> {
         let outcome = WorkAdmissionPort::resume(&self.store, request)?;
         Ok(json!({

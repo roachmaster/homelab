@@ -22,6 +22,7 @@ pub mod handoff_context;
 pub mod execution_policy;
 pub mod muse_intake;
 pub mod pinned_recipe;
+pub mod plan_lineage;
 pub mod retry_events;
 pub mod reviewer_correction;
 pub mod superseding_review;

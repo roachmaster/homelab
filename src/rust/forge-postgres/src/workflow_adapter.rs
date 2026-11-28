@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use forge_core::provider::Factory;
 
+use forge_work::plan_lineage::{M52_SOURCE_SHA256, PREFIX as PLAN_LINEAGE_PREFIX};
 use forge_work::retry_events::{
     scope_args, validate_proof, RetryEvents, RetryScope, RETRY_EVENT_KINDS,
 };
@@ -1994,6 +1995,48 @@ impl WorkflowTx for WorkflowTxImpl<'_, '_, '_, '_> {
                  OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON t.id=q.task_id WHERE t.workflow_id=$4 AND q.status IN('pending','checking')) \
                  OR EXISTS(SELECT 1 FROM forge_agent.coding_control_receipts c JOIN forge_agent.coding_tasks t ON t.id=c.task_id WHERE t.workflow_id=$5 AND c.action='cancel') \
                  OR EXISTS(SELECT 1 FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON t.id=e.task_id WHERE t.workflow_id=$6 AND e.event_kind IN('cancelled','cancel_requested') AND(e.payload->>'cause'='operator_request' OR e.payload->'actor'->>'kind'='operator')) AS busy",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn plan_source_present(&mut self) -> Result<bool, WorkError> {
+        let params: &[&(dyn ToSql + Sync)] = &[&M52_SOURCE_SHA256];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM pg_proc WHERE pronamespace=(SELECT oid FROM pg_namespace WHERE nspname='forge_coding_worker_api') AND proname='read_plan' AND proargtypes='2950 2950'::oidvector AND encode(sha256(convert_to(prosrc,'UTF8')),'hex')=$1) AS present",
+                params,
+            )
+            .map_err(work_err)
+    }
+
+    fn plan_lineage_busy(
+        &mut self,
+        workflow_id: Uuid,
+        task_id: Uuid,
+        attempt_id: Uuid,
+    ) -> Result<bool, WorkError> {
+        let like = format!("{PLAN_LINEAGE_PREFIX}%");
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &attempt_id,
+            &task_id,
+            &attempt_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &workflow_id,
+            &like,
+        ];
+        self.tx
+            .call_bool(
+                "SELECT EXISTS(SELECT 1 FROM forge_agent.coding_result_chunks WHERE attempt_id=$1) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews WHERE task_id=$2 AND attempt_id=$3) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$4 AND status IN('pending','leased')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON t.id=a.task_id WHERE t.workflow_id=$5 AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=$6 AND status IN('queued','running','cancel_requested')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON t.id=p.task_id WHERE t.workflow_id=$7 AND p.status IN('pending','checking','publishing')) \
+                 OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=$8 AND source_key LIKE $9) AS busy",
                 params,
             )
             .map_err(work_err)
