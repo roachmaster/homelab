@@ -186,6 +186,7 @@ pub struct ExtensionVersions {
     pub delivery: Option<i64>,
     pub retry_events: Option<i64>,
     pub event_attribution: Option<i64>,
+    pub defect_metadata: Option<i64>,
 }
 
 fn extension_version(headers: &Headers, name: &str) -> Result<Option<i64>, WorkError> {
@@ -225,13 +226,14 @@ const ROUTE_HEADERS: [&str; 4] = [
     "forge-destination",
     "forge-request-id",
 ];
-const EXTENSION_HEADERS: [&str; 3] = [
+const EXTENSION_HEADERS: [&str; 4] = [
     "forge-delivery-version",
     "forge-retry-events-version",
     "forge-event-attribution-version",
+    "forge-defect-metadata-version",
 ];
 
-/// work_api.destination: validates the three extension versions
+/// work_api.destination: validates the extension versions
 /// first (a malformed one rejects before any effect), then the
 /// shared dispatch-destination rules over the remaining headers.
 pub fn destination(headers: &Headers) -> Result<(WorkDestination, ExtensionVersions), WorkError> {
@@ -239,6 +241,7 @@ pub fn destination(headers: &Headers) -> Result<(WorkDestination, ExtensionVersi
         delivery: delivery_version(headers)?,
         retry_events: retry_events_version(headers)?,
         event_attribution: event_attribution_version(headers)?,
+        defect_metadata: extension_version(headers, "Forge-Defect-Metadata-Version")?,
     };
     let route_headers: Vec<(String, String)> = headers
         .iter()
@@ -408,6 +411,44 @@ pub fn retry_events_response(response: (u16, Value), version: Option<i64>) -> (u
         strip_key(event, "retry_event");
     }
     (status, body)
+}
+
+/// Keep pre-ABI19 browser tabs compatible with full internal task projections.
+pub fn defect_metadata_response(mut response: (u16, Value), version: Option<i64>) -> (u16, Value) {
+    if version == Some(1) {
+        return response;
+    }
+    fn legacy(task: &mut Value) {
+        if let Some(obj) = task.as_object_mut() {
+            for key in ["task_kind", "defect", "filed_defects"] {
+                obj.remove(key);
+            }
+        }
+    }
+    if let Some(event) = response.1.get_mut("event").and_then(Value::as_object_mut) {
+        match event.get("kind").and_then(Value::as_str) {
+            Some("work_opened") => {
+                if let Some(task) = event.get_mut("task") {
+                    legacy(task);
+                }
+            }
+            Some("work_listed") => {
+                if let Some(tasks) = event.get_mut("tasks").and_then(Value::as_array_mut) {
+                    tasks.iter_mut().for_each(legacy);
+                }
+            }
+            Some("work_failed")
+                if event
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .is_some_and(|reason| reason.starts_with("defect.")) =>
+            {
+                event.remove("reason");
+            }
+            _ => {}
+        }
+    }
+    response
 }
 
 /// Strips per-event attribution unless version 1 negotiated.
@@ -2344,6 +2385,15 @@ mod tests {
         let (_, versions) = destination(&good).expect("route");
         assert_eq!(versions.delivery, Some(1));
 
+        let name = "Forge-Defect-Metadata-Version".to_string();
+        good.push((name.clone(), "1".to_string()));
+        assert_eq!(destination(&good).unwrap().1.defect_metadata, Some(1));
+        good.push((name.clone(), "1".to_string()));
+        assert!(destination(&good).is_err());
+        let mut unknown = headers("ide.work.get");
+        unknown.push((name, "2".to_string()));
+        assert!(destination(&unknown).is_err());
+
         let mut extra = headers("ide.work.submit");
         extra.push(("Forge-Other".to_string(), "1".to_string()));
         assert!(destination(&extra).is_err());
@@ -2453,6 +2503,37 @@ mod tests {
         assert_eq!(body, json!({"error": "invalid_request"}));
     }
 
+    #[test]
+    fn existing_and_new_portals_negotiate_defects_on_success_and_failure() {
+        let opened = json!({"event":{"kind":"work_opened","task":{"title":"T","task_kind":"defect","defect":{},"filed_defects":[]}}});
+        assert_eq!(
+            defect_metadata_response((200, opened.clone()), Some(1)).1,
+            opened
+        );
+        assert_eq!(
+            defect_metadata_response((200, opened), None).1["event"]["task"],
+            json!({"title":"T"})
+        );
+        let listed =
+            json!({"event":{"kind":"work_listed","tasks":[{"title":"T","task_kind":"feature"}]}});
+        assert_eq!(
+            defect_metadata_response((200, listed), None).1["event"]["tasks"],
+            json!([{"title":"T"}])
+        );
+        for (reason, present) in [("defect.task_kind_filter", false), ("workflow.stale", true)] {
+            let failed = json!({"event":{"kind":"work_failed","reason":reason}});
+            assert_eq!(
+                defect_metadata_response((400, failed.clone()), Some(1)).1,
+                failed
+            );
+            assert_eq!(
+                defect_metadata_response((400, failed), None).1["event"]
+                    .get("reason")
+                    .is_some(),
+                present
+            );
+        }
+    }
     #[test]
     fn wrappers_strip_unnegotiated_projections() {
         let listed = (

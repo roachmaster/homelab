@@ -1,13 +1,5 @@
-//! forge-runner: the versioned-API host process (runner.py).
-//!
-//! One process serves the work, Jenkins and usage dispatch APIs
-//! and runs the background workflow coordinator and Jenkins
-//! event consumer — Python's shape, kept deliberately (the
-//! Gemini consult on splitting the process produced no answer;
-//! see forge-ops-design.yaml's h7e gemini_consult record).
-//! Runner-comms surfaces (chat, mail, model runs) are not
-//! ported; their destinations answer with the chat-history
-//! failure shape like any unknown destination.
+//! Authenticated Mission Control runner for work, Jenkins, usage, workspace and
+//! asynchronous model runs. Dispatch mode reconciles distributed GPU results.
 
 use std::collections::HashMap;
 use std::net::TcpListener;
@@ -140,9 +132,42 @@ fn main() {
     // Background services (runner.py's background_services):
     // start the workflow coordinator thread and the Jenkins
     // consumer, then report ready.
+    let workspace = runner_pg_config("mission-control").unwrap_or_else(|e| fail(&e));
+    let inference_model =
+        (environ.get("FORGE_RUNNER_MODE").map(String::as_str) == Some("dispatch")).then(|| {
+            let default = environ
+                .get("FORGE_RUNNER_MODEL")
+                .map(String::as_str)
+                .unwrap_or(forge_postgres::inference_runs::DEFAULT_MODEL);
+            if !matches!(
+                default,
+                forge_postgres::inference_runs::DEFAULT_MODEL
+                    | forge_postgres::inference_runs::SECOND_MODEL
+            ) {
+                fail("Invalid configured runner model")
+            }
+            default.to_owned()
+        });
     let mut background: Vec<std::thread::JoinHandle<()>> = Vec::new();
     let mut consumer_thread = None;
     if !api_only {
+        if inference_model.is_some() {
+            let pg = workspace.clone();
+            let stop = stop.clone();
+            background.push(std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    if forge_postgres::inference_runs::reconcile(&pg).is_err() {
+                        eprintln!("GPU completion scan unavailable");
+                    }
+                    for _ in 0..20 {
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }));
+        }
         if let (Some(start), Some(service)) = (workflow_thread, &work_service) {
             background.push(start.spawn(Arc::clone(service), Arc::clone(&stop)));
         }
@@ -160,7 +185,8 @@ fn main() {
     let ready = Arc::new(AtomicBool::new(true));
 
     let services = Arc::new(Services {
-        workspace: runner_pg_config("mission-control").unwrap_or_else(|e| fail(&e)),
+        workspace,
+        inference_model,
         work: work_service,
         jenkins: jenkins_service,
         usage: usage_service,

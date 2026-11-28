@@ -12,6 +12,7 @@ pub mod external_delivery_adapter;
 pub mod factory;
 pub mod gpu_adapter;
 pub mod gpu_worker;
+pub mod inference_runs;
 pub mod jenkins_store_adapter;
 pub mod model_route_proofs;
 pub mod peer_validator;

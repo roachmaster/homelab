@@ -14,7 +14,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 const MODEL: &str = "gpt-oss-20b";
-const RUN: &str = "edc1657c-be09-4bf4-a359-314e8b22a3a0";
+use forge_postgres::inference_runs;
 
 #[test]
 fn queued_inference_reaches_loopback_model_then_publishes_a_fenced_result() {
@@ -27,12 +27,25 @@ fn queued_inference_reaches_loopback_model_then_publishes_a_fenced_result() {
         .enable_all()
         .build()
         .unwrap();
-    rt.block_on(cluster.admin_exec(&[
-        "INSERT INTO forge_agent.conversations(id,owner_id) VALUES ('8fd41739-72f6-4264-967e-b8e19e79a218','mission-control')",
-        "INSERT INTO forge_agent.runs(id,conversation_id,request_id,model_id,distributed,run_deadline,next_attempt_at) SELECT 'edc1657c-be09-4bf4-a359-314e8b22a3a0',id,'fixture','gpt-oss-20b',true,now()+interval '2 minutes',now() FROM forge_agent.conversations",
-        "INSERT INTO forge_agent.run_events(run_id,sequence,event_type,data) SELECT id,1,'queued','{\"max_tokens\":32,\"temperature\":0.0,\"allow_partial\":false}' FROM forge_agent.runs",
-        "INSERT INTO forge_agent.messages(conversation_id,position,run_id,role,content) SELECT conversation_id,1,id,'user','fixture prompt' FROM forge_agent.runs",
-    ],false)).unwrap();
+    let coordinator = PgConfig {
+        host: cluster.root.display().to_string(),
+        user: "forge_agent".into(),
+        ..PgConfig::new("mission-control")
+    };
+    let input = json!({"messages":[{"role":"user","content":"fixture prompt"}],"max_tokens":32});
+    let job = inference_runs::submit(&coordinator, &input, Some("fixture"), MODEL).unwrap();
+    let run = job["run_id"].as_str().unwrap();
+    assert_eq!(job["status"], "queued");
+    assert_eq!(
+        inference_runs::submit(&coordinator, &input, Some("fixture"), MODEL).unwrap(),
+        job
+    );
+    let mut changed = input.clone();
+    changed["max_tokens"] = 31.into();
+    assert_eq!(
+        inference_runs::submit(&coordinator, &changed, Some("fixture"), MODEL).unwrap_err(),
+        forge_work::WorkError::rejected(409, "request_id_conflict")
+    );
     let cfg = PgConfig {
         host: cluster.root.display().to_string(),
         user: "forge_gpu_worker".into(),
@@ -116,7 +129,7 @@ fn queued_inference_reaches_loopback_model_then_publishes_a_fenced_result() {
         let client=cluster.connect("postgres").await.unwrap();
         let deadline=Instant::now()+Duration::from_secs(25);
         while Instant::now()<deadline {
-            let row=client.query_one("SELECT r.status,i.outcome FROM forge_agent.runs r LEFT JOIN forge_agent.inference_results i ON i.run_id=r.id WHERE r.id=$1::text::uuid",&[&RUN]).await.unwrap();
+            let row=client.query_one("SELECT r.status,i.outcome FROM forge_agent.runs r LEFT JOIN forge_agent.inference_results i ON i.run_id=r.id WHERE r.id=$1::text::uuid",&[&run]).await.unwrap();
             if let Some(outcome)=row.get::<_,Option<Value>>(1){return Some((row.get::<_,String>(0),outcome));}
             tokio::time::sleep(Duration::from_millis(50)).await;
         }None
@@ -137,14 +150,27 @@ fn queued_inference_reaches_loopback_model_then_publishes_a_fenced_result() {
             .unwrap()
             .query_one(
                 "SELECT attempt_token::text FROM forge_agent.runs WHERE id=$1::text::uuid",
-                &[&RUN],
+                &[&run],
             )
             .await
             .unwrap()
             .get::<_, String>(0)
     });
     assert!(!guard
-        .renew(RUN, "d2dd9655-8529-4e55-a670-4ee744374f4f")
+        .renew(run, "d2dd9655-8529-4e55-a670-4ee744374f4f")
         .unwrap());
-    guard.publish(RUN, &token, &result).unwrap();
+    guard.publish(run, &token, &result).unwrap();
+    assert_eq!(inference_runs::reconcile(&coordinator).unwrap(), 1);
+    assert_eq!(inference_runs::reconcile(&coordinator).unwrap(), 0);
+    let ready = inference_runs::lookup(&coordinator, run, None).unwrap();
+    assert_eq!(
+        (ready["status"].as_str(), ready["answer"].as_str()),
+        (Some("completed"), Some("fixture answer"))
+    );
+    let events = inference_runs::lookup(&coordinator, run, Some(0)).unwrap();
+    assert_eq!(
+        events["events"].as_array().unwrap().last().unwrap()["type"],
+        "completed"
+    );
+    assert!(events["events"][0]["data"].get("fingerprint").is_none());
 }
