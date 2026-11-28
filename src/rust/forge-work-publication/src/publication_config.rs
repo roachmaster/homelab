@@ -872,6 +872,7 @@ mod tests {
             codex_session_ttl_seconds: 3600,
             usage_only_profiles: Vec::new(),
             external_reviews: false,
+            grok_transport: "headless-v1".to_string(),
             resource_profile: "forge-native".to_string(),
             build_results_root: None,
             source_path: None,

@@ -1409,14 +1409,19 @@ impl CodingWorkerFactory {
         } else {
             None
         };
+        let grok_transport_factory: Option<Box<dyn crate::grok_acp::GrokTransportFactory>> =
+            crate::grok_acp::selected_factory(&self.config)
+                .map_err(WorkerError::Protocol)?
+                .map(|factory| Box::new(factory) as Box<dyn crate::grok_acp::GrokTransportFactory>);
         Ok(Box::new(crate::runner::CommandRunnerProvider::new(
             self.config.clone(),
             supervisor,
             sessions,
             codex_sessions,
             Some(Box::new(crate::runner::LogDiagnosticReporter)),
+            grok_transport_factory,
             Box::new(crate::ports_runtime::CommandGitRunner::default()),
-        )))
+        )?))
     }
 
     pub fn create(&self) -> Result<CodingWorker, WorkerError> {

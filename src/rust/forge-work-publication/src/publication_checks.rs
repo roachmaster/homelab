@@ -231,6 +231,7 @@ impl IsolatedCheckRunner {
             readonly_files: vec![script.clone()],
             external_sandbox: false,
             native_auth: None,
+            transport: None,
         };
         let publication_id = uuid(Some(&job["publication_id"]))
             .map_err(|error| fail_report(&self.config.checks, error.code()))?;

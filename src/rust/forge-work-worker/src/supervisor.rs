@@ -248,15 +248,66 @@ impl SupervisorPort for SystemdSupervisor {
                 .get("model")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let expected = grok_argv(
-                Path::new(&invocation.argv[0]),
-                model,
-                Path::new(CHILD_WORKSPACE),
-                &Path::new(CHILD_STATE).join("prompt.txt"),
-                &lease.attempt_id,
-                &Path::new(CHILD_STATE).join("grok-leader.sock"),
-                invocation.implement,
-            );
+            let acp = self.config.grok_transport == crate::grok_acp::SELECTION;
+            let expected = if acp {
+                crate::grok_acp::grok_acp_argv(
+                    Path::new(&invocation.argv[0]),
+                    model,
+                    invocation.implement,
+                )
+            } else {
+                grok_argv(
+                    Path::new(&invocation.argv[0]),
+                    model,
+                    Path::new(CHILD_WORKSPACE),
+                    &Path::new(CHILD_STATE).join("prompt.txt"),
+                    &lease.attempt_id,
+                    &Path::new(CHILD_STATE).join("grok-leader.sock"),
+                    invocation.implement,
+                )
+            };
+            if acp {
+                let boundary = invocation.transport.as_ref().ok_or_else(|| {
+                    failed("The selected ACP capability boundary is unavailable.")
+                })?;
+                let expected_notes: Vec<(String, PathBuf)> = [invocation.plan_file.clone()]
+                    .into_iter()
+                    .flatten()
+                    .chain(invocation.readonly_files.iter().cloned())
+                    .map(|path| {
+                        (
+                            Path::new(CHILD_STATE)
+                                .join(path.file_name().unwrap_or_default())
+                                .to_string_lossy()
+                                .into_owned(),
+                            path,
+                        )
+                    })
+                    .collect();
+                let git_configs = crate::grok_acp::git_config_paths(
+                    &invocation.workspace.git_directory,
+                )
+                .map(|(common, worktree, system)| vec![common, worktree, system])
+                .unwrap_or_default();
+                if invocation.implement != (lease.mode == "implement")
+                    || boundary.permissions.mode != lease.mode
+                    || boundary.permissions.paths.workspace != invocation.workspace.path
+                    || boundary.permissions.paths.notes != expected_notes
+                    || boundary.permissions.paths.git_configs != git_configs
+                    || boundary.permissions.progress
+                        != invocation
+                            .readonly_files
+                            .iter()
+                            .any(|path| path.file_name().and_then(|n| n.to_str()) == Some("report_progress.py"))
+                    || boundary.phase != "initialize"
+                {
+                    return Err(failed(
+                        "The selected ACP capability boundary is unavailable.",
+                    ));
+                }
+            } else if invocation.transport.is_some() {
+                return Err(failed("Unexpected Grok transport selection."));
+            }
             if invocation.argv != expected
                 || invocation.session.is_some()
                 || invocation.external_sandbox
@@ -265,8 +316,13 @@ impl SupervisorPort for SystemdSupervisor {
                     "The Grok execution boundary does not match its pinned policy.",
                 ));
             }
+            let config_content = if invocation.transport.is_some() {
+                format!("{GROK_CONFIG}{}", crate::grok_acp::CONFIG_SUFFIX)
+            } else {
+                GROK_CONFIG.to_string()
+            };
             for (name, expected_content) in [
-                ("config.toml", GROK_CONFIG),
+                ("config.toml", config_content.as_str()),
                 ("managed_config.toml", GROK_MANAGED_POLICY),
             ] {
                 let path = invocation.scratch.join("home/.grok").join(name);
@@ -446,6 +502,7 @@ impl SupervisorPort for SystemdSupervisor {
                         | "build-info.json"
                         | "build.log"
                         | "build_info.py"
+                        | "report_progress.py"
                 )
             );
             if path.parent() != Some(invocation.scratch.as_path())
@@ -457,6 +514,12 @@ impl SupervisorPort for SystemdSupervisor {
                 || !path.is_file()
             {
                 return Err(failed("The immutable execution context is unavailable."));
+            }
+            if path.file_name().and_then(|n| n.to_str()) == Some("report_progress.py")
+                && (invocation.transport.is_none()
+                    || std::fs::read(path).map(|bytes| bytes != crate::progress_helper::PROGRESS_HELPER).unwrap_or(true))
+            {
+                return Err(failed("The immutable public progress helper changed."));
             }
             readonly_bindings.push(format!(
                 "{}:{}",

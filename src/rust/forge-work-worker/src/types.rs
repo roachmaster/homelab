@@ -142,6 +142,9 @@ pub struct Invocation {
     pub readonly_files: Vec<std::path::PathBuf>,
     pub external_sandbox: bool,
     pub native_auth: Option<crate::native_auth::AuthLease>,
+    /// The selected Grok ACP transport (work_executor.Invocation
+    /// .transport); None for every headless run.
+    pub transport: Option<crate::grok_acp::GrokAcpTransport>,
 }
 
 /// The parsed outcome of a provider CLI run (work_executor.CliOutcome).

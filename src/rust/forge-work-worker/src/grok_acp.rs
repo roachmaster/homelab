@@ -606,6 +606,7 @@ fn shlex_split(segment: &str) -> Option<Vec<String>> {
 
 /// The deny-by-default native permission broker
 /// (work_grok_acp.Permissions).
+#[derive(Debug)]
 pub struct Permissions {
     pub mode: String,
     pub paths: NativePaths,
@@ -900,6 +901,7 @@ impl Permissions {
 /// frames (work_grok_acp.Transport). Only initialize/new/prompt and
 /// permission replies can leave this adapter. No authenticate,
 /// extension RPC, MCP, file or terminal service is offered.
+#[derive(Debug)]
 pub struct GrokAcpTransport {
     prompt: String,
     pub permissions: Permissions,

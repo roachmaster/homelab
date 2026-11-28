@@ -194,6 +194,7 @@ pub struct CommandRunnerProvider {
     sessions: Option<Box<dyn SessionPort>>,
     codex_sessions: Option<Box<dyn SessionPort>>,
     transport_diagnostics: Option<Box<dyn TransportDiagnosticPort>>,
+    grok_transport_factory: Option<Box<dyn crate::grok_acp::GrokTransportFactory>>,
     binary_hashes: BTreeMap<String, (PathBuf, [u8; 32])>,
     git: Box<dyn GitRunner>,
 }
@@ -205,17 +206,26 @@ impl CommandRunnerProvider {
         sessions: Option<Box<dyn SessionPort>>,
         codex_sessions: Option<Box<dyn SessionPort>>,
         transport_diagnostics: Option<Box<dyn TransportDiagnosticPort>>,
+        grok_transport_factory: Option<Box<dyn crate::grok_acp::GrokTransportFactory>>,
         git: Box<dyn GitRunner>,
-    ) -> CommandRunnerProvider {
-        CommandRunnerProvider {
+    ) -> Result<CommandRunnerProvider, WorkerError> {
+        if (config.grok_transport == crate::grok_acp::SELECTION)
+            != grok_transport_factory.is_some()
+        {
+            return Err(WorkerError::Protocol(
+                "Selected Grok transport requires an explicitly composed factory".to_string(),
+            ));
+        }
+        Ok(CommandRunnerProvider {
             config,
             supervisor,
             sessions,
             codex_sessions,
             transport_diagnostics,
+            grok_transport_factory,
             binary_hashes: BTreeMap::new(),
             git,
-        }
+        })
     }
 
     fn report_transport_failure(&mut self, lease: &Lease, error: &WorkerError) {
@@ -736,6 +746,7 @@ impl CommandRunnerProvider {
             return Err(needs_reconcile("Unbound reviewer feedback was supplied."));
         }
         let mut native_auth: Option<AuthLease> = None;
+        let mut transport: Option<crate::grok_acp::GrokAcpTransport> = None;
         let (argv, payload, external_sandbox) = if backend == "antigravity" {
             prompt.push_str(
                 "\n\nAgent tools: filesystem tools, shell commands, and read-only URL reads \
@@ -776,17 +787,66 @@ impl CommandRunnerProvider {
                 .recursive(true)
                 .mode(0o700)
                 .create(&native);
-            let staged = self.stage_native(&scratch, true, &native, &prompt)?;
+            if let Some(factory) = &self.grok_transport_factory {
+                let mut note_paths: Vec<PathBuf> = Vec::new();
+                for path in [
+                    plan_file.clone(),
+                    feedback_file.clone(),
+                    peer_file.clone(),
+                    peer_feedback_file.clone(),
+                    external_file.clone(),
+                ] {
+                    if let Some(path) = path {
+                        note_paths.push(path);
+                    }
+                }
+                note_paths.extend(build_files.iter().cloned());
+                if progress {
+                    note_paths.push(scratch.join("report_progress.py"));
+                }
+                let notes: Vec<(String, PathBuf)> = note_paths
+                    .iter()
+                    .map(|path| {
+                        (
+                            Path::new(CHILD_STATE)
+                                .join(path.file_name().unwrap_or_default())
+                                .to_string_lossy()
+                                .into_owned(),
+                            path.clone(),
+                        )
+                    })
+                    .collect();
+                let (common_config, worktree_config, system_config) =
+                    crate::grok_acp::git_config_paths(&workspace.git_directory)
+                        .map_err(WorkerError::Protocol)?;
+                transport = Some(
+                    factory
+                        .create(
+                            &lease.mode,
+                            &workspace.path,
+                            vec![common_config, worktree_config, system_config],
+                            notes,
+                            &prompt,
+                            progress,
+                        )
+                        .map_err(WorkerError::Protocol)?,
+                );
+            }
+            let staged = self.stage_native(&scratch, true, &native, &prompt, transport.is_some())?;
             native_auth = staged;
-            let argv = grok_argv(
-                &actual,
-                &model,
-                Path::new(CHILD_WORKSPACE),
-                &Path::new(CHILD_STATE).join("prompt.txt"),
-                &lease.attempt_id,
-                &Path::new(CHILD_STATE).join("grok-leader.sock"),
-                implement,
-            );
+            let argv = if transport.is_some() {
+                crate::grok_acp::grok_acp_argv(&actual, &model, implement)
+            } else {
+                grok_argv(
+                    &actual,
+                    &model,
+                    Path::new(CHILD_WORKSPACE),
+                    &Path::new(CHILD_STATE).join("prompt.txt"),
+                    &lease.attempt_id,
+                    &Path::new(CHILD_STATE).join("grok-leader.sock"),
+                    implement,
+                )
+            };
             (argv, Vec::new(), false)
         } else if backend == "muse" {
             if !self.supervisor.enforces_coding_sandbox() {
@@ -800,7 +860,7 @@ impl CommandRunnerProvider {
                 .recursive(true)
                 .mode(0o700)
                 .create(&native);
-            let staged = self.stage_native(&scratch, false, &native, &prompt)?;
+            let staged = self.stage_native(&scratch, false, &native, &prompt, false)?;
             native_auth = staged;
             let argv = muse_argv(
                 &actual,
@@ -837,6 +897,9 @@ impl CommandRunnerProvider {
             }
         }
         readonly_files.extend(build_files);
+        if transport.is_some() && progress {
+            readonly_files.push(scratch.join("report_progress.py"));
+        }
         Ok(Invocation {
             argv,
             stdin: payload,
@@ -850,6 +913,7 @@ impl CommandRunnerProvider {
             readonly_files,
             external_sandbox,
             native_auth,
+            transport,
         })
     }
 
@@ -863,6 +927,7 @@ impl CommandRunnerProvider {
         grok: bool,
         native: &Path,
         prompt: &str,
+        acp_config: bool,
     ) -> Result<Option<AuthLease>, WorkerError> {
         let destination = native.join("auth.json");
         let mut lease: Option<AuthLease> = None;
@@ -882,7 +947,12 @@ impl CommandRunnerProvider {
             lease = Some(staged);
             if grok {
                 let config_path = native.join("config.toml");
-                std::fs::write(&config_path, GROK_CONFIG)
+                let content = if acp_config {
+                    format!("{GROK_CONFIG}{}", crate::grok_acp::CONFIG_SUFFIX)
+                } else {
+                    GROK_CONFIG.to_string()
+                };
+                std::fs::write(&config_path, content)
                     .map_err(|e| StageFailure::Other(e.to_string()))?;
                 use std::os::unix::fs::PermissionsExt;
                 let _ =
@@ -991,7 +1061,7 @@ impl From<WorkerError> for BodyError {
 
 enum PumpMsg {
     Chunk { stderr: bool, data: Vec<u8> },
-    Eof,
+    Eof { stderr: bool },
 }
 
 const BLOCKED_FAILURES: [&str; 3] = ["quota_blocked", "blocked_auth", "blocked_permission"];
@@ -1271,7 +1341,7 @@ impl CommandRunnerProvider {
         let mut next_hint = Instant::now();
         let mut used_fallback = false;
         loop {
-            let expected = if invocation.backend == "grok" {
+            let expected = if invocation.backend == "grok" && invocation.transport.is_none() {
                 Some(lease.attempt_id.as_str())
             } else {
                 conversation.as_deref()
@@ -1308,15 +1378,37 @@ impl CommandRunnerProvider {
                 Ok(child) => child,
                 Err(_) => return Err(BodyError::IoFailure),
             };
-            let stdin_bytes = invocation.stdin.clone();
             let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<std::io::Result<()>>();
+            let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+            let mut chunk_tx = Some(chunk_tx);
             let mut stdin_handle = child.stdin.take().expect("stdin piped");
             std::thread::spawn(move || {
-                let result = stdin_handle
-                    .write_all(&stdin_bytes)
-                    .and_then(|_| stdin_handle.flush());
+                let mut result = Ok(());
+                while let Ok(chunk) = chunk_rx.recv() {
+                    result = stdin_handle
+                        .write_all(&chunk)
+                        .and_then(|_| stdin_handle.flush());
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                drop(stdin_handle);
                 let _ = stdin_tx.send(result);
             });
+            // The ACP transport's initialize frame is the child's
+            // first input; every other run sends its staged payload
+            // and closes stdin at once.
+            if let Some(transport) = invocation.transport.as_mut() {
+                let initial = transport.drain();
+                if let Some(tx) = &chunk_tx {
+                    let _ = tx.send(initial);
+                }
+            } else {
+                if let Some(tx) = &chunk_tx {
+                    let _ = tx.send(invocation.stdin.clone());
+                }
+                chunk_tx = None;
+            }
             let (tx, rx) = std::sync::mpsc::channel::<PumpMsg>();
             for is_error in [false, true] {
                 let sender = tx.clone();
@@ -1330,7 +1422,7 @@ impl CommandRunnerProvider {
                     loop {
                         match stream.read(&mut buffer) {
                             Ok(0) => {
-                                let _ = sender.send(PumpMsg::Eof);
+                                let _ = sender.send(PumpMsg::Eof { stderr: is_error });
                                 break;
                             }
                             Ok(count) => {
@@ -1345,7 +1437,7 @@ impl CommandRunnerProvider {
                                 }
                             }
                             Err(_) => {
-                                let _ = sender.send(PumpMsg::Eof);
+                                let _ = sender.send(PumpMsg::Eof { stderr: is_error });
                                 break;
                             }
                         }
@@ -1421,13 +1513,62 @@ impl CommandRunnerProvider {
                         }
                         for message in batch {
                             match message {
-                                PumpMsg::Eof => reads = reads.saturating_sub(1),
+                                PumpMsg::Eof { stderr } => {
+                                    reads = reads.saturating_sub(1);
+                                    if !stderr && errors.is_empty() && !interrupted {
+                                        if let Some(transport) = invocation.transport.as_mut() {
+                                            if transport.eof().is_err() {
+                                                errors.push(failed(
+                                                    "The ACP turn ended without a complete bound result.",
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
                                 PumpMsg::Chunk { stderr, data } => {
                                     if errors.is_empty() {
                                         if let Some(activity) = &mut callbacks.report_activity {
                                             activity();
                                         }
-                                        if let Err(error) = parser.feed(&data, stderr) {
+                                        if !stderr && invocation.transport.is_some() {
+                                            let transport =
+                                                invocation.transport.as_mut().unwrap();
+                                            match transport.feed(&data) {
+                                                Ok(output) => {
+                                                    if !output.is_empty() {
+                                                        if let Err(error) =
+                                                            parser.feed(&output, false)
+                                                        {
+                                                            self.report_transport_failure(
+                                                                lease, &error,
+                                                            );
+                                                            errors.push(error);
+                                                        }
+                                                    }
+                                                    if let Some(diagnostic) =
+                                                        transport.quota_diagnostic.clone()
+                                                    {
+                                                        parser.quota_diagnostic =
+                                                            Some(diagnostic);
+                                                    }
+                                                    let reply = transport.drain();
+                                                    if !reply.is_empty() {
+                                                        if let Some(tx) = &chunk_tx {
+                                                            let _ = tx.send(reply);
+                                                        }
+                                                    } else if transport.complete {
+                                                        chunk_tx = None;
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    let error = failed(
+                                                        "The coding agent returned invalid ACP protocol output.",
+                                                    );
+                                                    self.report_transport_failure(lease, &error);
+                                                    errors.push(error);
+                                                }
+                                            }
+                                        } else if let Err(error) = parser.feed(&data, stderr) {
                                             self.report_transport_failure(lease, &error);
                                             errors.push(error);
                                         }
