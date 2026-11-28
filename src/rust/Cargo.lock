@@ -790,6 +790,8 @@ dependencies = [
  "forge-core",
  "forge-foundation",
  "forge-jobs",
+ "forge-mcp",
+ "forge-mcp-host",
  "forge-template",
  "forge-work",
  "forge-work-publication",
@@ -797,6 +799,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "tokio",
  "uuid",
 ]
 

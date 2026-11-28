@@ -26,4 +26,7 @@ forge-jobs = { path = "../forge-jobs" }
 forge-work-worker = { path = "../forge-work-worker" }
 forge-work = { path = "../forge-work" }
 forge-work-publication = { path = "../forge-work-publication" }
+forge-mcp = { path = "../forge-mcp" }
+forge-mcp-host = { path = "../forge-mcp-host" }
+tokio = { version = "1", features = ["rt"] }
 uuid = { version = "1", features = ["v4", "v5"] }
