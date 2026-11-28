@@ -827,3 +827,152 @@ pub fn load_publication_config(path: &Path) -> FactoryResult<PublicationConfig> 
         Some(path.to_path_buf()),
     )
 }
+
+/// Binding the publication worker group provides.
+pub const PUBLICATION_WORKER: &str = "forge.postgres.publication_worker";
+
+/// The staged publication worker: the validated config, waiting for
+/// the host to bind the observer it created from the frozen observer
+/// exec factory.
+pub struct PublicationWorkerRecipe {
+    config: PublicationConfig,
+}
+
+impl PublicationWorkerRecipe {
+    /// Bind the ready collaborators and produce the worker factory.
+    /// Still effect-free: no session, thread or socket until
+    /// `create()`.
+    pub fn bind(
+        self,
+        observer: Option<Box<dyn JenkinsObserverPort>>,
+        stop: Arc<AtomicBool>,
+    ) -> PublicationWorkerFactory {
+        PublicationWorkerFactory {
+            config: self.config,
+            observer: Mutex::new(Some(observer)),
+            stop,
+        }
+    }
+}
+
+/// Creates the one publication worker a host process runs. The bound
+/// observer is moved into that worker, so a second `create()` is
+/// refused rather than silently building a worker without it.
+pub struct PublicationWorkerFactory {
+    config: PublicationConfig,
+    observer: Mutex<Option<Option<Box<dyn JenkinsObserverPort>>>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl forge_core::provider::Factory<PublicationWorker> for PublicationWorkerFactory {
+    type Error = String;
+    fn create(&self) -> FactoryResult<PublicationWorker> {
+        let observer = self
+            .observer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .ok_or_else(|| "The publication worker was already created".to_string())?;
+        create_publication_worker(&self.config, Arc::clone(&self.stop), observer)
+    }
+}
+
+/// Stage the publication worker group. It requires the publication
+/// runtime's observer exec binding (which in turn requires the process
+/// exec client), so a host missing either is rejected at freeze before
+/// any database session opens.
+pub fn register_publication_worker(
+    config: PublicationConfig,
+) -> forge_core::bootstrap::PreparedGroup<PublicationWorkerRecipe> {
+    forge_core::bootstrap::PreparedGroup::new(
+        PUBLICATION_WORKER,
+        &[PUBLICATION_WORKER],
+        &[forge_work_publication::registrar::OBSERVER_BINDING],
+        PublicationWorkerRecipe { config },
+    )
+    .expect("fixed publication worker group identifiers are valid")
+}
+
+#[cfg(test)]
+mod publication_worker_registry_tests {
+    use super::*;
+    use forge_core::bootstrap::{Registry, ValidationError};
+    use forge_core::provider::Factory;
+    use forge_work_publication::registrar::{register_publication, OBSERVER_BINDING};
+    use forge_work_worker::process_exec::register_process_exec;
+
+    fn config() -> PublicationConfig {
+        let worker = forge_work_worker::config::parse_config(&serde_json::json!({
+            "worker_id": "publication-1",
+            "owner": "forge",
+            "database": {"host": "/run/postgresql", "port": 5432, "name": "forge_agent", "user": "forge_coding_worker"},
+            "account": {"user": "forgeqa", "uid": 1001, "gid": 1001, "home": "/home/forgeqa"},
+            "workspace_root": "/srv/forge/workspaces",
+            "state_root": "/srv/forge/state",
+            "projects": {"homelab": "/srv/repos/homelab"},
+            "profiles": {"codex-author": {"backend": "codex", "model": "gpt-5", "modes": ["plan"]}},
+            "binaries": {"codex": "/usr/local/bin/codex"}
+        }))
+        .unwrap();
+        forge_work_publication::publication_config::parse_config(
+            &serde_json::json!({
+                "worker_config": "/srv/worker.json",
+                "repositories": {"homelab": "roachmaster/homelab"},
+                "github_config_dir": "/home/forgeqa/.config/gh",
+            }),
+            &worker,
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_worker_without_the_publication_runtime_is_rejected_at_freeze() {
+        let Err(rejected) = Registry::new()
+            .register(register_publication_worker(config()))
+            .unwrap()
+            .freeze()
+        else {
+            panic!("the worker group requires the observer exec binding");
+        };
+        assert_eq!(
+            rejected.reason(),
+            &ValidationError::MissingRequirement {
+                group: PUBLICATION_WORKER.to_string(),
+                binding: OBSERVER_BINDING.to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn the_production_plan_freezes_and_binds_without_effects() {
+        let frozen = Registry::new()
+            .register(register_process_exec().unwrap())
+            .unwrap()
+            .register(register_publication().unwrap())
+            .unwrap()
+            .register(register_publication_worker(config()))
+            .unwrap()
+            .freeze();
+        let Ok(frozen) = frozen else {
+            panic!("process exec, publication runtime and worker form a complete plan");
+        };
+        let ((((), _exec), runtime), worker) = frozen.into_factories();
+        assert!(runtime.observer_exec.create().is_ok());
+        let stop = Arc::new(AtomicBool::new(false));
+        // Binding opens nothing; only create() reaches PostgreSQL.
+        let _factory = worker.bind(None, stop);
+    }
+
+    #[test]
+    fn the_worker_factory_creates_at_most_one_worker() {
+        let factory = PublicationWorkerRecipe { config: config() }
+            .bind(None, Arc::new(AtomicBool::new(false)));
+        // Take the bound observer slot as the first create() would.
+        factory.observer.lock().unwrap().take();
+        let Err(message) = factory.create() else {
+            panic!("a second create must be refused");
+        };
+        assert_eq!(message, "The publication worker was already created");
+    }
+}
