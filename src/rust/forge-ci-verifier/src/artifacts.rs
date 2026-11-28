@@ -315,7 +315,7 @@ pub fn seal_portal_artifacts(request: ArtifactSealRequest<'_>) -> Result<Artifac
     }
     let file_rows:Vec<_>=payloads.iter().map(|(name,raw)|json!({"path":name,"sha256":digest(raw),"byte_count":raw.len(),"executable":name.starts_with("bin/")})).collect();
     let manifest = json!({"version":1,"policy":POLICY,"action_id":identity.action_id,"source_commit":identity.source_commit,"source_tree":identity.source_tree,"request_sha256":identity.request_sha256,"commands":commands,"files":file_rows});
-    let mut raw = serde_json::to_vec(&manifest).map_err(|_| "manifest_encode_failed")?;
+    let mut raw = crate::filesystem::canonical(&manifest);
     raw.push(b'\n');
     let manifest_sha = digest(&raw);
     payloads.insert("manifest.json".into(), raw);

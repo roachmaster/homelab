@@ -8,6 +8,7 @@ mod filesystem;
 mod host;
 mod process;
 mod source;
+mod stage;
 
 pub use admission::{ActionRequest, Config, Launcher};
 pub use artifacts::{seal_portal_artifacts, ArtifactExport, ArtifactIdentity, ArtifactSealRequest};

@@ -122,6 +122,10 @@ fn native_executor_drains_both_streams_clears_env_and_preserves_exit() {
 }
 #[test]
 fn native_executor_bounds_output_deadline_and_cancellation() {
+    let signalled = NativeProcess
+        .execute(process(&["/bin/sh", "-c", "kill -TERM $$"]))
+        .unwrap();
+    assert_eq!(signalled.code, -15);
     let mut p = process(&["/bin/sh", "-c", "while :; do printf 0123456789; done"]);
     p.max_output = 32;
     assert_eq!(

@@ -4,7 +4,7 @@
 //! the separately installed private root-only identity-drop helper.
 use forge_core::io_client::IoClient;
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
-use nix::sys::signal::{killpg, Signal};
+use nix::sys::signal::{kill, killpg, Signal};
 use nix::unistd::Pid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -50,11 +50,30 @@ pub struct NativeProcess;
 #[serde(deny_unknown_fields)]
 pub(crate) struct ChildSpec {
     pub version: u32,
+    pub supervisor_pid: u32,
     pub uid: u32,
     pub gid: u32,
     pub cwd: PathBuf,
     pub argv: Vec<String>,
     pub env: BTreeMap<String, String>,
+}
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ChildState {
+    Ready,
+    ExecFailed,
+    SetupFailed,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ChildStatus {
+    pub version: u32,
+    pub supervisor_pid: u32,
+    pub uid: u32,
+    pub gid: u32,
+    pub state: ChildState,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 fn nonblocking(file: &impl AsFd) -> Result<(), String> {
@@ -67,12 +86,16 @@ fn nonblocking(file: &impl AsFd) -> Result<(), String> {
     Ok(())
 }
 fn leader_stamp(pid: u32) -> Result<Option<u64>, String> {
-    let raw = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+    let raw = match std::fs::read(format!("/proc/{pid}/stat")) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("process_identity_unavailable".into()),
     };
-    let fields = raw.rsplit_once(')').ok_or("process_identity_invalid")?.1;
+    let end = raw
+        .iter()
+        .rposition(|b| *b == b')')
+        .ok_or("process_identity_invalid")?;
+    let fields = std::str::from_utf8(&raw[end + 1..]).map_err(|_| "process_identity_invalid")?;
     let start = fields
         .split_whitespace()
         .nth(19)
@@ -83,10 +106,15 @@ fn signal_group(child: &Child, stamp: u64, signal: Signal) -> Result<(), String>
     if leader_stamp(child.id())?.is_some_and(|observed| observed != stamp) {
         return Err("process_identity_changed".into());
     }
-    match killpg(
-        Pid::from_raw(i32::try_from(child.id()).map_err(|_| "invalid_process_group")?),
-        signal,
-    ) {
+    let pid = Pid::from_raw(i32::try_from(child.id()).map_err(|_| "invalid_process_group")?);
+    // A private helper creates its own session after exec. Until then it must
+    // be signalled directly, never through the supervisor's inherited group.
+    let result = match nix::unistd::getpgid(Some(pid)) {
+        Ok(group) if group != pid => kill(pid, signal),
+        Ok(_) | Err(nix::errno::Errno::ESRCH) => killpg(pid, signal),
+        Err(_) => return Err("process_identity_unavailable".into()),
+    };
+    match result {
         Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
         Err(_) => Err("process_signal_failed".into()),
     }
@@ -176,8 +204,10 @@ impl IoClient for NativeProcess {
             .envs(&request.env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0);
+            .stderr(Stdio::piped());
+        if matches!(&request.authority, ProcessAuthority::TrustedObservation) {
+            command.process_group(0);
+        }
         if let Some(cwd) = &request.cwd {
             command.current_dir(cwd);
         }
@@ -232,7 +262,12 @@ impl IoClient for NativeProcess {
                 if stdout_done && stderr_done {
                     if let Some(status) = child.try_wait().map_err(|_| "process_wait_failed")? {
                         return Ok(ExecutionResult {
-                            code: status.code().unwrap_or(128),
+                            code: {
+                                use std::os::unix::process::ExitStatusExt;
+                                status
+                                    .code()
+                                    .unwrap_or_else(|| -status.signal().unwrap_or(1))
+                            },
                             stdout: out,
                             interrupted: false,
                         });

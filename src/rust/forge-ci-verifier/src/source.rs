@@ -125,12 +125,6 @@ pub(crate) fn validate_tree(raw: &[u8]) -> Result<Vec<String>, String> {
         {
             return Err("source_bound".into());
         }
-        if name
-            .split('/')
-            .any(|p| matches!(p, "target" | "node_modules"))
-        {
-            return Err("candidate_output_path".into());
-        }
         paths.push(name.to_string());
     }
     if paths.is_empty() {
@@ -393,7 +387,7 @@ mod tests {
         format!("{mode} {kind} {} 1\t{path}\0", "a".repeat(40)).into_bytes()
     }
     #[test]
-    fn complete_tree_admission_rejects_nonregular_escape_duplicates_and_outputs() {
+    fn complete_tree_admission_rejects_unsafe_entries_without_blanket_fixture_exclusions() {
         assert_eq!(
             validate_tree(&row("100644", "blob", "src/main.rs")).unwrap(),
             ["src/main.rs"]
@@ -404,13 +398,15 @@ mod tests {
             row("100644", "blob", "../escape"),
             row("100644", "blob", ".git/config"),
             row("100644", "blob", ".GIT/config"),
-            row("100644", "blob", "src/target/payload"),
-            row("100644", "blob", "node_modules/payload"),
             row("100644", "blob", "/absolute"),
             row("100644", "blob", "control\nname"),
         ] {
             assert!(validate_tree(&bad).is_err());
         }
+        assert!(validate_tree(&row("100644", "blob", "fixtures/target/expected.json")).is_ok());
+        assert!(
+            validate_tree(&row("100644", "blob", "fixtures/node_modules/package.json")).is_ok()
+        );
         let mut duplicate = row("100644", "blob", "source");
         duplicate.extend(row("100755", "blob", "source"));
         assert!(validate_tree(&duplicate).is_err());

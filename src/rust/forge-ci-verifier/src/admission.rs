@@ -30,6 +30,8 @@ impl Launcher {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default = "default_instance", deserialize_with = "instance_string")]
+    pub jenkins_instance: String,
     pub version: u32,
     pub result_version: u32,
     pub child_sha256: String,
@@ -53,6 +55,15 @@ pub struct Config {
     pub portal_artifact_export: bool,
     #[serde(default)]
     pub cargo_cache: Option<Value>,
+}
+fn instance_string<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    // This field is observability only: malformed identity disables emission,
+    // rather than changing a gate or admitting a different endpoint.
+    Ok(value.as_str().unwrap_or_default().to_string())
+}
+fn default_instance() -> String {
+    "ci-primary".into()
 }
 fn yes() -> bool {
     true

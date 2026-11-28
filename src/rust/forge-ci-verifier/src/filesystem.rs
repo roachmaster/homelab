@@ -8,6 +8,27 @@ use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path};
 
+pub(crate) fn canonical(value: &serde_json::Value) -> Vec<u8> {
+    fn sorted(value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut entries: Vec<_> = map.iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+                serde_json::Value::Object(
+                    entries
+                        .into_iter()
+                        .map(|(k, v)| (k.clone(), sorted(v)))
+                        .collect(),
+                )
+            }
+            serde_json::Value::Array(values) => {
+                serde_json::Value::Array(values.iter().map(sorted).collect())
+            }
+            scalar => scalar.clone(),
+        }
+    }
+    serde_json::to_vec(&sorted(value)).expect("JSON Value serialization is infallible")
+}
 pub(crate) fn digest(raw: &[u8]) -> String {
     format!("{:x}", Sha256::digest(raw))
 }
@@ -132,7 +153,7 @@ pub(crate) fn atomic_json(
     group: u32,
 ) -> Result<(), String> {
     let tmp = path.with_extension(format!("{}.new", uuid::Uuid::new_v4()));
-    let mut raw = serde_json::to_vec(value).map_err(|_| "json_encode_failed")?;
+    let mut raw = canonical(value);
     raw.push(b'\n');
     write_new(&tmp, &raw, owner, group, 0o640)?;
     if fs::symlink_metadata(path).is_ok_and(|m| !m.is_file() || m.uid() != owner || m.nlink() != 1)

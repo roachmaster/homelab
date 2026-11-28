@@ -3,7 +3,7 @@
 use crate::filesystem::{
     atomic_json, digest, directory, new_file, read_owned, sync_dir, write_new,
 };
-use crate::process::ChildSpec;
+use crate::process::{ChildSpec, ChildState, ChildStatus};
 use crate::source::{
     check_clean, classify_prepare_failure, prepare, trusted_environment, SourcePreparation,
 };
@@ -44,22 +44,77 @@ fn strict<T: serde::de::DeserializeOwned>(raw: &[u8]) -> Result<T, String> {
     let value = forge_jenkins::strict_json::strict_parse(raw).map_err(|_| "invalid_json")?;
     serde_json::from_value(value).map_err(|_| "invalid_closed_schema".into())
 }
-fn lock(path: &Path) -> Result<Flock<File>, String> {
+#[derive(Clone)]
+struct LockWait {
+    deadline: Instant,
+    cancellation: Arc<AtomicBool>,
+    cancel_file: Option<PathBuf>,
+}
+fn owned_lock(path: &Path, owner: u32, wait: &LockWait) -> Result<Flock<File>, String> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .mode(0o600)
-        .custom_flags((OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC).bits())
+        .custom_flags((OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC | OFlag::O_NONBLOCK).bits())
         .open(path)
         .map_err(|_| "executor_lock_unavailable")?;
     use std::os::unix::fs::MetadataExt;
     let m = file.metadata().map_err(|_| "executor_lock_unavailable")?;
-    if !m.is_file() || m.uid() != 0 || m.nlink() != 1 || m.mode() & 0o077 != 0 {
+    if !m.is_file() || m.uid() != owner || m.nlink() != 1 || m.mode() & 0o7777 != 0o600 {
         return Err("unsafe_executor_lock".into());
     }
-    Flock::lock(file, FlockArg::LockExclusive).map_err(|_| "executor_lock_failed".into())
+    let mut file = file;
+    loop {
+        if Instant::now() >= wait.deadline
+            || wait.cancellation.load(Ordering::SeqCst)
+            || wait.cancel_file.as_ref().is_some_and(|p| p.exists())
+        {
+            return Err("executor_lock_cancelled_or_timed_out".into());
+        }
+        match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
+            Ok(lock) => return Ok(lock),
+            Err((returned, nix::errno::Errno::EWOULDBLOCK)) => {
+                file = returned;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => return Err("executor_lock_failed".into()),
+        }
+    }
+}
+struct RunLocks {
+    _action: Flock<File>,
+    _scope: Flock<File>,
+    _uid: Flock<File>,
+}
+fn acquire_run_locks(
+    global: &Path,
+    results: &Path,
+    action: &str,
+    owner: u32,
+    wait: &LockWait,
+) -> Result<RunLocks, String> {
+    let uid = owned_lock(global, owner, wait)?;
+    let scope = owned_lock(&results.join("executor.lock"), owner, wait)?;
+    let action = owned_lock(&results.join(format!("{action}.lock")), owner, wait)?;
+    Ok(RunLocks {
+        _action: action,
+        _scope: scope,
+        _uid: uid,
+    })
+}
+fn fixed_uid_lock() -> Result<PathBuf, String> {
+    use std::os::unix::fs::DirBuilderExt;
+    directory(Path::new("/run"), 0)?;
+    let root = Path::new("/run/forge-ci");
+    match fs::DirBuilder::new().mode(0o700).create(root) {
+        Ok(()) => (),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+        Err(_) => return Err("uid_lock_directory_unavailable".into()),
+    }
+    directory(root, 0)?;
+    Ok(root.join("build-uid.lock"))
 }
 fn monotonic_ms() -> Result<i64, String> {
     let t = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC)
@@ -93,8 +148,7 @@ fn validate_pins(config: &Config) -> Result<(), String> {
     let raw = read_owned(&config.policy_path, 0, 1024 * 1024)?;
     let actual: Value = strict(&raw)?;
     if actual != native_policy_descriptor()
-        || digest(&serde_json::to_vec(&actual).map_err(|_| "policy_encode_failed")?)
-            != config.policy_sha256
+        || digest(&crate::filesystem::canonical(&actual)) != config.policy_sha256
         || config.policy_sha256 != native_policy_sha256()
     {
         return Err("native_policy_pin_mismatch".into());
@@ -203,8 +257,20 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
         if digest(&bundle) != request.bundle_sha256 {
             return Err("candidate_bundle_changed".into());
         }
-        let _executor = lock(&self.config.results_root.join("executor.lock"))?;
-        let _action = lock(&self.config.results_root.join(format!("{action}.lock")))?;
+        let started = Instant::now();
+        let deadline = started + Duration::from_secs(self.config.timeout_seconds);
+        let lock_wait = LockWait {
+            deadline,
+            cancellation: cancellation.clone(),
+            cancel_file: Some(request_dir.join("cancelled")),
+        };
+        let _locks = acquire_run_locks(
+            &fixed_uid_lock()?,
+            &self.config.results_root,
+            action,
+            0,
+            &lock_wait,
+        )?;
         let result_path = self.config.results_root.join(format!("{action}.json"));
         if result_path.symlink_metadata().is_ok() {
             let previous: Value = strict(&read_owned(&result_path, 0, 1024 * 1024)?)?;
@@ -237,8 +303,18 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
             &mut channel,
             &json!({"action_id":action,"gate_manifest_sha256":request.gate_manifest_sha256}),
         )?;
-        let started = Instant::now();
-        let deadline = started + Duration::from_secs(self.config.timeout_seconds);
+        let mut emitter = match crate::stage::StageEmitter::capture(
+            &request,
+            &self.config,
+            crate::stage::StageTransport,
+        ) {
+            Ok(emitter) => Some(emitter),
+            Err(_) => {
+                writeln!(log, "FORGE_STAGE_EMIT_DISABLED invalid_supervisor_identity")
+                    .map_err(|_| "log_write_failed")?;
+                None
+            }
+        };
         let cancelled = request_dir.join("cancelled");
         let mut checks = Vec::new();
         let mut stages = Vec::new();
@@ -277,13 +353,19 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
             let phases = native_phases_for_scope(&request.branch_scope)?;
             for (index, phase) in phases.iter().enumerate() {
                 let before = Instant::now();
+                if let Some(emitter) = emitter.as_mut() {
+                    if let Some(code) = emitter.started(index, deadline) {
+                        writeln!(log, "FORGE_STAGE_EMIT_FAILED stage_started {code}")
+                            .map_err(|_| "log_write_failed")?;
+                    }
+                }
                 progress(
                     &mut channel,
                     &json!({"action_id":action,"gate_manifest_sha256":request.gate_manifest_sha256,"index":index,"kind":"stage_started","rc":null,"elapsed_ms":null,"monotonic_ms":monotonic_ms()?}),
                 )?;
                 writeln!(log, "FORGE_FIXED_CHECK_START {index}").map_err(|_| "log_write_failed")?;
                 log.flush().map_err(|_| "log_write_failed")?;
-                let code = self.build_command(BuildCommand {
+                let code = match self.build_command(BuildCommand {
                     argv: phase.argv.clone(),
                     layout,
                     uid: account.uid.as_raw(),
@@ -294,7 +376,40 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
                     cancellation: cancellation.clone(),
                     cancelled: &cancelled,
                     log: &log,
-                })?;
+                }) {
+                    Ok(code) => code,
+                    Err(reason) => {
+                        let closed = match reason.as_str() {
+                            "session_isolation_failed"
+                            | "capability_proof_failed"
+                            | "group_proof_failed"
+                            | "privilege_proof_failed"
+                            | "network_isolation_failed"
+                            | "loopback_setup_failed"
+                            | "supplementary_groups_failed"
+                            | "group_drop_failed"
+                            | "uid_drop_failed"
+                            | "no_new_privileges_failed"
+                            | "capabilities_not_cleared"
+                            | "identity_drop_unproven"
+                            | "parent_death_guard_failed"
+                            | "supervisor_disappeared"
+                            | "private_child_setup_failed"
+                            | "private_child_exec_failed"
+                            | "private_child_identity_mismatch"
+                            | "child_digest_mismatch"
+                            | "process_output_limit"
+                            | "cancelled" => reason.as_str(),
+                            _ => "process_unavailable",
+                        };
+                        stages.push(json!({"name":format!("check_{index}"),"label":phase.phase_id,"status":"not_run","reason":closed,"elapsed_ms":before.elapsed().as_millis()}));
+                        return Err(if reason == "cancelled" {
+                            reason
+                        } else {
+                            "verification_unavailable".into()
+                        });
+                    }
+                };
                 progress(
                     &mut channel,
                     &json!({"action_id":action,"gate_manifest_sha256":request.gate_manifest_sha256,"index":index,"kind":"stage_completed","rc":code,"elapsed_ms":before.elapsed().as_millis(),"monotonic_ms":monotonic_ms()?}),
@@ -302,6 +417,12 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
                 writeln!(log, "FORGE_FIXED_CHECK_END {index} rc={code}")
                     .map_err(|_| "log_write_failed")?;
                 checks.push(json!({"index":index,"argv":phase.argv,"returncode":code}));
+                if let Some(emitter) = emitter.as_mut() {
+                    if let Some(code) = emitter.completed(index, code == 0, deadline) {
+                        writeln!(log, "FORGE_STAGE_EMIT_FAILED stage_completed {code}")
+                            .map_err(|_| "log_write_failed")?;
+                    }
+                }
                 stages.push(json!({"name":format!("check_{index}"),"label":phase.phase_id,"status":if code==0{"passed"}else{"failed"},"returncode":code,"elapsed_ms":before.elapsed().as_millis()}));
                 if code != 0 {
                     failure = Some(
@@ -469,7 +590,8 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
         }
         let path = command.active.join(format!("child-{}.json", command.index));
         let spec = ChildSpec {
-            version: 1,
+            version: 2,
+            supervisor_pid: std::process::id(),
             uid: command.uid,
             gid: command.gid,
             cwd: command.layout.source.clone(),
@@ -492,6 +614,8 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
         if remaining == 0 {
             return Err("process_output_limit".into());
         }
+        let status_path = path.with_extension("status.json");
+        write_new(&status_path, b"", 0, 0, 0o600)?;
         let response = self.process.execute(ExecutionRequest {
             argv: vec![
                 self.config.child_path()?.to_string_lossy().into_owned(),
@@ -508,9 +632,57 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
                 executable: self.config.child_path()?,
             },
         })?;
-        fs::remove_file(path).map_err(|_| "child_spec_cleanup_failed")?;
         self.quiesce(command.uid)?;
+        let witness = read_owned(&status_path, 0, 4096).and_then(|raw| strict::<ChildStatus>(&raw));
+        fs::remove_file(path).map_err(|_| "child_spec_cleanup_failed")?;
+        fs::remove_file(status_path).map_err(|_| "child_status_cleanup_failed")?;
+        let witness = match witness {
+            Ok(witness) => witness,
+            Err(_) => {
+                return Err(if response.interrupted {
+                    "cancelled"
+                } else {
+                    "private_child_setup_failed"
+                }
+                .into())
+            }
+        };
+        if witness.version != 1
+            || witness.supervisor_pid != std::process::id()
+            || witness.uid != command.uid
+            || witness.gid != command.gid
+        {
+            return Err("private_child_identity_mismatch".into());
+        }
+        if witness.state == ChildState::SetupFailed {
+            return Err(closed_setup_reason(witness.reason.as_deref()).into());
+        }
+        if witness.state == ChildState::ExecFailed {
+            return Err("private_child_exec_failed".into());
+        }
+        if response.code == 125 {
+            return Err("private_child_setup_failed".into());
+        }
         Ok(response.code)
+    }
+}
+fn closed_setup_reason(reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("session_isolation_failed") => "session_isolation_failed",
+        Some("capability_proof_failed") => "capability_proof_failed",
+        Some("group_proof_failed") => "group_proof_failed",
+        Some("privilege_proof_failed") => "privilege_proof_failed",
+        Some("network_isolation_failed") => "network_isolation_failed",
+        Some("loopback_setup_failed") => "loopback_setup_failed",
+        Some("supplementary_groups_failed") => "supplementary_groups_failed",
+        Some("group_drop_failed") => "group_drop_failed",
+        Some("uid_drop_failed") => "uid_drop_failed",
+        Some("no_new_privileges_failed") => "no_new_privileges_failed",
+        Some("capabilities_not_cleared") => "capabilities_not_cleared",
+        Some("identity_drop_unproven") => "identity_drop_unproven",
+        Some("parent_death_guard_failed") => "parent_death_guard_failed",
+        Some("supervisor_disappeared") => "supervisor_disappeared",
+        _ => "private_child_setup_failed",
     }
 }
 struct BuildCommand<'a> {
@@ -529,7 +701,13 @@ struct BuildCommand<'a> {
 /// Describe is bounded and side-effect-free even from an uninstalled build.
 /// Execution additionally binds the actual kernel executable path, never argv0.
 pub fn public_main() -> Result<i32, String> {
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|v| {
+            v.into_string()
+                .map_err(|_| "invalid_launcher_arguments".to_string())
+        })
+        .collect::<Result<_, _>>()?;
     if args == ["--describe-policy"] {
         println!("{}", native_policy_descriptor());
         return Ok(0);
@@ -543,7 +721,7 @@ pub fn public_main() -> Result<i32, String> {
         Launcher::General => "forge-ci-check",
         Launcher::Native => "forge-native-ci-check",
     });
-    if exe != expected {
+    if exe != expected || std::env::args_os().next().as_deref() != Some(expected.as_os_str()) {
         return Err("unstaged_launcher_denied".into());
     }
     let config: Config = strict(&read_owned(launcher.config_path(), 0, 65536)?)?;
@@ -566,4 +744,94 @@ pub fn public_main() -> Result<i32, String> {
         json!({"action_id":result["action_id"],"status":result["status"],"branch_scope":result["branch_scope"],"log_sha256":result["log_sha256"],"elapsed_ms":result["elapsed_ms"]})
     );
     Ok(if result["status"] == "passed" { 0 } else { 1 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn waiting_for_a_uid_lease_obeys_cancellation_and_deadline_without_releasing_owner() {
+        let root =
+            std::env::temp_dir().join(format!("verifier-lock-cancel-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("uid.lock");
+        let owner = geteuid().as_raw();
+        let wait = LockWait {
+            deadline: Instant::now() + Duration::from_secs(2),
+            cancellation: Arc::new(AtomicBool::new(false)),
+            cancel_file: None,
+        };
+        let held = owned_lock(&path, owner, &wait).unwrap();
+        let cancelled = LockWait {
+            deadline: Instant::now() + Duration::from_secs(2),
+            cancellation: Arc::new(AtomicBool::new(true)),
+            cancel_file: None,
+        };
+        assert!(owned_lock(&path, owner, &cancelled).is_err());
+        let expired = LockWait {
+            deadline: Instant::now() + Duration::from_millis(20),
+            cancellation: Arc::new(AtomicBool::new(false)),
+            cancel_file: None,
+        };
+        let before = Instant::now();
+        assert!(owned_lock(&path, owner, &expired).is_err());
+        assert!(before.elapsed() < Duration::from_secs(1));
+        drop(held);
+        assert!(owned_lock(&path, owner, &wait).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn exact_and_native_scopes_cannot_hold_the_same_build_uid_simultaneously() {
+        let root = std::env::temp_dir().join(format!("verifier-lock-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let exact = root.join("exact-results");
+        let native = root.join("native-results");
+        fs::create_dir(&exact).unwrap();
+        fs::create_dir(&native).unwrap();
+        let global = root.join("build-uid.lock");
+        let owner = geteuid().as_raw();
+        let wait_for_lock = || LockWait {
+            deadline: Instant::now() + Duration::from_secs(2),
+            cancellation: Arc::new(AtomicBool::new(false)),
+            cancel_file: None,
+        };
+        let (entered, entry) = std::sync::mpsc::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let g = global.clone();
+        let first = std::thread::spawn(move || {
+            let _locks = acquire_run_locks(
+                &g,
+                &exact,
+                "00000000-0000-0000-0000-000000000001",
+                owner,
+                &wait_for_lock(),
+            )
+            .unwrap();
+            entered.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(2)).unwrap();
+        });
+        entry.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (attempt, attempted) = std::sync::mpsc::channel();
+        let (entered, entry) = std::sync::mpsc::channel();
+        let g = global.clone();
+        let second = std::thread::spawn(move || {
+            attempt.send(()).unwrap();
+            let _locks = acquire_run_locks(
+                &g,
+                &native,
+                "00000000-0000-0000-0000-000000000002",
+                owner,
+                &wait_for_lock(),
+            )
+            .unwrap();
+            entered.send(()).unwrap();
+        });
+        attempted.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(entry.recv_timeout(Duration::from_millis(30)).is_err());
+        release.send(()).unwrap();
+        entry.recv_timeout(Duration::from_secs(2)).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
 }
