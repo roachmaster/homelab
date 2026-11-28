@@ -74,6 +74,9 @@ use forge_work_publication::publication_clients::{
     SharedSnapshots, WorkspaceSnapshotProvider,
 };
 use forge_work_publication::publication_config::PublicationConfig;
+use forge_work_publication::publication_roles::{
+    AutomationPass, NoAutomation, NoIntentDrain, NoMerger, NoNativeCi,
+};
 use forge_work_publication::source_revision::VerifiedSourceSyncProvider;
 use forge_work_publication::trusted_delivery::{DeliveryConfig, JenkinsObserverPort};
 use forge_work_publication::trusted_delivery_provider::DeliveryProviderFactory;
@@ -780,17 +783,27 @@ pub fn create_publication_worker(
     // Same fallible order as before: candidates, then the branch
     // provider (which opens a session), then the listener.
     let candidates = make_candidates(config)?;
+    // Unselected capabilities bind their null roles.
     let collaborators = PublicationCollaborators {
-        reviewer: Some(reviewer),
-        merger,
-        native_ci: native_shared,
-        post_merge,
-        source_observer,
-        release,
-        jenkins_drain,
+        reviewer: Box::new(reviewer),
+        merger: match merger {
+            Some(merger) => Box::new(merger),
+            None => Box::new(NoMerger),
+        },
+        native_ci: match native_shared {
+            Some(shared) => Box::new(shared),
+            None => Box::new(NoNativeCi),
+        },
+        post_merge: automation_pass(post_merge),
+        source_observer: automation_pass(source_observer),
+        release: automation_pass(release),
+        jenkins_drain: match jenkins_drain {
+            Some(drain) => Box::new(drain),
+            None => Box::new(NoIntentDrain),
+        },
         branch_provider: select_branch_provider(config, &pg)?,
         stop,
-        listener: Some(Box::new(RetryingPublicationListener::new(pg))),
+        listener: Box::new(RetryingPublicationListener::new(pg)),
     };
     Ok(PublicationWorker::new(
         config.clone(),
@@ -802,6 +815,14 @@ pub fn create_publication_worker(
         candidates,
         collaborators,
     ))
+}
+
+/// A selected automation pass, or the null pass outside the rotation.
+fn automation_pass<P: AutomationPass + 'static>(pass: Option<P>) -> Box<dyn AutomationPass> {
+    match pass {
+        Some(pass) => Box::new(pass),
+        None => Box::new(NoAutomation),
+    }
 }
 
 /// The publication host's config loader (work_publication_config's

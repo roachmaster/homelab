@@ -22,19 +22,18 @@ use serde_json::{json, Value};
 use forge_work_worker::agent_branch::BranchReservation;
 use forge_work_worker::review_candidate::ReviewedCandidateProvider;
 use forge_work_worker::review_ports::{ChecksPort, SnapshotPort};
-use forge_work_worker::review_worker::ReviewWorker;
 
-use crate::delivery_ops::SourceObserver;
-use crate::delivery_worker::ReleaseWorker;
-use crate::jenkins_lifecycle::IntentDrain;
-use crate::merge::MergeWorker;
-use crate::native_jenkins::{BranchProviderObject, SharedNativeCi};
-use crate::post_merge::PostMergeWorker;
+use crate::native_jenkins::BranchProviderObject;
 use crate::publication_clients::ProviderError;
 use crate::publication_clients::{
     branch_name, GitHubPullRequestClient, GitRepositoryProvider, PublicationError,
 };
 use crate::publication_config::PublicationConfig;
+use crate::publication_roles::{
+    provider_publication, wait_for_stop, AutomationPass, DrainRole, MergeRole, NoAutomation,
+    NoIntentDrain, NoListener, NoMerger, NoNativeCi, NoReviewer, PublicationNativeCiPort,
+    ReviewRole,
+};
 use crate::trusted_delivery::{digest as validate_digest, validate_uid};
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -155,6 +154,13 @@ pub trait PublicationListenerPort: Send {
     /// Wait up to `seconds` for a queue notification; true when
     /// one arrived (notifications are hints — claims re-check).
     fn wait(&mut self, seconds: f64) -> bool;
+
+    /// The idle wait: up to `seconds` for a notification. A listener
+    /// with a socket waits on it; `NoListener` waits on `stop`.
+    fn wait_or_stop(&mut self, seconds: f64, stop: &AtomicBool) -> bool {
+        let _ = stop;
+        self.wait(seconds)
+    }
 }
 
 /// The full pull-request surface PublicationWorker drives (the
@@ -232,14 +238,14 @@ pub struct PublicationWorker {
     pub checks: Box<dyn ChecksPort>,
     pub pull_requests: GitHubPullRequestClient,
     pub candidates: ReviewedCandidateProvider,
-    reviewer: Option<ReviewWorker>,
-    merger: Option<MergeWorker>,
-    native_ci: Option<SharedNativeCi>,
-    listener: Option<Box<dyn PublicationListenerPort>>,
-    post_merge: Option<PostMergeWorker>,
-    source_observer: Option<SourceObserver>,
-    release: Option<ReleaseWorker>,
-    jenkins_drain: Option<IntentDrain>,
+    reviewer: Box<dyn ReviewRole>,
+    merger: Box<dyn MergeRole>,
+    native_ci: Box<dyn PublicationNativeCiPort>,
+    listener: Box<dyn PublicationListenerPort>,
+    post_merge: Box<dyn AutomationPass>,
+    source_observer: Box<dyn AutomationPass>,
+    release: Box<dyn AutomationPass>,
+    jenkins_drain: Box<dyn DrainRole>,
     branch_provider: Box<dyn BranchProviderObject>,
     pub stop: Arc<AtomicBool>,
     automation: Vec<&'static str>,
@@ -249,37 +255,38 @@ pub struct PublicationWorker {
 
 /// The publication worker's collaborators, all bound at construction.
 ///
-/// The optional sub-workers are capability selections: each is present
-/// only when its config flag enables it, and the worker's automation
-/// rotation is derived from which are present, so they stay `Option`.
-/// The branch port is never absent: `SharedAgentBranches` stands in
-/// for the shared branch policy.
+/// Every role is always present. A capability that is not selected is
+/// bound to its null object (`publication_roles`), which carries the
+/// absent behaviour itself: no review or merge claims, no automation
+/// pass in the rotation, jobs passed through without native CI, an
+/// idle wait on the stop flag, no drain thread. The branch port's null
+/// is `SharedAgentBranches`.
 pub struct PublicationCollaborators {
-    pub reviewer: Option<ReviewWorker>,
-    pub merger: Option<MergeWorker>,
-    pub native_ci: Option<SharedNativeCi>,
-    pub listener: Option<Box<dyn PublicationListenerPort>>,
-    pub post_merge: Option<PostMergeWorker>,
-    pub source_observer: Option<SourceObserver>,
-    pub release: Option<ReleaseWorker>,
-    pub jenkins_drain: Option<IntentDrain>,
+    pub reviewer: Box<dyn ReviewRole>,
+    pub merger: Box<dyn MergeRole>,
+    pub native_ci: Box<dyn PublicationNativeCiPort>,
+    pub listener: Box<dyn PublicationListenerPort>,
+    pub post_merge: Box<dyn AutomationPass>,
+    pub source_observer: Box<dyn AutomationPass>,
+    pub release: Box<dyn AutomationPass>,
+    pub jenkins_drain: Box<dyn DrainRole>,
     pub branch_provider: Box<dyn BranchProviderObject>,
     pub stop: Arc<AtomicBool>,
 }
 
 impl Default for PublicationCollaborators {
-    /// Nothing selected: no sub-workers, shared branches, a fresh stop
-    /// flag (what `PublicationWorker::new` used to start from).
+    /// Nothing selected: every role is its null object, shared
+    /// branches, a fresh stop flag.
     fn default() -> Self {
         PublicationCollaborators {
-            reviewer: None,
-            merger: None,
-            native_ci: None,
-            listener: None,
-            post_merge: None,
-            source_observer: None,
-            release: None,
-            jenkins_drain: None,
+            reviewer: Box::new(NoReviewer),
+            merger: Box::new(NoMerger),
+            native_ci: Box::new(NoNativeCi),
+            listener: Box::new(NoListener),
+            post_merge: Box::new(NoAutomation),
+            source_observer: Box::new(NoAutomation),
+            release: Box::new(NoAutomation),
+            jenkins_drain: Box::new(NoIntentDrain),
             branch_provider: Box::new(crate::native_jenkins::SharedAgentBranches),
             stop: Arc::new(AtomicBool::new(false)),
         }
@@ -325,17 +332,16 @@ impl PublicationWorker {
     }
 
     fn refresh_automation(&mut self) {
-        let mut automation = Vec::new();
-        if self.post_merge.is_some() {
-            automation.push("post_merge");
-        }
-        if self.source_observer.is_some() {
-            automation.push("source_observer");
-        }
-        if self.release.is_some() {
-            automation.push("release");
-        }
-        self.automation = automation;
+        let passes = [
+            ("post_merge", self.post_merge.enabled()),
+            ("source_observer", self.source_observer.enabled()),
+            ("release", self.release.enabled()),
+        ];
+        self.automation = passes
+            .into_iter()
+            .filter(|(_, enabled)| *enabled)
+            .map(|(kind, _)| kind)
+            .collect();
     }
 
     pub fn process(&mut self, job: &Value) -> Result<(), PublicationError> {
@@ -519,11 +525,10 @@ impl PublicationWorker {
         self.git
             .verify(&repository, &head)
             .map_err(|error| failure(error.code()))?;
-        if let Some(native_ci) = &self.native_ci {
-            job = native_ci
-                .publication_job(&job)
-                .map_err(|error| failure(error.code()))?;
-        }
+        job = self
+            .native_ci
+            .publication_job(&job)
+            .map_err(|error| failure(error.code()))?;
         let mut reservation: Option<BranchReservation> = None;
         if self.branch_provider.persistent_enabled() {
             reservation = self
@@ -831,9 +836,7 @@ impl PublicationWorker {
         if self.stop.load(Ordering::SeqCst) {
             return Ok(false);
         }
-        if let Some(native_ci) = &self.native_ci {
-            native_ci.reconcile_once(16)?;
-        }
+        self.native_ci.reconcile_once(16)?;
         if self.branch_provider.persistent_enabled() {
             let repositories: HashSet<String> = self.config.repositories.keys().cloned().collect();
             self.branch_provider
@@ -851,24 +854,9 @@ impl PublicationWorker {
                     let kind = self.automation[self.automation_index % self.automation.len()];
                     self.automation_index += 1;
                     let ran = match kind {
-                        "post_merge" => self
-                            .post_merge
-                            .as_mut()
-                            .expect("automation")
-                            .run_once()
-                            .map_err(provider_publication)?,
-                        "source_observer" => self
-                            .source_observer
-                            .as_mut()
-                            .expect("automation")
-                            .run_once()
-                            .map_err(|message| PublicationError::new(&message))?,
-                        _ => self
-                            .release
-                            .as_mut()
-                            .expect("automation")
-                            .run_once()
-                            .map_err(provider_publication)?,
+                        "post_merge" => self.post_merge.run_once()?,
+                        "source_observer" => self.source_observer.run_once()?,
+                        _ => self.release.run_once()?,
                     };
                     if ran {
                         self.yield_post_merge = true;
@@ -879,34 +867,14 @@ impl PublicationWorker {
         }
         let use_branch_claim = self.branch_provider.persistent_enabled();
         let worker_id: String = self.config.worker.worker_id.chars().take(54).collect();
-        if let Some(reviewer) = &mut self.reviewer {
-            let review = if use_branch_claim {
-                self.store
-                    .review_claim_for_branch_policy(&format!("{worker_id}-reviewer"))
-            } else {
-                self.store.review_claim(&format!("{worker_id}-reviewer"))
-            }
-            .map_err(provider_publication)?;
-            if let Some(review) = review {
-                reviewer
-                    .process(&review)
-                    .map_err(|error| PublicationError::new(&error.to_string()))?;
-                return Ok(true);
-            }
+        if self
+            .reviewer
+            .take_turn(&*self.store, &worker_id, use_branch_claim)?
+        {
+            return Ok(true);
         }
-        if self.merger.is_some() {
-            let merge = self
-                .store
-                .merge_claim(&format!("{worker_id}-merger"))
-                .map_err(provider_publication)?;
-            if let Some(merge) = merge {
-                self.merger
-                    .as_mut()
-                    .expect("checked")
-                    .process(&merge)
-                    .map_err(provider_publication)?;
-                return Ok(true);
-            }
+        if self.merger.take_turn(&*self.store, &worker_id)? {
+            return Ok(true);
         }
         let job = if use_branch_claim {
             self.store
@@ -930,36 +898,19 @@ impl PublicationWorker {
     /// pass is logged and the loop re-enters after a pause — no
     /// remote action is replayed.
     pub fn run_forever(&mut self) {
-        let (drain_done, drain_thread) = match self.jenkins_drain.take() {
-            Some(mut drain) => {
-                let stop = Arc::clone(&self.stop);
-                let (sender, receiver) = std::sync::mpsc::channel::<()>();
-                let thread = std::thread::spawn(move || {
-                    drain.run(&stop);
-                    let _ = sender.send(());
-                });
-                (Some(receiver), Some(thread))
-            }
-            None => (None, None),
-        };
-        let listener: Option<std::sync::Arc<std::sync::Mutex<Box<dyn PublicationListenerPort>>>> =
-            self.listener
-                .take()
-                .map(|listener| std::sync::Arc::new(std::sync::Mutex::new(listener)));
+        let drain = std::mem::replace(&mut self.jenkins_drain, Box::new(NoIntentDrain));
+        let drain = drain.start(Arc::clone(&self.stop));
+        let listener = std::mem::replace(&mut self.listener, Box::new(NoListener));
+        let listener = Arc::new(std::sync::Mutex::new(listener));
         while !self.stop.load(Ordering::SeqCst) {
             // Subscribe before scanning: install the wait drain so
             // long native CI waits keep the listener drained.
-            let scope = match (&self.native_ci, &listener) {
-                (Some(native_ci), Some(listener)) => {
-                    let drain_listener = std::sync::Arc::clone(listener);
-                    Some(native_ci.listen_scope(Box::new(move || {
-                        if let Ok(mut listener) = drain_listener.lock() {
-                            listener.wait(0.0);
-                        }
-                    })))
+            let drain_listener = Arc::clone(&listener);
+            let scope = self.native_ci.listen_scope(Box::new(move || {
+                if let Ok(mut listener) = drain_listener.lock() {
+                    listener.wait(0.0);
                 }
-                _ => None,
-            };
+            }));
             let outcome = self.run_until_idle(&listener);
             drop(scope);
             if outcome.is_err() {
@@ -967,48 +918,26 @@ impl PublicationWorker {
                 self.wait_stop(5.0);
             }
         }
-        if let (Some(receiver), Some(_thread)) = (drain_done, drain_thread) {
-            // Bounded shutdown: a stuck drain is abandoned (the
-            // process is exiting; the thread dies with it).
-            let _ = receiver.recv_timeout(std::time::Duration::from_secs_f64(
-                crate::jenkins_lifecycle::DRAIN_SHUTDOWN_TIMEOUT_SECONDS,
-            ));
-        }
+        drain.finish();
     }
 
     fn run_until_idle(
         &mut self,
-        listener: &Option<std::sync::Arc<std::sync::Mutex<Box<dyn PublicationListenerPort>>>>,
+        listener: &std::sync::Mutex<Box<dyn PublicationListenerPort>>,
     ) -> Result<(), PublicationError> {
         while !self.stop.load(Ordering::SeqCst) {
             if self.run_once()? {
                 continue;
             }
-            match listener {
-                Some(listener) => {
-                    if let Ok(mut listener) = listener.lock() {
-                        listener.wait(5.0);
-                    }
-                }
-                None => self.wait_stop(5.0),
+            if let Ok(mut listener) = listener.lock() {
+                listener.wait_or_stop(5.0, &self.stop);
             }
         }
         Ok(())
     }
 
     fn wait_stop(&self, seconds: f64) {
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds.max(0.0));
-        while !self.stop.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-    }
-}
-
-fn provider_publication(error: ProviderError) -> PublicationError {
-    match error {
-        ProviderError::Publication(publication) => publication,
-        ProviderError::Other(message) => PublicationError::new(&message),
+        wait_for_stop(&self.stop, seconds);
     }
 }
 
@@ -1174,5 +1103,178 @@ mod tests {
         );
         value["direct_implementation"] = json!(true);
         assert!(validate_job(&config(), &value).is_ok());
+    }
+
+    struct NoExec;
+    impl crate::publication_clients::CommandExecutor for NoExec {
+        fn execute(
+            &mut self,
+            _argv: &[String],
+            _env: &[(String, String)],
+            _cwd: Option<&std::path::Path>,
+            _data: Option<&[u8]>,
+            _timeout_seconds: f64,
+        ) -> crate::publication_clients::PublicationResult<Vec<u8>> {
+            Err(PublicationError::new("no_exec"))
+        }
+    }
+
+    struct NoSnapshots;
+    impl SnapshotPort for NoSnapshots {
+        fn create(
+            &mut self,
+            _job: &Value,
+        ) -> Result<
+            forge_work_worker::review_ports::ReviewSnapshot,
+            forge_work_worker::review_ports::ReviewError,
+        > {
+            Err(forge_work_worker::review_ports::ReviewError::code(
+                "no_snapshot",
+            ))
+        }
+    }
+
+    struct NoChecks;
+    impl ChecksPort for NoChecks {
+        fn quiesce(
+            &mut self,
+            _job: &Value,
+        ) -> Result<(), forge_work_worker::review_ports::ReviewError> {
+            Ok(())
+        }
+        fn run(
+            &mut self,
+            _job: &Value,
+            _repo: &std::path::Path,
+            _lost: &AtomicBool,
+        ) -> Result<
+            forge_work_worker::review_ports::VerificationReportData,
+            forge_work_worker::review_ports::VerificationFailure,
+        > {
+            unreachable!("no publication is claimed in these tests")
+        }
+    }
+
+    fn git() -> GitRepositoryProvider {
+        GitRepositoryProvider::new(
+            config(),
+            Box::new(NoExec),
+            Box::new(|_| String::new()),
+            Box::new(crate::publication_clients::NoBranchRecords),
+        )
+    }
+
+    fn null_worker(
+        store: Arc<crate::publication_roles::tests::RecordingStore>,
+    ) -> PublicationWorker {
+        PublicationWorker::new(
+            config(),
+            store,
+            Box::new(NoSnapshots),
+            git(),
+            Box::new(NoChecks),
+            GitHubPullRequestClient::new(config(), Box::new(NoExec)),
+            ReviewedCandidateProvider::new(
+                PathBuf::from("/srv/state"),
+                json!({}),
+                json!([]),
+                String::new(),
+                BTreeMap::new(),
+                Box::new(git()),
+                None,
+            ),
+            PublicationCollaborators::default(),
+        )
+    }
+
+    #[test]
+    fn with_every_role_absent_a_pass_only_claims_publications() {
+        let store = Arc::new(crate::publication_roles::tests::RecordingStore::default());
+        let mut worker = null_worker(Arc::clone(&store));
+        assert!(
+            worker.automation.is_empty(),
+            "no automation pass is selected"
+        );
+        assert!(!worker.run_once().unwrap(), "nothing to publish");
+        assert_eq!(
+            *store.calls.lock().unwrap(),
+            vec!["publication_claim:worker-1-publisher".to_string()],
+            "no review or merge claim without a reviewer or merger"
+        );
+    }
+
+    #[test]
+    fn a_stopped_worker_with_absent_roles_returns_from_run_forever() {
+        let store = Arc::new(crate::publication_roles::tests::RecordingStore::default());
+        let mut worker = null_worker(store);
+        worker.stop.store(true, Ordering::SeqCst);
+        let started = std::time::Instant::now();
+        worker.run_forever();
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    struct Turn(&'static str, bool, Arc<std::sync::Mutex<Vec<&'static str>>>);
+    impl crate::publication_roles::ReviewRole for Turn {
+        fn take_turn(
+            &mut self,
+            _store: &dyn PublicationClaimPort,
+            _worker_id: &str,
+            _branch_policy: bool,
+        ) -> Result<bool, PublicationError> {
+            self.2.lock().unwrap().push(self.0);
+            Ok(self.1)
+        }
+    }
+    impl crate::publication_roles::MergeRole for Turn {
+        fn take_turn(
+            &mut self,
+            _store: &dyn PublicationClaimPort,
+            _worker_id: &str,
+        ) -> Result<bool, PublicationError> {
+            self.2.lock().unwrap().push(self.0);
+            Ok(self.1)
+        }
+    }
+    impl crate::publication_roles::AutomationPass for Turn {
+        fn run_once(&mut self) -> Result<bool, PublicationError> {
+            self.2.lock().unwrap().push(self.0);
+            Ok(self.1)
+        }
+    }
+
+    #[test]
+    fn selected_roles_take_turns_in_the_original_order() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let store = Arc::new(crate::publication_roles::tests::RecordingStore::default());
+        let mut worker = PublicationWorker::new(
+            config(),
+            Arc::clone(&store) as Arc<dyn PublicationClaimPort>,
+            Box::new(NoSnapshots),
+            git(),
+            Box::new(NoChecks),
+            GitHubPullRequestClient::new(config(), Box::new(NoExec)),
+            ReviewedCandidateProvider::new(
+                PathBuf::from("/srv/state"),
+                json!({}),
+                json!([]),
+                String::new(),
+                BTreeMap::new(),
+                Box::new(git()),
+                None,
+            ),
+            PublicationCollaborators {
+                reviewer: Box::new(Turn("review", false, Arc::clone(&log))),
+                merger: Box::new(Turn("merge", true, Arc::clone(&log))),
+                release: Box::new(Turn("release", false, Arc::clone(&log))),
+                ..PublicationCollaborators::default()
+            },
+        );
+        assert_eq!(worker.automation, vec!["release"]);
+        assert!(worker.run_once().unwrap(), "the merger did work");
+        assert_eq!(*log.lock().unwrap(), vec!["release", "review", "merge"]);
+        assert!(
+            store.calls.lock().unwrap().is_empty(),
+            "a merge turn ends the pass before the publication claim"
+        );
     }
 }

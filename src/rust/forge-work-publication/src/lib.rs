@@ -37,6 +37,7 @@ pub mod publication_checks;
 pub mod publication_clients;
 pub mod publication;
 pub mod publication_config;
+pub mod publication_roles;
 pub mod registrar;
 pub mod jenkins_lifecycle;
 pub mod post_merge_provider;
