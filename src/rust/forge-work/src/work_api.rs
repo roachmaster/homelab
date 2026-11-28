@@ -1583,6 +1583,8 @@ impl WorkApiService {
                                     "project_alias": project_alias,
                                     "task_id": task_id.to_string(),
                                     "events": events,
+                                    "status": page.status,
+                                    "revision": page.revision,
                                     "next_sequence": page.next_after,
                                 }),
                             ),

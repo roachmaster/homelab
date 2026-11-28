@@ -48,15 +48,11 @@ pub(super) struct TaskBinding<'a> {
     pub profile: &'a str,
     pub status: &'a str,
 }
-fn fallback_branch(store: &PgWorkStore, project: &str, profile: &str) -> Result<Value, WorkError> {
-    let branch = store
-        .catalog
-        .as_ref()
-        .and_then(|config| config.profile(profile))
-        .map(|profile| profile.branch.clone())
-        .map(Ok)
-        .unwrap_or_else(|| forge_work::work_config::default_agent_branch(profile))
-        .map_err(WorkError::store)?;
+fn fallback_branch(project: &str, profile: &str) -> Result<Value, WorkError> {
+    // Historical tasks with no branch ledger use the original unobserved
+    // projection. A current admission override is not evidence for an old task.
+    let branch =
+        forge_work::work_config::default_agent_branch(profile).map_err(WorkError::store)?;
     let scope = forge_work_worker::agent_branch::branch_scope_for_branch(&branch)
         .map_err(|_| WorkError::store("Invalid branch state"))?;
     Ok(
@@ -90,7 +86,10 @@ pub(super) fn correlation(
             branch = Some(state);
         }
     }
-    let branch = branch.unwrap_or(fallback_branch(store, task.project, task.profile)?);
+    let branch = match branch {
+        Some(binding) => binding,
+        None => fallback_branch(task.project, task.profile)?,
+    };
     let root = task.repair_root.unwrap_or(task.task);
     let family = tx
         .query_rows(

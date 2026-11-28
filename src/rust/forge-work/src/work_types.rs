@@ -170,6 +170,9 @@ pub struct TaskPage {
 /// A sequence page of events.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventPage {
+    /// State and revision from the same owner-scoped snapshot as the events.
+    pub status: String,
+    pub revision: i64,
     /// The page's events, in sequence order.
     pub items: Vec<EventView>,
     /// The sequence to continue after.

@@ -136,6 +136,11 @@ pub(crate) fn events(
             .last()
             .map(|item| item.sequence)
             .unwrap_or(after_sequence);
-        Ok(forge_work::work_types::EventPage { items, next_after })
+        Ok(forge_work::work_types::EventPage {
+            status: col(task, "status")?,
+            revision: col(task, "revision")?,
+            items,
+            next_after,
+        })
     })
 }
