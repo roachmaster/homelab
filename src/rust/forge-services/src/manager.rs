@@ -1,14 +1,17 @@
 //! The inventory, bundle and lifecycle logic of services.py.
 //!
-//! The command runner is injected (RunFn) so the state machine is
-//! testable without systemd; production runs subprocesses with
-//! check=True semantics (non-zero exit is an error).
+//! The command runner and clock are ports (`crate::ports`) bound at
+//! construction, so the state machine is testable without systemd;
+//! production runs subprocesses with check=True semantics (non-zero
+//! exit is an error).
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use crate::ports::{Clock, CommandRunner};
 
 use serde_yaml_ng::Value as Yaml;
 
@@ -26,8 +29,6 @@ impl std::error::Error for ServiceError {}
 fn error(message: impl Into<String>) -> ServiceError {
     ServiceError(message.into())
 }
-
-pub type RunFn = Arc<dyn Fn(&[String]) -> Result<String, ServiceError> + Send + Sync>;
 
 pub fn subprocess_run(argv: &[String]) -> Result<String, ServiceError> {
     let output = std::process::Command::new(&argv[0])
@@ -244,8 +245,8 @@ pub fn write_file(path: &Path, contents: Option<&(Vec<u8>, u32)>) -> Result<(), 
     }
 }
 
-pub fn listening_endpoints(run: &RunFn) -> Result<Vec<String>, ServiceError> {
-    let output = run(&["ss".to_string(), "-H".to_string(), "-ltn".to_string()])?;
+pub fn listening_endpoints(run: &dyn CommandRunner) -> Result<Vec<String>, ServiceError> {
+    let output = run.run(&["ss".to_string(), "-H".to_string(), "-ltn".to_string()])?;
     Ok(output
         .lines()
         .filter_map(|row| row.split_whitespace().nth(3).map(str::to_string))
@@ -253,28 +254,37 @@ pub fn listening_endpoints(run: &RunFn) -> Result<Vec<String>, ServiceError> {
 }
 
 pub struct ServiceManager {
-    pub unit_root: PathBuf,
-    pub run: RunFn,
-    pub sleep: Arc<dyn Fn(Duration) + Send + Sync>,
-    pub now: Arc<dyn Fn() -> Instant + Send + Sync>,
-}
-
-impl Default for ServiceManager {
-    fn default() -> Self {
-        ServiceManager {
-            unit_root: PathBuf::from("/etc/systemd/system"),
-            run: Arc::new(subprocess_run),
-            sleep: Arc::new(std::thread::sleep),
-            now: Arc::new(Instant::now),
-        }
-    }
+    unit_root: PathBuf,
+    runner: Arc<dyn CommandRunner>,
+    clock: Arc<dyn Clock>,
 }
 
 impl ServiceManager {
+    /// Bind the manager to its unit root, command runner and clock.
+    pub fn new(
+        unit_root: PathBuf,
+        runner: Arc<dyn CommandRunner>,
+        clock: Arc<dyn Clock>,
+    ) -> ServiceManager {
+        ServiceManager {
+            unit_root,
+            runner,
+            clock,
+        }
+    }
+
+    pub fn unit_root(&self) -> &Path {
+        &self.unit_root
+    }
+
+    pub fn runner(&self) -> &dyn CommandRunner {
+        &*self.runner
+    }
+
     pub fn systemctl(&self, args: &[&str], capture: bool) -> Result<String, ServiceError> {
         let mut argv = vec!["systemctl".to_string()];
         argv.extend(args.iter().map(|arg| arg.to_string()));
-        let output = (self.run)(&argv)?;
+        let output = self.runner.run(&argv)?;
         let _ = capture;
         Ok(output)
     }
@@ -295,14 +305,14 @@ impl ServiceManager {
     }
 
     pub fn verify_active(&self, service: &Service) -> Result<(), ServiceError> {
-        let deadline = (self.now)() + Duration::from_secs(10);
+        let deadline = self.clock.now() + Duration::from_secs(10);
         let expected: std::collections::BTreeSet<&String> = service.tcp_listeners.iter().collect();
         loop {
             self.systemctl(&["is-active", "--quiet", &service.unit], false)?;
             let missing: Vec<&String> = if expected.is_empty() {
                 Vec::new()
             } else {
-                let listening = listening_endpoints(&self.run)?;
+                let listening = listening_endpoints(&*self.runner)?;
                 expected
                     .iter()
                     .filter(|endpoint| !listening.contains(endpoint))
@@ -312,7 +322,7 @@ impl ServiceManager {
             if missing.is_empty() {
                 return Ok(());
             }
-            if (self.now)() >= deadline {
+            if self.clock.now() >= deadline {
                 let mut names: Vec<&str> = missing.iter().map(|name| name.as_str()).collect();
                 names.sort();
                 return Err(error(format!(
@@ -321,7 +331,7 @@ impl ServiceManager {
                     names.join(", ")
                 )));
             }
-            (self.sleep)(Duration::from_millis(250));
+            self.clock.sleep(Duration::from_millis(250));
         }
     }
 
@@ -337,7 +347,7 @@ impl ServiceManager {
             for (relative, value) in contents {
                 write_file(&directory.join(relative), Some(value))?;
             }
-            (self.run)(&[
+            self.runner.run(&[
                 "systemd-analyze".to_string(),
                 "verify".to_string(),
                 directory.join(&service.unit).to_string_lossy().into_owned(),

@@ -4,7 +4,8 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use forge_services::manager::{listeners, load_inventory, show_inventory, Service, ServiceManager};
+use forge_services::composition::{create_service_manager, ServicesConfig};
+use forge_services::manager::{listeners, load_inventory, show_inventory, Service};
 use nix::fcntl::{Flock, FlockArg};
 
 fn inventory_path() -> PathBuf {
@@ -44,7 +45,7 @@ fn main() -> ExitCode {
         Ok(components) => components,
         Err(error) => return fail(error.0),
     };
-    let manager = ServiceManager::default();
+    let manager = create_service_manager(ServicesConfig::production());
     match action.as_str() {
         "list" => {
             print!("{}", show_inventory(&components));
@@ -65,7 +66,7 @@ fn main() -> ExitCode {
                     }
                 }
             }
-            let endpoints = match forge_services::manager::listening_endpoints(&manager.run) {
+            let endpoints = match forge_services::manager::listening_endpoints(manager.runner()) {
                 Ok(endpoints) => endpoints,
                 Err(error) => return fail(error.0),
             };
