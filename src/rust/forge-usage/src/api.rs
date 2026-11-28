@@ -278,40 +278,27 @@ impl UsageService {
     }
 }
 
-/// Selected, thread-safe acquisition of the usage read store.
-pub type UsageStoreFactory = Arc<dyn Fn(&UsageConfig) -> Arc<dyn UsageReadStore> + Send + Sync>;
+/// Opens the usage read store for a configuration.
+pub trait UsageStoreProvider: Send + Sync {
+    fn open(&self, config: &UsageConfig) -> Arc<dyn UsageReadStore>;
+}
 
-/// Stages config and a selected store factory without opening
-/// resources (UsageServiceFactory in usage_api.py).
+/// Stages config and the selected store provider without opening
+/// resources (UsageServiceFactory in usage_api.py). An unconfigured
+/// usage service is the caller's selection: it does not build one.
 pub struct UsageServiceFactory {
-    config: Option<UsageConfig>,
-    store_factory: Option<UsageStoreFactory>,
+    config: UsageConfig,
+    stores: Arc<dyn UsageStoreProvider>,
 }
 
 impl UsageServiceFactory {
-    pub fn new(
-        config: Option<UsageConfig>,
-        store_factory: Option<UsageStoreFactory>,
-    ) -> Result<UsageServiceFactory, String> {
-        if config.is_some() && store_factory.is_none() {
-            return Err("UsageServiceFactory requires an injected store factory".to_string());
-        }
-        Ok(UsageServiceFactory {
-            config,
-            store_factory,
-        })
+    pub fn new(config: UsageConfig, stores: Arc<dyn UsageStoreProvider>) -> UsageServiceFactory {
+        UsageServiceFactory { config, stores }
     }
 
-    pub fn create(&self) -> Result<Option<UsageService>, String> {
-        let Some(config) = &self.config else {
-            return Ok(None);
-        };
-        let factory = self
-            .store_factory
-            .as_ref()
-            .ok_or_else(|| "UsageServiceFactory requires an injected store factory".to_string())?;
-        let store = factory(config);
-        UsageService::new(config.clone(), store).map(Some)
+    pub fn create(&self) -> Result<UsageService, String> {
+        let store = self.stores.open(&self.config);
+        UsageService::new(self.config.clone(), store)
     }
 }
 

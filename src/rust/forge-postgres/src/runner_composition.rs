@@ -1517,18 +1517,29 @@ pub fn create_usage_service(
             })
             .collect(),
     };
-    let pg_config = pg.clone();
     let factory = forge_usage::api::UsageServiceFactory::new(
-        Some(usage_config),
-        Some(Arc::new(move |config: &forge_usage::store::UsageConfig| {
-            let port = crate::usage_store_adapter::PgUsageStore::new(pg_config.clone());
-            Arc::new(
-                forge_usage::store::UsageStore::new(config.clone(), Arc::new(port), 900, 15)
-                    .expect("usage store"),
-            ) as Arc<dyn forge_usage::store::UsageReadStore>
-        })),
-    )?;
-    factory.create()
+        usage_config,
+        Arc::new(PgUsageStores { pg: pg.clone() }),
+    );
+    factory.create().map(Some)
+}
+
+/// The usage read store over PostgreSQL (900s cache, 15s timeout).
+pub struct PgUsageStores {
+    pub pg: PgConfig,
+}
+
+impl forge_usage::api::UsageStoreProvider for PgUsageStores {
+    fn open(
+        &self,
+        config: &forge_usage::store::UsageConfig,
+    ) -> Arc<dyn forge_usage::store::UsageReadStore> {
+        let port = crate::usage_store_adapter::PgUsageStore::new(self.pg.clone());
+        Arc::new(
+            forge_usage::store::UsageStore::new(config.clone(), Arc::new(port), 900, 15)
+                .expect("usage store"),
+        )
+    }
 }
 
 #[cfg(test)]

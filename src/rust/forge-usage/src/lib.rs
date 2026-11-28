@@ -11,6 +11,8 @@
 pub mod api;
 pub mod collector;
 pub mod diagnostics;
+#[cfg(test)]
+mod factory_tests;
 pub mod muse_process;
 pub mod provider;
 pub mod rpc;
