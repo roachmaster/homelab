@@ -94,6 +94,9 @@ fn operational(error: &WorkerError) -> bool {
             code,
             message,
         } => code == "sql_error" && message.starts_with("[08"),
+        WorkerError::Store {
+            status: 503, code, ..
+        } => code == "unavailable",
         _ => false,
     }
 }
@@ -270,6 +273,9 @@ impl HttpModelAdapter {
                 if size == 0 {
                     break;
                 }
+                if size > MAX_BODY - raw.len() {
+                    return Err(ModelError::new(502, "forge_response_too_large"));
+                }
                 let mut chunk = vec![0u8; size];
                 reader.read_exact(&mut chunk).map_err(|e| unavailable(&e))?;
                 raw.extend_from_slice(&chunk);
@@ -278,11 +284,15 @@ impl HttpModelAdapter {
                 }
                 let mut crlf = [0u8; 2];
                 reader.read_exact(&mut crlf).map_err(|e| unavailable(&e))?;
+                if crlf != *b"\r\n" {
+                    return Err(ModelError::new(502, "invalid_forge_reply"));
+                }
             }
         } else {
-            let limit = content_length
-                .map(|length| (length + 1) as u64)
-                .unwrap_or((MAX_BODY + 1) as u64);
+            if content_length.is_some_and(|length| length > MAX_BODY) {
+                return Err(ModelError::new(502, "forge_response_too_large"));
+            }
+            let limit = (MAX_BODY + 1) as u64;
             reader
                 .take(limit)
                 .read_to_end(&mut raw)
@@ -496,7 +506,7 @@ impl ForgeGpuWorker {
             }
             if let Some(wanted) = &model {
                 if let Some(job) = self.store.claim(wanted)? {
-                    self.process(job)?;
+                    self.process(job, stop)?;
                     continue;
                 }
             }
@@ -505,7 +515,7 @@ impl ForgeGpuWorker {
         Ok(())
     }
 
-    fn process(&mut self, job: GpuJob) -> Result<(), WorkerError> {
+    fn process(&mut self, job: GpuJob, shutdown: &StopFlag) -> Result<(), WorkerError> {
         let stop = StopFlag::new();
         let (tx, rx) = std::sync::mpsc::channel::<Value>();
         let adapter = self.adapter.clone();
@@ -517,13 +527,19 @@ impl ForgeGpuWorker {
         });
         let mut result: Result<(), WorkerError> = Ok(());
         let mut outcome: Option<Value> = None;
-        loop {
-            match rx.recv_timeout(Duration::from_secs_f64(RENEW_SECONDS)) {
+        let mut next_renew = std::time::Instant::now() + Duration::from_secs_f64(RENEW_SECONDS);
+        while !shutdown.is_set() {
+            let remaining = next_renew.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(remaining.min(Duration::from_millis(250))) {
                 Ok(value) => {
                     outcome = Some(value);
                     break;
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if std::time::Instant::now() < next_renew {
+                        continue;
+                    }
+                    next_renew = std::time::Instant::now() + Duration::from_secs_f64(RENEW_SECONDS);
                     match self.store.renew(&job.run_id, &job.attempt_token) {
                         Ok(true) => {
                             if let Err(error) = self.store.advertise(&job.model, true) {

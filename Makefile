@@ -155,11 +155,11 @@ backend-suites:
 	cargo test --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked "$$@" \
 		-p forge-host -p forge-work -p forge-work-worker -p forge-work-publication -p forge-postgres \
 		-p forge-portal-release-actor -p forge-jenkins -p forge-usage -p forge-agent-driver \
-		-p forge-services -p forge-studio -p forge-mcp-db
+		-p forge-services -p forge-studio -p forge-mcp-db -p forge-ci-verifier
 
 ci-preflight:
 	@FORGE_DISABLE_DISPOSABLE_POSTGRES=1 cargo test --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked --lib \
-		-p forge-work-publication -p forge-work-worker -p forge-jenkins -p forge-portal-release-actor
+		-p forge-work-publication -p forge-work-worker -p forge-jenkins -p forge-portal-release-actor -p forge-ci-verifier
 
 ci-verified:
 	$(MAKE) ci-preflight

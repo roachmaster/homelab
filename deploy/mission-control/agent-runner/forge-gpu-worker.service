@@ -4,7 +4,7 @@ Wants=forge-postgres-tunnel.service forge-llama.service
 After=forge-postgres-tunnel.service forge-llama.service
 
 [Service]
-ExecStart=/usr/bin/python3 -B %h/.local/lib/forge-gpu-worker/forge_gpu_worker.py
+ExecStart=%h/.local/lib/forge-gpu-worker/forge-gpu-worker
 Environment=PGPASSFILE=%h/.config/forge-postgres-worker/pgpass
 Environment=FORGE_WORKER_MODEL_TOKEN_FILE=%h/.config/forge-llama/token
 # Proxy transport (rollout step 2): point the worker at the proxy

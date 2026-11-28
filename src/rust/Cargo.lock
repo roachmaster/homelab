@@ -606,6 +606,7 @@ dependencies = [
  "forge-work-publication",
  "forge-work-worker",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]

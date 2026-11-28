@@ -409,6 +409,14 @@ pub struct PgPublicationListener {
 
 impl PgPublicationListener {
     pub fn connect(config: &PgConfig) -> Result<Self, AdapterError> {
+        Self::listen(config, "LISTEN forge_coding_jobs")
+    }
+
+    pub(crate) fn gpu(config: &PgConfig) -> Result<Self, AdapterError> {
+        Self::listen(config, "LISTEN forge_agent_jobs")
+    }
+
+    fn listen(config: &PgConfig, sql: &'static str) -> Result<Self, AdapterError> {
         use std::task::Poll;
         use tokio_postgres::{AsyncMessage, NoTls};
 
@@ -438,7 +446,7 @@ impl PgPublicationListener {
             .await;
         });
         runtime
-            .block_on(client.simple_query("LISTEN forge_coding_jobs"))
+            .block_on(client.simple_query(sql))
             .map_err(|error| AdapterError::Unavailable(error.to_string()))?;
         Ok(Self {
             _runtime: runtime,
@@ -482,13 +490,23 @@ impl PgPublicationStore {
 pub struct RetryingPublicationListener {
     config: PgConfig,
     inner: Option<PgPublicationListener>,
+    connect: fn(&PgConfig) -> Result<PgPublicationListener, AdapterError>,
 }
 
 impl RetryingPublicationListener {
+    pub(crate) fn for_gpu(config: PgConfig) -> Self {
+        Self {
+            config,
+            inner: None,
+            connect: PgPublicationListener::gpu,
+        }
+    }
+
     pub fn new(config: PgConfig) -> RetryingPublicationListener {
         RetryingPublicationListener {
             config,
             inner: None,
+            connect: PgPublicationListener::connect,
         }
     }
 }
@@ -496,7 +514,7 @@ impl RetryingPublicationListener {
 impl forge_work_publication::publication::PublicationListenerPort for RetryingPublicationListener {
     fn wait(&mut self, seconds: f64) -> bool {
         if self.inner.is_none() {
-            match PgPublicationListener::connect(&self.config) {
+            match (self.connect)(&self.config) {
                 Ok(listener) => self.inner = Some(listener),
                 Err(_) => {
                     std::thread::sleep(std::time::Duration::from_secs_f64(seconds.max(0.0)));

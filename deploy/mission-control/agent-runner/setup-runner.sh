@@ -16,7 +16,7 @@ for dir in /opt/homelab-forge /opt/homelab-forge/releases "$release" "$release/b
     (( (8#$(stat -c %a "$dir") & 022) == 0 )) || die "Writable release directory $dir"
 done
 for binary in forge-runner forge-coding-worker forge-publication-worker forge-portal-release-actor \
-              forge-report-progress forge-build-info forge-attempt-checks; do
+              forge-external-delivery forge-report-progress forge-build-info forge-attempt-checks; do
     file="$release/bin/$binary"
     [[ ! -L $file && -f $file && -x $file && $(stat -c '%u:%g:%h' "$file") == 0:0:1 ]] ||
         die "Missing or unsafe native executable $binary"

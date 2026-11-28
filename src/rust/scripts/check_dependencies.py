@@ -53,7 +53,7 @@ EXTERNAL = {
     "forge-portal-release-actor": {"serde_json", "sha2", "nix"},
     "forge-studio": {"serde", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
     "forge-mcp-db": {"serde_json", "sha2", "base64", "tokio", "tokio-postgres", "rusqlite", "nix", "uuid", "chrono"},
-    "forge-host": {"serde_json", "ctrlc"},
+    "forge-host": {"serde_json", "ctrlc", "ureq"},
     "forge-ide-ui": {"serde"},
     "forge-terminal": {"ctrlc", "nix", "serde", "serde_json"},
     "forge-jobs": {"cap-std", "serde", "serde_json"},
