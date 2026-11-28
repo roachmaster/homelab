@@ -1656,6 +1656,11 @@ mod tests {
         attempt: Option<Value>,
         receipt: Option<Value>,
         busy: bool,
+        prefix_actions: Vec<Value>,
+        newer_plan: bool,
+        task_blocked: bool,
+        cancel_event: bool,
+        busy_any: bool,
         worker_rows: Vec<Value>,
         readiness_rows: Vec<Value>,
         records: Rc<RefCell<PinRecords>>,
@@ -1714,7 +1719,7 @@ mod tests {
         unused!(workflow_review, Uuid, bool => Result<Option<Value>, WorkError>);
         unused!(action, Uuid, bool => Result<Option<Value>, WorkError>);
         fn action_by_source(&mut self, _workflow_id: Uuid, _kind: &str, _source_key: &str) -> Result<Option<Value>, WorkError> { Ok(self.previous_action.clone()) }
-        unused!(actions_by_source_prefix, Uuid, Option<&str>, &str => Result<Vec<Value>, WorkError>);
+        fn actions_by_source_prefix(&mut self, _workflow_id: Uuid, _kind: Option<&str>, _prefix: &str) -> Result<Vec<Value>, WorkError> { Ok(self.prefix_actions.clone()) }
         unused!(count_actions_by_source_prefix, Uuid, Option<&str>, &str => Result<i64, WorkError>);
         fn attempt(&mut self, _task_id: Uuid, _attempt_id: Uuid) -> Result<Option<Value>, WorkError> { Ok(self.attempt.clone()) }
         unused!(attempts_of_task, Uuid => Result<Vec<Value>, WorkError>);
@@ -1768,7 +1773,7 @@ mod tests {
         unused!(ensure_decide_action, Uuid, &str => Result<(), WorkError>);
         unused!(hosted_merge_candidates, Uuid => Result<Vec<Value>, WorkError>);
         unused!(insert_merge_action, Uuid, &str, Uuid, &str => Result<(), WorkError>);
-        unused!(workflow_busy, Uuid, crate::workflow_tx::BusyCheck => Result<bool, WorkError>);
+        fn workflow_busy(&mut self, _workflow_id: Uuid, _check: crate::workflow_tx::BusyCheck) -> Result<bool, WorkError> { Ok(self.busy_any) }
         unused!(writer_active, Uuid => Result<bool, WorkError>);
         unused!(amend_policy_available, => Result<bool, WorkError>);
         unused!(allowance_workflows, Option<(&str, Uuid)> => Result<Vec<Value>, WorkError>);
@@ -1784,9 +1789,9 @@ mod tests {
         unused!(insert_workflow_review, &Value => Result<Uuid, WorkError>);
         unused!(insert_readiness_successor, Uuid, Uuid, &str => Result<Uuid, WorkError>);
         unused!(model_route_actions, &str, Uuid => Result<Vec<Value>, WorkError>);
-        unused!(newer_plan_task_exists, &str, Uuid, Uuid, &str, bool => Result<bool, WorkError>);
-        unused!(workflow_task_blocked, &str, Uuid => Result<bool, WorkError>);
-        unused!(operator_cancel_event_exists, Uuid => Result<bool, WorkError>);
+        fn newer_plan_task_exists(&mut self, _project: &str, _workflow_id: Uuid, _task_id: Uuid, _created_at: &str, _or_equal: bool) -> Result<bool, WorkError> { Ok(self.newer_plan) }
+        fn workflow_task_blocked(&mut self, _project: &str, _workflow_id: Uuid) -> Result<bool, WorkError> { Ok(self.task_blocked) }
+        fn operator_cancel_event_exists(&mut self, _workflow_id: Uuid) -> Result<bool, WorkError> { Ok(self.cancel_event) }
         unused!(successful_route_attempt, &str, Uuid, &str, &str => Result<Option<Uuid>, WorkError>);
         unused!(quota_resume_used, Uuid, &str => Result<i64, WorkError>);
         unused!(workflow_review_open, Uuid => Result<bool, WorkError>);
@@ -2035,9 +2040,13 @@ impl WorkflowDecisionPort for PinDecisions {
     }
 
     fn ready_row(alias: &str, mode: &str) -> Value {
+        ready_row_m(alias, "gemini-primary", mode)
+    }
+
+    fn ready_row_m(alias: &str, model: &str, mode: &str) -> Value {
         json!({"projects": ["homelab"], "profiles": [{
             "alias": alias, "backend": "antigravity",
-            "model": "gemini-primary", "modes": [mode]}]})
+            "model": model, "modes": [mode]}]})
     }
 
     struct PinWorld {
@@ -2156,6 +2165,11 @@ impl WorkflowDecisionPort for PinDecisions {
                 },
             })),
             busy: false,
+            prefix_actions: Vec::new(),
+            newer_plan: false,
+            task_blocked: false,
+            cancel_event: false,
+            busy_any: false,
             worker_rows: vec![ready_row("agy-author", "plan")],
             readiness_rows: vec![ready_row("codex-reviewer", "review")],
             records: records.clone(),
@@ -2326,6 +2340,175 @@ impl WorkflowDecisionPort for PinDecisions {
         let store = world.store();
         assert_eq!(
             store.recover_binary_pin(&world.command, &world.proof),
+            Err(mismatch())
+        );
+    }
+
+
+    // -- Model-route recovery over the same harness -----------------
+
+    struct RouteProof {
+        evidence: ModelRouteEvidence,
+    }
+
+    impl QuotaProofPort for RouteProof {
+        fn acquire(
+            &self,
+            _command: &ModelRoute,
+            _task: &Value,
+            _attempt: &Value,
+            _workflow: &Value,
+            _catalog: &dyn WorkflowCatalog,
+        ) -> Result<ModelRouteEvidence, WorkError> {
+            Ok(self.evidence.clone())
+        }
+    }
+
+    struct RouteWorld {
+        pin: PinWorld,
+        command: ModelRoute,
+        proof: RouteProof,
+    }
+
+    fn route_world() -> RouteWorld {
+        let mut pin = pin_world();
+        {
+            let task = pin.template.task.as_mut().unwrap();
+            task["status"] = json!("quota_blocked");
+            task["root_task_id"] = json!(pin.command.task_id.to_string());
+            let attempt = pin.template.attempt.as_mut().unwrap();
+            attempt["outcome"] = json!("quota_blocked");
+            attempt["summary"] = json!(QUOTA_SUMMARY);
+            pin.template.readiness_rows = vec![
+                ready_row_m("agy-author", "gemini-backup", "plan"),
+                ready_row_m("agy-author", "gemini-backup", "implement"),
+                ready_row("codex-reviewer", "review"),
+            ];
+        }
+        let snapshot = snapshot();
+        let recipe = PinnedRecipe::from_snapshot(&snapshot, "author_plan", &native).unwrap();
+        let command = ModelRoute::new(
+            "homelab",
+            pin.command.task_id,
+            pin.command.attempt_id,
+            3,
+            pin.command.reconciliation_receipt_id,
+            "gemini-backup",
+            "route-key-1",
+            "quota hit",
+        )
+        .unwrap();
+        let proof = RouteProof {
+            evidence: ModelRouteEvidence {
+                task_id: pin.command.task_id,
+                attempt_id: pin.command.attempt_id,
+                source_revision: 3,
+                recipe_digest: recipe.digest.clone(),
+                model: "gemini-backup".to_string(),
+                source_config_sha256: "f".repeat(64),
+                error_sha256: "aeb6f801f8121cdd783d2841b96c3610c227d73b066c2c0c1ed45b9230c4ee80"
+                    .to_string(),
+                audit_sha256: "9".repeat(64),
+            },
+        };
+        RouteWorld { pin, command, proof }
+    }
+
+    #[test]
+    fn model_route_recovery_resumes_on_the_backup_and_records() {
+        let world = route_world();
+        let store = world.pin.store();
+        let receipt = store
+            .recover_model_route(&world.command, &world.proof)
+            .expect("recovery");
+        assert_eq!(receipt, world.pin.decisions_receipt);
+        let records = world.pin.records.borrow();
+        assert_eq!(
+            records.workflow_updates,
+            vec![json!({"enabled": true, "phase": "plan", "escalation_reason": ""})]
+        );
+        assert_eq!(records.actions.len(), 1);
+        let action = &records.actions[0];
+        assert_eq!(action["intent"]["policy"], json!(MODEL_ROUTE_POLICY));
+        assert_eq!(action["intent"]["model"], json!("gemini-backup"));
+        assert_eq!(
+            action["finish_receipt"]["status"],
+            json!("provider_model_routed")
+        );
+        assert_eq!(records.events.len(), 1);
+        assert_eq!(
+            records.events[0]["payload"]["stage"],
+            json!("provider_model_route")
+        );
+        assert_eq!(records.events[0]["payload"]["model"], json!("gemini-backup"));
+    }
+
+    #[test]
+    fn model_route_replay_returns_the_stored_receipt() {
+        let mut world = route_world();
+        let request = json!({
+            "project_alias": "homelab",
+            "task_id": world.command.task_id.to_string(),
+            "attempt_id": world.command.attempt_id.to_string(),
+            "expected_revision": 3,
+            "reconciliation_receipt_id":
+                world.command.reconciliation_receipt_id.to_string(),
+            "model": "gemini-backup",
+            "idempotency_key": "route-key-1",
+            "note": "quota hit",
+        });
+        world.pin.template.previous_action = Some(json!({
+            "intent": {"request": request},
+            "finish_receipt": {"receipt": {"status": "already_routed"}},
+        }));
+        let store = world.pin.store();
+        let receipt = store
+            .recover_model_route(&world.command, &world.proof)
+            .expect("replay");
+        assert_eq!(receipt, json!({"status": "already_routed"}));
+        assert!(world.pin.records.borrow().actions.is_empty());
+    }
+
+    #[test]
+    fn model_route_refuses_a_second_route() {
+        let mut world = route_world();
+        world.pin.template.prefix_actions = vec![json!({"kind": "decide"})];
+        let store = world.pin.store();
+        assert_eq!(
+            store.recover_model_route(&world.command, &world.proof),
+            Err(not_reviewable())
+        );
+    }
+
+    #[test]
+    fn model_route_refuses_a_blocked_workflow() {
+        let mut world = route_world();
+        world.pin.template.task_blocked = true;
+        let store = world.pin.store();
+        assert_eq!(
+            store.recover_model_route(&world.command, &world.proof),
+            Err(not_reviewable())
+        );
+    }
+
+    #[test]
+    fn model_route_demands_reconcile_while_busy() {
+        let mut world = route_world();
+        world.pin.template.busy_any = true;
+        let store = world.pin.store();
+        assert_eq!(
+            store.recover_model_route(&world.command, &world.proof),
+            Err(reconcile_required())
+        );
+    }
+
+    #[test]
+    fn model_route_rejects_evidence_for_another_model() {
+        let mut world = route_world();
+        world.proof.evidence.model = "gemini-primary".to_string();
+        let store = world.pin.store();
+        assert_eq!(
+            store.recover_model_route(&world.command, &world.proof),
             Err(mismatch())
         );
     }
