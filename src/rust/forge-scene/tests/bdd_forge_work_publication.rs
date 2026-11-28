@@ -72,11 +72,11 @@ fn steps() -> Steps<World> {
     Steps::new()
         .given(
             "the publication runtime needs the worker process executor",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .given(
             "the publication runtime can register alongside the worker process executor",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .given(
             "the publication observer can run over an injected executor",
@@ -106,7 +106,8 @@ fn steps() -> Steps<World> {
                     Err(rejected) => {
                         w.duplicate_refused = true;
                         let frozen = rejected
-                            .into_original()
+                            .into_parts()
+                            .0
                             .freeze()
                             .map_err(|e| format!("{e:?}"))?;
                         let (((), _exec_factory), pub_factories) = frozen.into_factories();

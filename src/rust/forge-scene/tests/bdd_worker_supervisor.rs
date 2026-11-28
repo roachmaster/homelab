@@ -129,14 +129,14 @@ fn run_proof(w: &mut World, exec: ScriptedExec, cg: TempCgroup, unit: &str) {
 
 fn steps() -> Steps<World> {
     Steps::new()
-        .given("the supervisor can validate coding scope names", |_, _| Ok(()))
+        .given("the supervisor can validate coding scope names", |_: &mut World, _| Ok(()))
         .given(
             "the supervisor can inspect systemd state over an injected executor",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .given(
             "the supervisor can stop a coding scope over an injected executor",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .when("a stop proof is requested for an invalid scope name", |w, _| {
             let exec = ScriptedExec::new(Vec::new());

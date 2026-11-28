@@ -33,7 +33,7 @@ impl McpServer {
         }
     }
 
-    async fn execute(&self, request: McRequest) -> Result<forge_mcp::McResponse, McError> {
+    pub async fn execute(&self, request: McRequest) -> Result<forge_mcp::McResponse, McError> {
         self.backend.execute(request).await
     }
 }

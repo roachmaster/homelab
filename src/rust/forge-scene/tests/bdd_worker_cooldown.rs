@@ -118,7 +118,7 @@ fn refresh_selection(w: &mut World) -> Result<(), String> {
 
 fn steps() -> Steps<World> {
     Steps::new()
-        .given("the worker cooldown can evaluate configured profiles", |w, _| {
+        .given("the worker cooldown can evaluate configured profiles", |w: &mut World, _| {
             let root = TempRoot::new();
             let now = Arc::clone(&w.now);
             let clock: CooldownClock = Arc::new(move || *now.lock().unwrap());

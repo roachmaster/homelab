@@ -45,27 +45,27 @@ fn steps() -> Steps<World> {
     Steps::new()
         .given(
             "the disk registrar needs an explicit absolute starting directory",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .given(
             "the disk registrar can stage configuration without filesystem access",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .given(
             "the local host may start without the disk capability",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .given(
             "the local host can enable the disk capability from a directory",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .given(
             "the local host can list files in its configured directory",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .given(
             "the local host can verify disk command variants against route headers",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
         .when("registration receives a relative path", |w, _| {
             w.reg_error = register_disk(DiskConfig::Native {
@@ -101,7 +101,7 @@ fn steps() -> Steps<World> {
             })
             .map_err(|e| format!("{e:?}"))?;
             let cmds = app.commands().map_err(|e| format!("{e:?}"))?;
-            w.discovered = cmds.into_iter().map(|c| c.name.to_string()).collect();
+            w.discovered = cmds.into_iter().map(|c| c.descriptor.name.to_string()).collect();
             w.app = Some(app);
             Ok(())
         })
@@ -113,7 +113,7 @@ fn steps() -> Steps<World> {
             })
             .map_err(|e| format!("{e:?}"))?;
             let cmds = app.commands().map_err(|e| format!("{e:?}"))?;
-            w.discovered = cmds.into_iter().map(|c| c.name.to_string()).collect();
+            w.discovered = cmds.into_iter().map(|c| c.descriptor.name.to_string()).collect();
             w._dir = Some(dir);
             w.app = Some(app);
             Ok(())
@@ -207,7 +207,7 @@ fn steps() -> Steps<World> {
             ensure(
                 matches!(
                     w.invoke_error,
-                    Some(AppError::Dispatch(DispatchError::PayloadMismatch))
+                    Some(AppError::Dispatch(DispatchError::PayloadMismatch(_)))
                 ),
                 format!("unexpected invoke_error: {:?}", w.invoke_error),
             )

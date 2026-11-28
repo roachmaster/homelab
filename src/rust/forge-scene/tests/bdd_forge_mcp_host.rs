@@ -39,12 +39,12 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 
 fn steps() -> Steps<World> {
     Steps::new()
-        .given("the MCP server can report its capabilities", |_, _| Ok(()))
+        .given("the MCP server can report its capabilities", |_: &mut World, _| Ok(()))
         .given(
             "the MCP server can dispatch requests over the fake backend",
-            |_, _| Ok(()),
+            |_: &mut World, _| Ok(()),
         )
-        .given("the MCP host can describe tool input schemas", |_, _| Ok(()))
+        .given("the MCP host can describe tool input schemas", |_: &mut World, _| Ok(()))
         .when("server info is queried", |w, _| {
             let info = fake_server().get_info();
             w.server_name = Some(info.server_info.name);

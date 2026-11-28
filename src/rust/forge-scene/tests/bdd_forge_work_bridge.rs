@@ -2,7 +2,7 @@
 //! fifteen-route WorkBridge and WorkAdmissionPolicy in forge-work.
 
 use forge_core::bridge::DispatchError;
-use forge_core::ingress::{Envelope, Header, ResponseHeader, RouteKey};
+use forge_core::ingress::{Envelope, Header, Response, RouteKey};
 use forge_scene::bdd::{ensure, verify, Steps};
 use forge_work::catalog::WorkCatalog;
 use forge_work::decision_requests::{
@@ -193,7 +193,7 @@ impl WorkDecisionPort for CountingPorts {
 
 #[derive(Default)]
 struct World {
-    response: Option<(ResponseHeader, WorkResponse)>,
+    response: Option<Response<WorkResponse>>,
     error: Option<DispatchError<WorkError>>,
     port_calls: usize,
 }
@@ -216,9 +216,12 @@ fn run_dispatch(
     admission_open: bool,
 ) -> Result<(), String> {
     let bridge = work_bridge().map_err(|e| format!("{e:?}"))?;
-    let ports = CountingPorts::new();
-    let catalog = WorkCatalog::new(vec![]);
-    let ctx = WorkContext::new(&ports, &ports, &ports, &catalog, admission_open);
+    // The bridge's handlers are 'static, so the context's ports and
+    // catalog must be 'static too; leak one pair per dispatch (the
+    // count stays readable through the leaked reference).
+    let ports: &'static CountingPorts = Box::leak(Box::new(CountingPorts::new()));
+    let catalog: &'static WorkCatalog = Box::leak(Box::new(WorkCatalog::new(vec![])));
+    let ctx = WorkContext::new(ports, ports, ports, catalog, admission_open);
     match bridge.dispatch(Envelope::new(header, payload), &ctx) {
         Ok(ok) => w.response = Some(ok),
         Err(err) => w.error = Some(err),
@@ -289,7 +292,9 @@ fn steps() -> Steps<World> {
         .then(
             "the response carries the matching correlation header and task page",
             |w, _| {
-                let (hdr, resp) = w.response.as_ref().ok_or("expected Ok response")?;
+                let response = w.response.as_ref().ok_or("expected Ok response")?;
+                let hdr = &response.header;
+                let resp = &response.payload;
                 ensure(
                     hdr.correlation_id() == Some("corr-bdd-1"),
                     format!("correlation was {:?}", hdr.correlation_id()),
@@ -303,14 +308,14 @@ fn steps() -> Steps<World> {
         )
         .then("dispatch is denied and no port is called", |w, _| {
             ensure(
-                matches!(w.error, Some(DispatchError::AdmissionDenied)),
+                matches!(w.error, Some(DispatchError::Admission(_))),
                 format!("error was {:?}", w.error),
             )?;
             ensure(w.port_calls == 0, format!("port_calls was {}", w.port_calls))
         })
         .then("dispatch rejects the mismatch and no port is called", |w, _| {
             ensure(
-                matches!(w.error, Some(DispatchError::PayloadMismatch)),
+                matches!(w.error, Some(DispatchError::PayloadMismatch(_))),
                 format!("error was {:?}", w.error),
             )?;
             ensure(w.port_calls == 0, format!("port_calls was {}", w.port_calls))
@@ -319,7 +324,7 @@ fn steps() -> Steps<World> {
             "dispatch reports an unknown route and no port is called",
             |w, _| {
                 ensure(
-                    matches!(w.error, Some(DispatchError::UnknownRoute)),
+                    matches!(w.error, Some(DispatchError::UnknownRoute(_))),
                     format!("error was {:?}", w.error),
                 )?;
                 ensure(w.port_calls == 0, format!("port_calls was {}", w.port_calls))
