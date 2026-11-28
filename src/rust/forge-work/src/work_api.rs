@@ -910,7 +910,7 @@ pub fn decode(
                 &["status_filter", "limit", "cursor", "task_kind_filter"],
             )?;
             let status_filter = match body.get("status_filter") {
-                None => None,
+                None | Some(Value::Null) => None,
                 Some(value) => {
                     let text = value.as_str().ok_or_else(invalid_request)?;
                     if !VALID_STATUS_FILTERS.contains(&text) {
@@ -2441,6 +2441,22 @@ mod tests {
         assert!(matches!(
             destination(&headers("ide.work.bogus")),
             Err(WorkError::Rejected { status: 404, .. })
+        ));
+    }
+
+    #[test]
+    fn raw_list_accepts_explicit_null_filters_from_older_clients() {
+        let list = decode_body(
+            "work_list",
+            json!({"status_filter":null,"task_kind_filter":null}),
+        );
+        assert!(matches!(
+            decode(WorkDestination::List, "req-1", &list),
+            Ok(WorkCommand::List {
+                status_filter: None,
+                task_kind_filter: None,
+                ..
+            })
         ));
     }
 
