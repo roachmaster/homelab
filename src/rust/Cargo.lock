@@ -570,6 +570,13 @@ name = "forge-core"
 version = "0.1.0"
 
 [[package]]
+name = "forge-foundation"
+version = "0.1.0"
+dependencies = [
+ "forge-core",
+]
+
+[[package]]
 name = "forge-game-runtime"
 version = "0.1.0"
 
@@ -774,6 +781,28 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "forge-scene"
+version = "0.1.0"
+dependencies = [
+ "forge-core",
+ "forge-foundation",
+ "forge-jobs",
+ "forge-local",
+ "forge-mcp",
+ "forge-mcp-host",
+ "forge-system",
+ "forge-template",
+ "forge-work",
+ "forge-work-publication",
+ "forge-work-worker",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

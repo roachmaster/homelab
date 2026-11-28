@@ -97,56 +97,64 @@ pub trait ConsumerCachePort {
     ) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf)>, WorkerError>;
 }
 
-/// Spawn a bounded subprocess, capturing stdout: poll for exit
-/// until the deadline, then kill. Shared by the git runner and
-/// the supervisor's command port.
-pub(crate) fn spawn_bounded(
-    argv: &[String],
+/// Git runner adapter over any process-exec `IoClient`.
+pub struct ProcessGitRunner<C> {
+    client: C,
     timeout_seconds: u64,
-    configure: impl FnOnce(&mut std::process::Command),
-) -> Result<(i32, Vec<u8>), WorkerError> {
-    use std::io::Read;
-    let mut builder = std::process::Command::new(&argv[0]);
-    builder
-        .args(&argv[1..])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-    configure(&mut builder);
-    let mut child = builder
-        .spawn()
-        .map_err(|error| WorkerError::Protocol(format!("command spawn failed: {error}")))?;
-    let mut pipe = child.stdout.take().expect("stdout piped");
-    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    std::thread::spawn(move || {
-        let mut data = Vec::new();
-        let _ = pipe.read_to_end(&mut data);
-        let _ = tx.send(data);
-    });
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_secs(timeout_seconds.max(1));
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(WorkerError::Protocol(
-                        "command exceeded its time bound".to_string(),
-                    ));
-                }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
-            Err(error) => {
-                return Err(WorkerError::Protocol(format!(
-                    "command wait failed: {error}"
-                )));
-            }
+}
+
+impl<C> ProcessGitRunner<C> {
+    pub fn new(client: C, timeout_seconds: u64) -> Self {
+        Self {
+            client,
+            timeout_seconds,
         }
-    };
-    let output = rx.recv().unwrap_or_default();
-    Ok((status.code().unwrap_or(-1), output))
+    }
+
+    pub fn client(&self) -> &C {
+        &self.client
+    }
+}
+
+impl<C> GitRunner for ProcessGitRunner<C>
+where
+    C: forge_core::io_client::IoClient<
+        Request = crate::process_exec::ProcessRequest,
+        Response = crate::process_exec::ProcessOutput,
+        Error = WorkerError,
+    >,
+{
+    fn git(&mut self, repo: &Path, args: &[&str]) -> Result<String, WorkerError> {
+        let unavailable = || {
+            WorkerError::execution(
+                "failed",
+                "The approved repository or revision is unavailable.",
+            )
+        };
+        let mut argv: Vec<String> = vec![
+            "/usr/bin/git".to_string(),
+            "-c".to_string(),
+            "core.hooksPath=/dev/null".to_string(),
+            "-C".to_string(),
+            repo.to_string_lossy().into_owned(),
+        ];
+        argv.extend(args.iter().map(|arg| arg.to_string()));
+        let request = crate::process_exec::ProcessRequest::cleared(
+            argv,
+            self.timeout_seconds,
+            &["PATH", "LANG", "LC_ALL", "SYSTEMROOT"],
+            &[
+                ("GIT_CONFIG_NOSYSTEM", "1"),
+                ("GIT_CONFIG_GLOBAL", "/dev/null"),
+                ("GIT_TERMINAL_PROMPT", "0"),
+            ],
+        );
+        let output = self.client.execute(request).map_err(|_| unavailable())?;
+        if output.exit_code != 0 {
+            return Err(unavailable());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
 }
 
 /// The executor's `_git`: a subprocess git with a hardened
@@ -166,41 +174,47 @@ impl Default for CommandGitRunner {
 
 impl GitRunner for CommandGitRunner {
     fn git(&mut self, repo: &Path, args: &[&str]) -> Result<String, WorkerError> {
-        let unavailable = || {
-            WorkerError::execution(
-                "failed",
-                "The approved repository or revision is unavailable.",
-            )
-        };
-        let mut argv: Vec<String> = vec![
-            "/usr/bin/git".to_string(),
-            "-c".to_string(),
-            "core.hooksPath=/dev/null".to_string(),
-            "-C".to_string(),
-            repo.to_string_lossy().into_owned(),
-        ];
-        argv.extend(args.iter().map(|arg| arg.to_string()));
-        let (code, output) = spawn_bounded(&argv, self.timeout_seconds, |builder| {
-            builder.env_clear();
-            for (key, value) in std::env::vars() {
-                if matches!(key.as_str(), "PATH" | "LANG" | "LC_ALL" | "SYSTEMROOT") {
-                    builder.env(key, value);
-                }
-            }
-            builder
-                .env("GIT_CONFIG_NOSYSTEM", "1")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_TERMINAL_PROMPT", "0");
-        })
-        .map_err(|_| unavailable())?;
-        if code != 0 {
-            return Err(unavailable());
-        }
-        Ok(String::from_utf8_lossy(&output).into_owned())
+        ProcessGitRunner::new(crate::process_exec::SystemProcessExec, self.timeout_seconds)
+            .git(repo, args)
     }
 }
 
-/// The supervisor's bounded command port over std::process.
+/// Bounded command port adapter over any process-exec `IoClient`.
+pub struct ProcessCommandPort<C> {
+    client: C,
+}
+
+impl<C> ProcessCommandPort<C> {
+    pub fn new(client: C) -> Self {
+        Self { client }
+    }
+
+    pub fn client(&self) -> &C {
+        &self.client
+    }
+}
+
+impl<C> CommandPort for ProcessCommandPort<C>
+where
+    C: forge_core::io_client::IoClient<
+        Request = crate::process_exec::ProcessRequest,
+        Response = crate::process_exec::ProcessOutput,
+        Error = WorkerError,
+    >,
+{
+    fn run(
+        &mut self,
+        argv: &[String],
+        timeout_seconds: u64,
+    ) -> Result<(i32, Vec<u8>), WorkerError> {
+        let output = self.client.execute(
+            crate::process_exec::ProcessRequest::inherited(argv.to_vec(), timeout_seconds),
+        )?;
+        Ok((output.exit_code, output.stdout))
+    }
+}
+
+/// The supervisor's bounded command port over `SystemProcessExec`.
 pub struct SystemCommandPort;
 
 impl CommandPort for SystemCommandPort {
@@ -209,6 +223,6 @@ impl CommandPort for SystemCommandPort {
         argv: &[String],
         timeout_seconds: u64,
     ) -> Result<(i32, Vec<u8>), WorkerError> {
-        spawn_bounded(argv, timeout_seconds, |_| {})
+        ProcessCommandPort::new(crate::process_exec::SystemProcessExec).run(argv, timeout_seconds)
     }
 }

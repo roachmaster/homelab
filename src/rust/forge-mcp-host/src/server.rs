@@ -33,7 +33,7 @@ impl McpServer {
         }
     }
 
-    async fn execute(&self, request: McRequest) -> Result<forge_mcp::McResponse, McError> {
+    pub async fn execute(&self, request: McRequest) -> Result<forge_mcp::McResponse, McError> {
         self.backend.execute(request).await
     }
 }
@@ -233,4 +233,140 @@ impl ServerHandler for McpServer {
 
 pub fn _unused(_: Value) {
     let _ = json!({});
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fake::FakePort;
+    use forge_mcp::{Decide, McResponse, WorkSubmit};
+
+    fn server() -> McpServer {
+        McpServer::new(Backend::Fake(FakePort))
+    }
+
+    #[test]
+    fn server_info_names_the_service_and_offers_every_surface() {
+        let info = server().get_info();
+        assert_eq!(info.server_info.name, "forge-mcp");
+        assert!(info.capabilities.tools.is_some());
+        assert!(info.capabilities.resources.is_some());
+        assert!(info.capabilities.prompts.is_some());
+        assert!(info.instructions.is_some());
+    }
+
+    #[tokio::test]
+    async fn execute_work_get_returns_the_fake_view() {
+        let response = server()
+            .execute(McRequest::WorkGet {
+                task_id: "task-9".into(),
+            })
+            .await
+            .expect("work");
+        match response {
+            McResponse::Work(view) => {
+                assert_eq!(view.task_id, "task-9");
+                assert_eq!(view.status, "awaiting_review");
+                assert_eq!(view.agent_profile, "muse-db-primary");
+            }
+            other => panic!("response {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_workflow_get_returns_the_enabled_workflow() {
+        let response = server()
+            .execute(McRequest::WorkflowGet {
+                workflow_id: "wf-9".into(),
+            })
+            .await
+            .expect("workflow");
+        match response {
+            McResponse::Workflow(view) => {
+                assert_eq!(view.workflow_id, "wf-9");
+                assert_eq!(view.phase, "implement");
+                assert!(view.enabled);
+            }
+            other => panic!("response {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_events_list_caps_at_five_newest_first() {
+        let response = server()
+            .execute(McRequest::EventsList { limit: 10 })
+            .await
+            .expect("events");
+        match response {
+            McResponse::Events(events) => {
+                assert_eq!(events.len(), 5);
+                let sequences: Vec<u64> = events.iter().map(|e| e.sequence).collect();
+                assert_eq!(sequences, vec![2000, 1999, 1998, 1997, 1996]);
+            }
+            other => panic!("response {other:?}"),
+        }
+        let response = server()
+            .execute(McRequest::EventsList { limit: 3 })
+            .await
+            .expect("events");
+        match response {
+            McResponse::Events(events) => assert_eq!(events.len(), 3),
+            other => panic!("response {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_submit_cancel_and_decide_echo_the_task() {
+        let submit = McRequest::WorkSubmit(Box::new(WorkSubmit {
+            project_alias: "homelab".into(),
+            base_revision: "abc".into(),
+            agent_profile: "agy-primary".into(),
+            prompt: "p".into(),
+            acceptance_criteria: "ac".into(),
+            idempotency_key: "k".into(),
+            workflow_policy_digest: "d".into(),
+        }));
+        match server().execute(submit).await.expect("submit") {
+            McResponse::Submitted { task_id } => {
+                assert!(uuid::Uuid::parse_str(&task_id).is_ok());
+            }
+            other => panic!("response {other:?}"),
+        }
+        let cancel = McRequest::WorkCancel {
+            project_alias: "homelab".into(),
+            task_id: "task-9".into(),
+            expected_revision: 4,
+        };
+        match server().execute(cancel).await.expect("cancel") {
+            McResponse::Cancelled { task_id } => assert_eq!(task_id, "task-9"),
+            other => panic!("response {other:?}"),
+        }
+        let decide = McRequest::Decide(Box::new(Decide {
+            project_alias: "homelab".into(),
+            task_id: "task-9".into(),
+            expected_revision: 4,
+            plan_attempt_id: "attempt-1".into(),
+            plan_sha256: "sha".into(),
+            agent_profile: "agy-primary".into(),
+            approve: true,
+            idempotency_key: "k".into(),
+        }));
+        match server().execute(decide).await.expect("decide") {
+            McResponse::Decided { task_id } => assert_eq!(task_id, "task-9"),
+            other => panic!("response {other:?}"),
+        }
+    }
+
+    #[test]
+    fn input_schemas_name_the_required_arguments() {
+        let get = crate::input_schema("forge.work_get");
+        assert_eq!(get["required"], json!(["task_id"]));
+        let submit = crate::input_schema("forge.work_submit");
+        let required = submit["required"].as_array().expect("required");
+        assert!(required.contains(&json!("workflow_policy_digest")));
+        assert!(required.contains(&json!("idempotency_key")));
+        let unknown = crate::input_schema("forge.nope");
+        assert_eq!(unknown["type"], json!("object"));
+        assert!(unknown.get("required").is_none());
+    }
 }

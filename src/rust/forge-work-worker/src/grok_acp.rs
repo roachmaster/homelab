@@ -323,22 +323,346 @@ fn parse_assignment(line: &str) -> Option<(String, String)> {
     Some((key.to_string(), value.trim().to_string()))
 }
 
-pub fn same_tool_input(previous: &Value, current: &Value) -> bool {
-    if let Some(raw) = current.get("rawInput") {
-        if Some(raw) != previous.get("rawInput") {
-            return false;
+/// Type-strict JSON equality (work_grok_acp._same_json): canonical
+/// text with sorted keys - serde_json's Map is already key-ordered,
+/// and its number rendering keeps 1 and 1.0 (and true and 1) apart,
+/// exactly as Python's json.dumps comparison does.
+fn same_json(left: &Value, right: &Value) -> bool {
+    match (serde_json::to_string(left), serde_json::to_string(right)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// PurePosixPath parts: empty and '.' components drop out.
+fn posix_parts(path: &str) -> Vec<&str> {
+    path.split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect()
+}
+
+/// PurePosixPath str() form for a path whose parts contain no '..'.
+fn posix_normalize(path: &str) -> String {
+    let parts = posix_parts(path);
+    if path.starts_with('/') {
+        format!("/{}", parts.join("/"))
+    } else {
+        parts.join("/")
+    }
+}
+
+/// work_grok_acp._descriptor_path: a vendor descriptor path is only
+/// ever a workspace path, the workspace root, or one of this
+/// invocation's exact note paths.
+fn descriptor_path(raw: Option<&Value>, allowed_notes: &[String]) -> Option<String> {
+    let raw = raw.and_then(|v| v.as_str())?;
+    if raw.is_empty() || raw.chars().count() > 4096 || raw.contains('\0') {
+        return None;
+    }
+    if posix_parts(raw).iter().any(|part| *part == "..") {
+        return None;
+    }
+    let absolute = if raw.starts_with('/') {
+        posix_normalize(raw)
+    } else {
+        posix_normalize(&format!("{WORKSPACE}/{raw}"))
+    };
+    if absolute == WORKSPACE
+        || absolute.starts_with(&format!("{WORKSPACE}/"))
+        || allowed_notes.iter().any(|note| note == &absolute)
+    {
+        Some(absolute)
+    } else {
+        None
+    }
+}
+
+const NATIVE_TOOL_KEYS: [&str; 7] = [
+    "namespace",
+    "name",
+    "version",
+    "kind",
+    "label",
+    "read_only",
+    "input",
+];
+
+/// work_grok_acp._native_metadata: the frozen core of a native tool
+/// descriptor ({namespace, name, version}), or None when the block
+/// is not a well-formed v1 descriptor.
+fn native_metadata(block: Option<&Value>) -> Option<Map<String, Value>> {
+    let block = block.and_then(|v| v.as_object())?;
+    if !["namespace", "name", "version"]
+        .iter()
+        .all(|key| block.contains_key(*key))
+        || !block.keys().all(|key| NATIVE_TOOL_KEYS.contains(&key.as_str()))
+    {
+        return None;
+    }
+    let version = block.get("version")?;
+    if version.as_i64() != Some(1) || version.is_f64() {
+        return None;
+    }
+    for key in ["namespace", "name", "kind", "label"] {
+        if let Some(value) = block.get(key) {
+            let text = value.as_str()?;
+            if text.is_empty()
+                || text.chars().count() > 128
+                || text.chars().any(|c| (c as u32) < 32)
+            {
+                return None;
+            }
         }
     }
-    let (Some(meta), Some(original)) = (
-        current.get("_meta").and_then(|v| v.as_object()),
-        previous.get("_meta").and_then(|v| v.as_object()),
+    if let Some(read_only) = block.get("read_only") {
+        if !read_only.is_boolean() {
+            return None;
+        }
+    }
+    let mut core = Map::new();
+    for key in ["namespace", "name", "version"] {
+        core.insert(key.to_string(), block[key].clone());
+    }
+    Some(core)
+}
+
+/// work_grok_acp._descriptor_matches: a complete vendor descriptor
+/// proves the captured arguments only when it reconstructs them
+/// exactly (paths normalized through descriptor_path). The
+/// descriptor is never substituted into the authoritative rawInput.
+fn descriptor_matches(block: &Map<String, Value>, raw: &Map<String, Value>, allowed_notes: &[String]) -> bool {
+    let Some(input) = block.get("input") else {
+        return true;
+    };
+    let Some(value) = input.as_object() else {
+        return false;
+    };
+    let raw_value = Value::Object(raw.clone());
+    match block.get("name").and_then(|v| v.as_str()) {
+        Some("read_file") => {
+            let Some(normalized) = descriptor_path(raw.get("target_file"), allowed_notes) else {
+                return false;
+            };
+            let mut expected = Map::new();
+            expected.insert("path".to_string(), Value::String(normalized));
+            for key in ["offset", "limit"] {
+                if let Some(part) = raw.get(key) {
+                    expected.insert(key.to_string(), part.clone());
+                }
+            }
+            same_json(&Value::Object(value.clone()), &Value::Object(expected))
+        }
+        Some("list_dir") => {
+            let Some(normalized) = descriptor_path(raw.get("target_directory"), allowed_notes) else {
+                return false;
+            };
+            value.len() == 1
+                && value.get("directory").and_then(|v| v.as_str()) == Some(normalized.as_str())
+        }
+        Some("grep") => {
+            if !raw.get("pattern").map(|v| v.is_string()).unwrap_or(false) {
+                return false;
+            }
+            let mut expected = Map::new();
+            expected.insert("pattern".to_string(), raw["pattern"].clone());
+            if let Some(path) = raw.get("path") {
+                if !path.is_null() {
+                    let Some(normalized) = descriptor_path(Some(path), allowed_notes) else {
+                        return false;
+                    };
+                    expected.insert("path".to_string(), Value::String(normalized));
+                }
+            }
+            same_json(&Value::Object(value.clone()), &Value::Object(expected))
+        }
+        Some("run_terminal_command") => {
+            let keys: std::collections::HashSet<&str> =
+                value.keys().map(|k| k.as_str()).collect();
+            keys == raw.keys().map(|k| k.as_str()).collect()
+                && keys.iter().all(|key| matches!(*key, "command" | "description"))
+                && value
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .map(|command| !command.is_empty() && command.chars().count() <= 16384)
+                    .unwrap_or(false)
+                && value.values().all(|v| v.is_string())
+                && same_json(&Value::Object(value.clone()), &raw_value)
+        }
+        Some("write") | Some("search_replace") => {
+            same_json(&Value::Object(value.clone()), &raw_value)
+        }
+        _ => false,
+    }
+}
+
+/// work_grok_acp.same_tool_identity: progress annotations never
+/// replace captured arguments or tool identity. Only the frozen
+/// native core (namespace, name, version) may be restated.
+pub fn same_tool_identity(previous: &Value, current: &Value) -> bool {
+    if current.get("toolCallId") != previous.get("toolCallId") {
+        return false;
+    }
+    let empty = Map::new();
+    let (Some(original_meta), Some(meta)) = (
+        match previous.get("_meta") {
+            None => Some(&empty),
+            Some(value) => value.as_object(),
+        },
+        match current.get("_meta") {
+            None => Some(&empty),
+            Some(value) => value.as_object(),
+        },
     ) else {
         return false;
     };
-    // Progress adds non-authoritative metadata such as toolNotRun.
-    // Only native tool identity is frozen; status/diagnostic metadata
-    // is not that identity.
-    !meta.contains_key("x.ai/tool") || meta.get("x.ai/tool") == original.get("x.ai/tool")
+    let core = native_metadata(original_meta.get("x.ai/tool"));
+    let Some(value) = meta.get("x.ai/tool") else {
+        return true;
+    };
+    let Some(value) = value.as_object() else {
+        return false;
+    };
+    let Some(core) = core else {
+        return false;
+    };
+    core.iter().all(|(key, expected)| {
+        value.get(key).map(|v| same_json(v, expected)).unwrap_or(true)
+    })
+}
+
+/// work_grok_acp.same_tool_input: affirmative permission proof,
+/// independent of discarded progress data. Full current args must
+/// match the captured args, or use one of the observed tagged
+/// equivalents. A complete known vendor descriptor can also prove
+/// the original args. Missing/unknown/contradictory proof grants
+/// no permission.
+pub fn same_tool_input(previous: &Value, current: &Value, allowed_notes: &[String]) -> bool {
+    if !same_tool_identity(previous, current) {
+        return false;
+    }
+    let empty = Map::new();
+    let meta = current.get("_meta").and_then(|v| v.as_object()).unwrap_or(&empty);
+    if !meta
+        .keys()
+        .all(|key| matches!(key.as_str(), "x.ai/tool" | "toolNotRun"))
+    {
+        return false;
+    }
+    let original = previous
+        .get("_meta")
+        .and_then(|v| v.as_object())
+        .and_then(|meta| meta.get("x.ai/tool"))
+        .and_then(|v| v.as_object());
+    let raw = previous.get("rawInput").and_then(|v| v.as_object());
+    let (Some(original), Some(raw)) = (original, raw) else {
+        return false;
+    };
+    let augmented = meta.get("x.ai/tool").filter(|v| !v.is_null());
+    if let Some(augmented) = augmented {
+        let Some(augmented) = augmented.as_object() else {
+            return false;
+        };
+        if !augmented
+            .keys()
+            .all(|key| NATIVE_TOOL_KEYS.contains(&key.as_str()))
+        {
+            return false;
+        }
+    }
+    let augmented = augmented.and_then(|v| v.as_object());
+    let with_input = |augmented: &Map<String, Value>| {
+        let mut block = original.clone();
+        block.insert("input".to_string(), augmented["input"].clone());
+        descriptor_matches(&block, raw, allowed_notes)
+    };
+    if current.get("rawInput").is_none() {
+        let Some(augmented) = augmented else {
+            return false;
+        };
+        if !augmented.contains_key("input") {
+            return false;
+        }
+        let complete: &[&str] = match original.get("name").and_then(|v| v.as_str()) {
+            Some("read_file") => &["target_file", "offset", "limit"],
+            Some("list_dir") => &["target_directory"],
+            Some("grep") => &["pattern", "path"],
+            Some("run_terminal_command") => &["command", "description"],
+            Some("write") => &["file_path", "target_file", "path", "contents", "content"],
+            Some("search_replace") => &[
+                "file_path",
+                "target_file",
+                "path",
+                "old_string",
+                "new_string",
+                "replace_all",
+            ],
+            _ => return false,
+        };
+        return raw.keys().all(|key| complete.contains(&key.as_str()))
+            && with_input(augmented);
+    }
+    let tagged = &current["rawInput"];
+    if same_json(tagged, &Value::Object(raw.clone())) {
+        return match augmented {
+            Some(augmented) if augmented.contains_key("input") => with_input(augmented),
+            _ => true,
+        };
+    }
+    let Some(tagged) = tagged.as_object() else {
+        return false;
+    };
+    let (variant, defaults): (&str, Vec<(&str, Value)>) =
+        match original.get("name").and_then(|v| v.as_str()) {
+            Some("read_file") => ("ReadFile", Vec::new()),
+            Some("list_dir") => ("ListDir", Vec::new()),
+            Some("run_terminal_command") => (
+                "Bash",
+                vec![("is_background", Value::Bool(false))],
+            ),
+            Some("grep") => (
+                "Grep",
+                vec![
+                    ("-i", Value::Bool(false)),
+                    ("type", Value::Null),
+                    ("multiline", Value::Bool(false)),
+                    ("path", Value::Null),
+                    ("glob", Value::Null),
+                ],
+            ),
+            _ => return false,
+        };
+    let mut additions: Vec<(&str, Value)> = vec![("variant", Value::String(variant.to_string()))];
+    additions.extend(defaults);
+    let additions: Vec<(&str, Value)> = additions
+        .into_iter()
+        .filter(|(key, _)| !raw.contains_key(*key))
+        .collect();
+    let expected_keys: std::collections::HashSet<&str> = raw
+        .keys()
+        .map(|k| k.as_str())
+        .chain(additions.iter().map(|(key, _)| *key))
+        .collect();
+    if tagged.keys().map(|k| k.as_str()).collect::<std::collections::HashSet<&str>>()
+        != expected_keys
+    {
+        return false;
+    }
+    if !additions
+        .iter()
+        .all(|(key, value)| tagged.get(*key).map(|v| same_json(v, value)).unwrap_or(false))
+    {
+        return false;
+    }
+    let normalized: Map<String, Value> = tagged
+        .iter()
+        .filter(|(key, _)| !additions.iter().any(|(added, _)| *added == key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    same_json(&Value::Object(normalized), &Value::Object(raw.clone()))
+        && match augmented {
+            Some(augmented) if augmented.contains_key("input") => with_input(augmented),
+            _ => true,
+        }
 }
 
 /// Explicit parent-side read-only path proof; never expose the auth
@@ -862,27 +1186,98 @@ impl Permissions {
             }
             let fields: &[&str] = match name {
                 "read_file" => &["target_file", "offset", "limit"],
-                "list_dir" => &["relative_workspace_path", "path"],
-                "grep" => &["pattern", "path", "include_pattern", "exclude_pattern", "case_sensitive"],
+                "list_dir" => &["target_directory", "relative_workspace_path", "path"],
+                "grep" => &[
+                    "pattern",
+                    "path",
+                    "glob",
+                    "head_limit",
+                    "-A",
+                    "-i",
+                    "type",
+                    "multiline",
+                    "include_pattern",
+                    "exclude_pattern",
+                    "case_sensitive",
+                ],
                 "write" => &["file_path", "target_file", "path", "contents", "content"],
                 _ => &["file_path", "target_file", "path", "old_string", "new_string", "replace_all"],
             };
             if !raw.keys().all(|key| fields.contains(&key.as_str())) {
                 return false;
             }
-            let pathfields: Vec<&str> = ["target_file", "relative_workspace_path", "file_path", "path"]
-                .into_iter()
-                .filter(|key| raw.contains_key(*key))
-                .collect();
-            if pathfields.len() != 1 {
+            let pathfields: Vec<&str> = [
+                "target_file",
+                "target_directory",
+                "relative_workspace_path",
+                "file_path",
+                "path",
+            ]
+            .into_iter()
+            .filter(|key| raw.contains_key(*key))
+            .collect();
+            // A grep with no path (or an explicit null path) reads the
+            // workspace itself; every other call names exactly one.
+            let path: Value = if name == "grep"
+                && (pathfields.is_empty()
+                    || pathfields == ["path"] && raw["path"].is_null())
+            {
+                Value::String(WORKSPACE.to_string())
+            } else if pathfields.len() == 1 {
+                raw[pathfields[0]].clone()
+            } else {
                 return false;
+            };
+            if name == "grep" {
+                let pattern = raw.get("pattern").and_then(|v| v.as_str());
+                if !pattern
+                    .map(|p| !p.is_empty() && p.chars().count() <= 8192)
+                    .unwrap_or(false)
+                {
+                    return false;
+                }
+                for key in ["-i", "multiline", "case_sensitive"] {
+                    if let Some(value) = raw.get(key) {
+                        if !value.is_boolean() {
+                            return false;
+                        }
+                    }
+                }
+                for (key, minimum, maximum) in [("head_limit", 1i64, 10000i64), ("-A", 0, 4096)] {
+                    if let Some(value) = raw.get(key) {
+                        if value.as_i64().map(|n| !(minimum..=maximum).contains(&n)).unwrap_or(true)
+                            || value.is_f64()
+                        {
+                            return false;
+                        }
+                    }
+                }
+                if let Some(kind) = raw.get("type") {
+                    if !kind.is_null() {
+                        let Some(kind) = kind.as_str() else {
+                            return false;
+                        };
+                        if kind.is_empty()
+                            || kind.chars().count() > 64
+                            || !kind
+                                .chars()
+                                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+                        {
+                            return false;
+                        }
+                    }
+                }
             }
-            for key in ["include_pattern", "exclude_pattern"] {
+            for key in ["include_pattern", "exclude_pattern", "glob"] {
+                if name == "grep" && key == "glob" && raw.get(key).map(|v| v.is_null()).unwrap_or(false) {
+                    continue;
+                }
                 let pattern = raw.get(key).cloned().unwrap_or(Value::String(String::new()));
                 let Some(pattern) = pattern.as_str() else {
                     return false;
                 };
-                if pattern.starts_with('/')
+                if pattern.chars().count() > 4096
+                    || pattern.starts_with('/')
                     || pattern
                         .split('/')
                         .filter(|part| !part.is_empty() && *part != ".")
@@ -891,7 +1286,7 @@ impl Permissions {
                     return false;
                 }
             }
-            return self.paths.allows(&raw[pathfields[0]], write);
+            return self.paths.allows(&path, write);
         }
         false
     }
@@ -1192,10 +1587,18 @@ impl GrokAcpTransport {
             .cloned()
             .ok_or("Unbound ACP tool request")?;
         let tool_value = Value::Object(tool.clone());
-        if !same_tool_input(&previous, &tool_value) {
+        if !same_tool_identity(&previous, &tool_value) {
             return Err("ACP permission identity changed".to_string());
         }
-        let admitted = self.permissions.admit(&previous);
+        let allowed_notes: Vec<String> = self
+            .permissions
+            .paths
+            .notes
+            .iter()
+            .map(|(child, _host)| child.clone())
+            .collect();
+        let admitted = same_tool_input(&previous, &tool_value, &allowed_notes)
+            && self.permissions.admit(&previous);
         let wanted = if admitted { "allow_once" } else { "reject_once" };
         let ids: Vec<Option<&str>> = options
             .iter()
@@ -1346,6 +1749,25 @@ impl GrokAcpTransport {
                 {
                     return Err("Invalid ACP tool identity".to_string());
                 }
+                // The captured call is the permission evidence; its
+                // native metadata must be a well-formed descriptor.
+                // (The stored Value is owned - the deepcopy in the
+                // Python transport - so progress can never alias it.)
+                let empty = Map::new();
+                let meta = match update.get("_meta") {
+                    None => &empty,
+                    Some(value) => value
+                        .as_object()
+                        .ok_or("Invalid ACP native tool metadata")?,
+                };
+                if !meta
+                    .keys()
+                    .all(|key| matches!(key.as_str(), "x.ai/tool" | "toolNotRun"))
+                    || (meta.contains_key("x.ai/tool")
+                        && native_metadata(meta.get("x.ai/tool")).is_none())
+                {
+                    return Err("Invalid ACP native tool metadata".to_string());
+                }
                 self.calls
                     .insert(identity.to_string(), Value::Object(update.clone()));
                 Ok(Vec::new())
@@ -1355,9 +1777,12 @@ impl GrokAcpTransport {
                 let Some(previous) = identity.and_then(|id| self.calls.get(id)) else {
                     return Err("Unbound ACP tool update".to_string());
                 };
-                if !same_tool_input(previous, &Value::Object(update.clone())) {
-                    return Err("ACP tool input changed after binding".to_string());
+                if !same_tool_identity(previous, &Value::Object(update.clone())) {
+                    return Err("ACP tool identity changed after binding".to_string());
                 }
+                // rawInput and vendor input in an update are bounded
+                // display/progress annotations: neither merged nor
+                // used later as permission evidence.
                 Ok(Vec::new())
             }
             "user_message_chunk" | "agent_thought_chunk" | "plan" | "available_commands"
@@ -1792,7 +2217,18 @@ mod tests {
         let call = tool("run_terminal_command", json!({"command": "git status"}));
         update(&mut transport, call.clone()).unwrap();
         let changed = tool("run_terminal_command", json!({"command": "git push"}));
-        assert!(permission(&mut transport, &changed, None).is_err());
+        // A changed command is not an identity break: the proof fails
+        // and the answer is reject_once, not a protocol error.
+        permission(&mut transport, &changed, None).unwrap();
+        let reply: Value = serde_json::from_slice(&transport.drain()).unwrap();
+        assert_eq!(
+            reply["result"]["outcome"],
+            json!({"outcome": "selected", "optionId": "native-reject"})
+        );
+        assert!(reply["result"]["_meta"]["homelab/permission"]
+            .as_str()
+            .unwrap()
+            .contains("Do not use shell"));
         // No allow/reject-once option for the wanted kind.
         let mut transport = make_transport();
         initialize(&mut transport);
@@ -1803,12 +2239,14 @@ mod tests {
             Some(json!([{"optionId": "x", "name": "Always", "kind": "allow_always"}]))
         )
         .is_err());
-        // A changed tool_call_update cannot lend the original identity.
+        // A changed rawInput in an update is discarded progress data:
+        // it neither errors nor lends the original any new arguments.
         let mut transport = make_transport();
         initialize(&mut transport);
         update(&mut transport, call.clone()).unwrap();
-        assert!(update(&mut transport, json!({"sessionUpdate": "tool_call_update",
-            "toolCallId": "call-1", "rawInput": {"command": "git push"}})).is_err());
+        let silent = update(&mut transport, json!({"sessionUpdate": "tool_call_update",
+            "toolCallId": "call-1", "rawInput": {"command": "git push"}})).unwrap();
+        assert!(silent.is_empty());
         // Status metadata may progress without changing identity.
         let mut transport = make_transport();
         initialize(&mut transport);
@@ -1820,6 +2258,168 @@ mod tests {
         let changed = json!({"sessionUpdate": "tool_call_update", "toolCallId": "call-1",
             "_meta": {"x.ai/tool": {"name": "write"}}});
         assert!(update(&mut transport, changed).is_err());
+    }
+
+    #[test]
+    fn descriptor_proves_terminal_arguments_and_mismatch_rejects() {
+        let call = tool(
+            "run_terminal_command",
+            json!({"command": "git status", "description": "read inventory"}),
+        );
+        let descriptor = |command: &str| {
+            json!({"toolCallId": "call-1",
+                   "_meta": {"x.ai/tool": {"version": 1, "namespace": "grok_build",
+                       "name": "run_terminal_command",
+                       "input": {"command": command, "description": "read inventory"}}}})
+        };
+        // A complete descriptor reconstructing the captured args
+        // admits, even with no rawInput in the permission request.
+        let mut transport = make_transport();
+        initialize(&mut transport);
+        update(&mut transport, call.clone()).unwrap();
+        permission(&mut transport, &descriptor("git status"), None).unwrap();
+        let reply: Value = serde_json::from_slice(&transport.drain()).unwrap();
+        assert_eq!(
+            reply["result"]["outcome"],
+            json!({"outcome": "selected", "optionId": "native-allow"})
+        );
+        // The same descriptor naming a different command proves
+        // nothing: reject_once.
+        let mut transport = make_transport();
+        initialize(&mut transport);
+        update(&mut transport, call.clone()).unwrap();
+        permission(&mut transport, &descriptor("git push"), None).unwrap();
+        let reply: Value = serde_json::from_slice(&transport.drain()).unwrap();
+        assert_eq!(
+            reply["result"]["outcome"],
+            json!({"outcome": "selected", "optionId": "native-reject"})
+        );
+    }
+
+    #[test]
+    fn descriptor_and_tagged_variants_prove_captured_input() {
+        let previous = |name: &str, raw: Value| {
+            json!({"toolCallId": "call-1", "rawInput": raw,
+                   "_meta": {"x.ai/tool": {"version": 1, "namespace": "grok_build",
+                       "name": name}}})
+        };
+        let notes: Vec<String> = Vec::new();
+        // Tagged Bash equivalent with its observed defaults.
+        let terminal = previous("run_terminal_command", json!({"command": "git status"}));
+        let tagged = json!({"toolCallId": "call-1",
+            "rawInput": {"variant": "Bash", "command": "git status", "is_background": false}});
+        assert!(same_tool_input(&terminal, &tagged, &notes));
+        let background = json!({"toolCallId": "call-1",
+            "rawInput": {"variant": "Bash", "command": "git status", "is_background": true}});
+        assert!(!same_tool_input(&terminal, &background, &notes));
+        let extra = json!({"toolCallId": "call-1",
+            "rawInput": {"variant": "Bash", "command": "git status",
+                         "is_background": false, "extra": 1}});
+        assert!(!same_tool_input(&terminal, &extra, &notes));
+        // JSON types are part of the proof: true is not 1.
+        let read = previous("read_file", json!({"target_file": "a.rs", "limit": 1}));
+        let aliased = json!({"toolCallId": "call-1",
+            "rawInput": {"target_file": "a.rs", "limit": true}});
+        assert!(!same_tool_input(&read, &aliased, &notes));
+        // A read descriptor normalizes the path against the symbolic
+        // workspace root; it cannot redirect outside it, omit a
+        // captured argument, or borrow a note path it was not given.
+        let read = previous(
+            "read_file",
+            json!({"target_file": "src/main.rs", "offset": 0, "limit": 10}),
+        );
+        let described = |input: Value| {
+            json!({"toolCallId": "call-1",
+                   "_meta": {"x.ai/tool": {"version": 1, "namespace": "grok_build",
+                       "name": "read_file", "input": input}}})
+        };
+        assert!(same_tool_input(
+            &read,
+            &described(json!({"path": "/run/forge-coding-workspace/src/main.rs",
+                              "offset": 0, "limit": 10})),
+            &notes
+        ));
+        assert!(!same_tool_input(
+            &read,
+            &described(json!({"path": "/etc/passwd", "offset": 0, "limit": 10})),
+            &notes
+        ));
+        assert!(!same_tool_input(
+            &read,
+            &described(json!({"path": "/run/forge-coding-workspace/src/main.rs",
+                              "offset": 0})),
+            &notes
+        ));
+        let note = "/run/forge-coding-attempt/approved-plan.md";
+        let note_read = previous("read_file", json!({"target_file": note}));
+        let note_described = described(json!({"path": note}));
+        assert!(!same_tool_input(&note_read, &note_described, &notes));
+        assert!(same_tool_input(
+            &note_read,
+            &note_described,
+            &[note.to_string()]
+        ));
+        // Unknown authority fields in the request metadata fail closed.
+        let mut unknown = described(json!({"path": "/run/forge-coding-workspace/src/main.rs",
+                                           "offset": 0, "limit": 10}));
+        unknown["_meta"]["surprise"] = json!(true);
+        assert!(!same_tool_input(&read, &unknown, &notes));
+    }
+
+    #[test]
+    fn initial_native_metadata_is_validated() {
+        let mut transport = make_transport();
+        initialize(&mut transport);
+        let partial = json!({"sessionUpdate": "tool_call", "toolCallId": "call-9",
+            "rawInput": {"command": "git status"},
+            "_meta": {"x.ai/tool": {"name": "run_terminal_command"}}});
+        assert!(update(&mut transport, partial)
+            .unwrap_err()
+            .contains("Invalid ACP native tool metadata"));
+        let mut transport = make_transport();
+        initialize(&mut transport);
+        let extra = json!({"sessionUpdate": "tool_call", "toolCallId": "call-9",
+            "rawInput": {"command": "git status"},
+            "_meta": {"x.ai/tool": {"version": 1, "namespace": "grok_build",
+                      "name": "run_terminal_command"}, "surprise": 1}});
+        assert!(update(&mut transport, extra)
+            .unwrap_err()
+            .contains("Invalid ACP native tool metadata"));
+    }
+
+    #[test]
+    fn grep_admission_bounds() {
+        let root = tempdir("grep");
+        let (plan, _) = plan_permissions(&root);
+        // No path: the grep reads the workspace itself; the observed
+        // vendor defaults are admitted within their bounds.
+        assert!(plan.admit(&tool(
+            "grep",
+            json!({"pattern": "needle", "glob": null, "-i": false,
+                   "head_limit": 25, "type": "rust"})
+        )));
+        assert!(!plan.admit(&tool("grep", json!({"pattern": ""}))));
+        assert!(!plan.admit(&tool(
+            "grep",
+            json!({"pattern": "needle", "head_limit": 0})
+        )));
+        assert!(!plan.admit(&tool(
+            "grep",
+            json!({"pattern": "needle", "-A": 5000})
+        )));
+        assert!(!plan.admit(&tool(
+            "grep",
+            json!({"pattern": "needle", "type": "not a type!"})
+        )));
+        assert!(!plan.admit(&tool(
+            "grep",
+            json!({"pattern": "needle", "glob": "../outside"})
+        )));
+        assert!(!plan.admit(&tool(
+            "grep",
+            json!({"pattern": "needle", "-i": "yes"})
+        )));
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

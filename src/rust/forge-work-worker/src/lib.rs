@@ -31,6 +31,7 @@ pub mod ports_runtime;
 pub mod ports_store;
 pub mod ports_worker;
 pub mod process;
+pub mod process_exec;
 pub mod progress;
 pub mod progress_helper;
 pub mod provider_auth;
