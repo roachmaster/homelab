@@ -8,6 +8,7 @@ import re
 import shutil
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 import psycopg2
 from uuid import UUID, uuid4
 
@@ -120,6 +121,27 @@ def historical_registry(root, maximum):
     grant.write_text(value)
 
 
+def apply_through(cluster, maximum):
+    """Verify an explicit historical boundary without changing migration bytes.
+
+    Exact pre-proxy ACL preservation is a schema53 contract. Current runtime
+    compatibility tests still use the ordinary latest apply/verify entry point;
+    this helper does not qualify a current deployment or hide M54 grant changes.
+    """
+    if type(maximum) is not int or not 1 <= maximum <= 53:
+        raise ValueError("Expected an explicit pre-proxy historical boundary")
+    with TemporaryDirectory(prefix="forge-historical-apply-") as temporary:
+        registry = Path(temporary) / "sql"
+        historical_registry(registry, maximum)
+        if maximum == 53:
+            # Unlike the predecessor fixture, this fully populated boundary
+            # needs every current function grant for strict verification.
+            shutil.copyfile(SQL_DIR / "management/grant-runner.sql",
+                            registry / "management/grant-runner.sql")
+        with patch("work_pg_fixture.SQL_DIR", registry):
+            DisposablePostgresCluster.apply_and_verify(cluster)
+
+
 class PolicyIdentityTest(unittest.TestCase):
     def test_session_policy_is_versioned_without_changing_historical_digest_identity(self):
         self.assertEqual(WARM_POLICY_DIGEST,"03af7fd6e897a67254bd780a44536366b8dc11fdce307a44a29ddfb5a958cb33")
@@ -150,10 +172,11 @@ class PolicyIdentityTest(unittest.TestCase):
 
 
 class HistoricalDefectConnection(psycopg2.extensions.connection):
-    """Only pre-M53 fixtures project the three reviewed metadata read queries.
+    """Project only known read shapes absent from historical fixture schemas.
 
-    Canonical migrations stay immutable. Once M53 exists this connection returns
-    the real requested cursor and executes all current SQL without alteration.
+    Pre-M53 metadata and pre-M39 Jenkins bindings did not exist historically.
+    Canonical migrations stay immutable. Once those columns exist the actual
+    queries are unchanged; current-schema connections use the real cursor.
     """
     projections = (
         ('task_kind, defect, title, prompt, acceptance_criteria, latest_attempt_id',
@@ -174,6 +197,19 @@ class HistoricalDefectConnection(psycopg2.extensions.connection):
                 if compact.startswith("SELECT id AS task_id,title,defect->>'severity' AS severity FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND task_kind='defect'"):
                     connection.defect_projection_count+=1
                     return super().execute('SELECT NULL::uuid AS task_id,NULL::text AS title,NULL::text AS severity WHERE false')
+                if isinstance(query,str) and connection.historical_m39_projection:
+                    from forge_pg_proxy import READ_QUERIES
+                    if query == READ_QUERIES["jenkins_events_for_family"][0]:
+                        if parameters.get("main_action") is not None:
+                            raise ValueError("Historical Jenkins schema has no main-action binding")
+                        columns = ", action_id, branch_scope "
+                        main_predicate = (
+                            "OR (%(main_action)s IS NOT NULL AND action_id = %(main_action)s "
+                            "AND commit_sha = %(main_commit)s AND branch_scope = 'main')")
+                        if query.count(columns) != 1 or query.count(main_predicate) != 1:
+                            raise ValueError("Historical Jenkins fixture query changed")
+                        query = query.replace(columns, " ").replace(main_predicate, "")
+                        connection.jenkins_projection_count += 1
                 if isinstance(query,str):
                     for source, target in connection.projections:
                         if source in query:
@@ -198,8 +234,14 @@ class PreUpgradeCluster(DisposablePostgresCluster):
         with connection.cursor() as probe:
             probe.execute("SELECT EXISTS(SELECT FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='forge_agent' AND c.relname='coding_tasks' AND a.attname='task_kind' AND NOT a.attisdropped)")
             connection.historical_defect_projection=not probe.fetchone()[0]
+            probe.execute("SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='forge_agent' AND c.relname='jenkins_events' AND a.attname IN('action_id','branch_scope') AND NOT a.attisdropped")
+            columns = probe.fetchone()[0]
+            if columns not in (0, 2):
+                raise ValueError("Incomplete historical Jenkins binding columns")
+            connection.historical_m39_projection = columns == 0
         connection.autocommit=False
         connection.defect_projection_count=0
+        connection.jenkins_projection_count=0
         return connection
 
     def apply_and_verify(self):
@@ -377,7 +419,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 53)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 54)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -516,7 +558,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 53)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 54)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -576,7 +618,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 53)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 54)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -636,7 +678,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 53)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 54)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-ARRAY['task_kind','defect','correlation_id'], to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -1019,7 +1061,7 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
     def test_fresh_reapply_roles_and_untrusted_event_storage_have_no_coding_effect(self):
         self.cluster.apply_and_verify()
         self.event()
-        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(53,)])
+        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(54,)])
         self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_hosted_checks"), [(0,)])
         self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_workflow_actions"), [(0,)])
         for role in ("forge_gpu_worker", "forge_coding_worker", "forge_coding_reconciler"):
@@ -1179,8 +1221,8 @@ class JenkinsSchema27ContractTest(unittest.TestCase):
                         hashlib.sha256((cluster.data/"pg_hba.conf").read_bytes()).hexdigest(),
                     )
                 before = snapshot()
-                DisposablePostgresCluster.apply_and_verify(cluster)
-                DisposablePostgresCluster.apply_and_verify(cluster)
+                apply_through(cluster, 53)
+                apply_through(cluster, 53)
                 self.assertEqual(snapshot(), before)
                 for table in ("jenkins_events", "jenkins_event_deliveries", "jenkins_observations"):
                     self.assertEqual(self.execute("SELECT has_table_privilege('muse_events',%s,'SELECT'),has_table_privilege('muse_events',%s,'INSERT,UPDATE,DELETE')",

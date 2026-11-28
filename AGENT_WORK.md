@@ -13,6 +13,31 @@ the old qualified API with repair admission held. Model workers remain stopped
 until a reviewed current-main successor and its additive M54 preparation are
 qualified. The separate M55 proxy cutover remains disabled.
 
+## Historical upgrade boundaries after proxy preparation — 2026-11-28
+
+The default registry now stops at proxy preparation54. Current-runtime AGY,
+policy, Muse, author-handoff and independent-review fixtures retain their actual
+latest apply/replay and original receipt/counter/history assertions, with54 as
+the expected endpoint. Exact pre-proxy ACL preservation remains separately pinned
+to53 using a test-only registry copy and the unchanged current grant/verifier
+surface; no applied migration or production fixture implementation is modified.
+
+The historical read adapter handles only the exact named Jenkins-family query
+when the real pre-M39 binding columns are absent. It rejects invented main-action
+authority and disappears when actual columns exist. Its real M32-to54 test proves
+both sides while retaining all old review/history checks. Owner-fence checks keep
+private-helper and write denials, assert the exact54 read grant, and reproduce the
+original SELECT denial on an owned53 fixture. The HBA test now selects the actual
+legacy and preparation setup checks, preserving every original invalid Muse rule
+case and restoring both owned HBA and ident files without reload or service I/O.
+
+Four focused real-PostgreSQL boundary regressions pass. The complete nine-module
+qualification passes all94 tests with zero skips:32 policy/AGY,40 independent
+review/superseding/handoff/intake, and22 schema/owner/Muse-reader tests. Final logs
+are under /mnt/data/homelab-build/codex-legacy54-fixtures-20261128-evidence.
+No live SQL, source push, deployment, budget reset or historical receipt rewrite
+was performed.
+
 ## Proxy migration renumbering correction — 2026-11-28
 
 PR32 added proxy preparation/cutover as migrations 54/55, after the already

@@ -12,7 +12,7 @@ import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
 import test_work_workflow as workflow_fixture
-from test_work_policy_upgrade import historical_registry, PreUpgradeCluster
+from test_work_policy_upgrade import historical_registry, PreUpgradeCluster, apply_through
 from work_config import sha256_canonical
 from work_feedback import validate_findings
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE, SQL_DIR
@@ -119,14 +119,30 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                 checks=[dict(check_id='make-ci',status='failed' if failed else 'passed',head_sha='d'*40)]))
         return author,job,outcome
 
-    def test_role_local_capabilities_and_scoped_probe_do_not_grant_table_reads(self):
+    def test_role_local_capabilities_retain_private_helpers_and_explicit_read_stage(self):
         expected=dict(policy='forge-owner-code-resume-v1',schema_version=26,migration='coding_owner_continuation',same_task=True,repair_fenced=True)
         for role,schema in [('forge_agent','forge_agent'),('forge_coding_reconciler','forge_coding_reconciler_api')]:
             self.assertEqual(self.rows('SELECT '+schema+'.owner_continuation_capability()',role=role)[0][0],expected)
         for role,query in [('forge_coding_worker','SELECT forge_agent.owner_continuation_capability()'),
-                           ('forge_agent','SELECT forge_agent._coding_owner_continuation_fenced(NULL)'),
-                           ('forge_coding_reconciler','SELECT * FROM forge_agent.coding_tasks')]:
+                           ('forge_agent','SELECT forge_agent._coding_owner_continuation_fenced(NULL)')]:
             with self.subTest(role=role),self.assertRaises(psycopg2.Error):self.rows(query,role=role)
+        self.assertEqual(self.rows("SELECT version,name FROM forge_agent.schema_migrations WHERE version>=54 ORDER BY version"),
+                         [(54,'pg_proxy_preparation')])
+        self.assertEqual(self.rows('SELECT * FROM forge_agent.coding_tasks',role='forge_coding_reconciler'),[])
+        for query in ('UPDATE forge_agent.coding_tasks SET title=title',
+                      'DELETE FROM forge_agent.coding_tasks',
+                      'TRUNCATE forge_agent.coding_tasks'):
+            with self.subTest(query=query),self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+                self.rows(query,role='forge_coding_reconciler')
+        # Before the explicit preparation grant the original denial still holds.
+        with TemporaryDirectory(prefix='forge-owner-pre54-read-') as temporary:
+            registry=Path(temporary)/'sql';historical_registry(registry,53)
+            legacy=PreUpgradeCluster(registry).start()
+            try:
+                with closing(legacy.connect('forge_coding_reconciler')) as connection,connection.cursor() as cursor:
+                    with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+                        cursor.execute('SELECT * FROM forge_agent.coding_tasks')
+            finally:legacy.stop()
 
     def test_fence_binds_genuine_peer_source_plan_and_standard_queue_receipt(self):
         _,scope,action,intent=self.owner_marker()
@@ -278,7 +294,7 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                         defaults=execute('SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
                         relation_acls=execute("SELECT relname,relowner,relacl FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname=ANY(%s) ORDER BY relname",(original_relations,)),
                         hba=hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest())
-                before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
+                before=snapshot();apply_through(cluster,53);apply_through(cluster,53)
                 self.assertEqual(snapshot(),before)
                 self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(53,)])
                 # M41 adds the three authorized branch/CI evidence reads.
