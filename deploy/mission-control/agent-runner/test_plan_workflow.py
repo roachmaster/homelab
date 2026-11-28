@@ -242,8 +242,15 @@ class PlanWorkflowPostgresTest(unittest.TestCase):
         self.assertIsNone(self.db.queue_publication(direct,rec));self.assertIsNone(self.db.publication_claim("publisher"))
         self.cluster.apply_and_verify()
         self.assertFalse(self.rows("SELECT has_table_privilege('forge_agent','forge_agent.coding_plan_decisions','UPDATE,DELETE')")[0][0])
+        self.assertEqual(self.rows("SELECT name FROM forge_agent.schema_migrations WHERE version=54"),
+                         [("pg_proxy_preparation",)])
         for role in ("forge_coding_worker","forge_coding_reconciler","forge_gpu_worker"):
             for table in ("coding_plan_decisions","coding_publications"):
-                self.assertFalse(self.rows("SELECT has_table_privilege(%s,%s,'SELECT,INSERT,UPDATE,DELETE')",(role,"forge_agent."+table))[0][0])
+                with self.subTest(role=role,table=table):
+                    # M54 adds only the direct reads required during preparation.
+                    expected_read = role == "forge_coding_reconciler" or (
+                        role == "forge_coding_worker" and table == "coding_plan_decisions")
+                    self.assertEqual(self.rows("SELECT has_table_privilege(%s,%s,'SELECT')",(role,"forge_agent."+table))[0][0], expected_read)
+                    self.assertFalse(self.rows("SELECT has_table_privilege(%s,%s,'INSERT,UPDATE,DELETE,TRUNCATE')",(role,"forge_agent."+table))[0][0])
 
 if __name__=='__main__':unittest.main()
