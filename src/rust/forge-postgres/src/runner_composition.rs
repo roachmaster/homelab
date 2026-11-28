@@ -759,7 +759,7 @@ impl PgWorkCatalog {
     }
 }
 
-fn branch_row_dto(row: &tokio_postgres::Row) -> Result<Value, WorkError> {
+pub(crate) fn branch_row_dto(row: &tokio_postgres::Row) -> Result<Value, WorkError> {
     let text = |name: &str| -> Result<Option<String>, WorkError> {
         row.try_get(name)
             .map_err(|e| WorkError::store(e.to_string()))
@@ -798,7 +798,7 @@ fn branch_row_dto(row: &tokio_postgres::Row) -> Result<Value, WorkError> {
         "last_correlation_id": uuid("last_correlation_id")?,
         "reservation_status": text("reservation_status")?,
         "active_scope_kind": text("active_scope_kind")?,
-        "active_scope_id": text("active_scope_id")?,
+        "active_scope_id": uuid("active_scope_id")?,
         "active_root_task_id": uuid("active_root_task_id")?,
         "active_task_id": uuid("active_task_id")?,
         "active_pr_url": text("active_pr_url")?,
@@ -1541,3 +1541,7 @@ pub fn create_usage_service(
 #[cfg(all(test, feature = "test-support"))]
 #[path = "runner_repair_pg_tests.rs"]
 mod runner_repair_pg_tests;
+
+#[cfg(all(test, feature = "test-support"))]
+#[path = "runner_cicd_pg_tests.rs"]
+mod runner_cicd_pg_tests;

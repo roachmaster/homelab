@@ -40,6 +40,44 @@ pub fn no_run() -> Value {
     })
 }
 
+/// A known recorded stage is an execution witness when optional lifecycle
+/// emission is absent. An explicit start always retains priority; no event is
+/// synthesized and unrelated/malformed stage records establish nothing.
+fn recorded_run_start(events: &[Value], logical_names: &[String]) -> Option<Value> {
+    if events
+        .iter()
+        .any(|event| event["event_kind"] == "build_started")
+    {
+        return events
+            .iter()
+            .filter(|event| event["event_kind"] == "build_started")
+            .find_map(|event| {
+                event
+                    .get("occurred_at")
+                    .filter(|stamp| as_utc(stamp).is_some())
+                    .cloned()
+            });
+    }
+    events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event["event_kind"].as_str(),
+                Some("stage_started" | "stage_completed")
+            ) && event["stage_name"]
+                .as_str()
+                .is_some_and(|name| logical_names.iter().any(|known| known == name))
+        })
+        .filter_map(|event| {
+            Some((
+                as_utc(event.get("occurred_at")?)?,
+                event.get("occurred_at")?.clone(),
+            ))
+        })
+        .min_by(|(left, _), (right, _)| left.total_cmp(right))
+        .map(|(_, stamp)| stamp)
+}
+
 /// Identify the frozen CiGatePlan from an observation's check-name
 /// set, or None when the set matches no frozen plan.
 pub fn identify_plan(check_names: &[String]) -> Option<CiGatePlan> {
@@ -265,6 +303,7 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
     let mut started = vec![false; count];
     let mut completed_status: Vec<Option<&'static str>> = vec![None; count];
     let mut build_started_at: Option<f64> = None;
+    let mut stage_witness_at: Option<f64> = None;
     let mut has_queued = false;
     let mut has_started = false;
     let mut completed_event: Option<Value> = None;
@@ -287,6 +326,11 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
                 else {
                     continue;
                 };
+                if let Some(witness) = row.get("occurred_at").and_then(as_utc) {
+                    if stage_witness_at.is_none_or(|earliest| witness < earliest) {
+                        stage_witness_at = Some(witness);
+                    }
+                }
                 if kind == Some("stage_started") {
                     if completed_status[index].is_none() {
                         started[index] = true;
@@ -321,6 +365,11 @@ pub fn project_pipeline_stages(params: ProjectStagesParams) -> Value {
                 }
             }
         }
+    }
+
+    if !has_started && stage_witness_at.is_some() {
+        has_started = true;
+        build_started_at = stage_witness_at;
     }
 
     let terminal_observation = !observation_checks.is_empty()
@@ -817,10 +866,21 @@ fn build_run_from_stage_results(
         }));
     }
 
-    let started_at = events_for_run
-        .iter()
-        .find(|event| event.get("event_kind") == Some(&json!("build_started")))
-        .and_then(|event| event.get("occurred_at").cloned());
+    let names = CiGateContractFactory::new(SCOPED_PROFILE)
+        .ok()
+        .and_then(|factory| {
+            factory
+                .create()
+                .plan(if pipeline_scope == "main" {
+                    "main"
+                } else {
+                    "detached"
+                })
+                .ok()
+        })
+        .map(|plan| plan.logical_checks)
+        .unwrap_or_default();
+    let started_at = recorded_run_start(events_for_run, &names);
     let completed_at = events_for_run
         .iter()
         .rev()
@@ -907,6 +967,7 @@ fn build_run_from_events_only(
                 .ok()
         })
         .expect("scoped plan always builds");
+    let logical_names = plan.logical_checks.clone();
     let projected = project_pipeline_stages(ProjectStagesParams {
         plan: Some(plan),
         events: ordered.clone(),
@@ -941,10 +1002,7 @@ fn build_run_from_events_only(
             })
         })
         .collect();
-    let started_at = ordered
-        .iter()
-        .find(|event| event.get("event_kind") == Some(&json!("build_started")))
-        .and_then(|event| event.get("occurred_at").cloned());
+    let started_at = recorded_run_start(&ordered, &logical_names);
     let completed_at = ordered
         .iter()
         .rev()
@@ -1221,16 +1279,13 @@ pub fn project_correlation_cicd(params: CorrelationParams) -> Value {
 
     // Order runs chronologically (branch runs before main runs,
     // then build number / timestamps), capped at the newest 8.
-    fn run_sort_key(run: &Value) -> (String, i64, i64, String) {
+    fn run_sort_key(run: &Value) -> (f64, i64, i64, String) {
         let stamp = run
             .get("started_at")
             .filter(|value| truthy(Some(value)))
             .or_else(|| run.get("completed_at"))
-            .map(|value| match value {
-                Value::String(text) => text.clone(),
-                other => other.to_string(),
-            })
-            .unwrap_or_default();
+            .and_then(as_utc)
+            .unwrap_or(f64::NEG_INFINITY);
         (
             stamp,
             if run.get("pipeline_scope") == Some(&json!("branch")) {
@@ -1242,7 +1297,15 @@ pub fn project_correlation_cicd(params: CorrelationParams) -> Value {
             text_of(run.get("run_id")).unwrap_or_default(),
         )
     }
-    runs.sort_by_key(run_sort_key);
+    runs.sort_by(|left, right| {
+        let left = run_sort_key(left);
+        let right = run_sort_key(right);
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.cmp(&right.3))
+    });
     if runs.len() > MAX_CORRELATION_RUNS {
         runs = runs[runs.len() - MAX_CORRELATION_RUNS..].to_vec();
     }
@@ -1320,5 +1383,77 @@ mod tests {
     fn projection_no_run() {
         let projected = project_pipeline_stages(ProjectStagesParams::default());
         assert_eq!(projected, no_run());
+    }
+    #[test]
+    fn stage_only_execution_witness_preserves_clock_and_explicit_start_priority() {
+        let plan = CiGateContractFactory::new(SCOPED_PROFILE)
+            .unwrap()
+            .create()
+            .plan("main")
+            .unwrap();
+        let event = json!({"event_kind":"stage_started","stage_name":plan.logical_checks[0],"occurred_at":1000.0});
+        let project = |events, now| {
+            project_pipeline_stages(ProjectStagesParams {
+                plan: Some(plan.clone()),
+                events,
+                now: Some(now),
+                ..Default::default()
+            })
+        };
+        assert_eq!(
+            project(vec![event.clone()], 1001.0)["pipeline_phase"],
+            "running"
+        );
+        assert_eq!(
+            project(vec![event.clone()], 4000.0)["pipeline_phase"],
+            "unknown"
+        );
+        let explicit = json!({"event_kind":"build_started","occurred_at":3999.0});
+        assert_eq!(
+            project(vec![event.clone(), explicit.clone()], 4000.0)["pipeline_phase"],
+            "running"
+        );
+        assert_eq!(
+            recorded_run_start(&[event.clone(), explicit], &plan.logical_checks),
+            Some(json!(3999.0))
+        );
+        let mut unknown = event.clone();
+        unknown["stage_name"] = json!("unregistered-stage");
+        assert_eq!(
+            project(vec![unknown.clone()], 1001.0)["pipeline_phase"],
+            "unknown"
+        );
+        assert!(recorded_run_start(&[unknown], &plan.logical_checks).is_none());
+        let mut malformed = event.clone();
+        malformed["occurred_at"] = json!("not-time");
+        assert_eq!(
+            project(vec![malformed], 1001.0)["pipeline_phase"],
+            "unknown"
+        );
+        let earlier = json!({"event_kind":"stage_completed","stage_name":plan.logical_checks[0],"stage_status":"success","occurred_at":999.0});
+        assert_eq!(
+            recorded_run_start(&[event, earlier], &plan.logical_checks),
+            Some(json!(999.0))
+        );
+    }
+    #[test]
+    fn correlation_runs_sort_by_recorded_time_not_timestamp_spelling() {
+        let event = |action: &str, stamp: &str, build: i64| json!({"action_id":action,"event_kind":"build_started","branch_scope":"main","branch":"main","job_name":NATIVE_JENKINS_JOB,"build_number":build,"occurred_at":stamp,"sequence":build});
+        let result = project_correlation_cicd(CorrelationParams {
+            correlation_id: "fixture".into(),
+            branch_state: None,
+            waiting_on_branch_owner: false,
+            stage_results: vec![],
+            jenkins_events: vec![
+                event("later", "2026-11-28T00:00:00.001Z", 1),
+                event("earlier", "2026-11-28T00:00:00Z", 2),
+            ],
+            hosted_observations: vec![],
+            post_merge_runs: vec![],
+            release_status: None,
+            now: None,
+        });
+        assert_eq!(result["runs"][0]["action_id"], "earlier");
+        assert_eq!(result["runs"][1]["action_id"], "later");
     }
 }

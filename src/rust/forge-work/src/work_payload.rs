@@ -128,6 +128,7 @@ pub enum WorkPayload {
         view: String,
         cursor_token: Option<String>,
         delivery_enabled: bool,
+        limit_bytes: i64,
     },
     ApproveExternalPlanOverride(ExternalOverrideRequest),
     RecoverExternalReviewInfrastructure(ExternalRecoveryRequest),

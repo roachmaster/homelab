@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
-use crate::work_common::{col, run_tx, work_err};
+use crate::work_common::{col, run_read_tx, work_err};
 use crate::work_store::PgWorkStore;
 
 /// The stage-log page size in bytes (Python's stage log window).
@@ -11,7 +11,7 @@ const STAGE_LOG_WINDOW: usize = 32768;
 
 /// Parses a "{sha256}.{offset}" cursor token (same pinned format as
 /// the result cursor).
-fn parse_token(token: &str) -> Option<i64> {
+fn parse_token(token: &str) -> Option<(String, i64)> {
     if token.len() > 86 || !token.is_ascii() {
         return None;
     }
@@ -29,12 +29,12 @@ fn parse_token(token: &str) -> Option<i64> {
     if offset.len() > 1 && offset.starts_with('0') {
         return None;
     }
-    offset.parse().ok()
+    Some((sha.to_string(), offset.parse().ok()?))
 }
 
-fn sha256_hex(text: &str) -> String {
+fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(text.as_bytes());
+    hasher.update(bytes);
     hasher
         .finalize()
         .iter()
@@ -44,14 +44,14 @@ fn sha256_hex(text: &str) -> String {
 
 /// WorkReadPort::cicd_stage_log: one window of a Jenkins stage log
 /// for the task's workflow family. The three views assemble from
-/// the stage rows: errors (excerpts), tests (summary JSON), console
-/// (stage headers + excerpts, the v1 subset of Python's Jenkins
-/// event assembly). The byte window and digest cursor follow
-/// Python's stage-log paging.
+/// the authorized stage rows: bounded error excerpts, rendered test
+/// summaries and sealed console chunks. Digest/offset/UTF-8 boundaries
+/// and the requested window are checked before the public page returns.
 pub(crate) struct LogPage<'a> {
     pub stage_id: &'a str,
     pub view: &'a str,
     pub cursor_token: Option<&'a str>,
+    pub limit_bytes: i64,
 }
 
 pub(crate) fn cicd_stage_log(
@@ -67,6 +67,7 @@ pub(crate) fn cicd_stage_log(
         stage_id,
         view,
         cursor_token,
+        limit_bytes,
     } = page;
     let invalid = || forge_work::WorkError::rejected(400, "invalid_request");
     if stage_id.is_empty()
@@ -80,11 +81,17 @@ pub(crate) fn cicd_stage_log(
     if !["errors", "tests", "console"].contains(&view) {
         return Err(invalid());
     }
-    let offset = match cursor_token {
-        None => 0,
-        Some(token) => parse_token(token).ok_or_else(invalid)?,
+    if !(1..=STAGE_LOG_WINDOW as i64).contains(&limit_bytes) {
+        return Err(invalid());
+    }
+    let (requested_digest, offset) = match cursor_token {
+        None => (None, 0),
+        Some(token) => {
+            let (digest, offset) = parse_token(token).ok_or_else(invalid)?;
+            (Some(digest), offset as usize)
+        }
     };
-    run_tx(store, |tx| {
+    run_read_tx(store, |tx| {
         let params: &[&(dyn ToSql + Sync)] = &[&store.owner, &project_alias, &task_id];
         let tasks = tx
             .query_rows(
@@ -173,125 +180,230 @@ pub(crate) fn cicd_stage_log(
         if rows.is_empty() {
             return Err(forge_work::WorkError::not_found("stage log"));
         }
-        let text = assemble(view, &rows)?;
-        let digest = sha256_hex(&text);
-        let bytes = text.as_bytes();
-        let start = (offset as usize).min(bytes.len());
-        let end = (start + STAGE_LOG_WINDOW).min(bytes.len());
-        let slice = &bytes[start..end];
-        let content = match std::str::from_utf8(slice) {
-            Ok(text) => text.to_string(),
-            Err(error) => {
-                if error.error_len().is_some() {
-                    return Err(invalid());
-                }
-                std::str::from_utf8(&slice[..error.valid_up_to()])
-                    .map_err(|_| invalid())?
-                    .to_string()
-            }
+        let summary = StageSummary::from_rows(&rows)?;
+        let bytes = match view {
+            "errors" => summary
+                .excerpt
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes()
+                .to_vec(),
+            "tests" => summary.test_text().into_bytes(),
+            _ => sealed_console(tx, store, project_alias, action_id, &rows)?,
         };
-        let consumed = start + content.len();
-        let next_cursor = if consumed < bytes.len() {
-            Some(format!("{digest}.{consumed}"))
-        } else {
-            None
-        };
+        let page = page_bytes(
+            &bytes,
+            requested_digest.as_deref(),
+            offset,
+            limit_bytes as usize,
+        )?;
         Ok(forge_work::work_types::StageLogView {
+            project_alias: project_alias.to_string(),
+            task_id,
+            correlation_id,
+            action_id,
             stage_id: stage_id.to_string(),
-            content,
-            next_cursor,
+            view: view.to_string(),
+            content: page.content,
+            total_bytes: bytes.len(),
+            byte_offset: offset,
+            truncated: page.next_cursor.is_some(),
+            next_cursor: page.next_cursor,
+            prev_cursor: page.prev_cursor,
+            tests_passed: summary.passed,
+            tests_failed: summary.failed,
+            tests_skipped: summary.skipped,
+            test_cases: summary.cases,
+            error_excerpt: summary.excerpt,
         })
     })
 }
 
-/// Assembles the full view text from the stage rows.
-fn assemble(view: &str, rows: &[tokio_postgres::Row]) -> Result<String, forge_work::WorkError> {
-    match view {
-        "errors" => {
-            let mut parts: Vec<String> = Vec::new();
-            for row in rows {
-                let excerpt: Option<String> = col(row, "error_excerpt")?;
-                if let Some(excerpt) = excerpt {
-                    if !excerpt.is_empty() {
-                        parts.push(excerpt);
-                    }
-                }
-            }
-            let joined = parts.join("\n\n");
-            let bytes = joined.as_bytes();
-            if bytes.len() <= 4096 {
-                return Ok(joined.trim_end().to_string());
-            }
-            let mut cut = 4096;
-            while cut > 0 && bytes[cut] & 0xC0 == 0x80 {
-                cut -= 1;
-            }
-            Ok(joined[..cut].trim_end().to_string())
+struct BytePage {
+    content: String,
+    next_cursor: Option<String>,
+    prev_cursor: Option<String>,
+}
+fn page_bytes(
+    bytes: &[u8],
+    requested_digest: Option<&str>,
+    offset: usize,
+    limit: usize,
+) -> Result<BytePage, forge_work::WorkError> {
+    let invalid = || forge_work::WorkError::rejected(400, "invalid_request");
+    let digest = sha256_hex(bytes);
+    if requested_digest.is_some_and(|requested| requested != digest) {
+        return Err(forge_work::WorkError::rejected(409, "result_mismatch"));
+    }
+    if offset > bytes.len() || limit == 0 || offset < bytes.len() && bytes[offset] & 0xC0 == 0x80 {
+        return Err(invalid());
+    }
+    let mut end = bytes.len().min(offset.saturating_add(limit));
+    while end > offset && end < bytes.len() && bytes[end] & 0xC0 == 0x80 {
+        end -= 1;
+    }
+    if end == offset && offset < bytes.len() {
+        return Err(invalid());
+    }
+    let content = std::str::from_utf8(&bytes[offset..end])
+        .map_err(|_| forge_work::WorkError::rejected(503, "unavailable"))?
+        .to_string();
+    let next_cursor = (end < bytes.len()).then(|| format!("{digest}.{end}"));
+    let prev_cursor = if offset > 0 {
+        let mut previous = offset.saturating_sub(limit);
+        while previous > 0 && previous < bytes.len() && bytes[previous] & 0xC0 == 0x80 {
+            previous -= 1;
         }
-        "tests" => {
-            let mut passed: Option<i64> = None;
-            let mut failed: Option<i64> = None;
-            let mut skipped: Option<i64> = None;
-            let mut cases: Vec<Value> = Vec::new();
-            for row in rows {
-                if let Some(value) = col::<Option<i64>>(row, "tests_passed")? {
-                    passed = Some(passed.unwrap_or(0) + value);
+        Some(format!("{digest}.{previous}"))
+    } else {
+        None
+    };
+    Ok(BytePage {
+        content,
+        next_cursor,
+        prev_cursor,
+    })
+}
+
+struct StageSummary {
+    passed: Option<i64>,
+    failed: Option<i64>,
+    skipped: Option<i64>,
+    cases: Vec<Value>,
+    excerpt: Option<String>,
+}
+impl StageSummary {
+    fn from_rows(rows: &[tokio_postgres::Row]) -> Result<Self, forge_work::WorkError> {
+        let mut result = Self {
+            passed: None,
+            failed: None,
+            skipped: None,
+            cases: Vec::new(),
+            excerpt: None,
+        };
+        let mut excerpts = Vec::new();
+        for row in rows {
+            for (column, target) in [
+                ("tests_passed", &mut result.passed),
+                ("tests_failed", &mut result.failed),
+                ("tests_skipped", &mut result.skipped),
+            ] {
+                if let Some(value) = col::<Option<i32>>(row, column)? {
+                    *target = Some(target.unwrap_or(0) + i64::from(value));
                 }
-                if let Some(value) = col::<Option<i64>>(row, "tests_failed")? {
-                    failed = Some(failed.unwrap_or(0) + value);
-                }
-                if let Some(value) = col::<Option<i64>>(row, "tests_skipped")? {
-                    skipped = Some(skipped.unwrap_or(0) + value);
-                }
-                let summary: Option<Value> = col(row, "test_summary")?;
-                if let Some(cases_value) = summary
-                    .as_ref()
-                    .and_then(|value| value.get("cases"))
-                    .and_then(Value::as_array)
-                {
-                    for case in cases_value {
-                        if cases.len() >= 64 {
+            }
+            if let Some(summary) = col::<Option<Value>>(row, "test_summary")? {
+                if let Some(cases) = summary["cases"].as_array() {
+                    for case in cases {
+                        if result.cases.len() >= 64 {
                             break;
                         }
-                        let name = case.get("name").and_then(Value::as_str).unwrap_or_default();
-                        let status = case
-                            .get("status")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        cases.push(serde_json::json!({
-                            "name": name.chars().take(160).collect::<String>(),
-                            "status": status,
-                        }));
+                        if let Some(name) = case["name"].as_str() {
+                            result.cases.push(serde_json::json!({"name":name.chars().take(160).collect::<String>(),"status":case["status"].as_str().filter(|s|!s.is_empty()).unwrap_or("unknown")}));
+                        }
                     }
                 }
             }
-            Ok(serde_json::json!({
-                "passed": passed,
-                "failed": failed,
-                "skipped": skipped,
-                "cases": cases,
-            })
-            .to_string())
-        }
-        _ => {
-            let mut out = String::new();
-            for row in rows {
-                let label: Option<String> = col(row, "label")?;
-                let logical: String = col(row, "logical_stage_id")?;
-                let status: String = col(row, "status")?;
-                let name = label.filter(|value| !value.is_empty()).unwrap_or(logical);
-                out.push_str(&format!("## {name} [{status}]\n"));
-                let excerpt: Option<String> = col(row, "error_excerpt")?;
-                if let Some(excerpt) = excerpt {
-                    if !excerpt.is_empty() {
-                        out.push_str(&excerpt);
-                        out.push('\n');
-                    }
-                }
+            if let Some(excerpt) =
+                col::<Option<String>>(row, "error_excerpt")?.filter(|text| !text.is_empty())
+            {
+                excerpts.push(excerpt);
             }
-            Ok(out)
         }
+        if !excerpts.is_empty() {
+            let joined = excerpts.join("\n\n");
+            let mut end = joined.len().min(4096);
+            while !joined.is_char_boundary(end) {
+                end -= 1;
+            }
+            result.excerpt = Some(joined[..end].trim_end().to_string());
+        }
+        Ok(result)
     }
+    fn test_text(&self) -> String {
+        let mut lines = Vec::new();
+        if self.passed.is_some() || self.failed.is_some() || self.skipped.is_some() {
+            lines.push(format!(
+                "Tests: {} passed, {} failed, {} skipped",
+                self.passed.unwrap_or(0),
+                self.failed.unwrap_or(0),
+                self.skipped.unwrap_or(0)
+            ));
+        }
+        for case in &self.cases {
+            lines.push(format!(
+                "[{}] {}",
+                case["status"].as_str().unwrap_or("unknown"),
+                case["name"].as_str().unwrap_or_default()
+            ));
+        }
+        lines.join("\n")
+    }
+}
+
+fn sealed_console(
+    tx: &mut crate::tx::Tx<'_, '_>,
+    store: &PgWorkStore,
+    project: &str,
+    action: Uuid,
+    stages: &[tokio_postgres::Row],
+) -> Result<Vec<u8>, forge_work::WorkError> {
+    let indices: Vec<i32> = stages
+        .iter()
+        .map(|row| col(row, "stage_index"))
+        .collect::<Result<_, _>>()?;
+    let total = stages.iter().try_fold(0usize, |total, row| {
+        let bytes: i32 = col(row, "log_byte_count")?;
+        usize::try_from(bytes)
+            .ok()
+            .and_then(|bytes| total.checked_add(bytes))
+            .filter(|total| *total <= 262144)
+            .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))
+    })?;
+    let chunks=tx.query_rows("SELECT stage_index,chunk_index,byte_offset,byte_len,chunk_sha256,chunk_bytes FROM forge_agent.jenkins_stage_log_chunks WHERE owner_id=$1 AND project_alias=$2 AND action_id=$3 AND stage_index=ANY($4::integer[]) ORDER BY stage_index,chunk_index",&[&store.owner,&project,&action,&indices]).map_err(work_err)?;
+    let unavailable = || forge_work::WorkError::rejected(503, "unavailable");
+    let mut full = Vec::with_capacity(total);
+    for stage in stages {
+        let index: i32 = col(stage, "stage_index")?;
+        let mut bytes = Vec::new();
+        let mut count = 0;
+        for chunk in &chunks {
+            if col::<i32>(chunk, "stage_index")? != index {
+                continue;
+            }
+            if col::<i32>(chunk, "chunk_index")? != count
+                || col::<i32>(chunk, "byte_offset")? as usize != bytes.len()
+            {
+                return Err(unavailable());
+            }
+            let part: Vec<u8> = col(chunk, "chunk_bytes")?;
+            if col::<i32>(chunk, "byte_len")? as usize != part.len()
+                || col::<String>(chunk, "chunk_sha256")? != sha256_hex(&part)
+            {
+                return Err(unavailable());
+            }
+            bytes.extend(part);
+            count += 1;
+        }
+        let expected_bytes: i32 = col(stage, "log_byte_count")?;
+        let expected_count: i32 = col(stage, "log_chunk_count")?;
+        let expected_sha: Option<String> = col(stage, "log_sha256")?;
+        if expected_bytes < 0
+            || bytes.len() != expected_bytes as usize
+            || count != expected_count
+            || expected_sha
+                .as_deref()
+                .is_some_and(|expected| expected != sha256_hex(&bytes))
+            || expected_sha.is_none() && !bytes.is_empty()
+        {
+            return Err(unavailable());
+        }
+        if full.len() + bytes.len() > 262144 {
+            return Err(unavailable());
+        }
+        full.extend(bytes);
+    }
+    Ok(full)
 }
 
 /// Only the task-authorized delivery projection can widen CI
@@ -299,7 +411,9 @@ fn assemble(view: &str, rows: &[tokio_postgres::Row]) -> Result<String, forge_wo
 /// verification must be a dict, its verification_id a canonical
 /// UUID string, and its commit_sha a 40-char lowercase hex SHA;
 /// anything else binds nothing.
-fn delivery_main_binding(delivery: Option<&serde_json::Value>) -> (Option<Uuid>, Option<String>) {
+pub(crate) fn delivery_main_binding(
+    delivery: Option<&serde_json::Value>,
+) -> (Option<Uuid>, Option<String>) {
     let Some(delivery) = delivery else {
         return (None, None);
     };
@@ -339,6 +453,32 @@ mod tests {
 
     const ACTION: &str = "11111111-1111-4111-8111-11111111111a";
     const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[test]
+    fn byte_pages_bind_digest_offset_and_whole_utf8_boundaries() {
+        let bytes = "éxxx".as_bytes();
+        let first = super::page_bytes(bytes, None, 0, 3).unwrap();
+        assert_eq!(first.content, "éx");
+        let cursor = first.next_cursor.unwrap();
+        let (digest, offset) = super::parse_token(&cursor).unwrap();
+        assert_eq!(offset, 3);
+        let next = super::page_bytes(bytes, Some(&digest), offset as usize, 3).unwrap();
+        assert_eq!(next.content, "xx");
+        assert!(next.next_cursor.is_none());
+        assert!(next.prev_cursor.is_some());
+        assert!(matches!(
+            super::page_bytes(bytes, Some(&"0".repeat(64)), 3, 3),
+            Err(forge_work::WorkError::Rejected { status: 409, .. })
+        ));
+        for (offset, limit) in [(1, 3), (bytes.len() + 1, 3), (0, 1)] {
+            assert!(matches!(
+                super::page_bytes(bytes, None, offset, limit),
+                Err(forge_work::WorkError::Rejected { status: 400, .. })
+            ));
+        }
+        assert!(super::parse_token(&format!("{}.01", "a".repeat(64))).is_none());
+        assert!(super::parse_token(&format!("{}.0", "A".repeat(64))).is_none());
+    }
 
     #[test]
     fn exact_delivery_binds_main_run() {

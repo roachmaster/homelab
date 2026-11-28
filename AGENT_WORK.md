@@ -3395,3 +3395,28 @@ The exact scoped qualification passes 47 tests with no ignored or filtered cases
 wiring case), strict all-target/all-feature Clippy, formatting, import and dependency
 guards. All 386 permitted role/catalog SQL preparations succeed. This is scoped
 local evidence, not a production or full Jenkins qualification.
+### 2026-11-28 — Rust review, CICD and sealed stage-log read parity
+
+Task detail now composes retained review and current correlation CICD projections
+from existing owner/project-scoped read ports. Main evidence uses the exact
+protected delivery action/commit/main tuple; a candidate commit alone cannot
+admit another main action. A genuine known stage timestamp establishes running
+state without fabricating build-start events, with explicit start precedence and
+staleness retained. Recorded timestamps sort by actual time rather than spelling.
+
+Stage-log reads preserve the old port method while forwarding the current typed
+request limit through a compatible default port. The adapter validates sealed
+chunk order/offset/hash and whole-log hash, cursor hash and UTF-8 boundaries;
+returns the current complete page DTO; and respects the shipped 256KiB full-view
+bound. An oversized logical aggregate fails closed while its bounded individual
+phase logs remain readable. No schema, gate graph or authority changes.
+
+Validation: 44 PostgreSQL, 143 work and 86 publication library tests passed with
+zero ignored, including actual disposable PG reads, foreign/wrong action and
+commit refusals, native branch UUID decoding, stage-only running projection,
+review state, pagination/UTF-8/hash tampering and oversized aggregate/usable phase
+regressions. Strict all-target/all-feature Clippy across those three crates,
+selected formatting and diff checks passed. Logs:
+`/mnt/data/homelab-build/rust-cicd-full-{tests,clippy2}.log`.
+List classification/counts and final integrated HTTP/UI qualification remain
+required before whole-runtime cutover. No production state was changed.

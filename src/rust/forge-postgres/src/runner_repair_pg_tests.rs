@@ -363,6 +363,15 @@ fn actual_private_repair_uses_normal_admission_atomic_lease_and_queued_receipt()
             assert!(event.get(forbidden).is_none());
         }
     }
+    super::runner_cicd_pg_tests::exercise(super::runner_cicd_pg_tests::ReadFixture {
+        cluster: &cluster,
+        runtime: &runtime,
+        service: &normal.service,
+        pg: &pg,
+        task,
+        workflow: claimed.workflow_id.unwrap(),
+        lineage,
+    });
     cluster.stop();
 }
 

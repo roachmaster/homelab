@@ -174,3 +174,17 @@ mod admission_tests {
         }
     }
 }
+
+/// Bounded read request for the current stage-log port. The original frozen
+/// method remains available for existing adapters at its historical 32KiB bound.
+pub struct StageLogReadRequest<'a> {
+    pub project_alias: &'a str,
+    pub task_id: Uuid,
+    pub correlation_id: Uuid,
+    pub action_id: Uuid,
+    pub stage_id: &'a str,
+    pub view: &'a str,
+    pub cursor_token: Option<&'a str>,
+    pub limit_bytes: i64,
+    pub delivery_enabled: bool,
+}

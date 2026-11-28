@@ -1796,7 +1796,7 @@ impl WorkApiService {
                     stage_id,
                     view,
                     cursor,
-                    limit_bytes: _,
+                    limit_bytes,
                 },
             ) => {
                 self.require_project(&project_alias)?;
@@ -1811,6 +1811,7 @@ impl WorkApiService {
                         view,
                         cursor_token: cursor,
                         delivery_enabled: self.config.delivery_enabled,
+                        limit_bytes,
                     },
                 )? {
                     WorkResponse::StageLog(view) => Ok((
@@ -1819,9 +1820,11 @@ impl WorkApiService {
                             "work_cicd_stage_log_page",
                             correlation,
                             json!({
-                                "stage_id": view.stage_id,
-                                "content": view.content,
-                                "next_cursor": view.next_cursor,
+                                "project_alias":view.project_alias,"task_id":view.task_id.to_string(),"correlation_id":view.correlation_id.to_string(),"action_id":view.action_id.to_string(),
+                                "stage_id": view.stage_id,"view":view.view,
+                                "content": view.content,"truncated":view.truncated,"total_bytes":view.total_bytes,"byte_offset":view.byte_offset,
+                                "next_cursor": view.next_cursor,"prev_cursor":view.prev_cursor,
+                                "tests_passed":view.tests_passed,"tests_failed":view.tests_failed,"tests_skipped":view.tests_skipped,"test_cases":view.test_cases,"error_excerpt":view.error_excerpt,
                             }),
                         ),
                     )),

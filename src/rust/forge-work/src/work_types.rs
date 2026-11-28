@@ -95,12 +95,23 @@ pub struct ResultChunk {
 /// One bounded view of a CI/CD stage log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StageLogView {
-    /// The stage the log belongs to.
+    pub project_alias: String,
+    pub task_id: Uuid,
+    pub correlation_id: Uuid,
+    pub action_id: Uuid,
     pub stage_id: String,
-    /// The log content in this view.
+    pub view: String,
     pub content: String,
-    /// The cursor for the next view, when more log remains.
+    pub truncated: bool,
+    pub total_bytes: usize,
+    pub byte_offset: usize,
     pub next_cursor: Option<String>,
+    pub prev_cursor: Option<String>,
+    pub tests_passed: Option<i64>,
+    pub tests_failed: Option<i64>,
+    pub tests_skipped: Option<i64>,
+    pub test_cases: Vec<Value>,
+    pub error_excerpt: Option<String>,
 }
 
 /// A cursor page of task summaries.

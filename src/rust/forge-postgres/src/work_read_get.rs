@@ -22,7 +22,7 @@ pub(crate) fn get(
         let params: &[&(dyn ToSql + Sync)] = &[&store.owner, &project_alias, &task_id];
         let rows = tx
             .query_rows(
-                "SELECT id, correlation_id, project_alias, base_revision, mode, agent_profile, recipe_digest, status, revision, created_at, task_kind, defect, title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id, review_required, workflow_required, workflow_id, workflow_review_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3",
+                "SELECT id, correlation_id, project_alias, base_revision, mode, agent_profile, recipe_digest, status, revision, created_at, task_kind, defect, title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id, review_required, workflow_required, workflow_id, workflow_review_id, repair_root_task_id FROM forge_agent.coding_tasks WHERE owner_id=$1 AND project_alias=$2 AND id=$3",
                 params,
             )
             .map_err(work_err)?;
@@ -119,6 +119,19 @@ pub(crate) fn get(
         )? {
             projection["workflow"] = workflow;
         }
+        if let Some(review) = crate::work_projection_review::review(
+            tx,
+            store,
+            crate::work_projection_review::ReviewBinding {
+                project: project_alias,
+                task: task_id,
+                status: &task.status,
+                attempt: col(row, "latest_attempt_id")?,
+                retry: retry.as_ref(),
+            },
+        )? {
+            projection["review"] = review;
+        }
         let (external_workflow, artifact) = crate::external_adapter::project_work_task(
             tx,
             store,
@@ -144,6 +157,20 @@ pub(crate) fn get(
                 projection["delivery"] = delivery;
             }
         }
+        projection["correlation_cicd"] = crate::work_projection_cicd::correlation(
+            tx,
+            store,
+            crate::work_projection_cicd::TaskBinding {
+                project: project_alias,
+                task: task_id,
+                correlation: task.correlation_id,
+                workflow: workflow_id,
+                repair_root: col(row, "repair_root_task_id")?,
+                profile: &task.agent_profile,
+                status: &task.status,
+            },
+            projection.get("delivery"),
+        )?;
         Ok(forge_work::TaskView {
             summary: task,
             projection,
