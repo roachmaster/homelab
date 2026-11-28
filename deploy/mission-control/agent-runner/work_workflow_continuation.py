@@ -26,8 +26,17 @@ def retained_sources(cursor, workflow_id):
     cursor.execute("""SELECT finish_receipt FROM forge_agent.coding_workflow_actions
       WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s""",
       (workflow_id, PREFIX + '%'))
-    return [binding for row in cursor.fetchall()
-            for binding in row['finish_receipt']['receipt']['retained_sources']]
+    bindings = [binding for row in cursor.fetchall()
+                for binding in row['finish_receipt']['receipt']['retained_sources']]
+    from work_baseline_continuation import PREFIX as baseline_prefix, retained_bindings
+    cursor.execute("""SELECT intent,finish_receipt,source_key FROM forge_agent.coding_workflow_actions
+      WHERE workflow_id=%s AND kind='decide' AND status='completed' AND source_key LIKE %s""",
+      (workflow_id, baseline_prefix + '%'))
+    for row in cursor.fetchall():
+        bindings.extend(retained_bindings(row['intent'], (row['finish_receipt'] or {}).get('receipt'),
+                                         workflow_id, row['source_key']))
+    # Later continuations retain a superset of earlier immutable sources.
+    return [b for index, b in enumerate(bindings) if b not in bindings[:index]]
 
 
 def is_retained_source(task, bindings):

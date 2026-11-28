@@ -195,6 +195,16 @@ pub struct WorkDefectLink {
     pub title: String,
     pub severity: WorkDefectSeverity,
 }
+fn deserialize_defect_metadata_version<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u8>, D::Error> {
+    let version = u8::deserialize(deserializer)?;
+    if version != 1 {
+        return Err(serde::de::Error::custom("Unknown defect metadata version"));
+    }
+    Ok(Some(version))
+}
+
 fn valid_defect_metadata(kind: WorkTaskKind, defect: Option<&WorkDefect>) -> bool {
     match (kind, defect) {
         (WorkTaskKind::Feature, None) => true,
@@ -1509,6 +1519,12 @@ pub enum WorkRequest {
         request_id: String,
     },
     WorkSubmit {
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_defect_metadata_version"
+        )]
+        defect_metadata_version: Option<u8>,
         #[serde(default)]
         task_kind: WorkTaskKind,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1530,11 +1546,23 @@ pub enum WorkRequest {
         workflow_policy_id: Option<String>,
     },
     WorkGet {
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_defect_metadata_version"
+        )]
+        defect_metadata_version: Option<u8>,
         request_id: String,
         project_alias: String,
         task_id: String,
     },
     WorkList {
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_defect_metadata_version"
+        )]
+        defect_metadata_version: Option<u8>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task_kind_filter: Option<WorkTaskKind>,
         request_id: String,
@@ -1776,8 +1804,28 @@ impl WorkRequest {
                 | Self::WorkPublicationRetry { .. }
         )
     }
+    pub fn defect_metadata_version(&self) -> Option<u8> {
+        match self {
+            Self::WorkSubmit {
+                defect_metadata_version,
+                ..
+            }
+            | Self::WorkGet {
+                defect_metadata_version,
+                ..
+            }
+            | Self::WorkList {
+                defect_metadata_version,
+                ..
+            } => *defect_metadata_version,
+            _ => None,
+        }
+    }
     pub fn is_valid(&self) -> bool {
         valid_work_request_id(self.request_id())
+            && self
+                .defect_metadata_version()
+                .is_none_or(|version| version == 1)
             && self.project_alias().is_none_or(|v| valid_work_name(v, 64))
             && self.task_id().is_none_or(valid_chat_id)
             && match self {

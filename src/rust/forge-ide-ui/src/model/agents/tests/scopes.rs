@@ -8,6 +8,7 @@ fn active_is_explicit_default_and_changing_scope_resets_server_pagination() {
     assert!(matches!(
         &effects[0],
         UiEffect::Work(WorkRequest::WorkList {
+            defect_metadata_version: Some(1),
             status_filter: Some(WorkListFilter::Scope(WorkListScope::Active)),
             cursor: None,
             ..

@@ -208,6 +208,7 @@ fn submission_uses_catalog_revision_and_preserves_exact_retry_intent() {
     assert!(
         matches!(original,WorkRequest::WorkSubmit{base_revision,agent_profile,..} if base_revision==&"a".repeat(40)&&agent_profile=="agy-primary")
     );
+    assert_eq!(original.defect_metadata_version(), Some(1));
     assert!(agents.locked());
     assert!(!agents.prompt.is_empty());
     agents.network_failed("send", "watch".into(), &mut vec![]);
@@ -376,7 +377,7 @@ fn polling_uses_owned_watch_and_accepts_events_beyond_task_revision() {
     assert_eq!(agents.event_sequence, 55);
     assert!(effects
         .iter()
-        .any(|e| matches!(e,UiEffect::Work(WorkRequest::WorkGet{task_id,..}) if task_id==TASK)));
+        .any(|e| matches!(e,UiEffect::Work(WorkRequest::WorkGet{task_id,defect_metadata_version:Some(1),..}) if task_id==TASK)));
 }
 #[test]
 fn result_pages_are_utf8_bounded_manifest_bound_and_previous_is_exact() {
@@ -1751,4 +1752,68 @@ fn configured_presence_refresh_uses_clock_guards_without_usage_or_selection_effe
         "closed"
     )
     .is_empty());
+}
+
+#[test]
+fn accepted_defect_links_open_outside_filtered_list_without_retaining_stale_authority() {
+    for target in [ATTEMPT, KEY] {
+        let mut agents = ready();
+        agents.pane = Pane::Reader;
+        agents.selected = Some(TASK.into());
+        agents.task_kind_filter = Some(WorkTaskKind::Defect);
+        let mut current = detail(WorkStatus::Completed);
+        current.task_kind = WorkTaskKind::Defect;
+        current.defect = Some(WorkDefect {
+            summary: "An observed failure".into(),
+            location: WorkDefectLocation {
+                repo_path: "src/report.rs".into(),
+                function: "parse".into(),
+                commit: "a".repeat(40),
+            },
+            observed_behavior: "Failure disappears".into(),
+            expected_behavior: "Failure remains visible".into(),
+            severity: WorkDefectSeverity::High,
+            evidence: "Owned regression".into(),
+            discovering_task_id: Some(ATTEMPT.into()),
+            discovering_workflow_id: None,
+        });
+        current.filed_defects = vec![WorkDefectLink {
+            task_id: KEY.into(),
+            title: "A related defect".into(),
+            severity: WorkDefectSeverity::High,
+        }];
+        agents.task = Some(current);
+        let unknown = "44444444-4444-4444-8444-444444444444";
+        assert!(step(
+            &mut agents,
+            UiEvent::OpenAgentTask {
+                task_id: unknown.into()
+            },
+            "unknown"
+        )
+        .is_empty());
+        assert_eq!(agents.selected.as_deref(), Some(TASK));
+        let effects = step(
+            &mut agents,
+            UiEvent::OpenAgentTask {
+                task_id: target.into(),
+            },
+            "linked",
+        );
+        assert!(effects.iter().any(|effect| matches!(effect,
+            UiEffect::Work(WorkRequest::WorkGet { task_id, project_alias, defect_metadata_version: Some(1), .. })
+            if task_id == target && project_alias == "workspace")));
+        assert_eq!(agents.selected.as_deref(), Some(target));
+        assert!(agents.task.is_none());
+        let stale = if target == ATTEMPT { KEY } else { ATTEMPT };
+        assert!(step(
+            &mut agents,
+            UiEvent::OpenAgentTask {
+                task_id: stale.into()
+            },
+            "stale-link"
+        )
+        .is_empty());
+        assert_eq!(agents.selected.as_deref(), Some(target));
+    }
 }

@@ -590,6 +590,37 @@ def handles(headers):
     return any(value.startswith("ide.work.") for value in headers.get_all("Forge-Destination", []))
 
 
+def defect_metadata_version(headers):
+    values = headers.get_all('Forge-Defect-Metadata-Version', [])
+    if not values:
+        return None
+    if values != ['1']:
+        raise Rejected(400, 'invalid_request')
+    return 1
+
+
+def defect_metadata_response(response, version):
+    """Keep strict legacy Work DTOs usable, including already-open browser tabs."""
+    if version == 1:
+        return response
+    status, body = response
+    if not isinstance(body, dict) or not isinstance(body.get('event'), dict):
+        return response
+    event = dict(body['event'])
+    def legacy(task):
+        return {key: value for key, value in task.items()
+                if key not in {'task_kind', 'defect', 'filed_defects'}} if isinstance(task, dict) else task
+    if event.get('kind') == 'work_opened':
+        event['task'] = legacy(event.get('task'))
+    elif event.get('kind') == 'work_listed' and isinstance(event.get('tasks'), list):
+        event['tasks'] = [legacy(task) for task in event['tasks']]
+    elif event.get('kind') == 'work_failed' and isinstance(event.get('reason'), str) and event['reason'].startswith('defect.'):
+        event.pop('reason')
+    else:
+        return response
+    return status, {**body, 'event': event}
+
+
 def event_attribution_version(headers):
     values = headers.get_all('Forge-Event-Attribution-Version', [])
     if not values:
@@ -669,6 +700,7 @@ def delivery_response(response, version):
 
 
 def destination(headers):
+    defect_metadata_version(headers)
     delivery_version(headers)  # Reject malformed negotiation before request effects.
     retry_events_version(headers)
     event_attribution_version(headers)
@@ -676,7 +708,7 @@ def destination(headers):
     # for the shared closed-envelope validator rather than relaxing that contract.
     route_headers = Message()
     for name, value in headers.items():
-        if name.lower() not in {'forge-delivery-version','forge-retry-events-version','forge-event-attribution-version'}:
+        if name.lower() not in {'forge-delivery-version','forge-retry-events-version','forge-event-attribution-version','forge-defect-metadata-version'}:
             route_headers[name] = value
     value = common.dispatch_destination(route_headers)
     try:
@@ -772,6 +804,12 @@ def decode(route, correlation, body):
     base = {"kind", "request_id", "project_alias"}
     if not base <= body.keys():
         raise Rejected(400, "invalid_request")
+    # Presentation capability, not business intent or idempotency authority.
+    if 'defect_metadata_version' in body:
+        if (kind not in {'work_submit', 'work_get', 'work_list'}
+                or type(body['defect_metadata_version']) is not int or body['defect_metadata_version'] != 1):
+            raise Rejected(400, 'invalid_request')
+        body = {key: value for key, value in body.items() if key != 'defect_metadata_version'}
     project_alias = _identifier(body["project_alias"])
 
     if (route is Destination.SUBMIT and kind == "work_submit"

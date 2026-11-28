@@ -242,6 +242,16 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
             reader.read_exact(&mut bytes).unwrap();
             let request: Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(
+                headers
+                    .get("forge-defect-metadata-version")
+                    .map(String::as_str),
+                request
+                    .get("defect_metadata_version")
+                    .and_then(Value::as_u64)
+                    .filter(|version| *version == 1)
+                    .map(|_| "1")
+            );
+            assert_eq!(
                 headers["forge-request-id"],
                 request["request_id"].as_str().unwrap()
             );
@@ -1852,6 +1862,7 @@ fn defect_submission_and_filtered_portal_projection_use_the_normal_relay() {
         ],
     );
     let mut request = submit();
+    request["defect_metadata_version"] = json!(1);
     request["task_kind"] = json!("defect");
     request["defect"] = metadata;
     request["prompt"] = json!("p".repeat(8192));
@@ -1871,6 +1882,7 @@ fn defect_submission_and_filtered_portal_projection_use_the_normal_relay() {
     );
     assert_reply(&host, "ide.work.submit", request, &auth, 202, receipt());
     let mut list = common("work_list");
+    list["defect_metadata_version"] = json!(1);
     list["task_kind_filter"] = json!("defect");
     assert_reply(&host, "ide.work.list", list.clone(), &auth, 200, response);
     list["task_kind_filter"] = json!("feature");
@@ -1883,4 +1895,68 @@ fn defect_submission_and_filtered_portal_projection_use_the_normal_relay() {
         failure("unavailable"),
     );
     worker.join().unwrap();
+}
+
+#[test]
+fn defect_metadata_negotiation_preserves_legacy_raw_reply_and_selects_header_per_request() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let legacy = opened();
+    let mut current = legacy.clone();
+    current["event"]["task"]["task_kind"] = json!("feature");
+    current["event"]["task"]["defect"] = Value::Null;
+    current["event"]["task"]["filed_defects"] = json!([]);
+    let worker = backend(
+        upstream,
+        vec![(200, legacy.clone()), (200, current.clone())],
+    );
+    assert_reply(
+        &host,
+        "ide.work.get",
+        task_request("work_get"),
+        &auth,
+        200,
+        legacy,
+    );
+    let mut selected = task_request("work_get");
+    selected["defect_metadata_version"] = json!(1);
+    assert_reply(&host, "ide.work.get", selected, &auth, 200, current);
+    worker.join().unwrap();
+}
+
+#[test]
+fn invalid_defect_negotiation_fails_before_backend_effects() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    for value in [Value::Null, json!(true), json!("1"), json!(0), json!(2)] {
+        let mut request = task_request("work_get");
+        request["defect_metadata_version"] = value;
+        assert_reply(
+            &host,
+            "ide.work.get",
+            request,
+            &auth,
+            400,
+            failure("invalid_request"),
+        );
+    }
+    let original = task_request("work_get");
+    let encoded = original.to_string();
+    let duplicate = format!(
+        "{{\"defect_metadata_version\":1,\"defect_metadata_version\":1,{}",
+        &encoded[1..]
+    );
+    let wire = post(&host, "ide.work.get", original, &auth);
+    let (headers, _) = wire.split_once("\r\n\r\n").unwrap();
+    let headers = headers.replace(
+        &format!("Content-Length: {}", encoded.len()),
+        &format!("Content-Length: {}", duplicate.len()),
+    );
+    let response = exchange(&host, format!("{headers}\r\n\r\n{duplicate}"));
+    assert!(response.starts_with("HTTP/1.1 400 "), "{response}");
+    no_calls(&upstream);
 }

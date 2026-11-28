@@ -160,7 +160,13 @@ impl WorkRelay {
     ) -> Option<(u16, Bytes, Envelope<WorkReply>)> {
         let (status, body) = self
             .relay
-            .dispatch(request.destination(), request.request_id(), bytes, deadline)
+            .dispatch_work_metadata(
+                request.destination(),
+                request.request_id(),
+                bytes,
+                deadline,
+                request.defect_metadata_version(),
+            )
             .ok()?;
         let mut reply: Envelope<WorkReply> = serde_json::from_slice(&body).ok()?;
         if let WorkReply::WorkCatalog { mcp_presence, .. } = &mut reply.event {
@@ -201,6 +207,7 @@ impl WorkRelay {
         ) || matches!(&request, WorkRequest::WorkReviewDecide { decision, .. } if decision.begins_execution());
         if inspect_source {
             let get = WorkRequest::WorkGet {
+                defect_metadata_version: Some(1),
                 request_id: request.request_id().into(),
                 project_alias: request.project_alias().unwrap_or_default().into(),
                 task_id: request.task_id().unwrap_or_default().into(),
@@ -266,7 +273,8 @@ fn invalid_submission(header: &Header, bytes: &[u8]) -> Result<(u16, Bytes), Rej
     let reason = serde_json::from_slice::<serde_json::Value>(bytes)
         .ok()
         .and_then(|body| {
-            (body.get("kind").and_then(|v| v.as_str()) == Some("work_submit")
+            (body.get("defect_metadata_version").and_then(|v| v.as_u64()) == Some(1)
+                && body.get("kind").and_then(|v| v.as_str()) == Some("work_submit")
                 && (body.get("defect").is_some_and(|v| !v.is_null())
                     || body.get("task_kind").is_some_and(|v| v != "feature")))
             .then_some(WorkFailureReason::DefectFields)

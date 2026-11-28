@@ -66,6 +66,33 @@ class GrokParserTest(unittest.TestCase):
  def test_missing_prompt_bucket_never_invents_full_input(self):
   value=SPEND.copy();del value['cache_creation_input_tokens']
   u=normalize_attempt_usage('grok',value);self.assertIsNone(u['input_tokens']);self.assertEqual(u['coverage'],'partial')
+ def test_native_permission_refusal_is_blocked_not_operator_or_workflow_cancellation(self):
+  # Actual retained1.0.92 ACP refusal shape from the Nov27 repair incident;
+  # IDs, workspace and command are fixtures, and no prompt/arguments are kept.
+  call={'type':'tool_call','toolCallId':'call-fixture','toolName':'run_terminal_command'}
+  refusal={'type':'tool_call_update','toolCallId':'call-fixture','status':'failed',
+   'content':[{'type':'content','content':{'type':'text','text':'User cancelled the execution for tool `run_terminal_command`'}}],
+   '_meta':{'toolNotRun':'cancelled'}}
+  terminal=records(stopReason='cancelled')[-1]
+  for evidence in (refusal,{k:v for k,v in refusal.items() if k!='_meta'}):
+   result=parse([call,evidence,terminal])
+   self.assertEqual(result.status,'blocked_permission');self.assertEqual(result.text,'')
+   self.assertIn('permission_cancelled',result.summary)
+   # Real interruption/stop authority still wins over a simultaneous native
+   # refusal. Neither an unknown cancel nor incomplete scope proof is relabeled.
+   self.assertEqual(parse([call,evidence,terminal],interrupted=True).status,'cancelled')
+  for evidence in ({**refusal,'toolCallId':'unbound'}, {**refusal,'status':'completed'},
+                   {**refusal,'_meta':{'toolNotRun':'other'}}, {**refusal,'content':[]}):
+   self.assertEqual(parse([call,evidence,terminal]).status,'cancelled')
+  self.assertEqual(parse([refusal,terminal]).status,'cancelled')
+  self.assertEqual(parse([{'type':'text','data':'User cancelled the execution for tool `run_terminal_command`'},terminal]).status,'cancelled')
+  self.assertEqual(parse([call,refusal,*records()]).status,'awaiting_review')
+ def test_permission_tool_bookkeeping_is_bounded_and_retains_no_arguments(self):
+  events=GrokEvents(SID)
+  for n in range(100):events.record({'type':'tool_call','toolCallId':'call-'+str(n),
+   'toolName':'run_terminal_command','rawInput':{'command':'private argument never retained'}})
+  self.assertEqual(len(events._permission_tools),64)
+  self.assertEqual(set(events._permission_tools.values()),{'run_terminal_command'})
  def test_auto_compaction_metadata_does_not_kill_a_long_run_or_supply_completion(self):
   for kind in ('auto_compact_started','auto_compact_progress','auto_compact_finished'):
    event={'type':kind,'tokens_used':206251,'context_window':256000,'percentage':81,

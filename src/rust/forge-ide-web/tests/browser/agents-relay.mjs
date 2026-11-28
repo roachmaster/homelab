@@ -439,7 +439,7 @@ export async function startAgentsRelay() {
       const source=tasks.get(discoveringTaskId);if(!source)throw new Error('Missing discovering fixture');
       const defect={summary:'Report parser loses an observed failure',location:{repo_path:'src/report.rs',function:'parse',commit:base},observed_behavior:'Failure disappears',expected_behavior:'Failure remains visible',severity:'high',evidence:'Owned parser reproduction fixture',discovering_task_id:source.task_id,discovering_workflow_id:source.workflow.workflow_id};
       const next=task('queued',tasks.size,{prompt:defect.summary,mode:'plan',task_kind:'defect',defect,workflow_policy_digest:workflowPolicy.policy_digest});
-      next.workflow.phase='planning';tasks.set(next.task_id,next);
+      next.workflow.phase='plan';tasks.set(next.task_id,next);
       source.filed_defects.push({task_id:next.task_id,title:next.title,severity:'high'});
       return next.task_id;
     },

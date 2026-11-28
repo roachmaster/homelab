@@ -1,4 +1,223 @@
-## Native completion and schema52 source integration — 2026-11-27
+## Parallel web-host fixture correction — 2026-11-28
+
+Jenkins141 caught a timestamp collision while two consumer fixtures created the
+same temporary directory; the other73 host tests passed and trusted cleanup was
+confirmed. The fixture now follows the repository's atomic counter/PID pattern,
+using exclusive directory creation with bounded AlreadyExists retries. It never
+reuses or deletes a colliding path. Application behavior and existing assertions
+are unchanged. All74 consumer tests pass with16 test threads on Rust1.97.1;
+formatting passes. Independent read-only review found no blocker. Qualify this
+successor and full merged main; the previous build is retained as failed.
+
+## Independent M32 upgrade preservation with additive M53 metadata — 2026-11-28
+
+On exact basefa77558a, the real PostgreSQL superseding-review upgrade proof failed
+because its whole-task snapshot gained task_kind and defect during M53. This
+correction changes only that test's historical task projection: every old field
+and the complete review/budget/workflow/artifact/event/credential/default/HBA
+comparisons remain intact. A separate query asserts all historical tasks retain
+their count and receive feature/NULL defaults before recovery.
+
+The original failing case reproduced before correction, then passed on owned
+socket-only PostgreSQL16 in8.5s. The complete independent-review module passed
+all14 tests in103.8s with zero skips. The proactive scan found other historical
+whole-task upgrade snapshots already account for M53's additive fields; same-schema
+snapshots and explicit old-column projections need no change. No application,
+SQL, production service, native workspace or root maintenance checkout changed.
+This isolated feature/codex correction is for root review/import; no push occurred.
+
+## Constrained Grok ACP transport — 2026-11-28
+
+Authorized follow-up to the native headless permission cancellation incident:
+a separately selected ACP1 client now makes bounded one-call native permission
+decisions from frozen task mode, acquired workspace and explicit current notes.
+The legacy headless selection remains the default. New Grok worker config alone
+can select `grok_transport: acp-constrained-v1`; API recipes/catalogs do not change.
+
+The existing supervisor and inode-bound native-auth staging/cleanup remain in
+control. ACP has no client filesystem/terminal RPC, leader, G1, external tools or
+supplied MCP servers. Native bare ask rules remove automatic read/shell bypass;
+only provided allow_once/reject_once options are selected. Plan/review remain
+read-only except the exact immutable progress helper. Implementation retains
+workspace edit/build/test capability under the existing OS boundary. Unknown
+operations receive a one-call denial and fixed direction, not turn cancellation.
+Git config is a closed harmless subset, including protection against filters,
+signature verifiers, includes, fsmonitor and inline-section syntax. Host path
+ancestors and descendants reject symlinks. Native tool input and request/session
+identity cannot change after binding.
+
+Both protected maps and setup-runner include work_grok_acp.py. No SQL migration,
+historical receipt/config rewrite, live service change or old-task revival was
+performed. Root must qualify and stage the matching verifier/runtime/config
+cohort. Final prompt ACP usage projects full input/cache into existing disjoint
+accounting buckets; notification step spend grants no usage authority. Native
+PermissionCancelled is blocked_permission; real interruption remains cancelled.
+
+102 focused ACP/Grok/executor/progress/CI-contract/transport tests passed; the
+ACP module contributes31 cases. setup-runner shell syntax and diff checks passed.
+Evidence: /mnt/data/homelab-build/grok-permission-matcher-20261128. Installed1.0.92
+accepted the selected ACP flags and initialize-only in an empty HOME/network-disabled
+namespace with cwd set to that isolated HOME, then exited0. Offline inspect loaded12 permission rules and managed
+MCP lockdown. No session/new, prompt, authenticate, model or quota call was sent
+to the real CLI; fake-server tests are explicitly not production model proof.
+
+## Grok native permission-cancellation containment — 2026-11-28
+
+Main137's automatic repairbf84a2c4 began on Grok and was cancelled by the native
+permission gate for a read-only Git inventory. Retained native events prove
+permission_cancelled preceded worker publication and coordinator cancellation;
+there was no operator control receipt, deadline stop or admission compensation.
+The generic historical workflow_cancelled event does not establish the real cause.
+Those old tasks/events remain unchanged and are not revived.
+
+Source now distinguishes a bounded, known-call native permission refusal plus
+cancelled terminal outcome as blocked_permission; real interrupted runs remain
+cancelled. Model prose and unbound failures cannot acquire a permission cause.
+This is truthful containment, not an upstream matcher fix. The separately reviewed ACP
+transport below provides the constrained successor; do not enable always-approve or
+guess that changing an allow rule repairs the installed headless client.
+
+## Real-browser and upgrade corrections — 2026-11-28
+
+Full-main Jenkins137 exposed a real phone layout regression in the new defect
+filter. The scope grid is now compact: the390px first task starts at358px rather
+than402px, retaining labels,44px targets and the original fold assertion.
+Real browser execution also caught an invalid fixture phase(planning instead of
+the closed wire value plan), then a product navigation guard that ignored trusted
+discovery/filed-defect links outside the current filtered list. The guard now
+admits only those links from the currently accepted task; unrelated and stale
+IDs remain rejected and server owner/project checks are unchanged.
+
+The unchanged browser driver and supervisor report28/28 with all cleanup passed
+and unchanged source; outer make exited143 as the child completed, so this is
+behavior evidence, not a successful Jenkins gate.109 reducer tests,35 generator
+tests and actual release WASM/ABI/playtest checks passed. The obsolete root
+Jenkins138 candidate was normally cancelled and trusted cleanup confirmed;
+qualify the integrated successor rather than treating it as green.
+
+The local full runner inventory caught one stale trace-upgrade expectation for
+M53's additive columns. It now compares every old field and independently asserts
+feature/NULL defaults; all7 trace tests pass. Remaining database-backed modules
+still require execution. No live schema/source/portal switch has occurred.
+
+## Combined event-stream maintenance and ABI19 handoff — 2026-11-27
+
+Native workflow5aded552 completed normally after a real independent revise/repair
+cycle. Candidate4a2de4dc passed Jenkins136 all45 checks and cleanup; reviewer5104d878
+approved and attested defect-child-discovery-link. Main8b921df3 integrates that
+reviewed source. Its migration0053_defect_tasks is reserved by this implementation;
+never duplicate53, rewrite applied1–52 or restore the reserved digest-column drop.
+The branch reservation released normally at epoch8 before root maintenance resumed.
+
+This candidate combines exact task-authorized main-CI joins, honest action/run
+projection and execution ordering, evidence-bound baseline replay, and private
+archival of two obsolete diagnostics without rewriting failed tasks or receipts.
+The legacy workspace PostgreSQL fixture now honors branch memory scope; all14
+scope tests pass and full main still requires every database test with zero skips.
+
+Only the separately reviewed compatibility correction was imported from4c03894f;
+its draft snapshot parent was not integrated. New clients explicitly request
+defect metadata; old browser requests retain raw legacy task/failure shapes.
+Unknown/null/duplicate negotiation fails before effects and does not alter feature
+intent hashes. ABI19 is matched across WASM, generated assets, host and actor.
+Focused correction evidence includes59 Python,24 protocol,108 Agents,74 host and35
+generator tests plus actual WASM. Combined candidate qualification remains required.
+
+For deployment, retain the old producer/verifier pair through exact tree/main
+verification. Drain all replay-required CI generations before switching the
+new paired helper, its configuration pin and runtime source. Rehearse and back up
+schema52, apply qualified53 and strict grants/privilege checks, then select the
+defect-aware API/workers and ABI19 actor/portal cohort. Request negotiation keeps
+the old ABI18 host/tabs compatible during the staged switch. Supersede overtaken
+fresh ABI18 releases through the normal old actor before changing its ABI config.
+Preserve the three older deferred/journalled operations and canonical checkout.
+
+Release activation is held during this authoring checkpoint; normal CI/review/
+merge/main observation remain enabled. The two diagnostic archives have not been
+executed. Qualify and deploy their exact source before admission. Operational
+release state belongs to actual process identities, protected CI and delivery
+receipts under /opt/homelab-forge/operations/event-autonomy-20261127/, not to these
+historical authoring notes. The Drive retention answer remains pending; do not
+invent completion or reset spent authority for unfinished Grok/AGY scopes.
+
+## Event-stream recovery and delivery checkpoint — historical, 2026-11-27
+
+Reviewed main7ae49268 includes PR36–39. Jenkins134 passed all46 full-main
+checks, real browser and all four zero-skip backend suites (1856 runner tests).
+Portal release5eadce13 is durably deployed. Schema52 remains current. The five
+model/publication services use immutable main4c2ba8b9 source; the API alone uses
+immutable feature source89ff01c7, separately qualified by Jenkins133 all45 and
+51 focused tests with zero skips. This temporary qualified feature deployment
+does not claim main provenance. Preserve its selected Jenkins ingress allowlist.
+
+The qualified API binds generated-correlation main events, artifacts and logs
+through the task's exact authorized delivery action/commit/main scope. Live
+Jenkins134 main progress was visible on task2411dd36 and its parent. PR39 binds
+terminal observations to action plus commit, retaining commit-only fallback for
+unbound legacy data. Local follow-up uses genuine execution timestamps to sort
+runs so late artifact ingestion cannot make an older branch build appear latest.
+
+Stopped implementation258e6354 genuinely handed off with no_source_changes.
+Private once-only baseline recovery checked its unchanged stopped native source,
+protected full-main134 evidence and qualified API89 before creating fresh Plan
+2ede1336 in the same workflow5aded552. Independent Plan review passed; normal
+implementation is running from main7ae49268 on feature/codex. Planning was charged
+once, plan revisions advanced to2, and original repair budgets/history remain.
+The native implementation owns the remote branch reservation. Root maintenance
+must wait for normal release of that reservation before pushing.
+
+Root maintenance adds a private, exact two-diagnostic archive audit. It preserves
+failed tasks, attempts, receipts and controls; only a matching current operator
+disposition moves these obsolete diagnostics into History. No public archive or
+retry authority is added. This follow-up is not deployed or executed. After
+merging reviewed main7ae, all52 archive/projection tests passed with zero skips.
+
+The defect implementation currently reserves migration53. Never create another
+53, alter applied migrations1–52 or restore the owner-reserved digest-column drop.
+Its database, protocol compatibility, protected verifier and runtime consumers
+must be reviewed and deployed as one qualified cohort. Release activation alone
+is temporarily held; implementation, review, CI, merge and main observation stay
+enabled. Three older deferred release journals remain unchanged. Preserve the
+canonical main checkout and other agent branches.
+
+The live catalog has one active workflow, five Needs attention and56 History.
+Two attention items are the obsolete diagnostics awaiting qualified archival;
+the others concern Drive retention semantics (owner answer pending), unfinished
+Grok transient-readiness deferral and unfinished AGY refresh_base capability.
+Do not mark these delivered or reset their spent authority to hide attention.
+
+## Baseline recovery and main-CI linkage — historical source checkpoint, 2026-11-27
+
+PR37/main4c2ba8b9 passed Jenkins130 all46 checks, real browser and all four
+zero-skip backend suites (1846 runner tests). Portal releaseeee7d464 and six
+matched API/worker/publisher services are live from immutable4c2ba8b9 source.
+Schema52 and privilege checks pass. Normal automation then merged PR38 as
+ef54565c; Jenkins131 passed its full main verification and portal release
+da51e83a is deployed. Canonical homelab HEAD remains e9b2921 with its original
+untracked caches. Native publication still owns the remote feature/codex branch;
+root maintenance must not advance it until that reservation is released.
+
+The local source adds exact authorized delivery action/commit/main-scope joins
+for generated-correlation main events, artifacts and logs. It preserves the
+caller's task correlation and does not authorize another task's same-commit run.
+Two real PostgreSQL regressions passed. Existing branch stage-only running
+projection is proven live by Jenkins132 on task2411dd36 and its parent.
+
+Implementation258e6354 stopped without edits because its old approved Plan kept
+an unresolved baseline prerequisite at a51e83d. A separate private, once-only
+baseline continuation requires the genuine no_source_changes review handoff,
+unchanged stopped native workspace, exact source/Plan/review evidence, independently
+verified current main and a qualified API source. It creates a new Plan in the
+same workflow with independent review; original tasks, approvals, receipts,
+branch ownership and spent budgets remain intact. One planning transition is
+charged without resetting repair counters. Typed replay support must be selected
+in the API/coordinator before admission. Fifteen focused tests passed, including
+six owned PostgreSQL cases. This source is not yet qualified, deployed or admitted;
+do not stretch the older incident or exact-note resume authorities to perform it.
+No migration is added; applied schema52 and the reserved digest-column drop stay
+unchanged. Keep the three older deferred release journals untouched.
+
+## Native completion and schema52 source integration — 2026-11-27 (historical)
 
 Migration52 is LIVE from qualified source702cf64e. Jenkins126 passed all45 branch
 checks; actualSQL apply/privilege/config checks passed after a drained seven-service

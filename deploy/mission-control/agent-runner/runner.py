@@ -512,10 +512,13 @@ class Handler(BaseHTTPRequestHandler):
         api = self.versioned_api()
         u_api = usage_api if usage_api is not None else _UnavailableUsageApi
         correlation = history_api.request_id(self.headers)
+        defect_metadata_version = None
         try:
             if correlation is None:
                 raise Rejected(400, "invalid_request")
             route = api.destination(self.headers)
+            if api is work_api:
+                defect_metadata_version = api.defect_metadata_version(self.headers)
             limit = (
                 jenkins_api.MAX_REQUEST_BYTES if api is jenkins_api
                 else work_api.MAX_REQUEST_BYTES if api is work_api
@@ -534,10 +537,10 @@ class Handler(BaseHTTPRequestHandler):
                 work_service = getattr(self.server, "work_service", None)
                 if work_service is None:
                     raise Rejected(503, "unavailable")
-                return api.event_attribution_response(api.retry_events_response(api.delivery_response(api.dispatch(route, correlation, command, work_service,
+                return api.defect_metadata_response(api.event_attribution_response(api.retry_events_response(api.delivery_response(api.dispatch(route, correlation, command, work_service,
                                                                     delivery_version=api.delivery_version(self.headers)),
                                              api.delivery_version(self.headers)), api.retry_events_version(self.headers)),
-                    api.event_attribution_version(self.headers))
+                    api.event_attribution_version(self.headers)), defect_metadata_version)
             if api is u_api:
                 usage_service = getattr(self.server, "usage_service", None)
                 if usage_service is None:
@@ -549,7 +552,8 @@ class Handler(BaseHTTPRequestHandler):
                 return api.dispatch(route, correlation, command, self.server.pinned_model, self.server.configured_models)
             return api.dispatch(route, correlation, command)
         except Rejected as error:
-            return api.failed(correlation, error)
+            response = api.failed(correlation, error)
+            return api.defect_metadata_response(response, defect_metadata_version) if api is work_api else response
         except psycopg2.Error:
             return api.failed(correlation, Rejected(503, "unavailable"))
         except TimeoutError:

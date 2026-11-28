@@ -16,6 +16,7 @@ from agent_tools import ToolCall
 import queue_store as store
 from chat_history_store import dao
 from file_context import FileAttachment
+from work_pg_fixture import PG16_AVAILABLE
 
 
 POSTGRES_BIN = Path("/usr/lib/postgresql/16/bin")
@@ -41,7 +42,7 @@ def snapshot(*conversations, selected=0, bookmark=None):
     ]}, "workbench": bookmark, "workbench_open": bookmark is not None}
 
 
-@unittest.skipUnless(os.geteuid() != 0 and (POSTGRES_BIN / "initdb").is_file(),
+@unittest.skipUnless(PG16_AVAILABLE,
                      "Disposable PostgreSQL 16 integration requires its binaries and a non-root user")
 class WorkspaceStoreTest(unittest.TestCase):
     @classmethod

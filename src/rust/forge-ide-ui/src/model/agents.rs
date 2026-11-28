@@ -273,6 +273,7 @@ impl Agents {
         self.direction = direction;
         self.request(
             WorkRequest::WorkList {
+                defect_metadata_version: Some(1),
                 request_id: id,
                 project_alias: self.project.clone(),
                 status_filter: Some(WorkListFilter::Scope(self.task_scope)),
@@ -287,6 +288,7 @@ impl Agents {
         if let Some(task_id) = self.selected.clone() {
             self.request(
                 WorkRequest::WorkGet {
+                    defect_metadata_version: Some(1),
                     request_id: id,
                     project_alias: self.project.clone(),
                     task_id,
@@ -769,6 +771,7 @@ impl Agents {
                     let base_revision = self.base().unwrap_or_default().to_owned();
                     self.request(
                         WorkRequest::WorkSubmit {
+                            defect_metadata_version: Some(1),
                             task_kind: WorkTaskKind::Feature,
                             defect: None,
                             request_id: id,
@@ -796,6 +799,14 @@ impl Agents {
             }
             UiEvent::OpenAgentTask { task_id } if work => {
                 if self.tasks.iter().any(|t| t.task_id == task_id)
+                    || self.task.as_ref().is_some_and(|task| {
+                        task.defect.as_ref().is_some_and(|defect| {
+                            defect.discovering_task_id.as_ref() == Some(&task_id)
+                        }) || task
+                            .filed_defects
+                            .iter()
+                            .any(|link| link.task_id == task_id)
+                    })
                     || self
                         .task
                         .as_ref()
