@@ -53,4 +53,27 @@ pub trait WorkReadPort {
         cursor_token: Option<&str>,
         delivery_enabled: bool,
     ) -> Result<StageLogView, WorkError>;
+    /// Current request port; legacy adapters retain their original bound and
+    /// refuse a smaller bound unless they explicitly implement this method.
+    fn cicd_stage_log_request(
+        &self,
+        request: crate::work_requests::StageLogReadRequest<'_>,
+    ) -> Result<StageLogView, WorkError> {
+        if !(1..=32768).contains(&request.limit_bytes) {
+            return Err(WorkError::rejected(400, "invalid_request"));
+        }
+        if request.limit_bytes != 32768 {
+            return Err(WorkError::rejected(503, "unavailable"));
+        }
+        self.cicd_stage_log(
+            request.project_alias,
+            request.task_id,
+            request.correlation_id,
+            request.action_id,
+            request.stage_id,
+            request.view,
+            request.cursor_token,
+            request.delivery_enabled,
+        )
+    }
 }

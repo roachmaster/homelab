@@ -16,7 +16,8 @@ use crate::work_store::PgWorkStore;
 fn submit_intent(
     request: &forge_work::work_requests::SubmitRequest,
     defect: &Option<Value>,
-    include_workflow: bool,
+    digest: Option<&str>,
+    policy_id: Option<Uuid>,
 ) -> Value {
     let mut intent = serde_json::json!({
         "project_alias": request.project_alias,
@@ -33,10 +34,11 @@ fn submit_intent(
     if request.auto_repair {
         intent["auto_repair"] = Value::Bool(true);
     }
-    if include_workflow {
-        if let Some(digest) = &request.workflow_policy_digest {
-            intent["workflow_policy_digest"] = Value::String(digest.clone());
-        }
+    if let Some(digest) = digest {
+        intent["workflow_policy_digest"] = Value::String(digest.to_string());
+    }
+    if let Some(policy_id) = policy_id {
+        intent["workflow_policy_id"] = Value::String(policy_id.to_string());
     }
     intent
 }
@@ -86,14 +88,84 @@ fn identity_ready(tx: &mut crate::tx::Tx<'_, '_>) -> Result<bool, forge_work::Wo
         .unwrap_or(false))
 }
 
+fn recorded_submit(
+    tx: &mut crate::tx::Tx<'_, '_>,
+    store: &PgWorkStore,
+    request: &forge_work::work_requests::SubmitRequest,
+    defect: &Option<Value>,
+    intent: &str,
+) -> Result<Option<forge_work::ControlOutcome>, forge_work::WorkError> {
+    let receipt_params: &[&(dyn ToSql + Sync)] = &[
+        &store.owner,
+        &request.project_alias,
+        &request.idempotency_key,
+    ];
+    let receipts = tx
+            .query_rows(
+                "SELECT t.intent_digest, e.payload AS receipt_json FROM forge_agent.coding_tasks t JOIN forge_agent.coding_events e ON (e.owner_id, e.project_alias, e.task_id) = (t.owner_id, t.project_alias, t.id) AND e.sequence = 1 WHERE t.owner_id = $1 AND t.project_alias = $2 AND t.idempotency_key = $3",
+                receipt_params,
+            )
+            .map_err(work_err)?;
+    if let Some(receipt) = receipts.first() {
+        let stored_intent: String = col(receipt, "intent_digest")?;
+        if stored_intent != intent {
+            // Fences are submission preconditions, not a different task.
+            // Tolerate only the presented/absent/frozen native policy forms.
+            let frozen = tx.query_rows("SELECT w.policy_digest,i.workflow_policy_id FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id LEFT JOIN forge_agent.coding_task_identities i ON (i.owner_id,i.project_alias,i.task_id)=(t.owner_id,t.project_alias,t.id) WHERE t.owner_id=$1 AND t.project_alias=$2 AND t.idempotency_key=$3",receipt_params).map_err(work_err)?;
+            let mut digests = vec![None, request.workflow_policy_digest.clone()];
+            let mut ids = vec![None, request.workflow_policy_id];
+            if let Some(frozen) = frozen.first() {
+                digests.push(Some(col::<String>(frozen, "policy_digest")?));
+                ids.push(col::<Option<Uuid>>(frozen, "workflow_policy_id")?);
+            }
+            let replay = digests.iter().any(|digest| {
+                ids.iter().any(|id| {
+                    stored_intent
+                        == intent_digest(&submit_intent(request, defect, digest.as_deref(), *id))
+                })
+            });
+            if !replay {
+                return Err(forge_work::WorkError::rejected(409, "idempotency_conflict"));
+            }
+        }
+        let receipt_json: Value = col(receipt, "receipt_json")?;
+        let task_id: Uuid = receipt_json
+            .get("task_id")
+            .and_then(Value::as_str)
+            .and_then(|text| text.parse().ok())
+            .ok_or_else(|| forge_work::WorkError::store("submit receipt missing task_id"))?;
+        return outcome_for(tx, &store.owner, &request.project_alias, task_id, 1, true)
+            .map(|outcome| Some(outcome.with_recorded_receipt(receipt_json.clone())));
+    }
+
+    Ok(None)
+}
+
+pub(crate) fn submit_replay(
+    store: &PgWorkStore,
+    request: &forge_work::work_requests::SubmitRequest,
+) -> Result<Option<forge_work::ControlOutcome>, forge_work::WorkError> {
+    let defect = forge_work::defect::validate_defect(&request.task_kind, request.defect.as_ref())?;
+    prepare_title(&request.prompt)?;
+    let intent = intent_digest(&submit_intent(
+        request,
+        &defect,
+        request.workflow_policy_digest.as_deref(),
+        request.workflow_policy_id,
+    ));
+    run_tx(store, |tx| {
+        advisory_lock(tx, &store.owner, &request.project_alias)?;
+        recorded_submit(tx, store, request, &defect, &intent)
+    })
+}
+
 /// WorkAdmissionPort::submit, ported from WorkStore.submit's core
 /// transaction: advisory lock, first-event receipt replay (with the
 /// digest-variant tolerance for the workflow fence switch), the
 /// pending cap, the workflow merge-head base fence, the task
 /// insert, the review policy, the workflow row and identity
-/// recording, and the queued event + notify. Delivery admission and
-/// external-profile enqueue are host concerns the request does not
-/// carry (documented v1 boundary).
+/// recording, and the queued event + notify. Private repair admission and
+/// lineage binding and external-profile enqueue share this transaction.
 pub(crate) fn submit(
     store: &PgWorkStore,
     request: &forge_work::work_requests::SubmitRequest,
@@ -102,33 +174,16 @@ pub(crate) fn submit(
     // before any store work.
     let defect = forge_work::defect::validate_defect(&request.task_kind, request.defect.as_ref())?;
     let title = prepare_title(&request.prompt)?;
-    let intent = intent_digest(&submit_intent(request, &defect, true));
+    let intent = intent_digest(&submit_intent(
+        request,
+        &defect,
+        request.workflow_policy_digest.as_deref(),
+        request.workflow_policy_id,
+    ));
     run_tx(store, |tx| {
         advisory_lock(tx, &store.owner, &request.project_alias)?;
-        let receipt_params: &[&(dyn ToSql + Sync)] = &[
-            &store.owner,
-            &request.project_alias,
-            &request.idempotency_key,
-        ];
-        let receipts = tx
-            .query_rows(
-                "SELECT t.intent_digest, e.payload AS receipt_json FROM forge_agent.coding_tasks t JOIN forge_agent.coding_events e ON (e.owner_id, e.project_alias, e.task_id) = (t.owner_id, t.project_alias, t.id) AND e.sequence = 1 WHERE t.owner_id = $1 AND t.project_alias = $2 AND t.idempotency_key = $3",
-                receipt_params,
-            )
-            .map_err(work_err)?;
-        if let Some(receipt) = receipts.first() {
-            let stored_intent: String = col(receipt, "intent_digest")?;
-            let variant = intent_digest(&submit_intent(request, &defect, false));
-            if stored_intent != intent && stored_intent != variant {
-                return Err(forge_work::WorkError::rejected(409, "idempotency_conflict"));
-            }
-            let receipt_json: Value = col(receipt, "receipt_json")?;
-            let task_id: Uuid = receipt_json
-                .get("task_id")
-                .and_then(Value::as_str)
-                .and_then(|text| text.parse().ok())
-                .ok_or_else(|| forge_work::WorkError::store("submit receipt missing task_id"))?;
-            return outcome_for(tx, &store.owner, &request.project_alias, task_id, 1, true);
+        if let Some(outcome) = recorded_submit(tx, store, request, &defect, &intent)? {
+            return Ok(outcome);
         }
         let count_params: &[&(dyn ToSql + Sync)] = &[&store.owner, &request.project_alias];
         let counts = tx
@@ -145,8 +200,63 @@ pub(crate) fn submit(
         if pending >= store.max_pending {
             return Err(forge_work::WorkError::rejected(503, "queue_full"));
         }
-        let has_workflow = request.workflow_policy_digest.is_some();
-        if has_workflow {
+        if let Some(authority) = &request.delivery_admission {
+            if !store.delivery_enabled {
+                return Err(forge_work::WorkError::rejected(403, "denied"));
+            }
+            let rows = tx
+                .query_rows(
+                    "SELECT forge_agent.delivery_repair_admit($1,$2,$3,$4)",
+                    &[
+                        &authority.operation_id,
+                        &authority.generation,
+                        &authority.lease_token,
+                        &intent,
+                    ],
+                )
+                .map_err(work_err)?;
+            if !rows
+                .first()
+                .and_then(|row| row.try_get::<_, bool>(0).ok())
+                .unwrap_or(false)
+            {
+                return Err(forge_work::WorkError::rejected(403, "denied"));
+            }
+        }
+        let trusted_main = if store.delivery_enabled {
+            tx.call_json(
+                "SELECT forge_agent.delivery_project_head($1)",
+                &[&request.project_alias],
+            )
+            .map_err(work_err)?
+            .and_then(|value| value["commit_sha"].as_str().map(str::to_string))
+        } else {
+            None
+        };
+        if trusted_main
+            .as_ref()
+            .is_some_and(|head| head != &request.base_revision)
+        {
+            return Err(forge_work::work_config::rejected_reason(
+                409,
+                "result_mismatch",
+                "base_stale",
+            ));
+        }
+        let is_external = store
+            .catalog
+            .as_ref()
+            .and_then(|config| config.profile(&request.agent_profile))
+            .is_some_and(|profile| profile.is_external());
+        let native_snapshot = request.workflow_snapshot.as_ref().filter(|_| !is_external);
+        if !is_external
+            && native_snapshot.is_none()
+            && (request.workflow_policy_digest.is_some() || request.workflow_policy_id.is_some())
+        {
+            return Err(forge_work::WorkError::rejected(503, "unavailable"));
+        }
+        let has_workflow = native_snapshot.is_some();
+        if has_workflow && trusted_main.is_none() {
             let heads = tx
                 .query_rows(
                     "SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w USING (workflow_id) WHERE a.owner_id = $1 AND a.project_alias = $2 AND a.kind = 'merge' AND a.status = 'completed' AND a.finish_receipt->>'status' = 'merged' AND a.finish_receipt->'receipt'->>'merge_commit' = a.intent->>'merge_commit' AND w.phase = 'completed' ORDER BY a.updated_at DESC, a.action_id DESC LIMIT 1",
@@ -164,19 +274,11 @@ pub(crate) fn submit(
                 }
             }
         }
-        let recipe_document = pinned_recipe_for(
-            tx,
-            &store.owner,
-            &request.project_alias,
-            &request.recipe_digest,
-        )?
-        .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
-        // A defect's discovering references must resolve before
-        // the task is created (WorkStore.submit). Python also
-        // falls back to the external workflow table for a workflow
-        // id; this adapter carries no external-workflow
-        // configuration, so that fallback is the recorded v1
-        // boundary (shared with _filed_defects).
+        let recipe_document =
+            pinned_recipe_for(tx, store, &request.project_alias, &request.recipe_digest)?
+                .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
+        // Discovering references resolve within the exact owner/project.
+        // Managed external workflows have their own durable workflow table.
         if let Some(defect) = &defect {
             for (field, table, column) in [
                 ("discovering_task_id", "coding_tasks", "id"),
@@ -202,7 +304,11 @@ pub(crate) fn submit(
                         check_params,
                     )
                     .map_err(work_err)?;
-                if found.is_empty() {
+                let external_found = found.is_empty()
+                    && field == "discovering_workflow_id"
+                    && store.catalog.as_ref().is_some_and(|config| config.external_workflow(&request.project_alias).is_some())
+                    && !tx.query_rows("SELECT 1 FROM forge_external_workflow.workflows WHERE owner_id=$1 AND project_alias=$2 AND workflow_id=$3 FOR SHARE",check_params).map_err(work_err)?.is_empty();
+                if found.is_empty() && !external_found {
                     return Err(forge_work::work_config::rejected_reason(
                         400,
                         "invalid_request",
@@ -253,17 +359,17 @@ pub(crate) fn submit(
         ensure_review_policy(tx, store, &request.project_alias, task_id)?;
         let mut workflow_id: Option<Uuid> = None;
         let mut effective_snapshot: Option<Value> = None;
-        if let Some(digest) = &request.workflow_policy_digest {
-            let snapshot = request
-                .workflow_snapshot
-                .clone()
-                .unwrap_or_else(|| serde_json::json!({"policy_digest": digest}));
+        if let Some(snapshot) = native_snapshot {
+            let snapshot = snapshot.clone();
+            let digest = snapshot["policy_digest"].as_str().ok_or_else(|| {
+                forge_work::WorkError::store("Workflow snapshot has no policy digest")
+            })?;
             effective_snapshot = Some(snapshot.clone());
             let workflow_params: &[&(dyn ToSql + Sync)] = &[
                 &store.owner,
                 &request.project_alias,
                 &task_id,
-                digest,
+                &digest,
                 &snapshot,
             ];
             let rows = tx
@@ -298,9 +404,10 @@ pub(crate) fn submit(
                 &request.recipe_digest,
             )?;
             let mut policy_id: Option<Uuid> = None;
-            if let (Some(digest), Some(snapshot)) =
-                (&request.workflow_policy_digest, &effective_snapshot)
-            {
+            if let Some(snapshot) = &effective_snapshot {
+                let digest = snapshot["policy_digest"].as_str().ok_or_else(|| {
+                    forge_work::WorkError::store("Workflow snapshot has no policy digest")
+                })?;
                 let mut document = snapshot.clone();
                 if let Some(object) = document.as_object_mut() {
                     object.remove("policy_digest");
@@ -343,14 +450,45 @@ pub(crate) fn submit(
             &request.project_alias,
             task_id,
             "queued",
-            receipt,
+            receipt.clone(),
             crate::work_rows::EventOptions {
                 actor: &request.actor,
                 cause: None,
                 first: true,
             },
         )?;
+        if is_external {
+            crate::external_adapter::enqueue_work_admission(
+                tx,
+                store,
+                &request.project_alias,
+                task_id,
+                &request.agent_profile,
+            )?;
+        }
+        if let Some(authority) = &request.delivery_admission {
+            let rows = tx
+                .query_rows(
+                    "SELECT forge_agent.delivery_repair_bind($1,$2,$3,$4,$5)",
+                    &[
+                        &authority.operation_id,
+                        &authority.generation,
+                        &authority.lease_token,
+                        &task_id,
+                        &receipt,
+                    ],
+                )
+                .map_err(work_err)?;
+            if !rows
+                .first()
+                .and_then(|row| row.try_get::<_, bool>(0).ok())
+                .unwrap_or(false)
+            {
+                return Err(forge_work::WorkError::rejected(403, "denied"));
+            }
+        }
         notify(tx)?;
         outcome_for(tx, &store.owner, &request.project_alias, task_id, 1, false)
+            .map(|outcome| outcome.with_recorded_receipt(receipt.clone()))
     })
 }

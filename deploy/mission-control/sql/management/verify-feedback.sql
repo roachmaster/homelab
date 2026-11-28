@@ -86,6 +86,7 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
    THEN jsonb_set(item,'{3}',(SELECT old->3 FROM jsonb_array_elements(expected.data->'columns') old WHERE old->>0=item->>0))
    ELSE item END ORDER BY ord) FROM jsonb_array_elements(actual->'columns') WITH ORDINALITY rows(item,ord)));
  END IF;
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=56 AND name='native_ci_verifier') AND expected.name='coding_reviews' THEN actual:=replace(actual::text,'forge-sdlc-jenkins-v[1-4]:','forge-sdlc-jenkins-v[1-3]:')::jsonb;END IF;
  -- M49 widened only the gate check to also accept named contracts; verify the exact
  -- widened expression by restoring the predecessor text before the shape compare.
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=49 AND name='gate_contract_names') AND expected.name='coding_reviews' THEN

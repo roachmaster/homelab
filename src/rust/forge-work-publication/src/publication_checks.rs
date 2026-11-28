@@ -32,7 +32,7 @@ use forge_work_worker::workspace::WorkspaceLease;
 use crate::publication_clients::{uuid, PublicationError};
 use crate::publication_config::PublicationConfig;
 use crate::verification::{project_verification, VerificationMetadata, VerificationReport};
-use crate::verification_init::verification_argv;
+use forge_work_worker::attempt_helper;
 
 const O_NOFOLLOW: i32 = 0o400000;
 const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
@@ -47,46 +47,6 @@ fn exclusive_output(path: &Path) -> std::io::Result<File> {
         .open(path)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     Ok(file)
-}
-
-fn python_repr(text: &str) -> String {
-    let quote = if text.contains('\'') && !text.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut out = String::new();
-    out.push(quote);
-    for ch in text.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            ch if ch == quote => {
-                out.push('\\');
-                out.push(ch);
-            }
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch => out.push(ch),
-        }
-    }
-    out.push(quote);
-    out
-}
-
-fn checks_repr(checks: &[Vec<String>]) -> String {
-    let commands: Vec<String> = checks
-        .iter()
-        .map(|command| {
-            let parts: Vec<String> = command.iter().map(|part| python_repr(part)).collect();
-            if parts.len() == 1 {
-                format!("({},)", parts[0])
-            } else {
-                format!("({})", parts.join(", "))
-            }
-        })
-        .collect();
-    format!("[{}]", commands.join(", "))
 }
 
 fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
@@ -194,33 +154,17 @@ impl IsolatedCheckRunner {
             }
             let _ = std::fs::create_dir(&support);
         }
-        let script = directory.join("verify.py");
-        let script_text = format!(
-            "import os,shutil,subprocess,sys\n\
-             os.environ['GIT_CONFIG_NOSYSTEM']='1'\n\
-             os.environ['GIT_CONFIG_GLOBAL']='/dev/null'\n\
-             os.environ['GIT_OPTIONAL_LOCKS']='0'\n\
-             os.environ['PYTHONDONTWRITEBYTECODE']='1'\n\
-             os.environ['QA_OUTPUT_ROOT']='/run/forge-coding-attempt/qa'\n\
-             if shutil.which('rustc'):\n\
-             \x20version=subprocess.run(['rustc','--version'],capture_output=True,text=True,check=False)\n\
-             \x20print('FORGE_VERIFIER_TOOLCHAIN '+version.stdout.strip()[:128],flush=True)\n\
-             commands={}\n\
-             for index,command in enumerate(commands):\n\
-             \x20print('FORGE_CHECK_START '+str(index),flush=True)\n\
-             \x20try:\n\
-             \x20 result=subprocess.run(command,stdin=subprocess.DEVNULL,check=False,timeout=1800)\n\
-             \x20except OSError:\n\
-             \x20 print('Required fixed verification executable is unavailable.',flush=True);sys.exit(127)\n\
-             \x20if result.returncode:\n\
-             \x20 sys.exit(result.returncode if result.returncode>0 else 128-result.returncode)\n\
-             \x20print('FORGE_CHECK_PASS '+str(index),flush=True)\n",
-            checks_repr(&self.config.checks)
-        );
-        std::fs::write(&script, script_text)
-            .map_err(|_| fail_report(&self.config.checks, "verification_process_unavailable"))?;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o444))
-            .map_err(|_| fail_report(&self.config.checks, "verification_process_unavailable"))?;
+        let unavailable = || fail_report(&self.config.checks, "verification_process_unavailable");
+        let helper =
+            attempt_helper::stage(&directory, attempt_helper::CHECKS).map_err(|_| unavailable())?;
+        let plan = directory.join("checks.json");
+        let mut output = exclusive_output(&plan).map_err(|_| unavailable())?;
+        serde_json::to_writer(&mut output, &self.config.checks).map_err(|_| unavailable())?;
+        output
+            .set_permissions(std::fs::Permissions::from_mode(0o444))
+            .map_err(|_| unavailable())?;
+        output.sync_all().map_err(|_| unavailable())?;
+        drop(output);
         let workspace = WorkspaceLease {
             path: repository.to_path_buf(),
             repository: project_root.clone(),
@@ -233,14 +177,8 @@ impl IsolatedCheckRunner {
             source_repository: None,
             execution_branch: None,
         };
-        let verify_argv = verification_argv(&[
-            "/usr/bin/python3".to_string(),
-            "-B".to_string(),
-            format!("{CHILD_STATE}/verify.py"),
-        ])
-        .map_err(|_| fail_report(&self.config.checks, "verification_process_unavailable"))?;
         let invocation = Invocation {
-            argv: verify_argv,
+            argv: vec![format!("{CHILD_STATE}/{}", attempt_helper::CHECKS)],
             stdin: Vec::new(),
             backend: "verification".to_string(),
             cwd: repository.to_path_buf(),
@@ -249,7 +187,7 @@ impl IsolatedCheckRunner {
             implement: true,
             session: None,
             plan_file: None,
-            readonly_files: vec![script.clone()],
+            readonly_files: vec![helper, plan],
             external_sandbox: false,
             native_auth: None,
             transport: None,

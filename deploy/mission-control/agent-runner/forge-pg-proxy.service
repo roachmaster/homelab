@@ -6,7 +6,7 @@ After=postgresql@16-main.service
 [Service]
 User=forge-pg-proxy
 Group=forge-pg-proxy
-ExecStart=/usr/bin/python3 -B /opt/homelab-forge/agent-runner/forge_pg_proxy.py --config /etc/homelab-forge/forge-pg-proxy/config.json
+ExecStart=/opt/homelab-forge/event-current/bin/forge-pg-proxy --config /etc/homelab-forge/forge-pg-proxy/config.json
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true

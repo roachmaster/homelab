@@ -90,11 +90,32 @@ impl PgSession {
         &mut self,
         f: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, AdapterError>,
     ) -> Result<T, AdapterError> {
+        self.in_tx_mode(false, f)
+    }
+
+    /// Coherent portal snapshot, allowing the existing protected FOR SHARE
+    /// external scope readers. Isolation is selected before the owner query.
+    pub(crate) fn in_tx_repeatable<T>(
+        &mut self,
+        f: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, AdapterError>,
+    ) -> Result<T, AdapterError> {
+        self.in_tx_mode(true, f)
+    }
+
+    fn in_tx_mode<T>(
+        &mut self,
+        repeatable: bool,
+        f: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, AdapterError>,
+    ) -> Result<T, AdapterError> {
         let owner = self.config.owner.clone();
         let handle = self.rt.handle().clone();
         let client = &mut self.client;
         let out = self.rt.block_on(async {
             let mut tx = client.transaction().await?;
+            if repeatable {
+                tx.batch_execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                    .await?;
+            }
             tx.execute(
                 "SELECT set_config('forge.coding_owner', $1, true)",
                 &[&owner],
@@ -173,7 +194,9 @@ impl PgSession {
         // decode panic - row.get::<T> panics on NULL.
         Ok(self
             .run_query(select, params, true)?
-            .and_then(|row| row.get::<usize, Option<T>>(0)))
+            .map(|row| row.try_get::<usize, Option<T>>(0))
+            .transpose()?
+            .flatten())
     }
 
     /// Executes a query that does not return any result.

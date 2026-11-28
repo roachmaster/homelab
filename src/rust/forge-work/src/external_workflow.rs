@@ -71,11 +71,8 @@ pub struct ExternalProfileInfo {
     pub branch: Option<String>,
 }
 
-/// AGENT_BRANCH_INSTRUCTIONS (mirror of the forge-work-worker
-/// constant; the crates cannot import each other): instruction
-/// text only - never changes permissions, frozen branch
-/// bindings or recipes.
-pub(crate) const AGENT_BRANCH_INSTRUCTIONS: &str = r#"Keep one persistent named feature/<agent> branch per agent, never renamed or replaced. Assignments: agy-primary=feature/agy; codex-author and codex-primary=feature/codex; grok-primary=feature/grok; muse-primary and muse-db-primary=feature/muse; dot-primary=feature/dot. Configured aliases must use their explicitly assigned agent branch; do not infer a new owner from an alias. Never create agent-owned per-task branches. Before any authorized push, rebase onto current main, rerun required tests, and push incrementally after green tests rather than one final dump. Manage your own local build cache outside source using the provisioned cache paths; preserve other agents' caches. These rules grant no commit or push permission. Native task workers must not commit or push; their authorized publisher owns publication. Plan and review remain read-only pinned snapshots. If a receipt-bound author workspace has a different branch, stop and request receipt-preserving reconciliation; never rewrite frozen identities or switch another owner's checkout. Legacy machinery-owned publication exception: work_publication_clients.py:branch_name() retains forge/task-<publication-id> fallback refs for explicit ephemeral-task-v1, legacy identities and jobs without persistent profile resolution. Historical forge/agent/<profile-slug> defaults remain compatibility bindings, not author branch instructions. Preserve their receipts; only a separately authorized transition may reconcile them."#;
+/// Included once in the immutable external author claim.
+const AUTHOR_BRANCH_RULES: &str = "Use only your assigned persistent feature branch and provisioned cache. Stop on a binding mismatch. Never create, switch or rename branches. Before an authorized push, rebase onto current main, rerun required tests and publish incrementally after green checks. Preserve other agents' work and caches.";
 
 pub struct ExternalWorkflowStore {
     pub(crate) owner: String,
@@ -640,6 +637,7 @@ impl ExternalWorkflowStore {
         tx: &mut dyn ExternalTx,
         project: &str,
         task_id: Uuid,
+        author_profile: &str,
         context: &Value,
     ) -> Result<Uuid, WorkError> {
         let assignment = tx.enqueue_v2(project, task_id)?;
@@ -648,10 +646,18 @@ impl ExternalWorkflowStore {
         // original request stays untouched.
         let mut enriched = context.clone();
         if let Some(map) = enriched.as_object_mut() {
-            map.insert(
-                "instructions".to_string(),
-                Value::String(AGENT_BRANCH_INSTRUCTIONS.to_string()),
-            );
+            let branch = crate::work_config::owned_feature_branch(author_profile).or_else(|| {
+                self.profiles
+                    .get(author_profile)?
+                    .branch
+                    .as_deref()
+                    .filter(|branch| branch.starts_with("feature/"))
+            });
+            let instructions = match branch {
+                Some(branch) => format!("Assigned branch: {branch}. {AUTHOR_BRANCH_RULES}"),
+                None => AUTHOR_BRANCH_RULES.to_owned(),
+            };
+            map.insert("instructions".into(), Value::String(instructions));
         }
         let raw = canonical_json(&enriched);
         if raw.len() > 1_048_576 {
@@ -681,7 +687,7 @@ impl ExternalWorkflowStore {
             "acceptance_criteria": task["acceptance_criteria"],
         });
         crate::defect::merge_defect_context(&mut context, &task);
-        self.enqueue_ext(tx, project, task_id, &context)
+        self.enqueue_ext(tx, project, task_id, text(&w, "author_profile"), &context)
     }
 
     /// discover: enroll fresh plan tasks for every managed

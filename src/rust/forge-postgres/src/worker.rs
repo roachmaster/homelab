@@ -76,8 +76,50 @@ pub struct Claim {
 }
 
 impl Claim {
-    /// Decodes the claim payload: string fields via as_str, uuid fields via as_str + Uuid::parse_str, recipe cloned from the payload; every missing or mistyped required field is a Protocol error naming the field. Optional context fields decode leniently (absent or mistyped reads as None), mirroring the Python Lease's .get() reads.
+    /// Decode a claim without normalizing malformed continuation authority
+    /// into an absent field. Optional null remains absent; supplied identities
+    /// must already be canonical before the typed lease contract runs.
     pub fn from_json(payload: serde_json::Value) -> Result<Claim, AdapterError> {
+        for field in [
+            "attempt_id",
+            "attempt_token",
+            "incarnation",
+            "resume_attempt_id",
+            "plan_decision_id",
+            "feedback_id",
+            "repair_source_review_id",
+            "scope_plan_decision_id",
+            "parent_task_id",
+            "workflow_id",
+            "workflow_review_id",
+            "workflow_feedback_review_id",
+        ] {
+            if let Some(value) = payload.get(field).filter(|value| !value.is_null()) {
+                let text = value
+                    .as_str()
+                    .ok_or_else(|| AdapterError::Protocol(format!("{field} invalid")))?;
+                if Uuid::parse_str(text)
+                    .ok()
+                    .is_none_or(|id| id.to_string() != text)
+                {
+                    return Err(AdapterError::Protocol(format!("{field} invalid")));
+                }
+            }
+        }
+        for field in [
+            "resume_workspace_digest",
+            "feedback_sha256",
+            "repair_candidate_commit",
+            "review_target_sha256",
+            "workflow_feedback_sha256",
+        ] {
+            if payload
+                .get(field)
+                .is_some_and(|value| !value.is_null() && !value.is_string())
+            {
+                return Err(AdapterError::Protocol(format!("{field} invalid")));
+            }
+        }
         Ok(Claim {
             task_id: req_str(&payload, "task_id")?,
             project_alias: req_str(&payload, "project_alias")?,
@@ -345,37 +387,45 @@ impl WorkerApi {
         allowed_profiles: &[String],
     ) -> Result<Option<Claim>, AdapterError> {
         let profiles: Vec<&str> = allowed_profiles.iter().map(String::as_str).collect();
-        let payload = self.session.call_json(
-            "SELECT forge_coding_worker_api.claim($1, $2, $3)",
-            &[&worker_id, &incarnation, &profiles],
-        )?;
-        let Some(payload) = payload else {
-            return Ok(None);
-        };
-        let mut claim = Claim::from_json(payload)?;
-        // The defect metadata rides a separate schema-53 read
-        // (WorkStore claim does the same): probe for the function
-        // exactly as renew_status probes its typed form, and keep
-        // the feature/None defaults when it is absent.
-        let has_read_defect = self.session.call_bool(
-            "SELECT to_regprocedure($1) IS NOT NULL",
-            &[&"forge_coding_worker_api.read_defect(uuid,uuid)"],
-        )?;
-        if has_read_defect {
-            if let Some(metadata) = self.session.call_json(
-                "SELECT forge_coding_worker_api.read_defect($1, $2)",
-                &[&claim.attempt_id, &claim.attempt_token],
-            )? {
-                if let Some(kind) = metadata.get("task_kind").and_then(Value::as_str) {
-                    claim.task_kind = kind.to_string();
+        // Admission and all effect-free contract reads/validation commit
+        // together. A malformed future lease cannot leave an orphan attempt.
+        self.session.in_tx(|tx| {
+            let payload = tx.call_json(
+                "SELECT forge_coding_worker_api.claim($1, $2, $3)",
+                &[&worker_id, &incarnation, &profiles],
+            )?;
+            let Some(payload) = payload else {
+                return Ok(None);
+            };
+            let mut claim = Claim::from_json(payload)?;
+            // The defect metadata rides a separate schema-53 read
+            // (WorkStore claim does the same): probe for the function
+            // exactly as renew_status probes its typed form, and keep
+            // the feature/None defaults when it is absent.
+            let has_read_defect = tx.call_bool(
+                "SELECT to_regprocedure($1) IS NOT NULL",
+                &[&"forge_coding_worker_api.read_defect(uuid,uuid)"],
+            )?;
+            if has_read_defect {
+                if let Some(metadata) = tx.call_json(
+                    "SELECT forge_coding_worker_api.read_defect($1, $2)",
+                    &[&claim.attempt_id, &claim.attempt_token],
+                )? {
+                    if let Some(kind) = metadata.get("task_kind").and_then(Value::as_str) {
+                        claim.task_kind = kind.to_string();
+                    }
+                    claim.defect = metadata
+                        .get("defect")
+                        .cloned()
+                        .filter(|value| !value.is_null());
                 }
-                claim.defect = metadata
-                    .get("defect")
-                    .cloned()
-                    .filter(|value| !value.is_null());
             }
-        }
-        Ok(Some(claim))
+            forge_work_worker::worker::validate_lease(&crate::worker_adapter::claim_to_lease(
+                claim.clone(),
+            ))
+            .map_err(|_| AdapterError::Protocol("Invalid claimed coding lease".into()))?;
+            Ok(Some(claim))
+        })
     }
 
     /// Renews the lease for the given claim.
@@ -655,6 +705,35 @@ mod tests {
             Claim::from_json(payload),
             Err(AdapterError::Protocol(_))
         ));
+    }
+
+    #[test]
+    fn supplied_malformed_continuation_authority_is_not_erased() {
+        for field in [
+            "parent_task_id",
+            "plan_decision_id",
+            "feedback_id",
+            "workflow_feedback_review_id",
+        ] {
+            for value in [
+                json!(false),
+                json!("not-uuid"),
+                json!("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"),
+            ] {
+                let mut payload = full_payload();
+                payload[field] = value;
+                assert!(Claim::from_json(payload).is_err(), "{field}");
+            }
+        }
+        for field in [
+            "feedback_sha256",
+            "repair_candidate_commit",
+            "workflow_feedback_sha256",
+        ] {
+            let mut payload = full_payload();
+            payload[field] = json!(1);
+            assert!(Claim::from_json(payload).is_err(), "{field}");
+        }
     }
 
     #[test]

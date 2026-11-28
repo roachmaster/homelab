@@ -21,7 +21,6 @@ use forge_work::external_step::validate_gate_reference;
 use crate::ci_contract::{
     legacy_checks, CiGateContract, CiGateContractFactory, LEGACY_PROFILE, SCOPED_PROFILE,
 };
-use crate::ci_phases::EVENT_PROFILE;
 use crate::durable_files::{effective_uid, home_dir, read_private};
 use crate::jenkins_observer::JenkinsObserverError;
 use crate::publication_clients::{CommandExecutor, PublicationError};
@@ -464,12 +463,17 @@ pub fn jenkins_gate_manifest(
     let source_digest = format!("{:x}", Sha256::digest(canonical_bytes(&protected_value)));
     let helper_digest = format!(
         "{:x}",
-        Sha256::digest(read_private(&config.verifier, 1024 * 1024, Some(0))?)
+        Sha256::digest(read_private(
+            &config.verifier,
+            verifier_maximum(&config.verification_profile),
+            Some(0)
+        )?)
     );
     let plan = contract
         .plan(branch_scope.unwrap_or("detached"))
         .map_err(DeliveryError::value)?;
-    let scoped = contract.profile == SCOPED_PROFILE || contract.profile == EVENT_PROFILE;
+    let scoped =
+        contract.profile == SCOPED_PROFILE || crate::ci_phases::is_event_profile(&contract.profile);
     let mut policy = json!({
         "version": plan.result_version(),
         "provider": "jenkins",
@@ -484,7 +488,7 @@ pub fn jenkins_gate_manifest(
         };
         policy["branch_scope"] = json!(scope);
     }
-    if contract.profile == EVENT_PROFILE {
+    if crate::ci_phases::is_event_profile(&contract.profile) {
         let phases: Vec<Value> = plan
             .phases
             .iter()
@@ -533,6 +537,9 @@ pub struct DeliveryConfig {
     pub jenkins_binary_sha256: String,
     pub jenkins_config: PathBuf,
     pub verifier: PathBuf,
+    pub policy_path: Option<PathBuf>,
+    pub policy_sha256: Option<String>,
+    pub verifier_sha256: Option<String>,
     pub jenkins_job: String,
     pub verification_profile: String,
     /// The Jenkins instance alias this delivery client
@@ -577,7 +584,14 @@ impl DeliveryConfig {
             "jenkins_config",
             "verifier",
         ];
-        let optional = ["jenkins_job", "verification_profile", "jenkins_instance"];
+        let optional = [
+            "jenkins_job",
+            "verification_profile",
+            "jenkins_instance",
+            "policy_path",
+            "policy_sha256",
+            "verifier_sha256",
+        ];
         if !required.iter().all(|key| object.contains_key(*key))
             || !object
                 .keys()
@@ -679,6 +693,30 @@ impl DeliveryConfig {
         )
         .map(|factory| factory.create().profile)
         .map_err(DeliveryError::value)?;
+        let native = profile == forge_jenkins::native_policy::NATIVE_PROFILE;
+        let binding_keys = ["policy_path", "policy_sha256", "verifier_sha256"];
+        if native != binding_keys.iter().all(|k| raw.get(*k).is_some())
+            || (!native && binding_keys.iter().any(|k| raw.get(*k).is_some()))
+        {
+            return Err(invalid(
+                "Native verifier requires an explicit policy and binary binding",
+            ));
+        }
+        let policy_path = if native {
+            Some(path_field("policy_path")?)
+        } else {
+            None
+        };
+        let policy_sha256 = if native {
+            Some(digest(raw["policy_sha256"].as_str().unwrap_or_default())?)
+        } else {
+            None
+        };
+        let verifier_sha256 = if native {
+            Some(digest(raw["verifier_sha256"].as_str().unwrap_or_default())?)
+        } else {
+            None
+        };
         Ok(DeliveryConfig {
             owner: owner.to_string(),
             worker_id: worker_id.to_string(),
@@ -695,6 +733,9 @@ impl DeliveryConfig {
                 .to_string(),
             jenkins_config: path_field("jenkins_config")?,
             verifier: path_field("verifier")?,
+            policy_path,
+            policy_sha256,
+            verifier_sha256,
             jenkins_job: job.to_string(),
             verification_profile: profile,
             jenkins_instance: instance,
@@ -972,6 +1013,15 @@ pub fn owner_uid() -> u32 {
     effective_uid()
 }
 
+/// Native executables have a separate bounded limit from legacy script sources.
+pub fn verifier_maximum(profile: &str) -> usize {
+    if profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+        64 * 1024 * 1024
+    } else {
+        1024 * 1024
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,6 +1088,20 @@ mod tests {
         });
         let config = DeliveryConfig::parse(&raw).unwrap();
         assert_eq!(config.verification_profile, LEGACY_PROFILE);
+        let mut native = raw.clone();
+        native["verification_profile"] = json!(forge_jenkins::native_policy::NATIVE_PROFILE);
+        assert!(DeliveryConfig::parse(&native).is_err());
+        native["policy_path"] = json!("/srv/native/policy.json");
+        native["policy_sha256"] = json!(forge_jenkins::native_policy::native_policy_sha256());
+        native["verifier_sha256"] = json!("b".repeat(64));
+        let selected = DeliveryConfig::parse(&native).unwrap();
+        assert_eq!(
+            selected.policy_path,
+            Some(PathBuf::from("/srv/native/policy.json"))
+        );
+        native["policy_path"] = json!("relative.json");
+        assert!(DeliveryConfig::parse(&native).is_err());
+
         let mut drifted = raw.clone();
         drifted["database"]["user"] = json!("forge_coding_worker");
         assert!(DeliveryConfig::parse(&drifted).is_err());

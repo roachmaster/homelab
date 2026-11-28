@@ -13,6 +13,10 @@ fn cluster_applies_schema_and_grants() {
         .expect("runtime")
         .block_on(async {
             if !pg16_available() {
+                assert!(
+                    std::env::var("FORGE_REQUIRE_DISPOSABLE_POSTGRES").as_deref() != Ok("1"),
+                    "The main backend suite requires a disposable PostgreSQL 16 cluster"
+                );
                 eprintln!("skipping: disposable PostgreSQL 16 unavailable");
                 return;
             }

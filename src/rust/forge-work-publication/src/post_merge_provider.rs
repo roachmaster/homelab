@@ -13,7 +13,6 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::ci_contract::SCOPED_PROFILE;
-use crate::ci_phases::EVENT_PROFILE;
 use crate::delivery_stores::RequireLease;
 use crate::durable_files::{effective_uid, read_private};
 use crate::post_merge::PostMergeProviderPort;
@@ -44,7 +43,7 @@ fn provider_error(error: DeliveryError) -> ProviderError {
         DeliveryError::LeaseLost => {
             ProviderError::Other("Delivery worker lease is no longer active".to_string())
         }
-        DeliveryError::Artifacts(error) => ProviderError::Other(error.code.clone()),
+        DeliveryError::Artifacts(error) => ProviderError::SourceArtifacts(error),
     }
 }
 
@@ -59,7 +58,9 @@ pub struct PostMergeVerificationProvider {
 impl PostMergeVerificationProvider {
     pub fn new(delivery: TrustedDeliveryPort) -> Result<Self, ProviderError> {
         let contract = contract_for_config(&delivery.config).map_err(provider_error)?;
-        if contract.profile != SCOPED_PROFILE && contract.profile != EVENT_PROFILE {
+        if contract.profile != SCOPED_PROFILE
+            && !crate::ci_phases::is_event_profile(&contract.profile)
+        {
             return value_error("Post-merge verification requires a scoped Jenkins profile");
         }
         Ok(PostMergeVerificationProvider { delivery })
@@ -134,8 +135,12 @@ impl PostMergeVerificationProvider {
         let verifier_sha256 = format!(
             "{:x}",
             Sha256::digest(
-                read_private(&selected.verifier, 1024 * 1024, Some(0))
-                    .map_err(ProviderError::Other)?
+                read_private(
+                    &selected.verifier,
+                    crate::trusted_delivery::verifier_maximum(&selected.verification_profile),
+                    Some(0)
+                )
+                .map_err(ProviderError::Other)?
             )
         );
         let body = json!({
@@ -404,6 +409,16 @@ impl PostMergeProviderFactory {
         execute: Box<dyn CommandExecutor>,
         git_port: std::sync::Arc<dyn crate::artifact_source::GitArtifactGitPort + Send + Sync>,
     ) -> Result<PostMergeVerificationProvider, ProviderError> {
+        self.create_with_observer(jenkins_execute, execute, git_port, None)
+    }
+
+    pub fn create_with_observer(
+        self,
+        jenkins_execute: Box<dyn CommandExecutor>,
+        execute: Box<dyn CommandExecutor>,
+        git_port: std::sync::Arc<dyn crate::artifact_source::GitArtifactGitPort + Send + Sync>,
+        observer: Option<Box<dyn crate::trusted_delivery::JenkinsObserverPort>>,
+    ) -> Result<PostMergeVerificationProvider, ProviderError> {
         let config = &self.config;
         let delivery_config_path = config
             .post_merge_jenkins_delivery_config
@@ -422,7 +437,7 @@ impl PostMergeProviderFactory {
                 .keys()
                 .all(|alias| config.repositories.contains_key(alias));
         if (selected.verification_profile != SCOPED_PROFILE
-            && selected.verification_profile != EVENT_PROFILE)
+            && !crate::ci_phases::is_event_profile(&selected.verification_profile))
             || selected.owner != config.worker.owner
             || selected.github_config_dir != config.github_config_dir
             || !projects_match
@@ -446,10 +461,33 @@ impl PostMergeProviderFactory {
         selected.state_root = config.state_root().join("post-merge-ci");
         let delivery = DeliveryProviderFactory {
             config: selected,
-            observer: None,
+            observer,
         }
         .create(jenkins_execute, execute, git_port)
         .map_err(provider_error)?;
         PostMergeVerificationProvider::new(delivery)
+    }
+}
+
+#[cfg(test)]
+mod source_error_tests {
+    use super::*;
+    #[test]
+    fn source_preparation_keeps_typed_rejection_across_the_normal_provider_boundary() {
+        let source = crate::trusted_delivery::SourceArtifactRejected::new(
+            &"a".repeat(40),
+            &"b".repeat(40),
+            &"b".repeat(40),
+            vec![(
+                "cache/fixture.pyc".into(),
+                "private_or_generated_artifact".into(),
+            )],
+            1,
+        )
+        .unwrap();
+        match provider_error(DeliveryError::Artifacts(Box::new(source.clone()))) {
+            ProviderError::SourceArtifacts(actual) => assert_eq!(*actual, source),
+            _ => panic!("source rejection must not become a transient text error"),
+        }
     }
 }

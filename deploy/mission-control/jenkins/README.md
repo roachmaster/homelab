@@ -11,14 +11,32 @@ work. The named **legacy machinery-owned publication exception** retains
 explicit ephemeral policy, legacy identities or missing persistent resolution.
 Preserve frozen receipts; this documentation grants no new permissions.
 
-Native Jenkins LTS and Java 21 are installed by an explicit local systemd job.
-This does not submit a Forge coding workflow, push GitHub source or trigger CI.
-Review `install.py` and `bootstrap.groovy` before installing them into the
-root-owned `/var/lib/forge-provisioning/jenkins/source` directory and invoking
-the installer as root. The installation now also has a dedicated CI agent and
-the trusted `forge-exact-candidate` pipeline described below.
+## Native deployment candidate
 
-## Current CI pipeline
+The v4 deployment source builds both privileged Jenkins verifier entry points and
+their private build helper from the `forge-ci-verifier` crate. `forge-jenkins-install`
+provisions Jenkins and Java. `forge-jenkins-setup-ci` installs the executor, jobs,
+and verified binaries. Its `--native-only --execute` mode provisions the
+`forge-native-candidate` job. Provisioning uses a root-owned release directory
+with the companion Groovy files, `forge-ci-check`, `forge-native-ci-check`,
+`forge-ci-build-child`, and `forge-ci-cache-clear`. The installer obtains the
+descriptor from the binary and compares it with the contract compiled into the
+installer before selecting a release. The offline Cargo registry must contain
+the exact packages in the candidate lock file.
+
+| Verified scope | First stage | Second stage | Third stage |
+|---|---|---|---|
+| Agent branch or detached | source preflight | checks | in-memory backend |
+| Main | verified checks | real browser journeys | backend suites with disposable PostgreSQL |
+
+The numbered phase plan expands these stages to 45 branch or 46 main checks.
+The v4 backend commands are `make backend-suites SCOPE=branch` and
+`make backend-suites SCOPE=main`. Profiles v1–v3 remain available to validate
+prior receipts. Records below describe their installation and measurements.
+The [native verifier](../../../src/rust/forge-ci-verifier/README.md) and
+[agent work log](../../../AGENT_WORK.md) record the qualification and rollout state.
+
+## Earlier Jenkins profiles and operating records
 
 ### Package updates and planned agent restarts
 
@@ -32,10 +50,10 @@ restart. Package installation and all other service restart policies remain
 unchanged. See the installed `/usr/share/doc/needrestart/README.Ubuntu` and
 `/etc/needrestart/needrestart.conf` for the packaged behavior and `override_rc`.
 
-To apply just this policy to an existing executor after reviewing the script:
+From the reviewed native provisioning directory, use the restart-deferral mode:
 
 ```sh
-sudo python3 -B deploy/mission-control/jenkins/setup-ci.py \
+sudo ./forge-jenkins-setup-ci \
   --agent-restart-deferral-only --execute
 ```
 

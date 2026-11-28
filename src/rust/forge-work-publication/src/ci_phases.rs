@@ -235,6 +235,42 @@ pub fn event_phases_for_scope(branch_scope: &str) -> Vec<CiPhase> {
     phases
 }
 
+pub fn is_event_profile(profile: &str) -> bool {
+    matches!(
+        profile,
+        EVENT_PROFILE | forge_jenkins::native_policy::NATIVE_PROFILE
+    )
+}
+/// Select v4's native backend plan without altering historical v3 commands.
+pub fn event_phases_for_profile(profile: &str, scope: &str) -> Vec<CiPhase> {
+    if profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+        forge_jenkins::native_policy::native_phases_for_scope(scope)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| CiPhase {
+                phase_id: p.phase_id,
+                kind: p.kind,
+                argv: p.argv,
+                logical_gate: p.logical_gate,
+            })
+            .collect()
+    } else {
+        event_phases_for_scope(scope)
+    }
+}
+pub fn event_stage_evidence_for_profile(
+    profile: &str,
+    scope: &str,
+    checks: &Value,
+    failure: Option<&str>,
+) -> Result<Value, String> {
+    if profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+        forge_jenkins::native_policy::native_stage_evidence(scope, checks, failure)
+    } else {
+        event_stage_evidence(scope, checks, failure)
+    }
+}
+
 fn is_int(value: &Value) -> bool {
     value.as_i64().is_some() || value.as_u64().is_some()
 }

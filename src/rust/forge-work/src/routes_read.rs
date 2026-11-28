@@ -110,18 +110,20 @@ pub fn register_reads(
                     view,
                     cursor_token,
                     delivery_enabled,
+                    limit_bytes,
                 } => ctx
                     .read
-                    .cicd_stage_log(
-                        &project_alias,
+                    .cicd_stage_log_request(crate::work_requests::StageLogReadRequest {
+                        project_alias: &project_alias,
                         task_id,
                         correlation_id,
                         action_id,
-                        &stage_id,
-                        &view,
-                        cursor_token.as_deref(),
+                        stage_id: &stage_id,
+                        view: &view,
+                        cursor_token: cursor_token.as_deref(),
                         delivery_enabled,
-                    )
+                        limit_bytes,
+                    })
                     .map(WorkResponse::StageLog),
                 _ => Err(WorkError::rejected(500, "payload_mismatch")),
             },

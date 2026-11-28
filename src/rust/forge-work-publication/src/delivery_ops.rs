@@ -675,6 +675,7 @@ fn provider_message(error: ProviderError) -> String {
     match error {
         ProviderError::Publication(publication) => publication.code().to_string(),
         ProviderError::Other(message) => message,
+        ProviderError::SourceArtifacts(error) => error.code,
     }
 }
 

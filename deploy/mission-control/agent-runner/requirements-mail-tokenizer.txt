@@ -1,7 +1,0 @@
-# Pin the Python 3.12 x86_64 Mission Control wheel set.
-openai-harmony==0.0.8 --hash=sha256:c007d277218a50db8839e599ed78e0fffe5130f614c3f6d93ae257f282071a29
-pydantic==2.11.7 --hash=sha256:dde5df002701f6de26248661f6835bbe296a47bf73990135c7d07ce741b9623b
-pydantic-core==2.33.2 --hash=sha256:8f57a69461af2a5fa6e6bbd7a5f60d3b7e6cebb687f55106933188e79ad155c1
-typing-extensions==4.14.1 --hash=sha256:d1e1e3b58374dc93031d6eda2420a48ea44a36c2b4766a4fdeb3710755731d76
-typing-inspection==0.4.1 --hash=sha256:389055682238f53b04f7badcb49b989835495a96700ced5dab2d8feae4b26f51
-annotated-types==0.7.0 --hash=sha256:1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53

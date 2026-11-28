@@ -1,7 +1,7 @@
 # Publication runtime registration and process-backed ports:
 # register_publication requires the worker's process_exec binding at
-# freeze, and generic IoClient wiring keeps observer execution and
-# verifier AST parsing testable without spawning subprocesses.
+# freeze. Observer execution takes an injected IoClient, and the
+# historical policy parser reads source directly in Rust.
 # Bindings: tests/bdd_forge_work_publication.rs.
 
 Feature: Publication registrar and process-backed ports honor contracts
@@ -34,7 +34,7 @@ Feature: Publication registrar and process-backed ports honor contracts
     When the observer is given an empty argument list
     Then the observer refuses the command with zero executor calls
 
-  Scenario: Verifier AST parsing decodes JSON and surfaces stderr on failure
-    Given the verifier AST port can parse source over an injected executor
-    When the executor succeeds with a JSON AST and later fails with a syntax error
-    Then the first call yields the parsed module and the second returns stderr text
+  Scenario: Verifier AST parsing preserves structure and reports invalid syntax
+    Given the historical verifier factory can parse policy source
+    When the historical policy parser reads valid source and then encounters invalid syntax
+    Then the first call yields the parsed module and the second returns the parser error

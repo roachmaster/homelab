@@ -95,15 +95,31 @@ impl ExternalWorkflowPolicy {
             }
         };
         Self::new(
-            object["author_profile"].as_str().unwrap_or_default(),
-            object["reviewer_profile"].as_str().unwrap_or_default(),
+            object
+                .get("author_profile")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            object
+                .get("reviewer_profile")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
             int_or("max_plan_revisions", AGENT_RETRY_LIMIT)?,
             int_or("max_code_revisions", AGENT_RETRY_LIMIT)?,
-            object["auto_merge"].as_bool().unwrap_or(true),
-            object["merge_method"].as_str().unwrap_or("merge"),
-            object["version"]
-                .as_str()
-                .unwrap_or(EXTERNAL_AUTONOMY_VERSION),
+            match object.get("auto_merge") {
+                None => true,
+                Some(Value::Bool(value)) => *value,
+                Some(_) => return Err("Invalid external workflow delegation".into()),
+            },
+            match object.get("merge_method") {
+                None => "merge",
+                Some(Value::String(value)) => value,
+                Some(_) => return Err("Invalid external workflow delegation".into()),
+            },
+            match object.get("version") {
+                None => EXTERNAL_AUTONOMY_VERSION,
+                Some(Value::String(value)) => value,
+                Some(_) => return Err("Invalid external workflow delegation".into()),
+            },
         )
     }
 
@@ -226,6 +242,18 @@ mod tests {
                 digest: "e".repeat(64),
             })
         }
+    }
+
+    #[test]
+    fn optional_external_policy_defaults_are_typed_and_do_not_panic() {
+        let policy = json!({"author_profile":"muse-db-primary","reviewer_profile":"codex-primary"});
+        assert!(ExternalWorkflowPolicy::from_value(&policy).is_ok());
+        for field in ["auto_merge", "merge_method", "version"] {
+            let mut bad = policy.clone();
+            bad[field] = json!(42);
+            assert!(ExternalWorkflowPolicy::from_value(&bad).is_err());
+        }
+        assert!(ExternalWorkflowPolicy::from_value(&json!({})).is_err());
     }
 
     #[test]

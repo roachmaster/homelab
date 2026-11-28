@@ -1,19 +1,6 @@
-//! Verifier policy parity: prove an installed verifier's declared
-//! policy matches this gate contract, without executing verifier
-//! code. Port of work_ci_contract.py's parity machinery
-//! (extract_verifier_policy, _verify_source_policy_parity,
-//! _verify_contract_policy_parity and the bounded static evaluator
-//! for event_phases_for_scope).
-//!
-//! Python's implementation walks the CPython `ast` of the verifier
-//! source. The Rust port keeps exactly that ground truth: source is
-//! parsed by CPython itself through the AST port (a fixed dump
-//! script, in the spirit of work_verification_init's fixed
-//! launcher), and every extraction, comparison and bounded
-//! evaluation rule below is Rust. The verifier file stays Python
-//! (deploy/mission-control/jenkins/verify-candidate.py is outside
-//! the agent-runner migration map), so the parity proof must keep
-//! reading Python source.
+//! Native v4 compares a pinned closed JSON policy without executing a parser.
+//! Historical v1-v3 AST compatibility is retained separately, with test-only
+//! declarations as fixtures; no Python supervisor is packaged or loaded by v4.
 
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -36,81 +23,7 @@ pub trait VerifierAstPort {
     fn parse(&self, source: &[u8]) -> Result<Value, String>;
 }
 
-const AST_DUMP_SCRIPT: &str = r"
-import sys, ast, json
-def conv(node):
-    if isinstance(node, ast.AST):
-        out = {'_type': type(node).__name__}
-        for field in node._fields:
-            out[field] = conv(getattr(node, field))
-        return out
-    if isinstance(node, list):
-        return [conv(item) for item in node]
-    if isinstance(node, (str, bool, int)) or node is None:
-        return node
-    if isinstance(node, float):
-        return {'$float': repr(node)}
-    if isinstance(node, bytes):
-        return {'$bytes': node.hex()}
-    return {'$other': type(node).__name__}
-try:
-    tree = ast.parse(sys.stdin.buffer.read().decode('utf-8'))
-except Exception as error:
-    sys.stderr.write(str(error))
-    sys.exit(1)
-sys.stdout.write(json.dumps(conv(tree)))
-";
-
-/// The production AST port: CPython's own parser via a fixed script.
-pub struct PythonAstPort;
-
-/// AST parser adapter backed by any bounded process-exec `IoClient`.
-pub struct IoClientAstPort<C> {
-    client: C,
-}
-
-impl<C> IoClientAstPort<C> {
-    pub fn new(client: C) -> Self {
-        Self { client }
-    }
-}
-
-impl<C> VerifierAstPort for IoClientAstPort<C>
-where
-    C: forge_core::io_client::IoClient<
-            Request = forge_work_worker::process_exec::ProcessRequest,
-            Response = forge_work_worker::process_exec::ProcessOutput,
-            Error = forge_work_worker::WorkerError,
-        > + Send
-        + Sync,
-{
-    fn parse(&self, source: &[u8]) -> Result<Value, String> {
-        let request = forge_work_worker::process_exec::ProcessRequest::inherited(
-            vec![
-                "/usr/bin/python3".to_string(),
-                "-B".to_string(),
-                "-c".to_string(),
-                AST_DUMP_SCRIPT.to_string(),
-            ],
-            30,
-        )
-        .with_stdin(source.to_vec());
-        let output = self
-            .client
-            .execute(request)
-            .map_err(|error| format!("{error:?}"))?;
-        if output.exit_code != 0 {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-        }
-        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
-    }
-}
-
-impl VerifierAstPort for PythonAstPort {
-    fn parse(&self, source: &[u8]) -> Result<Value, String> {
-        IoClientAstPort::new(forge_work_worker::process_exec::SystemProcessExec).parse(source)
-    }
-}
+pub use crate::historical_ast::RustAstPort;
 
 // ---------------------------------------------------------------------------
 // AST helpers
@@ -513,6 +426,12 @@ pub fn verify_source_policy_parity(
     port: &dyn VerifierAstPort,
 ) -> Result<(), String> {
     let contract = CiGateContractFactory::new(profile)?.create();
+    if profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+        return verify_native_policy_descriptor(
+            source,
+            &forge_jenkins::native_policy::native_policy_sha256(),
+        );
+    }
     let policy = extract_verifier_policy(source, port)?;
     let mut mismatches: Vec<String> = Vec::new();
     if contract.profile == LEGACY_PROFILE && policy.checks != Some(legacy_checks()) {
@@ -1438,6 +1357,12 @@ pub fn verify_contract_policy_parity(
     source: &[u8],
     port: &dyn VerifierAstPort,
 ) -> Result<(), String> {
+    if contract.profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+        return verify_native_policy_descriptor(
+            source,
+            &forge_jenkins::native_policy::native_policy_sha256(),
+        );
+    }
     if std::str::from_utf8(source).is_err() {
         return Err("Installed verifier policy is unreadable".to_string());
     }
@@ -1572,21 +1497,37 @@ pub fn verify_verifier_policy_parity_contract(
     verify_contract_policy_parity(contract, source, port)
 }
 
+/// Native v4 reads only a root-pinned closed JSON descriptor; it never invokes
+/// a Python parser or executes candidate verifier code to establish parity.
+pub fn verify_native_policy_descriptor(raw: &[u8], expected_sha256: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    if raw.len() > 262144 {
+        return Err(MISMATCH.into());
+    }
+    let parsed = crate::strict_json::strict_parse(raw).map_err(|_| MISMATCH.to_string())?;
+    if raw.len() > 262144
+        || format!("{:x}", Sha256::digest(raw)) != expected_sha256
+        || expected_sha256 != forge_jenkins::native_policy::native_policy_sha256()
+        || parsed != forge_jenkins::native_policy::native_policy_descriptor()
+    {
+        return Err(MISMATCH.into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ci_contract::CiGateContractFactory;
 
     fn verifier_source() -> Vec<u8> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../deploy/mission-control/jenkins/verify-candidate.py");
-        std::fs::read(&path).expect("the real verifier source is a parity fixture")
+        include_bytes!("../tests/fixtures/legacy_ci_policy.txt").to_vec()
     }
 
     #[test]
-    fn real_verifier_matches_all_profiles() {
+    fn historical_policy_fixture_matches_legacy_profiles() {
         let source = verifier_source();
-        let port = PythonAstPort;
+        let port = RustAstPort;
         for profile in [LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE] {
             verify_source_policy_parity(&source, profile, &port)
                 .unwrap_or_else(|error| panic!("source parity {profile}: {error}"));
@@ -1613,7 +1554,7 @@ mod tests {
                 "",
             );
         assert_ne!(skewed, text);
-        let port = PythonAstPort;
+        let port = RustAstPort;
         let error =
             verify_source_policy_parity(skewed.as_bytes(), EVENT_PROFILE, &port).unwrap_err();
         assert!(error.contains("work_external_plan_override.py"), "{error}");
@@ -1634,10 +1575,42 @@ mod tests {
         let text = String::from_utf8(source).unwrap();
         let skewed = text.replace("('/usr/bin/make', 'ci'),", "('/usr/bin/make', 'check'),");
         assert_ne!(skewed, text);
-        let port = PythonAstPort;
+        let port = RustAstPort;
         let error =
             verify_source_policy_parity(skewed.as_bytes(), LEGACY_PROFILE, &port).unwrap_err();
         assert!(error.contains("legacy CHECKS differ"), "{error}");
         assert!(verify_source_policy_parity(b"def broken(:\n", LEGACY_PROFILE, &port).is_err());
+    }
+}
+
+#[cfg(test)]
+mod native_v4_tests {
+    use super::*;
+    #[test]
+    fn descriptor_requires_exact_native_policy_and_pin_without_ast_execution() {
+        let value = forge_jenkins::native_policy::native_policy_descriptor();
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let pin = forge_jenkins::native_policy::native_policy_sha256();
+        verify_native_policy_descriptor(&bytes, &pin).unwrap();
+        struct NoAst;
+        impl VerifierAstPort for NoAst {
+            fn parse(&self, _source: &[u8]) -> Result<Value, String> {
+                panic!("Native parity must not invoke a Python parser");
+            }
+        }
+        let contract = CiGateContractFactory::new(forge_jenkins::native_policy::NATIVE_PROFILE)
+            .unwrap()
+            .create();
+        verify_verifier_policy_parity_contract(&contract, &bytes, &NoAst).unwrap();
+
+        assert!(verify_native_policy_descriptor(&bytes, &"0".repeat(64)).is_err());
+        let mut changed = value.clone();
+        changed["main_phases"][45]["argv"] = serde_json::json!(["/bin/true"]);
+        let raw = serde_json::to_vec(&changed).unwrap();
+        assert!(verify_native_policy_descriptor(&raw, &pin).is_err());
+        let mut duplicate = bytes.clone();
+        duplicate.pop();
+        duplicate.extend_from_slice(b",\"version\":1}");
+        assert!(verify_native_policy_descriptor(&duplicate, &pin).is_err());
     }
 }

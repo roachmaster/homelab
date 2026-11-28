@@ -22,6 +22,7 @@ BEGIN
  'constraints',(SELECT jsonb_agg(jsonb_build_array(k.conname,k.contype,k.convalidated,k.condeferrable,k.condeferred,pg_get_constraintdef(k.oid,false)) ORDER BY k.conname) FROM pg_constraint k WHERE k.conrelid=c.oid),
  'indexes',(SELECT jsonb_agg(jsonb_build_array(ic.relname,i.indisvalid,i.indisready,pg_get_indexdef(i.indexrelid)) ORDER BY ic.relname) FROM pg_index i JOIN pg_class ic ON ic.oid=i.indexrelid WHERE i.indrelid=c.oid),
  'triggers',(SELECT jsonb_agg(jsonb_build_array(t.tgname,t.tgenabled,pg_get_triggerdef(t.oid,false)) ORDER BY t.tgname) FROM pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal))::text INTO actual FROM pg_class c WHERE c.oid='forge_agent.coding_workflow_reviews'::regclass;
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=56 AND name='native_ci_verifier') THEN actual:=replace(actual,'forge-sdlc-jenkins-v[1-4]:','forge-sdlc-jenkins-v[1-3]:');END IF;
  -- M49 widened only the gate check to also accept named contracts; verify the exact
  -- widened expression by restoring the predecessor text before the shape compare.
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=49 AND name='gate_contract_names') THEN

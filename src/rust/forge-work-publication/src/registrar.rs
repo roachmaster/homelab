@@ -7,7 +7,7 @@
 //! calls `Factory::create()`.
 
 use crate::jenkins_observer::{IoClientObserverExecute, ProcessObserverExecute};
-use crate::verifier_parity::{IoClientAstPort, PythonAstPort};
+use crate::verifier_parity::RustAstPort;
 use forge_core::bootstrap::{PreparedGroup, RegistrationError};
 use forge_core::io_client::IoClient;
 use forge_core::provider::Factory;
@@ -30,19 +30,18 @@ impl Factory<ProcessObserverExecute> for ObserverExecFactory {
     }
 }
 
-/// Factory for the production Python AST parser port.
+/// Factory for the native historical verifier parser port.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AstPortFactory;
 
-impl Factory<PythonAstPort> for AstPortFactory {
+impl Factory<RustAstPort> for AstPortFactory {
     type Error = RegistrationError;
 
-    fn create(&self) -> Result<PythonAstPort, Self::Error> {
-        Ok(PythonAstPort)
+    fn create(&self) -> Result<RustAstPort, Self::Error> {
+        Ok(RustAstPort)
     }
 }
 
-/// Generic factory group allowing tests or hosts to inject any `process_exec` `IoClient`.
 #[derive(Debug, Clone)]
 pub struct GenericPublicationFactories<C> {
     client: C,
@@ -61,10 +60,6 @@ where
 
     pub fn observer_exec(&self) -> IoClientObserverExecute<C> {
         IoClientObserverExecute::new(self.client.clone())
-    }
-
-    pub fn ast_port(&self) -> IoClientAstPort<C> {
-        IoClientAstPort::new(self.client.clone())
     }
 }
 
@@ -109,7 +104,7 @@ where
 mod tests {
     use super::*;
     use crate::jenkins_observer::ObserverExecute;
-    use crate::verifier_parity::VerifierAstPort;
+
     use forge_core::bootstrap::Registry;
     use forge_work_worker::process_exec::register_process_exec;
 
@@ -165,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn generic_registrar_wires_observer_and_ast_over_fake_ioclient() {
+    fn generic_registrar_wires_observer_over_fake_ioclient() {
         let stub = StubExec {
             stdout: br#"{"_type":"Module","body":[]}"#.to_vec(),
             stderr: Vec::new(),
@@ -183,17 +178,5 @@ mod tests {
             .execute(&["/usr/bin/jenkins-obs".into()], &[], 5.0)
             .unwrap();
         assert_eq!(observer_bytes, br#"{"_type":"Module","body":[]}"#);
-
-        let ast = factories.ast_port().parse(b"pass\n").unwrap();
-        assert_eq!(ast["_type"], "Module");
-
-        let failing_stub = StubExec {
-            stdout: Vec::new(),
-            stderr: b"SyntaxError: invalid syntax\n".to_vec(),
-            exit_code: 1,
-        };
-        let failing = GenericPublicationFactories::new(failing_stub);
-        let err = failing.ast_port().parse(b"def (").unwrap_err();
-        assert!(err.contains("SyntaxError"));
     }
 }

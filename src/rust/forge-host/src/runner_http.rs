@@ -32,6 +32,8 @@ const MAX_SLOTS: usize = 24;
 const DISPATCH_PATH: &str = "/v1/dispatch";
 
 pub struct Services {
+    pub workspace: forge_postgres::PgConfig,
+    pub inference_model: Option<String>,
     pub work: Option<Arc<WorkApiService>>,
     pub jenkins: Option<Arc<Mutex<forge_jenkins::api::JenkinsService>>>,
     pub usage: Option<Arc<forge_usage::api::UsageService>>,
@@ -39,7 +41,7 @@ pub struct Services {
 
 type Headers = Vec<(String, String)>;
 
-fn header_values<'a>(headers: &'a Headers, name: &str) -> Vec<&'a str> {
+pub(crate) fn header_values<'a>(headers: &'a Headers, name: &str) -> Vec<&'a str> {
     headers
         .iter()
         .filter(|(key, _)| key.eq_ignore_ascii_case(name))
@@ -195,7 +197,7 @@ fn contains_nul(value: &Value) -> bool {
 
 /// read_json_body() from runner.py, over the already-read body
 /// bytes: the caller enforces the transport-level header rules.
-fn parse_body(raw: &[u8], limit: usize) -> Result<Value, ()> {
+pub(crate) fn parse_body(raw: &[u8], limit: usize) -> Result<Value, ()> {
     if raw.is_empty() || raw.len() > limit {
         return Err(());
     }
@@ -207,12 +209,13 @@ fn parse_body(raw: &[u8], limit: usize) -> Result<Value, ()> {
     Ok(value)
 }
 
-struct Request {
-    method: String,
-    path: String,
-    headers: Headers,
-    body: Vec<u8>,
-    body_headers_ok: bool,
+pub(crate) struct Request {
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) headers: Headers,
+    pub(crate) body: Vec<u8>,
+    pub(crate) body_headers_ok: bool,
+    pub(crate) body_error: Option<(u16, &'static str)>,
 }
 
 /// One HTTP/1.1 request read under the runner's discipline:
@@ -276,6 +279,14 @@ fn read_request(stream: &mut TcpStream) -> Option<Request> {
     } else {
         0
     };
+    let body_error = if !content_type_ok {
+        Some((415, "json_required"))
+    } else if !length_ok || !transfer_ok || length > MAX_RESPONSE_BYTES {
+        Some((413, "invalid_body_size"))
+    } else {
+        None
+    };
+    let length = if body_error.is_none() { length } else { 0 };
     let mut body = buffer.split_off(header_end);
     while body.len() < length {
         match stream.read(&mut chunk) {
@@ -285,13 +296,14 @@ fn read_request(stream: &mut TcpStream) -> Option<Request> {
         }
     }
     body.truncate(length);
-    let body_headers_ok = body_headers_ok && body.len() == length;
+    let body_headers_ok = body_headers_ok && body_error.is_none() && body.len() == length;
     Some(Request {
         method,
         path,
         headers,
         body,
         body_headers_ok,
+        body_error,
     })
 }
 
@@ -318,7 +330,7 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
         _ => "Response",
     };
     let head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         payload.len()
     );
     let _ = stream.write_all(head.as_bytes());
@@ -384,19 +396,25 @@ fn dispatch(
             };
             let command = match work_api::decode(route, correlation, &body) {
                 Ok(command) => command,
-                Err(error) => return work_api::failed(Some(correlation), &error),
+                Err(error) => {
+                    return work_api::defect_metadata_response(
+                        work_api::failed(Some(correlation), &error),
+                        versions.defect_metadata,
+                    )
+                }
             };
             let Some(service) = &services.work else {
                 return failed(api, Some(correlation), 503, "unavailable");
             };
-            match service.dispatch(route, correlation, command, versions.delivery) {
+            let response = match service.dispatch(route, correlation, command, versions.delivery) {
                 Ok(response) => {
                     let response = work_api::delivery_response(response, versions.delivery);
                     let response = work_api::retry_events_response(response, versions.retry_events);
                     work_api::event_attribution_response(response, versions.event_attribution)
                 }
                 Err(error) => work_api::failed(Some(correlation), &error),
-            }
+            };
+            work_api::defect_metadata_response(response, versions.defect_metadata)
         }
         Api::Usage => {
             let destination = match dispatch_destination(headers) {
@@ -458,6 +476,35 @@ fn handle_connection(mut stream: TcpStream, services: &Services, token: &str, re
         } else {
             respond(&mut stream, 503, &json!({"worker_ready": false}));
         }
+        return;
+    }
+    if let Some(result) = crate::runner_inference::route(services, &request) {
+        let (status, body) = match result {
+            Ok(pair) => pair,
+            Err(WorkError::Rejected { status, code }) => (status, json!({"error":code})),
+            Err(_) => (503, json!({"error":"database_unavailable"})),
+        };
+        respond(&mut stream, status, &body);
+        return;
+    }
+    if request.method == "POST" && request.path == "/v1/workspace" {
+        let result = if let Some((status, code)) = request.body_error {
+            Err(WorkError::rejected(status, code))
+        } else if request.body_headers_ok {
+            parse_body(&request.body, MAX_RESPONSE_BYTES)
+                .map_err(|()| WorkError::rejected(400, "invalid_workspace_json"))
+                .and_then(|body| {
+                    forge_postgres::workspace_store::dispatch(&services.workspace, &body)
+                })
+        } else {
+            Err(WorkError::rejected(400, "invalid_workspace_json"))
+        };
+        let (status, body) = match result {
+            Ok(body) => (200, body),
+            Err(WorkError::Rejected { status, code }) => (status, json!({"error":code})),
+            Err(_) => (503, json!({"error":"database_unavailable"})),
+        };
+        respond(&mut stream, status, &body);
         return;
     }
     if request.method == "POST" && dispatch_path {

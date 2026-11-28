@@ -7,11 +7,12 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-ci-verifier": {("forge-core", "normal"), ("forge-jenkins", "normal")},
     "forge-jenkins": {("forge-core", "normal")},
     "forge-usage": {("forge-core", "normal")},
     "forge-agent-driver": set(),
     "forge-services": set(),
-    "forge-portal-release-actor": set(),
+    "forge-portal-release-actor": {("forge-jenkins", "normal")},
     "forge-studio": set(),
     "forge-mcp-db": set(),
     "forge-ide-ui": set(),
@@ -35,15 +36,16 @@ ALLOWED = {
                        ("forge-local", "forge-core", "forge-jobs")},
     "forge-mcp": set(),
     "forge-mcp-host": {("forge-mcp", "normal")},
-    "forge-postgres": {("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-work-publication", "normal"), ("forge-jenkins", "normal"), ("forge-usage", "normal")},
+    "forge-postgres": {("forge-mcp-db", "dev"), ("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-work-publication", "normal"), ("forge-jenkins", "normal"), ("forge-usage", "normal")},
     "forge-work": {("forge-core", "normal")},
-    "forge-work-worker": {("forge-core", "normal"), ("forge-usage", "normal")},
+    "forge-work-worker": {("forge-core", "normal"), ("forge-usage", "normal"), ("forge-jenkins", "normal")},
     "forge-work-publication": {("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-jenkins", "normal")},
     "forge-host": {(name, "normal") for name in ("forge-core", "forge-work", "forge-work-worker", "forge-work-publication", "forge-jenkins", "forge-usage", "forge-postgres")},
 }
 EXTERNAL_DEV = {"forge-scene": {"uuid", "tokio"}, "forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
 EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
 EXTERNAL = {
+    "forge-ci-verifier": {"serde", "serde_json", "sha2", "uuid", "nix", "ctrlc"},
     "forge-jenkins": {"serde", "serde_json", "sha2", "url", "base64", "ureq", "nix", "serde_yaml_ng"},
     "forge-usage": {"serde", "serde_json", "sha2"},
     "forge-agent-driver": {"serde", "serde_json", "serde_yaml_ng", "nix"},
@@ -51,7 +53,7 @@ EXTERNAL = {
     "forge-portal-release-actor": {"serde_json", "sha2", "nix"},
     "forge-studio": {"serde", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
     "forge-mcp-db": {"serde_json", "sha2", "base64", "tokio", "tokio-postgres", "rusqlite", "nix", "uuid", "chrono"},
-    "forge-host": {"serde_json", "ctrlc"},
+    "forge-host": {"serde_json", "ctrlc", "ureq"},
     "forge-ide-ui": {"serde"},
     "forge-terminal": {"ctrlc", "nix", "serde", "serde_json"},
     "forge-jobs": {"cap-std", "serde", "serde_json"},
@@ -66,10 +68,10 @@ EXTERNAL = {
                   "nix", "serde_json"},
     "forge-mcp": {"serde", "serde_json"},
     "forge-mcp-host": {"tokio", "rmcp", "serde", "serde_json", "reqwest", "tokio-postgres", "uuid", "axum"},
-    "forge-postgres": {"chrono", "nix", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
+    "forge-postgres": {"bytes", "futures-util", "chrono", "nix", "serde_json", "sha2", "tokio", "tokio-postgres", "uuid"},
     "forge-work": {"serde_json", "sha2", "uuid"},
     "forge-work-worker": {"serde_json", "sha2", "uuid", "nix"},
-    "forge-work-publication": {"serde", "serde_json", "sha2", "uuid", "base64"},
+    "forge-work-publication": {"serde", "serde_json", "sha2", "uuid", "base64", "rustpython-parser"},
 }
 
 WASM_PLAYTEST_PROFILE = {
@@ -284,7 +286,7 @@ def main():
         raise SystemExit("Only the playtest runtime and digest verifier may expand the default WASM profile")
     if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable | web_native) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable | wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
-    local_expected = (set(ALLOWED) - {"forge-jenkins", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-foundation", "forge-scene", "forge-mcp", "forge-mcp-host", "forge-postgres", "forge-work", "forge-work-worker", "forge-work-publication", "forge-usage", "forge-agent-driver", "forge-services", "forge-portal-release-actor", "forge-studio", "forge-host", "forge-mcp-db"})
+    local_expected = (set(ALLOWED) - {"forge-ci-verifier", "forge-jenkins", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-foundation", "forge-scene", "forge-mcp", "forge-mcp-host", "forge-postgres", "forge-work", "forge-work-worker", "forge-work-publication", "forge-usage", "forge-agent-driver", "forge-services", "forge-portal-release-actor", "forge-studio", "forge-host", "forge-mcp-db"})
     for args in [(), ("--features", "disk"), ("--features", "jobs")]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")

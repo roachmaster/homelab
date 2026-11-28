@@ -1,13 +1,5 @@
-//! forge-runner: the versioned-API host process (runner.py).
-//!
-//! One process serves the work, Jenkins and usage dispatch APIs
-//! and runs the background workflow coordinator and Jenkins
-//! event consumer — Python's shape, kept deliberately (the
-//! Gemini consult on splitting the process produced no answer;
-//! see forge-ops-design.yaml's h7e gemini_consult record).
-//! Runner-comms surfaces (chat, mail, model runs) are not
-//! ported; their destinations answer with the chat-history
-//! failure shape like any unknown destination.
+//! Authenticated Mission Control runner for work, Jenkins, usage, workspace and
+//! asynchronous model runs. Dispatch mode reconciles distributed GPU results.
 
 use std::collections::HashMap;
 use std::net::TcpListener;
@@ -131,12 +123,64 @@ fn main() {
         }
     }
 
+    // Acquire the listener before any background claimant can start.
+    let listener = match TcpListener::bind(("127.0.0.1", port)) {
+        Ok(listener) => listener,
+        Err(error) => fail(&format!("unable to bind 127.0.0.1:{port}: {error}")),
+    };
+
     // Background services (runner.py's background_services):
     // start the workflow coordinator thread and the Jenkins
     // consumer, then report ready.
+    let workspace = runner_pg_config("mission-control").unwrap_or_else(|e| fail(&e));
+    let inference_model =
+        (environ.get("FORGE_RUNNER_MODE").map(String::as_str) == Some("dispatch")).then(|| {
+            let default = environ
+                .get("FORGE_RUNNER_MODEL")
+                .map(String::as_str)
+                .unwrap_or(forge_postgres::inference_runs::DEFAULT_MODEL);
+            if !matches!(
+                default,
+                forge_postgres::inference_runs::DEFAULT_MODEL
+                    | forge_postgres::inference_runs::SECOND_MODEL
+            ) {
+                fail("Invalid configured runner model")
+            }
+            default.to_owned()
+        });
+    // In dispatch mode, a successful database scan is the readiness witness.
+    // API-only processes intentionally start no claimants.
+    let ready = Arc::new(AtomicBool::new(api_only || inference_model.is_none()));
     let mut background: Vec<std::thread::JoinHandle<()>> = Vec::new();
     let mut consumer_thread = None;
     if !api_only {
+        if inference_model.is_some() {
+            let pg = workspace.clone();
+            let stop = stop.clone();
+            let ready = Arc::clone(&ready);
+            background.push(std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match forge_postgres::inference_runs::reconcile(&pg) {
+                        Ok(processed) => {
+                            ready.store(true, Ordering::SeqCst);
+                            if processed == forge_postgres::inference_runs::RECONCILE_BATCH {
+                                continue;
+                            }
+                        }
+                        Err(_) => {
+                            ready.store(false, Ordering::SeqCst);
+                            eprintln!("GPU completion scan unavailable");
+                        }
+                    }
+                    for _ in 0..20 {
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }));
+        }
         if let (Some(start), Some(service)) = (workflow_thread, &work_service) {
             background.push(start.spawn(Arc::clone(service), Arc::clone(&stop)));
         }
@@ -151,13 +195,10 @@ fn main() {
             ));
         }
     }
-    let ready = Arc::new(AtomicBool::new(true));
 
-    let listener = match TcpListener::bind(("127.0.0.1", port)) {
-        Ok(listener) => listener,
-        Err(error) => fail(&format!("unable to bind 127.0.0.1:{port}: {error}")),
-    };
     let services = Arc::new(Services {
+        workspace,
+        inference_model,
         work: work_service,
         jenkins: jenkins_service,
         usage: usage_service,
@@ -169,6 +210,7 @@ fn main() {
         ready,
         Arc::clone(&stop),
     );
+    stop.store(true, Ordering::SeqCst);
     for handle in background {
         let _ = handle.join();
     }

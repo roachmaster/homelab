@@ -11,12 +11,18 @@ work. The named **legacy machinery-owned publication exception** retains
 explicit ephemeral policy, legacy identities or missing persistent resolution.
 Preserve frozen receipts; this documentation grants no new permissions.
 
-**Operating note — 26 November 2026:** the event/API runner is deliberately
-stopped and disabled at boot. Coding, publication and external-delivery workers
-are separate services and remain active; this is not a full queue/workflow pause.
-The live database reports schema40. Consolidated source in PR29 adds schema41
-branch/stage contracts and ABI16, with qualification/rollout still outstanding.
-See the [current system picture](../../../docs/design/implementation-status.md).
+**Runtime checkpoint, November 28, 2026.** Reviewed main `6fa2e13d` runs schema
+54 and portal ABI 19. The runner API, four coding workers and publisher use the
+qualified Python release. This branch prepares Rust replacements. Workspace
+tabs persist in PostgreSQL through the Rust runner. In dispatch mode it accepts
+standalone GPU submissions at `/v1/runs`, reads their status and events, and
+serves the bounded synchronous `/v1/chat/completions` relay for standalone
+requests. The GPU worker runs on Forge, calls the local model server, and
+publishes its result under the claim's attempt token. The Mission Control
+runner completes the run and publishes its final event. The optional
+PostgreSQL proxy and the external-delivery service each have a separate
+native executable.
+The [agent work log](../../../AGENT_WORK.md) records test and deployment status.
 
 [AGY quota handoff to Codex](../../../docs/architecture/agent-quota-handoff.md)
 describes optional source-bound author delegation, retained Plans/workspaces,
@@ -48,21 +54,21 @@ sequenceDiagram
 
 ## Install and verify
 
+The runner unit selects `/opt/homelab-forge/event-current/bin/forge-runner`.
+The same immutable release supplies the coding worker, publisher, portal
+release actor, and attempt helpers. First-install provisioning validates the
+release files and PostgreSQL grants, and reuses the existing runner token.
+
 ```bash
+sudo deploy/mission-control/agent-runner/setup-runner.sh --check
 sudo deploy/mission-control/agent-runner/setup-runner.sh
-sudo deploy/mission-control/agent-runner/connect-ide.py
 sudo journalctl -u forge-agent-runner.service
 ```
 
-The setup script checks the database, installs the Ubuntu psycopg2 package when
-needed, and installs the native service. systemd supplies separate incoming and
-outgoing bearer credentials. The incoming credential is created under
-`/etc/homelab-forge/agent-runner/`. Keep it on Mission Control.
-
-The IDE connection script updates the existing chat relay endpoint, restarts the
-web host, and checks an authenticated chat plus its database events. It restores
-the previous configuration if verification fails. To reconnect the IDE directly
-to Forge, run `sudo deploy/mission-control/agent-runner/connect-ide.py --rollback`.
+For an existing installation, stage the release, drain native actions, and
+change all six systemd selectors together with the release actor configuration.
+Confirm the actual process paths and authenticated portal calls before resuming
+admissions. The selected database transport remains direct PostgreSQL.
 
 ## Local API
 
@@ -232,14 +238,14 @@ checkpoints in a transaction. The retained tombstone prevents stale writes from
 recreating the chat. Unlinked legacy run snapshots retain their independent
 scope.
 
-## Mail
+## Mail in the schema 54 deployment
 
 Mail uses `ide.mail.list`, `ide.mail.open`, `ide.mail.send`, `ide.mail.retry`,
-and the opt-in `ide.mail.archive` operation on the same versioned dispatch endpoint. Apply migration `0007` and install the
-packages in `requirements-mail-tokenizer.txt` from its hashed wheel set in the
-runner's Python environment. Install the matching Forge adapter and worker,
-configure `gpt-oss-120b` with its Mail profile, then enable `chat.mail_enabled`
-on the web host with workspace persistence and asynchronous dispatch enabled.
+and the opt-in `ide.mail.archive` operation on the same versioned dispatch
+endpoint. The previous release used a Python Harmony wheel to count the tokens
+in its pinned Mail profile. The native GPU worker supports that profile on the
+inference side. The coordinator must qualify the matching offline token counts
+and queue admission before selecting native Mail.
 
 The `gpt-oss-120b-harmony-v1` profile uses a 4,096-token context with 1,024 tokens
 reserved for generation (including reasoning), a 16-token operating margin and
@@ -401,8 +407,8 @@ model IDs and must include the default when set. The catalog offers only the
 default when the list is omitted. The API can accept new jobs while Forge is
 offline.
 
-Install `forge_gpu_worker.py` and `model_adapter.py` under
-`~/.local/lib/forge-gpu-worker/` on Forge with psycopg2 available to Python.
+Build the `forge-host` binary `forge-gpu-worker` for the Forge host and install it
+as `~/.local/lib/forge-gpu-worker/forge-gpu-worker`.
 Install `forge-gpu-worker.service` as a user unit. The unit expects
 `forge-postgres-tunnel.service` to forward Forge loopback port 15432 to
 Mission Control PostgreSQL, and `forge-llama.service` to serve the authenticated

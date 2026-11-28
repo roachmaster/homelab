@@ -403,8 +403,7 @@ fn repair_recipe(
 ) -> Result<(Value, String), forge_work::WorkError> {
     let unavailable = || forge_work::WorkError::rejected(503, "unavailable");
     let digest = digest.ok_or_else(unavailable)?;
-    let document =
-        pinned_recipe_for(tx, &store.owner, project_alias, digest)?.ok_or_else(unavailable)?;
+    let document = pinned_recipe_for(tx, store, project_alias, digest)?.ok_or_else(unavailable)?;
     if document.get("mode").and_then(Value::as_str) != Some("implement") {
         return Err(unavailable());
     }
@@ -466,7 +465,8 @@ pub(crate) fn repair(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(replay.clone()));
         }
         let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
         if task.workflow_required || task.status != "completed" || task.mode != "implement" {
@@ -623,7 +623,8 @@ pub(crate) fn repair(
                 request.task_id,
                 request.expected_revision + 1,
                 false,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(result.clone()));
         }
         // Source-review path: no usable review for the candidate.
         let findings = if !findings_empty(&request.findings) {
@@ -771,6 +772,7 @@ pub(crate) fn repair(
             request.expected_revision + 1,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(result.clone()))
     })
 }
 
@@ -818,7 +820,8 @@ pub(crate) fn publication_retry(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(replay.clone()));
         }
         let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
         if task.workflow_required {
@@ -884,6 +887,7 @@ pub(crate) fn publication_retry(
             request.expected_revision + 1,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(result.clone()))
     })
 }
 
@@ -1049,9 +1053,8 @@ pub(crate) fn handoff_author(
             .first()
             .ok_or_else(|| forge_work::WorkError::not_found("task"))?;
         let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
-        let recipe_document =
-            pinned_recipe_for(tx, &store.owner, &project_alias, &request.recipe_digest)?
-                .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
+        let recipe_document = pinned_recipe_for(tx, store, &project_alias, &request.recipe_digest)?
+            .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
         let task_mode: String = col(row, "mode")?;
         if col::<Option<chrono::DateTime<chrono::Utc>>>(row, "cancelled_at")?.is_some()
             || col::<Option<Uuid>>(row, "workflow_review_id")?.is_some()

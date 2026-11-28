@@ -191,6 +191,22 @@ fn final_acceptance_projection_requires_matching_hosted_evidence() {
     let mut review: WorkReviewSummary = serde_json::from_value(value.clone()).unwrap();
     assert!(review.is_valid());
     assert!(review.is_processing());
+    for name in [
+        "forge-sdlc-jenkins-v3:main",
+        "forge-sdlc-jenkins-v4:branch/feature-codex",
+    ] {
+        review.gate_manifest_sha256 = Some(name.into());
+        assert!(review.is_valid());
+    }
+    for name in [
+        "forge-sdlc-jenkins-v5:main",
+        "forge-sdlc-jenkins-v4:branch/Bad",
+        "forge-sdlc-jenkins-v4:branch/-bad",
+    ] {
+        review.gate_manifest_sha256 = Some(name.into());
+        assert!(!review.is_valid());
+    }
+    review.gate_manifest_sha256 = Some("forge-sdlc-jenkins-v4:main".into());
     review.can_accept = true;
     assert!(!review.is_valid());
     review.required_hosted_green = true;

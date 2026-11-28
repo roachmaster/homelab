@@ -3,7 +3,7 @@
 An MCP server that lets an agent run read-only queries against the Forge
 PostgreSQL database on Mission Control. It is published at
 `https://mcp.thedevex.com/mcp`. Cloudflare only routes traffic. The server
-authenticates every request itself, using static bearer tokens.
+authenticates MCP requests using static bearer tokens or OAuth.
 
 ```text
 MCP client ──HTTPS──▶ Cloudflare (DNS + Tunnel, no Access app)
@@ -12,57 +12,73 @@ MCP client ──HTTPS──▶ Cloudflare (DNS + Tunnel, no Access app)
              ──unix socket, peer auth──▶ PostgreSQL forge_agent as role homelab_mcp (SELECT only)
 ```
 
-Status: **proposed**. This directory contains the code, unit and SQL. Nothing
-is installed on Mission Control, no role exists in the database, and no
-Cloudflare DNS record or tunnel route exists yet. The install steps below need
-root and an operator's approval.
+Mission Control serves this endpoint with static credentials and Gemini OAuth.
+The unit in this checkout selects the Rust server. The active service and its
+resolved executable identify the version actually deployed.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `mcp_server.py` | Server: MCP Streamable HTTP (JSON responses) at `POST /mcp`, plus `GET /healthz`. Python 3 stdlib + `psycopg2`. |
-| `mcp_auth.py` | Static bearer-token check, token-file loader, failed-attempt limiter. |
-| `mcp_oauth.py` | OAuth 2.1 authorization server (code + PKCE S256, refresh rotation, revocation), `DualAuth`, and a root-only CLI for clients, grants and the operator password. |
-| `mcp_presence.py` | Optional authenticated heartbeat, bounded SQLite presence and private portal-reader authentication. |
-| `sql_guard.py` | Defense-in-depth check that a query is one read-only statement. |
-| `mcp_tokens.py` | Root-only CLI: `create`, `list`, `revoke`. |
+| `forge-mcp-db` | Server: MCP Streamable HTTP (JSON responses) at `POST /mcp`, plus `GET /healthz`. The Rust server uses `tokio-postgres`. |
+| `forge-mcp-db/src/auth.rs` | Static bearer-token check, token-file loader, failed-attempt limiter. |
+| `forge-mcp-oauth` | OAuth 2.1 authorization server (code + PKCE S256, refresh rotation, revocation), `DualAuth`, and a root-only CLI for clients, grants and the operator password. |
+| `forge-mcp-db/src/presence.rs` | Optional authenticated heartbeat, bounded SQLite presence and private portal-reader authentication. |
+| `forge-mcp-db/src/sql_guard.rs` | Defense-in-depth check that a query is one read-only statement. |
+| `forge-mcp-tokens` | Root-only CLI: `create`, `list`, `revoke`. |
 | `homelab-mcp.service` | Hardened systemd unit. |
 | `server.example.json` | Config template for `/etc/homelab-forge/mcp/server.json`. |
 | `sql/grant-mcp-readonly.sql`, `sql/verify-mcp-readonly.sql` | Grant and verify the SELECT-only reader. |
-| `test_mcp_server.py` | Unit, HTTP and disposable-PostgreSQL integration tests. |
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
+| `get_task` | Look up the brief by task UUID. Request an assignment or metadata section on demand. |
 | `query` | Runs one `SELECT`, `WITH`, `VALUES`, `TABLE`, `EXPLAIN` (without ANALYZE) or `SHOW` statement and returns one page of rows. |
 | `list_tables` | Lists the tables and views the role can read, with an optional `schema` filter. Paginated the same way as `query`. |
 | `describe_table` | Lists the columns, types, nullability and defaults of one readable table. |
 
-### Pagination
+### Task handoffs and pagination
 
-`query` and `list_tables` return a page object (as text and `structuredContent`):
+Pass the task UUID in handoffs. Call `get_task` with `{"id":"<task-uuid>"}`
+for title, status, mode and assigned profile. Request `"section":"assignment"`
+for the prompt and acceptance criteria, or `"section":"metadata"` for project,
+source revision, workflow, task kind and revision. Use a narrow `query` for
+specific events. Long text follows the server cell limit. SQL `substring` can
+retrieve additional text by offset.
+
+Query and catalog tools return compact JSON in one MCP text block by default.
+Column names appear once. For example, one complete page looks like this.
 
 ```json
-{"columns": ["id", "status"], "rows": [{"id": 1, "status": "done"}], "row_count": 100,
- "offset": 0, "page_size": 100, "has_more": true, "next_cursor": "eyJ2Ijo…", "truncated": true}
+{"columns":["id","status"],"rows":[[1,"done"]]}
 ```
 
-- `page_size` defaults to 100 and is capped at `max_rows` (500).
-- When `has_more` is true, call the tool again with the **same arguments** plus `"cursor": "<next_cursor>"`. The last page has `next_cursor: null`.
+- Compact pages default to at most 10 rows and 8 KiB of serialized page data.
+- Pass `next_cursor` back with the same SQL or schema filter and page size.
+  A terminal page omits the cursor. A truncated page without a cursor has
+  reached a server bound. Narrow the request to continue.
+- `"view":"structured"` places the same compact data in `structuredContent`.
+- `"view":"full"` returns named rows, counts, offsets and cursor metadata in both
+  MCP representations. It uses the configured page size, normally 100. Explicit
+  page sizes in all views are capped by `max_rows`.
+
 - Add an `ORDER BY` on a unique key; without one PostgreSQL may return rows in a different order on each call.
 - `SELECT`/`WITH`/`VALUES`/`TABLE` statements page through the unmodified statement with a server-side `DECLARE` cursor: `MOVE` skips to the offset and `page_size + 1` rows are fetched. No SQL is built around your statement. `EXPLAIN` and `SHOW` return one page only.
 - Each page runs in its own read-only transaction, so pages reflect the data at the time of each call.
 - Cursors are HMAC-signed with a per-process key and bound to the tool, the token, the exact SQL (or schema filter) and the page size. A tampered cursor, a cursor sent with different arguments or by another token, or one older than one hour (`cursor_ttl_seconds`) is rejected. Cursors stop working when the service restarts; start again without a cursor.
 - If a page would exceed `max_response_bytes`, fewer rows are returned and `next_cursor` continues from the first row not returned. Offsets are capped at `max_offset` (1,000,000).
 
+The compact catalog lists schema and table names. Column descriptions show names
+and types. Request `view: full` for table type, nullability and defaults.
+
 ## Optional authenticated connection presence
 
 Presence is disabled by default. Enabling it adds `heartbeat` for mapped,
 authenticated `read` principals. Its annotations are **`readOnlyHint: false`**,
 `destructiveHint: false` and `idempotentHint: true`: it changes only a local
-last-seen timestamp. `query`, `list_tables` and `describe_table` remain read-only.
+last-seen timestamp. `get_task`, `query`, `list_tables` and `describe_table` are read-only.
 Presence never writes PostgreSQL, claims work or advertises execution readiness.
 
 Add this optional object to the root-managed server configuration, replacing the
@@ -95,12 +111,9 @@ A mapped client sends this actual call every 60 seconds while connected:
 {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"heartbeat","arguments":{}}}
 ```
 
-The empty arguments object cannot contain an identity, label or timestamp. A
-successful `structuredContent` is:
-
-```json
-{"agent_id":"dot","label":"Dot","state":"online","last_seen_at":"2026-11-27T12:00:00Z","heartbeat_interval_seconds":60,"freshness_seconds":180}
-```
+A compact heartbeat acknowledges `{"state":"online"}`. Request `"view":"full"`
+for agent ID, label, timestamp and freshness intervals. The authenticated
+principal determines the agent identity.
 
 Times come from the server. A real observation stays `online` for 180 seconds,
 then becomes `stale`; a mapped agent with no call is `never`. No background timer,
@@ -142,7 +155,7 @@ worker changes are required by this implementation.
 ## Security model
 
 - **Authentication.** Every `/mcp` request needs `Authorization: Bearer hmcp_<id>_<secret>`. A missing or bad token gets `401` with `WWW-Authenticate: Bearer realm="homelab-mcp"` (plus `error="invalid_token"` when a token was sent).
-- **Token storage.** Tokens carry 256 random bits. Only their SHA-256 is stored, in `/etc/homelab-forge/mcp/tokens.json`. That file is `root:homelab_mcp 0640`, written only by root through `mcp_tokens.py`.
+- **Token storage.** Tokens carry 256 random bits. Only their SHA-256 is stored, in `/etc/homelab-forge/mcp/tokens.json`. That file is `root:homelab_mcp 0640`, written only by root through `forge-mcp-tokens`.
   - The server refuses the file if it is group-writable or world-accessible. If the file is unreadable or invalid, the server rejects every request until it is fixed.
   - It reloads the file whenever it changes, so `create` and `revoke` take effect without a restart.
 - **Expiry and scopes.** Every token expires (default 90 days, maximum 365) and carries a scope. Only `read` exists. The optional heartbeat additionally requires an administrator-configured authenticated identity mapping.
@@ -164,9 +177,9 @@ Known limits:
 - Hosted connectors that only support OAuth (Gemini custom apps, claude.ai, ChatGPT) use the OAuth layer below with a pre-registered client; there is no dynamic client registration.
 - Only one scope exists, so all tokens see the same tables.
 
-## Install on Mission Control (root, not yet done)
+## First installation on Mission Control
 
-Run these from a checkout of the reviewed commit. Steps 2 and 3 change the
+The Rust crate is under `src/rust/forge-mcp-db`. Run these first-install steps from a checkout of the reviewed commit. An upgrade reuses the provisioned account, configuration, credentials and database grants. Steps 2 and 3 change the
 live database, so take a backup first (`sudo deploy/mission-control/backup-postgres.sh`).
 
 1. Create the service user and install the release:
@@ -175,8 +188,8 @@ live database, so take a backup first (`sudo deploy/mission-control/backup-postg
    sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin homelab_mcp
    release=/opt/homelab-forge/mcp/releases/$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)
    sudo install -d -m 0755 "$release"
-   sudo install -m 0644 deploy/mission-control/mcp-postgres/{mcp_auth.py,mcp_oauth.py,mcp_presence.py,sql_guard.py} "$release"/
-   sudo install -m 0755 deploy/mission-control/mcp-postgres/{mcp_server.py,mcp_tokens.py} "$release"/
+   cargo build --manifest-path src/rust/Cargo.toml --locked --release -p forge-mcp-db -p forge-services --bins
+   sudo install -m 0755 "${CARGO_TARGET_DIR:-src/rust/target}"/release/{forge-mcp-db,forge-mcp-tokens,forge-mcp-oauth,forge-services} "$release"/
    sudo ln -sfn "$release" /opt/homelab-forge/mcp/current
    sudo install -d -m 0750 -o root -g homelab_mcp /etc/homelab-forge/mcp
    sudo install -m 0640 -o root -g homelab_mcp deploy/mission-control/mcp-postgres/server.example.json /etc/homelab-forge/mcp/server.json
@@ -200,14 +213,14 @@ live database, so take a backup first (`sudo deploy/mission-control/backup-postg
 4. Create the first token. It is printed once, so copy it into the agent's secret store:
 
    ```bash
-   sudo /opt/homelab-forge/mcp/current/mcp_tokens.py create --name "agent laptop" --ttl-days 90
+   sudo /opt/homelab-forge/mcp/current/forge-mcp-tokens create --name "agent laptop" --ttl-days 90
    ```
 
 5. Install and start the unit. Register it with the lifecycle script, using the inventory id `homelab-mcp`:
 
    ```bash
    mkdir -p /tmp/mcp-bundle && cp deploy/mission-control/mcp-postgres/homelab-mcp.service /tmp/mcp-bundle/
-   sudo deploy/mission-control/services.py install homelab-mcp /tmp/mcp-bundle
+   sudo /opt/homelab-forge/mcp/current/forge-services install homelab-mcp /tmp/mcp-bundle
    curl -s -H 'Host: 127.0.0.1:8791' http://127.0.0.1:8791/healthz          # {"status": "ok"}
    curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: 127.0.0.1:8791' -X POST http://127.0.0.1:8791/mcp   # 401
    ```
@@ -283,9 +296,9 @@ Clients that only speak stdio, such as Claude Desktop, can use the `mcp-remote` 
 ## Token operations
 
 ```bash
-sudo /opt/homelab-forge/mcp/current/mcp_tokens.py list
-sudo /opt/homelab-forge/mcp/current/mcp_tokens.py create --name "ci agent" --ttl-days 30
-sudo /opt/homelab-forge/mcp/current/mcp_tokens.py revoke <id>
+sudo /opt/homelab-forge/mcp/current/forge-mcp-tokens list
+sudo /opt/homelab-forge/mcp/current/forge-mcp-tokens create --name "ci agent" --ttl-days 30
+sudo /opt/homelab-forge/mcp/current/forge-mcp-tokens revoke <id>
 ```
 
 To rotate a token, create the new one, update the client, then revoke the old one.
@@ -294,19 +307,12 @@ Revoked and expired tokens stay in the file for audit.
 ## Tests
 
 ```bash
-cd deploy/mission-control/mcp-postgres && python3 -B -m unittest -v
+cargo test --manifest-path src/rust/Cargo.toml --locked -p forge-mcp-db
 ```
 
-The integration class starts a disposable PostgreSQL 16 cluster under `/tmp`.
-It applies the Forge schema, creates `homelab_mcp`, runs the grant script and
-checks the following:
-- Writes, DDL and temporary tables fail at the database level.
-- Ungranted tables are denied.
-- The statement timeout fires.
-- The verify script catches an added write grant.
-
-These tests need `/usr/lib/postgresql/16/bin` and a non-root user. The suite is
-registered in `backend-suites.py`.
+The main backend suite runs a disposable PostgreSQL fixture. During a release,
+also exercise the Rust server over HTTP with a disposable MCP reader, including
+pagination, decimal and interval values, static-token revocation and Gemini OAuth.
 
 ## OAuth 2.1 (Gemini custom apps and other hosted connectors)
 
@@ -329,12 +335,12 @@ root:homelab_mcp 0640), and hashed codes/grants/tokens in
 `/var/lib/homelab-forge/mcp/oauth.sqlite3` (systemd `StateDirectory`, 0700).
 
 ```sh
-sudo ./mcp_oauth.py operator set-password --generate /root/homelab-mcp-operator-password.txt
-sudo ./mcp_oauth.py client create --name gemini --secret-file /root/homelab-mcp-gemini-oauth-client.txt
-sudo ./mcp_oauth.py client list
-sudo ./mcp_oauth.py grant list
-sudo ./mcp_oauth.py grant revoke <grant_id>          # or: grant revoke-client <client_id>
-sudo ./mcp_oauth.py client revoke <client_id>
+sudo ./forge-mcp-oauth operator set-password --generate /root/homelab-mcp-operator-password.txt
+sudo ./forge-mcp-oauth client create --name gemini --secret-file /root/homelab-mcp-gemini-oauth-client.txt
+sudo ./forge-mcp-oauth client list
+sudo ./forge-mcp-oauth grant list
+sudo ./forge-mcp-oauth grant revoke <grant_id>          # or: grant revoke-client <client_id>
+sudo ./forge-mcp-oauth client revoke <client_id>
 ```
 
 The CLI prints only ids; secrets go to new 0600 files and are never echoed.

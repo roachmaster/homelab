@@ -809,6 +809,7 @@ fn read_no_follow(path: &Path, limit: usize) -> PublicationResult<Vec<u8>> {
 #[derive(Debug)]
 pub enum ProviderError {
     Publication(PublicationError),
+    SourceArtifacts(Box<crate::trusted_delivery::SourceArtifactRejected>),
     Other(String),
 }
 
@@ -823,6 +824,7 @@ impl From<ProviderError> for ReviewError {
         match error {
             ProviderError::Publication(error) => ReviewError::from(error),
             ProviderError::Other(message) => ReviewError::other(message),
+            ProviderError::SourceArtifacts(error) => ReviewError::other(error.code),
         }
     }
 }

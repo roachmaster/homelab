@@ -36,7 +36,10 @@ impl<'t, 'c> Tx<'t, 'c> {
         let row = handle.block_on(async move { pg.query_opt(select, params).await })?;
         // Decode as Option<T>: a SQL NULL first column is no result,
         // not a decode panic - row.get::<T> panics on NULL.
-        Ok(row.and_then(|row| row.get::<usize, Option<T>>(0)))
+        Ok(row
+            .map(|r| r.try_get::<usize, Option<T>>(0))
+            .transpose()?
+            .flatten())
     }
 
     /// Executes a statement on the open transaction that returns no result.

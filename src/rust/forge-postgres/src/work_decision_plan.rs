@@ -108,7 +108,8 @@ pub(crate) fn plan_decide(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(receipt_json.clone()));
         }
         let status: String = col(row, "status")?;
         let mode: String = col(row, "mode")?;
@@ -191,13 +192,9 @@ pub(crate) fn plan_decide(
             if pending >= store.max_pending {
                 return Err(forge_work::WorkError::rejected(503, "queue_full"));
             }
-            next_recipe = pinned_recipe_for(
-                tx,
-                &store.owner,
-                &request.project_alias,
-                &request.recipe_digest,
-            )?
-            .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
+            next_recipe =
+                pinned_recipe_for(tx, store, &request.project_alias, &request.recipe_digest)?
+                    .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
             next_digest = request.recipe_digest.clone();
             next_profile = request.agent_profile.clone();
         }
@@ -345,5 +342,6 @@ pub(crate) fn plan_decide(
             new_revision,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(receipt.clone()))
     })
 }

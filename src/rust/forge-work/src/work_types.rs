@@ -44,6 +44,14 @@ pub struct TaskSummary {
     pub workflow_required: Option<bool>,
     /// The workflow's current phase, when the projection carries it.
     pub workflow_phase: Option<String>,
+    /// Scope activity time; absent for legacy raw-status pages.
+    pub updated_at: Option<String>,
+    /// Current workflow automation switch, when available.
+    pub workflow_enabled: Option<bool>,
+    /// Protected delivery projection, when configured and requested.
+    pub delivery: Option<Value>,
+    /// Retained retry budget projection.
+    pub retry_event: Option<Value>,
 }
 
 /// One task in full: its summary plus the public detail projection.
@@ -61,6 +69,10 @@ pub struct TaskView {
 /// One coding_events row as a typed view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventView {
+    pub event_id: Uuid,
+    pub correlation_id: Uuid,
+    /// Guarded public fields; raw payload stays internal.
+    pub public: Value,
     /// The event's sequence within the task's stream.
     pub sequence: i64,
     /// The event kind, from the canonical vocabulary.
@@ -91,12 +103,57 @@ pub struct ResultChunk {
 /// One bounded view of a CI/CD stage log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StageLogView {
-    /// The stage the log belongs to.
+    pub project_alias: String,
+    pub task_id: Uuid,
+    pub correlation_id: Uuid,
+    pub action_id: Uuid,
     pub stage_id: String,
-    /// The log content in this view.
+    pub view: String,
     pub content: String,
-    /// The cursor for the next view, when more log remains.
+    pub truncated: bool,
+    pub total_bytes: usize,
+    pub byte_offset: usize,
     pub next_cursor: Option<String>,
+    pub prev_cursor: Option<String>,
+    pub tests_passed: Option<i64>,
+    pub tests_failed: Option<i64>,
+    pub tests_skipped: Option<i64>,
+    pub test_cases: Vec<Value>,
+    pub error_excerpt: Option<String>,
+}
+
+/// Complete scope counts before filtering or pagination.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeCounts {
+    pub active: u64,
+    pub attention: u64,
+    pub history: u64,
+    pub all: u64,
+}
+impl ScopeCounts {
+    pub fn from_value(value: &Value) -> Option<Self> {
+        if value.as_object()?.len() != 4 {
+            return None;
+        }
+        let result = Self {
+            active: value["active"].as_u64()?,
+            attention: value["attention"].as_u64()?,
+            history: value["history"].as_u64()?,
+            all: value["all"].as_u64()?,
+        };
+        result.is_valid().then_some(result)
+    }
+    pub fn to_value(&self) -> Value {
+        serde_json::json!({"active":self.active,"attention":self.attention,"history":self.history,"all":self.all})
+    }
+    pub fn is_valid(&self) -> bool {
+        self.all <= crate::operator_dtos::MAX_REVISION as u64
+            && self
+                .active
+                .checked_add(self.attention)
+                .and_then(|n| n.checked_add(self.history))
+                == Some(self.all)
+    }
 }
 
 /// A cursor page of task summaries.
@@ -106,11 +163,16 @@ pub struct TaskPage {
     pub items: Vec<TaskSummary>,
     /// The task id to continue from, when more tasks remain.
     pub next_cursor: Option<Uuid>,
+    /// Counts before scope selection and keyset pagination.
+    pub scope_counts: Option<ScopeCounts>,
 }
 
 /// A sequence page of events.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventPage {
+    /// State and revision from the same owner-scoped snapshot as the events.
+    pub status: String,
+    pub revision: i64,
     /// The page's events, in sequence order.
     pub items: Vec<EventView>,
     /// The sequence to continue after.
@@ -127,6 +189,16 @@ pub struct ControlOutcome {
     /// True when this outcome replays an earlier identical intent
     /// instead of acting again.
     pub replayed: bool,
+    /// Immutable private receipt, projected per operation at the API boundary.
+    /// This is never serialized wholesale; actor/audit fields remain private.
+    pub recorded_receipt: Option<Value>,
+}
+
+impl ControlOutcome {
+    pub fn with_recorded_receipt(mut self, receipt: Value) -> Self {
+        self.recorded_receipt = Some(receipt);
+        self
+    }
 }
 
 /// A pinned policy identity: the kind of policy and its digest.
@@ -136,4 +208,22 @@ pub struct PolicyIdentity {
     pub kind: String,
     /// The snapshot's pinned digest.
     pub digest: String,
+}
+
+#[cfg(test)]
+mod scope_count_tests {
+    use super::*;
+    #[test]
+    fn counts_reject_negative_overflow_unknown_and_inconsistent_totals() {
+        for value in [
+            serde_json::json!({"active":-1,"attention":0,"history":0,"all":0}),
+            serde_json::json!({"active":u64::MAX,"attention":1,"history":0,"all":0}),
+            serde_json::json!({"active":1,"attention":0,"history":0,"all":0}),
+            serde_json::json!({"active":0,"attention":0,"history":0,"all":0,"extra":1}),
+        ] {
+            assert!(ScopeCounts::from_value(&value).is_none());
+        }
+        let value = serde_json::json!({"active":1,"attention":2,"history":3,"all":6});
+        assert_eq!(ScopeCounts::from_value(&value).unwrap().to_value(), value);
+    }
 }

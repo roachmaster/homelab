@@ -85,6 +85,76 @@ struct ExternalTxImpl<'x, 't, 'c, 'o> {
     owner: &'o str,
 }
 
+/// Enqueue through the existing external port in the caller's admission
+/// transaction. The selected workflow object is private to this operation;
+/// no coordinator, dispatcher or provider loop is started here.
+pub(crate) fn enqueue_work_admission(
+    tx: &mut Tx<'_, '_>,
+    store: &crate::work_store::PgWorkStore,
+    project: &str,
+    task: Uuid,
+    profile: &str,
+) -> Result<Uuid, WorkError> {
+    let config = store
+        .catalog
+        .as_ref()
+        .ok_or_else(|| WorkError::rejected(503, "unavailable"))?;
+    if !config
+        .profile(profile)
+        .is_some_and(|profile| profile.is_external() && profile.execution_enabled)
+    {
+        return Err(WorkError::rejected(503, "unavailable"));
+    }
+    let mut handle = ExternalTxImpl {
+        tx,
+        owner: &store.owner,
+    };
+    if let Some(workflow) =
+        crate::runner_composition::build_external_store(config, store.factory.config())?
+    {
+        if workflow.manages(project) {
+            return workflow.admit(&mut handle, project, task);
+        }
+    }
+    handle.enqueue(project, task)
+}
+
+/// Existing scoped external history reads in the caller's coherent snapshot.
+pub(crate) fn project_work_task(
+    tx: &mut Tx<'_, '_>,
+    store: &crate::work_store::PgWorkStore,
+    project: &str,
+    task: Uuid,
+    profile: &str,
+) -> Result<(Option<Value>, Option<Value>), WorkError> {
+    let Some(config) = store.catalog.as_ref() else {
+        return Ok((None, None));
+    };
+    let mut handle = ExternalTxImpl {
+        tx,
+        owner: &store.owner,
+    };
+    let workflow = if let Some(workflow) =
+        crate::runner_composition::build_external_store(config, store.factory.config())?
+    {
+        workflow.project(&mut handle, project, task)?
+    } else {
+        None
+    };
+    let artifact = if config
+        .profile(profile)
+        .is_some_and(|profile| profile.is_external())
+    {
+        handle
+            .artifact_by_task(project, task)?
+            .map(|artifact| validate_external_artifact(&artifact).map_err(WorkError::store))
+            .transpose()?
+    } else {
+        None
+    };
+    Ok((workflow, artifact))
+}
+
 type Params = Vec<Box<dyn ToSql + Sync + Send>>;
 
 fn refs(params: &Params) -> Vec<&(dyn ToSql + Sync)> {

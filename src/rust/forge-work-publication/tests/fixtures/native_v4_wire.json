@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "purpose": "Offline wire compatibility only. Historical IDs/prepare identities retained as source evidence; derived v4 objects are test inputs, never production actions or authorization.",
+  "cases": [
+    {
+      "scope": "branch",
+      "historical_input": {
+        "action_id": "636dae2d-e255-4385-968c-62d4e4d812fb",
+        "workflow_id": "6e67ec8e-f2ea-4d0d-8bc3-c0fe0a2be680",
+        "correlation_id": "04cf3c8d-060a-4782-9f1f-ad5b87402905",
+        "project_alias": "homelab",
+        "prepare_action_id": "c5e17507-5f28-43b2-b300-b0cfd0f1e398",
+        "candidate_commit": "84fe21a8aa04e0ab3615e653c06d74a6256bb76c",
+        "candidate_tree": "49d216098b7d0904e2d088139cdd9cc1af1013fa",
+        "integration_base": "33bac6c701174201d54bc47dfe7799176caf56ef",
+        "source_branch": "feature/codex",
+        "branch_scope": "branch/feature-codex-4295b88440286851",
+        "gate_manifest_sha256": "forge-sdlc-jenkins-v3:branch/feature-codex-4295b88440286851",
+        "verification_profile": "forge-sdlc-jenkins-v3"
+      },
+      "historical_public_spool": {
+        "action_id": "636dae2d-e255-4385-968c-62d4e4d812fb",
+        "branch_scope": "branch/feature-codex-4295b88440286851",
+        "bundle_sha256": "b47507117acc908c2ba0be57622232f9e003e32bfdfec7324015f2c6909c9765",
+        "candidate_commit": "84fe21a8aa04e0ab3615e653c06d74a6256bb76c",
+        "candidate_tree": "49d216098b7d0904e2d088139cdd9cc1af1013fa",
+        "correlation_id": "04cf3c8d-060a-4782-9f1f-ad5b87402905",
+        "expected_main": "33bac6c701174201d54bc47dfe7799176caf56ef",
+        "gate_manifest_sha256": "forge-sdlc-jenkins-v3:branch/feature-codex-4295b88440286851",
+        "project_alias": "homelab",
+        "verification_profile": "forge-sdlc-jenkins-v3",
+        "version": 3,
+        "workflow_id": "6e67ec8e-f2ea-4d0d-8bc3-c0fe0a2be680"
+      },
+      "native_v4_input": {
+        "action_id": "636dae2d-e255-4385-968c-62d4e4d812fb",
+        "workflow_id": "6e67ec8e-f2ea-4d0d-8bc3-c0fe0a2be680",
+        "correlation_id": "04cf3c8d-060a-4782-9f1f-ad5b87402905",
+        "project_alias": "homelab",
+        "prepare_action_id": "c5e17507-5f28-43b2-b300-b0cfd0f1e398",
+        "candidate_commit": "84fe21a8aa04e0ab3615e653c06d74a6256bb76c",
+        "candidate_tree": "49d216098b7d0904e2d088139cdd9cc1af1013fa",
+        "integration_base": "33bac6c701174201d54bc47dfe7799176caf56ef",
+        "source_branch": "feature/codex",
+        "branch_scope": "branch/feature-codex-4295b88440286851",
+        "gate_manifest_sha256": "forge-sdlc-jenkins-v4:branch/feature-codex-4295b88440286851",
+        "verification_profile": "forge-sdlc-jenkins-v4"
+      },
+      "native_v4_public_spool": {
+        "action_id": "636dae2d-e255-4385-968c-62d4e4d812fb",
+        "branch_scope": "branch/feature-codex-4295b88440286851",
+        "bundle_sha256": "b47507117acc908c2ba0be57622232f9e003e32bfdfec7324015f2c6909c9765",
+        "candidate_commit": "84fe21a8aa04e0ab3615e653c06d74a6256bb76c",
+        "candidate_tree": "49d216098b7d0904e2d088139cdd9cc1af1013fa",
+        "correlation_id": "04cf3c8d-060a-4782-9f1f-ad5b87402905",
+        "expected_main": "33bac6c701174201d54bc47dfe7799176caf56ef",
+        "gate_manifest_sha256": "forge-sdlc-jenkins-v4:branch/feature-codex-4295b88440286851",
+        "project_alias": "homelab",
+        "verification_profile": "forge-sdlc-jenkins-v4",
+        "version": 4,
+        "workflow_id": "6e67ec8e-f2ea-4d0d-8bc3-c0fe0a2be680"
+      }
+    },
+    {
+      "scope": "main",
+      "historical_input": {
+        "action_id": "ff262ecf-4284-4821-b765-8735016282ea",
+        "workflow_id": "ff262ecf-4284-4821-b765-8735016282ea",
+        "branch_scope": "main",
+        "project_alias": "homelab",
+        "source_branch": "main",
+        "candidate_tree": "49d216098b7d0904e2d088139cdd9cc1af1013fa",
+        "correlation_id": "500f7b78-c09f-4c01-a775-85186afa490f",
+        "candidate_commit": "6fa2e13da7ab26a401ceb4aafaf41e8d4d3c37fc",
+        "integration_base": "6fa2e13da7ab26a401ceb4aafaf41e8d4d3c37fc",
+        "prepare_action_id": "34ed14d6-d831-584b-a901-b0160f4440f9",
+        "gate_manifest_sha256": "forge-sdlc-jenkins-v3:main",
+        "verification_profile": "forge-sdlc-jenkins-v3"
+      },
+      "historical_public_spool": {
+        "action_id": "ff262ecf-4284-4821-b765-8735016282ea",
+        "branch_scope": "main",
+        "bundle_sha256": "6398323e8e2a763ae5e05bebafcc2a0ba9ffe03d6c1bad4acdda28a268c768c5",
+        "candidate_commit": "6fa2e13da7ab26a401ceb4aafaf41e8d4d3c37fc",
+        "candidate_tree": "49d216098b7d0904e2d088139cdd9cc1af1013fa",
+        "correlation_id": "500f7b78-c09f-4c01-a775-85186afa490f",
+        "expected_main": "6fa2e13da7ab26a401ceb4aafaf41e8d4d3c37fc",
+        "gate_manifest_sha256": "forge-sdlc-jenkins-v3:main",
+        "project_alias": "homelab",
+        "verification_profile": "forge-sdlc-jenkins-v3",
+        "version": 3,
+        "workflow_id": "ff262ecf-4284-4821-b765-8735016282ea"
+      },
+      "native_v4_input": {
+        "action_id": "ff262ecf-4284-4821-b765-8735016282ea",
+        "workflow_id": "ff262ecf-4284-4821-b765-8735016282ea",
+        "branch_scope": "main",
+        "project_alias": "homelab",
+        "source_branch": "main",
+        "candidate_tree": "49d216098b7d0904e2d088139cdd9cc1af1013fa",
+        "correlation_id": "500f7b78-c09f-4c01-a775-85186afa490f",
+        "candidate_commit": "6fa2e13da7ab26a401ceb4aafaf41e8d4d3c37fc",
+        "integration_base": "6fa2e13da7ab26a401ceb4aafaf41e8d4d3c37fc",
+        "prepare_action_id": "34ed14d6-d831-584b-a901-b0160f4440f9",
+        "gate_manifest_sha256": "forge-sdlc-jenkins-v4:main",
+        "verification_profile": "forge-sdlc-jenkins-v4"
+      },
+      "native_v4_public_spool": {
+        "action_id": "ff262ecf-4284-4821-b765-8735016282ea",
+        "branch_scope": "main",
+        "bundle_sha256": "6398323e8e2a763ae5e05bebafcc2a0ba9ffe03d6c1bad4acdda28a268c768c5",
+        "candidate_commit": "6fa2e13da7ab26a401ceb4aafaf41e8d4d3c37fc",
+        "candidate_tree": "49d216098b7d0904e2d088139cdd9cc1af1013fa",
+        "correlation_id": "500f7b78-c09f-4c01-a775-85186afa490f",
+        "expected_main": "6fa2e13da7ab26a401ceb4aafaf41e8d4d3c37fc",
+        "gate_manifest_sha256": "forge-sdlc-jenkins-v4:main",
+        "project_alias": "homelab",
+        "verification_profile": "forge-sdlc-jenkins-v4",
+        "version": 4,
+        "workflow_id": "ff262ecf-4284-4821-b765-8735016282ea"
+      }
+    }
+  ]
+}

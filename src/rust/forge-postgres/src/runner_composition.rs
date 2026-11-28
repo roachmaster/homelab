@@ -9,11 +9,9 @@
 //! - The runner connects directly (host /var/run/postgresql,
 //!   forge_agent) as the process user with the libpq passfile;
 //!   Python's proxy switch stays retired, as everywhere else.
-//! - The Pg submit's documented v1 boundary stands: delivery
-//!   admission and external-profile enqueue inside the submit
-//!   transaction are not wired through the store; the external
-//!   workflow store is composed for control, catalog and the
-//!   coordinator hooks.
+//! - Private failed-main admission and lineage binding share the
+//!   normal submission transaction. External-profile enqueue must
+//!   remain separately qualified before enabling those submissions.
 //! - The workflow store is built twice (once for the API's
 //!   native-control provider behind a mutex, once for the
 //!   coordinator thread): the providers are stateless over the
@@ -57,7 +55,7 @@ use crate::workflow_decision::PgWorkflowDecisions;
 
 const RUNNER_DB_HOST: &str = "/var/run/postgresql";
 const RUNNER_DB_NAME: &str = "forge_agent";
-const WORKER_FRESHNESS_SECONDS: i32 = 90;
+const WORKER_FRESHNESS_SECONDS: f64 = 90.0;
 const MODE_ORDER: [&str; 3] = ["plan", "review", "implement"];
 
 /// The runner's database config: Python's queue_store.connect
@@ -122,7 +120,7 @@ fn review_policy(config: &WorkApiConfig) -> ReviewPolicy {
     }
 }
 
-fn pg_work_store(config: &WorkApiConfig, pg: &PgConfig) -> PgWorkStore {
+fn pg_work_store(config: &WorkApiConfig, pg: &PgConfig) -> Result<PgWorkStore, WorkError> {
     PgWorkStore::new(
         PgSessionFactory::new(pg.clone()),
         config.owner.clone(),
@@ -130,6 +128,8 @@ fn pg_work_store(config: &WorkApiConfig, pg: &PgConfig) -> PgWorkStore {
         config.max_pending,
         review_policy(config),
     )
+    .with_delivery_enabled(config.delivery_enabled)
+    .with_recipe_catalog(config)
 }
 
 // ---------------------------------------------------------------------
@@ -556,7 +556,7 @@ fn register_identity(
     let identity_id: Uuid = row
         .try_get("identity_id")
         .map_err(|e| WorkError::store(e.to_string()))?;
-    let generation: i64 = row
+    let generation: i32 = row
         .try_get("generation")
         .map_err(|e| WorkError::store(e.to_string()))?;
     Ok(Some(json!({
@@ -599,7 +599,7 @@ impl PgWorkCatalog {
         if pending.is_empty() {
             return Ok(());
         }
-        let store = pg_work_store(config, &self.pg);
+        let store = pg_work_store(config, &self.pg)?;
         let identities = crate::work_common::run_tx(&store, |tx| {
             if !identity_ready(tx)? {
                 return Ok(Vec::new());
@@ -759,7 +759,7 @@ impl PgWorkCatalog {
     }
 }
 
-fn branch_row_dto(row: &tokio_postgres::Row) -> Result<Value, WorkError> {
+pub(crate) fn branch_row_dto(row: &tokio_postgres::Row) -> Result<Value, WorkError> {
     let text = |name: &str| -> Result<Option<String>, WorkError> {
         row.try_get(name)
             .map_err(|e| WorkError::store(e.to_string()))
@@ -798,7 +798,7 @@ fn branch_row_dto(row: &tokio_postgres::Row) -> Result<Value, WorkError> {
         "last_correlation_id": uuid("last_correlation_id")?,
         "reservation_status": text("reservation_status")?,
         "active_scope_kind": text("active_scope_kind")?,
-        "active_scope_id": text("active_scope_id")?,
+        "active_scope_id": uuid("active_scope_id")?,
         "active_root_task_id": uuid("active_root_task_id")?,
         "active_task_id": uuid("active_task_id")?,
         "active_pr_url": text("active_pr_url")?,
@@ -982,7 +982,7 @@ fn build_workflow_store(
         config: coordinator_config(config),
         catalog: Box::new(config.clone()),
         tx_factory: Box::new(pg_workflow_tx_factory(config, pg)),
-        decisions: Box::new(PgWorkflowDecisions::new(pg_work_store(config, pg))),
+        decisions: Box::new(PgWorkflowDecisions::new(pg_work_store(config, pg)?)),
         native_policy_matches: Box::new(forge_work::work_config::native_policy_matches),
         retry_events_enabled: true,
         execution_policy: Some(Box::new(execution_policy)),
@@ -1082,6 +1082,7 @@ impl forge_work_publication::delivery_repair::RepairSnapshotsPort for RepairSnap
 
 struct RepairSubmit {
     service: Arc<WorkApiService>,
+    pg: PgConfig,
 }
 
 impl forge_work_publication::delivery_repair::RepairSubmitPort for RepairSubmit {
@@ -1090,6 +1091,11 @@ impl forge_work_publication::delivery_repair::RepairSubmitPort for RepairSubmit 
         submit: &forge_work_publication::delivery_repair::RepairSubmit,
     ) -> Result<Value, WorkError> {
         let command = forge_work::work_api::WorkSubmit {
+            delivery_admission: submit
+                .delivery_admission
+                .as_ref()
+                .map(forge_work::work_requests::DeliveryAdmission::from_value)
+                .transpose()?,
             project_alias: submit.project_alias.clone(),
             base_revision: submit.base_revision.clone(),
             mode: submit.mode.clone(),
@@ -1110,12 +1116,21 @@ impl forge_work_publication::delivery_repair::RepairSubmitPort for RepairSubmit 
             forge_work::work_api::WorkCommand::Submit(command),
             None,
         )?;
-        let mut event = body.get("event").cloned().unwrap_or(Value::Null);
-        if let Some(map) = event.as_object_mut() {
-            map.remove("kind");
-            map.remove("request_id");
-        }
-        Ok(event)
+        // The public V1 response intentionally omits private audit fields.
+        // The ready port must finish with the immutable queued receipt that
+        // the same admission transaction already bound to this operation.
+        let task = body["event"]["task_id"]
+            .as_str()
+            .and_then(|text| Uuid::parse_str(text).ok())
+            .ok_or_else(|| WorkError::store("Repair admission returned no task"))?;
+        let mut session = PgSession::connect(self.pg.clone()).map_err(work_err)?;
+        session
+            .call_json(
+                "SELECT e.payload FROM forge_agent.coding_events e JOIN forge_agent.coding_tasks t ON (t.owner_id,t.project_alias,t.id)=(e.owner_id,e.project_alias,e.task_id) WHERE e.owner_id=$1 AND e.project_alias=$2 AND e.task_id=$3 AND e.sequence=1 AND e.event_kind='queued' AND t.idempotency_key=$4",
+                &[&self.pg.owner, &submit.project_alias, &task, &submit.idempotency_key],
+            )
+            .map_err(work_err)?
+            .ok_or_else(|| WorkError::store("Repair admission queued receipt unavailable"))
     }
 }
 
@@ -1127,7 +1142,18 @@ fn build_delivery_repair(
     let repair_config = forge_work_publication::delivery_repair::DeliveryRepairConfig {
         delivery_enabled: config.delivery_enabled,
         delivery_repair_projects: config.delivery_repair_projects.iter().cloned().collect(),
-        project_workflows: config.project_workflows.clone(),
+        project_workflows: config
+            .project_workflows
+            .iter()
+            .map(|(project, policy)| {
+                (
+                    project.clone(),
+                    config
+                        .delivery_repair_workflow(project)
+                        .unwrap_or_else(|| policy.clone()),
+                )
+            })
+            .collect(),
         external_workflows: config.external_workflows.clone(),
         profiles: config
             .profiles
@@ -1146,6 +1172,7 @@ fn build_delivery_repair(
         Box::new(store),
         Box::new(RepairSubmit {
             service: Arc::clone(service),
+            pg: pg.clone(),
         }),
         "delivery-repair",
     )
@@ -1223,7 +1250,7 @@ impl WorkflowThreadStart {
     }
 }
 
-fn build_external_store(
+pub(crate) fn build_external_store(
     config: &WorkApiConfig,
     pg: &PgConfig,
 ) -> Result<Option<Rc<ExternalWorkflowStore>>, WorkError> {
@@ -1425,6 +1452,9 @@ pub struct RunnerWork {
 }
 
 pub fn create_work_service(config: &WorkApiConfig, pg: &PgConfig) -> Result<RunnerWork, WorkError> {
+    if config.owner != pg.owner {
+        return Err(WorkError::store("Runner database owner mismatch"));
+    }
     let (sender, receiver) = std::sync::mpsc::channel();
     let has_external_workflows = !config.external_workflows.is_empty();
     let external_control: Option<Arc<dyn ExternalControlPort + Send + Sync>> =
@@ -1444,9 +1474,9 @@ pub fn create_work_service(config: &WorkApiConfig, pg: &PgConfig) -> Result<Runn
     };
     let service = WorkApiService::new(
         config.clone(),
-        Arc::new(pg_work_store(config, pg)),
-        Arc::new(pg_work_store(config, pg)),
-        Arc::new(pg_work_store(config, pg)),
+        Arc::new(pg_work_store(config, pg)?),
+        Arc::new(pg_work_store(config, pg)?),
+        Arc::new(pg_work_store(config, pg)?),
         Arc::new(catalog_port),
         bridge_catalog(config),
         external_control,
@@ -1455,7 +1485,7 @@ pub fn create_work_service(config: &WorkApiConfig, pg: &PgConfig) -> Result<Runn
             owner: config.owner.clone(),
         })),
         Arc::new(PgPolicyIdentity {
-            store: pg_work_store(config, pg),
+            store: pg_work_store(config, pg)?,
         }),
     )?;
     Ok(RunnerWork {
@@ -1507,3 +1537,15 @@ pub fn create_usage_service(
     )?;
     factory.create()
 }
+
+#[cfg(all(test, feature = "test-support"))]
+#[path = "runner_repair_pg_tests.rs"]
+mod runner_repair_pg_tests;
+
+#[cfg(all(test, feature = "test-support"))]
+#[path = "runner_cicd_pg_tests.rs"]
+mod runner_cicd_pg_tests;
+
+#[cfg(all(test, feature = "test-support"))]
+#[path = "runner_list_pg_tests.rs"]
+mod runner_list_pg_tests;

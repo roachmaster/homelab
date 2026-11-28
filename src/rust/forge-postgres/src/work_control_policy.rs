@@ -18,13 +18,22 @@ pub(crate) fn ensure_review_policy(
     root_task_id: Uuid,
 ) -> Result<(), forge_work::WorkError> {
     let policy = &store.repair_policy;
+    // The durable SQL contract stores these bounded counters as integer.
+    // tokio-postgres intentionally rejects an i64 for an INT4 parameter.
+    let counter = |value| {
+        i32::try_from(value)
+            .map_err(|_| forge_work::WorkError::store("Invalid repair policy counter"))
+    };
+    let max_rounds = counter(policy.max_rounds)?;
+    let max_stagnant_rounds = counter(policy.max_stagnant_rounds)?;
+    let max_infrastructure_retries = counter(policy.max_infrastructure_retries)?;
     let params: &[&(dyn ToSql + Sync)] = &[
         &store.owner,
         &project_alias,
         &policy.version,
-        &policy.max_rounds,
-        &policy.max_stagnant_rounds,
-        &policy.max_infrastructure_retries,
+        &max_rounds,
+        &max_stagnant_rounds,
+        &max_infrastructure_retries,
         &policy.required_hosted_checks,
     ];
     tx.execute_count(

@@ -7,17 +7,14 @@
 //! control first-dibs), and the response envelopes.
 //!
 //! Recorded v1 boundaries (forge-ops-design.yaml h7e):
-//! - Recipe resolution is eager here (Python resolves lazily
-//!   inside the store transaction), so an idempotent replay after
-//!   catalog drift or profile disabling can fail 503/403 where
-//!   Python replays the receipt.
+//! - Submit first probes the exact recorded intent under the normal project
+//!   lock before resolving the current catalog. Other decision recipe guards
+//!   remain eager until their exact stored control receipts are checked.
 //! - Decision receipts carry the common projection
 //!   (project/task/base_revision/revision/status) from the
 //!   ControlOutcome; Python's per-operation extras (repair's
 //!   repair_task_id/review_id, plan_decide's mode is included)
 //!   ride only where the outcome carries them.
-//! - Task/event pages ride the S0 typed shapes (no scope_counts,
-//!   no event attribution/progress projections).
 
 use std::collections::BTreeSet;
 use std::sync::atomic::AtomicBool;
@@ -186,6 +183,7 @@ pub struct ExtensionVersions {
     pub delivery: Option<i64>,
     pub retry_events: Option<i64>,
     pub event_attribution: Option<i64>,
+    pub defect_metadata: Option<i64>,
 }
 
 fn extension_version(headers: &Headers, name: &str) -> Result<Option<i64>, WorkError> {
@@ -225,13 +223,14 @@ const ROUTE_HEADERS: [&str; 4] = [
     "forge-destination",
     "forge-request-id",
 ];
-const EXTENSION_HEADERS: [&str; 3] = [
+const EXTENSION_HEADERS: [&str; 4] = [
     "forge-delivery-version",
     "forge-retry-events-version",
     "forge-event-attribution-version",
+    "forge-defect-metadata-version",
 ];
 
-/// work_api.destination: validates the three extension versions
+/// work_api.destination: validates the extension versions
 /// first (a malformed one rejects before any effect), then the
 /// shared dispatch-destination rules over the remaining headers.
 pub fn destination(headers: &Headers) -> Result<(WorkDestination, ExtensionVersions), WorkError> {
@@ -239,6 +238,7 @@ pub fn destination(headers: &Headers) -> Result<(WorkDestination, ExtensionVersi
         delivery: delivery_version(headers)?,
         retry_events: retry_events_version(headers)?,
         event_attribution: event_attribution_version(headers)?,
+        defect_metadata: extension_version(headers, "Forge-Defect-Metadata-Version")?,
     };
     let route_headers: Vec<(String, String)> = headers
         .iter()
@@ -408,6 +408,44 @@ pub fn retry_events_response(response: (u16, Value), version: Option<i64>) -> (u
         strip_key(event, "retry_event");
     }
     (status, body)
+}
+
+/// Keep pre-ABI19 browser tabs compatible with full internal task projections.
+pub fn defect_metadata_response(mut response: (u16, Value), version: Option<i64>) -> (u16, Value) {
+    if version == Some(1) {
+        return response;
+    }
+    fn legacy(task: &mut Value) {
+        if let Some(obj) = task.as_object_mut() {
+            for key in ["task_kind", "defect", "filed_defects"] {
+                obj.remove(key);
+            }
+        }
+    }
+    if let Some(event) = response.1.get_mut("event").and_then(Value::as_object_mut) {
+        match event.get("kind").and_then(Value::as_str) {
+            Some("work_opened") => {
+                if let Some(task) = event.get_mut("task") {
+                    legacy(task);
+                }
+            }
+            Some("work_listed") => {
+                if let Some(tasks) = event.get_mut("tasks").and_then(Value::as_array_mut) {
+                    tasks.iter_mut().for_each(legacy);
+                }
+            }
+            Some("work_failed")
+                if event
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .is_some_and(|reason| reason.starts_with("defect.")) =>
+            {
+                event.remove("reason");
+            }
+            _ => {}
+        }
+    }
+    response
 }
 
 /// Strips per-event attribution unless version 1 negotiated.
@@ -599,6 +637,7 @@ impl<'a> Body<'a> {
 
 #[derive(Debug, Clone)]
 pub struct WorkSubmit {
+    pub delivery_admission: Option<crate::work_requests::DeliveryAdmission>,
     pub project_alias: String,
     pub base_revision: String,
     pub mode: String,
@@ -851,6 +890,7 @@ pub fn decode(
                 workflow_policy_id,
                 task_kind,
                 defect,
+                delivery_admission: None,
             }))
         }
         WorkDestination::Get => {
@@ -869,7 +909,7 @@ pub fn decode(
                 &["status_filter", "limit", "cursor", "task_kind_filter"],
             )?;
             let status_filter = match body.get("status_filter") {
-                None => None,
+                None | Some(Value::Null) => None,
                 Some(value) => {
                     let text = value.as_str().ok_or_else(invalid_request)?;
                     if !VALID_STATUS_FILTERS.contains(&text) {
@@ -1503,19 +1543,12 @@ impl WorkApiService {
                     },
                 )? {
                     WorkResponse::Tasks(page) => {
-                        let tasks: Vec<Value> = page.items.iter().map(summary_dict).collect();
-                        Ok((
-                            200,
-                            envelope(
-                                "work_listed",
-                                correlation,
-                                json!({
-                                    "project_alias": project_alias,
-                                    "tasks": tasks,
-                                    "next_cursor": page.next_cursor.map(|c| c.to_string()),
-                                }),
-                            ),
-                        ))
+                        let tasks: Vec<Value> = page.items.iter().map(list_summary_dict).collect();
+                        let mut payload = json!({"project_alias":project_alias,"tasks":tasks,"next_cursor":page.next_cursor.map(|c|c.to_string())});
+                        if let Some(counts) = page.scope_counts {
+                            payload["scope_counts"] = counts.to_value();
+                        }
+                        Ok((200, envelope("work_listed", correlation, payload)))
                     }
                     _ => Err(unavailable()),
                 }
@@ -1550,6 +1583,8 @@ impl WorkApiService {
                                     "project_alias": project_alias,
                                     "task_id": task_id.to_string(),
                                     "events": events,
+                                    "status": page.status,
+                                    "revision": page.revision,
                                     "next_sequence": page.next_after,
                                 }),
                             ),
@@ -1603,7 +1638,7 @@ impl WorkApiService {
                         envelope(
                             "work_cancel_recorded",
                             correlation,
-                            receipt_dict(&outcome, command.expected_revision, false),
+                            receipt_dict(&outcome, command.expected_revision, false)?,
                         ),
                     )),
                     _ => Err(unavailable()),
@@ -1667,7 +1702,7 @@ impl WorkApiService {
                         envelope(
                             "work_accepted",
                             correlation,
-                            receipt_dict(&outcome, command.expected_revision, false),
+                            receipt_dict(&outcome, command.expected_revision, false)?,
                         ),
                     )),
                     _ => Err(unavailable()),
@@ -1711,7 +1746,11 @@ impl WorkApiService {
                         envelope(
                             "work_repair_submitted",
                             correlation,
-                            receipt_dict(&outcome, command.expected_revision, false),
+                            receipt_with_extras(
+                                &outcome,
+                                command.expected_revision,
+                                &["repair_task_id", "review_id"],
+                            )?,
                         ),
                     )),
                     _ => Err(unavailable()),
@@ -1734,11 +1773,17 @@ impl WorkApiService {
                 )? {
                     WorkResponse::Control(outcome) => Ok((
                         202,
-                        envelope(
-                            "work_publication_retry_queued",
-                            correlation,
-                            receipt_dict(&outcome, command.expected_revision, false),
-                        ),
+                        envelope("work_publication_retry_queued", correlation, {
+                            let mut value = receipt_with_extras(
+                                &outcome,
+                                command.expected_revision,
+                                &["publication_id"],
+                            )?;
+                            if value.get("publication_id").is_none() {
+                                value["publication_id"] = json!(command.publication_id.to_string());
+                            }
+                            value
+                        }),
                     )),
                     _ => Err(unavailable()),
                 }
@@ -1753,7 +1798,7 @@ impl WorkApiService {
                     stage_id,
                     view,
                     cursor,
-                    limit_bytes: _,
+                    limit_bytes,
                 },
             ) => {
                 self.require_project(&project_alias)?;
@@ -1768,6 +1813,7 @@ impl WorkApiService {
                         view,
                         cursor_token: cursor,
                         delivery_enabled: self.config.delivery_enabled,
+                        limit_bytes,
                     },
                 )? {
                     WorkResponse::StageLog(view) => Ok((
@@ -1776,9 +1822,11 @@ impl WorkApiService {
                             "work_cicd_stage_log_page",
                             correlation,
                             json!({
-                                "stage_id": view.stage_id,
-                                "content": view.content,
-                                "next_cursor": view.next_cursor,
+                                "project_alias":view.project_alias,"task_id":view.task_id.to_string(),"correlation_id":view.correlation_id.to_string(),"action_id":view.action_id.to_string(),
+                                "stage_id": view.stage_id,"view":view.view,
+                                "content": view.content,"truncated":view.truncated,"total_bytes":view.total_bytes,"byte_offset":view.byte_offset,
+                                "next_cursor": view.next_cursor,"prev_cursor":view.prev_cursor,
+                                "tests_passed":view.tests_passed,"tests_failed":view.tests_failed,"tests_skipped":view.tests_skipped,"test_cases":view.test_cases,"error_excerpt":view.error_excerpt,
                             }),
                         ),
                     )),
@@ -1797,8 +1845,50 @@ impl WorkApiService {
         if self.config.profile(&command.agent_profile).is_none() {
             return Err(rejected_reason(403, "denied", "profile_not_granted"));
         }
+        let actor = if command.auto_repair {
+            Actor::new(ActorKind::Coordinator, "forge-coordinator")
+        } else {
+            self.operator()
+        };
+        let mut request = SubmitRequest {
+            workflow_policy_id: command.workflow_policy_id,
+            delivery_admission: command.delivery_admission.clone(),
+            project_alias: command.project_alias.clone(),
+            base_revision: command.base_revision.clone(),
+            mode: command.mode.clone(),
+            agent_profile: command.agent_profile.clone(),
+            recipe_digest: String::new(),
+            prompt: command.prompt.clone(),
+            acceptance_criteria: command.acceptance_criteria.clone(),
+            idempotency_key: command.idempotency_key.clone(),
+            auto_repair: command.auto_repair,
+            workflow_policy_digest: command.workflow_policy_digest.clone(),
+            workflow_snapshot: None,
+            actor,
+            task_kind: command.task_kind.clone(),
+            defect: command.defect.clone(),
+        };
+        match self.call(correlation, WorkPayload::SubmitReplay(request.clone()))? {
+            WorkResponse::Replay(Some(outcome)) => {
+                return submitted_response(correlation, &outcome)
+            }
+            WorkResponse::Replay(None) => {}
+            _ => return Err(unavailable()),
+        }
         let recipe = self.resolve_for_submit(command)?;
-        let snapshot = self.config.workflow_snapshot(
+        let repair_config = command
+            .delivery_admission
+            .as_ref()
+            .map(|_| {
+                self.config.delivery_submission_config(
+                    &command.project_alias,
+                    &command.agent_profile,
+                    command.workflow_policy_digest.as_deref(),
+                )
+            })
+            .transpose()?;
+        let selected_config = repair_config.as_ref().unwrap_or(&self.config);
+        let snapshot = selected_config.workflow_snapshot(
             &command.project_alias,
             &command.mode,
             &command.agent_profile,
@@ -1809,47 +1899,10 @@ impl WorkApiService {
                     .policy_identity(project, kind, snapshot)
             },
         )?;
-        let actor = if command.auto_repair {
-            Actor::new(ActorKind::Coordinator, "forge-coordinator")
-        } else {
-            self.operator()
-        };
-        match self.call(
-            correlation,
-            WorkPayload::Submit(SubmitRequest {
-                project_alias: command.project_alias.clone(),
-                base_revision: command.base_revision.clone(),
-                mode: command.mode.clone(),
-                agent_profile: command.agent_profile.clone(),
-                recipe_digest: recipe.digest,
-                prompt: command.prompt.clone(),
-                acceptance_criteria: command.acceptance_criteria.clone(),
-                idempotency_key: command.idempotency_key.clone(),
-                auto_repair: command.auto_repair,
-                workflow_policy_digest: command.workflow_policy_digest.clone(),
-                workflow_snapshot: snapshot,
-                actor,
-                task_kind: command.task_kind.clone(),
-                defect: command.defect.clone(),
-            }),
-        )? {
-            WorkResponse::Control(outcome) => {
-                let task = &outcome.task;
-                Ok((
-                    202,
-                    envelope(
-                        "work_submitted",
-                        correlation,
-                        json!({
-                            "task_id": task.task_id.to_string(),
-                            "project_alias": task.project_alias,
-                            "revision": task.revision,
-                            "status": task.status,
-                            "recipe_digest": task.recipe_digest,
-                        }),
-                    ),
-                ))
-            }
+        request.recipe_digest = recipe.digest;
+        request.workflow_snapshot = snapshot;
+        match self.call(correlation, WorkPayload::Submit(request))? {
+            WorkResponse::Control(outcome) => submitted_response(correlation, &outcome),
             _ => Err(unavailable()),
         }
     }
@@ -1859,7 +1912,19 @@ impl WorkApiService {
         self.external_guard(&command.project_alias, command.task_id)?;
         if let Some(native) = &self.native_control {
             if let Some(receipt) = native.resume(command)? {
-                return Ok((202, envelope("work_resumed", correlation, receipt)));
+                return Ok((
+                    202,
+                    envelope(
+                        "work_resumed",
+                        correlation,
+                        recorded_receipt(
+                            &receipt,
+                            (&command.project_alias, command.task_id),
+                            Some(command.expected_revision),
+                            true,
+                        )?,
+                    ),
+                ));
             }
         }
         if self.config.profile(&command.agent_profile).is_none() {
@@ -1894,7 +1959,7 @@ impl WorkApiService {
                 envelope(
                     "work_resumed",
                     correlation,
-                    receipt_dict(&outcome, command.expected_revision, true),
+                    receipt_dict(&outcome, command.expected_revision, true)?,
                 ),
             )),
             _ => Err(unavailable()),
@@ -1955,11 +2020,19 @@ impl WorkApiService {
                 } else {
                     202
                 };
-                let mut fields = receipt_dict(&outcome, command.expected_revision, false)
+                let mut fields = receipt_dict(&outcome, command.expected_revision, false)?
                     .as_object()
                     .cloned()
                     .unwrap_or_default();
-                fields.insert("mode".to_string(), json!(outcome.task.mode));
+                fields.insert(
+                    "mode".to_string(),
+                    outcome
+                        .recorded_receipt
+                        .as_ref()
+                        .and_then(|r| r.get("mode"))
+                        .cloned()
+                        .unwrap_or_else(|| json!(outcome.task.mode)),
+                );
                 Ok((
                     status,
                     envelope("work_plan_decided", correlation, Value::Object(fields)),
@@ -1978,7 +2051,17 @@ impl WorkApiService {
         self.external_guard(&command.project_alias, command.task_id)?;
         if let Some(native) = &self.native_control {
             if let Some(receipt) = native.review_decide(command)? {
-                return Ok((202, envelope("work_review_decided", correlation, receipt)));
+                let mut value = recorded_receipt(
+                    &receipt,
+                    (&command.project_alias, command.task_id),
+                    Some(command.expected_revision),
+                    false,
+                )?;
+                append_receipt_extras(&mut value, &receipt, &["review_id", "repair_task_id"])?;
+                if value["review_id"].as_str().is_none() {
+                    return Err(unavailable());
+                }
+                return Ok((202, envelope("work_review_decided", correlation, value)));
             }
         }
         let decision = match command.decision.as_str() {
@@ -2017,15 +2100,52 @@ impl WorkApiService {
         )? {
             WorkResponse::Control(outcome) => Ok((
                 202,
-                envelope(
-                    "work_review_decided",
-                    correlation,
-                    receipt_dict(&outcome, command.expected_revision, false),
-                ),
+                envelope("work_review_decided", correlation, {
+                    let mut value = receipt_with_extras(
+                        &outcome,
+                        command.expected_revision,
+                        &["review_id", "repair_task_id"],
+                    )?;
+                    if value.get("review_id").is_none() {
+                        value["review_id"] = json!(command.review_id.to_string());
+                    }
+                    value
+                }),
             )),
             _ => Err(unavailable()),
         }
     }
+}
+
+fn submitted_response(
+    correlation: &str,
+    outcome: &ControlOutcome,
+) -> Result<(u16, Value), WorkError> {
+    let task = &outcome.task;
+    let receipt = if let Some(receipt) = &outcome.recorded_receipt {
+        recorded_receipt(receipt, (&task.project_alias, task.task_id), None, true)?
+    } else {
+        json!({"task_id":task.task_id.to_string(),"project_alias":task.project_alias,"revision":task.revision,"status":task.status,"recipe_digest":task.recipe_digest})
+    };
+    Ok((202, envelope("work_submitted", correlation, receipt)))
+}
+
+fn list_summary_dict(summary: &TaskSummary) -> Value {
+    let mut value = summary_dict(summary);
+    for (key, field) in [
+        ("updated_at", summary.updated_at.as_ref().map(|v| json!(v))),
+        (
+            "workflow_enabled",
+            summary.workflow_enabled.map(|v| json!(v)),
+        ),
+        ("delivery", summary.delivery.clone()),
+        ("retry_event", summary.retry_event.clone()),
+    ] {
+        if let Some(field) = field {
+            value[key] = field;
+        }
+    }
+    value
 }
 
 fn summary_dict(summary: &TaskSummary) -> Value {
@@ -2062,23 +2182,112 @@ fn event_dict(event: &EventView) -> Value {
     let mut map = Map::new();
     map.insert("sequence".to_string(), json!(event.sequence));
     map.insert("kind".to_string(), json!(event.kind.as_str()));
-    if let Some(actor) = &event.actor {
-        map.insert(
-            "actor".to_string(),
-            json!({"kind": actor.kind.as_str(), "id": actor.id}),
-        );
+    map.insert("event_id".into(), json!(event.event_id.to_string()));
+    map.insert(
+        "correlation_id".into(),
+        json!(event.correlation_id.to_string()),
+    );
+    if let Some(fields) = event.public.as_object() {
+        for (key, value) in fields {
+            map.insert(key.clone(), value.clone());
+        }
     }
-    if let Some(cause) = &event.cause {
-        map.insert("cause".to_string(), json!(cause));
-    }
-    map.insert("payload".to_string(), event.payload.clone());
     map.insert("created_at".to_string(), json!(event.created_at));
     Value::Object(map)
 }
 
 /// The common decision-receipt projection: Python's receipts name
 /// the caller's expected revision "base_revision".
-fn receipt_dict(outcome: &ControlOutcome, expected_revision: i64, with_recipe: bool) -> Value {
+fn recorded_receipt(
+    receipt: &Value,
+    identity: (&str, Uuid),
+    expected: Option<i64>,
+    with_recipe: bool,
+) -> Result<Value, WorkError> {
+    let valid = receipt["project_alias"].as_str() == Some(identity.0)
+        && receipt["task_id"].as_str() == Some(identity.1.to_string().as_str())
+        && receipt["revision"]
+            .as_i64()
+            .is_some_and(|n| (1..=MAX_REVISION).contains(&n))
+        && receipt["status"].as_str().is_some_and(|status| {
+            matches!(
+                status,
+                "queued"
+                    | "running"
+                    | "cancel_requested"
+                    | "awaiting_review"
+                    | "completed"
+                    | "failed"
+                    | "cancelled"
+                    | "needs_reconcile"
+                    | "quota_blocked"
+                    | "blocked_auth"
+                    | "blocked_permission"
+            )
+        })
+        && expected.is_none_or(|expected| receipt["base_revision"].as_i64() == Some(expected))
+        && (!with_recipe
+            || receipt["recipe_digest"]
+                .as_str()
+                .is_some_and(|digest| is_hex(digest, 64)));
+    if !valid {
+        return Err(unavailable());
+    }
+    let mut keys = vec!["project_alias", "task_id", "revision", "status"];
+    if expected.is_some() {
+        keys.push("base_revision");
+    }
+    if with_recipe {
+        keys.push("recipe_digest");
+    }
+    Ok(restrict_receipt(receipt, &keys))
+}
+
+fn append_receipt_extras(
+    result: &mut Value,
+    receipt: &Value,
+    extras: &[&str],
+) -> Result<(), WorkError> {
+    for key in extras {
+        if let Some(value) = receipt.get(*key) {
+            if !value.is_null()
+                && !value
+                    .as_str()
+                    .is_some_and(|s| Uuid::parse_str(s).is_ok_and(|id| id.to_string() == s))
+            {
+                return Err(unavailable());
+            }
+            result[*key] = value.clone();
+        }
+    }
+    Ok(())
+}
+
+fn receipt_with_extras(
+    outcome: &ControlOutcome,
+    expected: i64,
+    extras: &[&str],
+) -> Result<Value, WorkError> {
+    let mut result = receipt_dict(outcome, expected, false)?;
+    if let Some(receipt) = &outcome.recorded_receipt {
+        append_receipt_extras(&mut result, receipt, extras)?;
+    }
+    Ok(result)
+}
+
+fn receipt_dict(
+    outcome: &ControlOutcome,
+    expected_revision: i64,
+    with_recipe: bool,
+) -> Result<Value, WorkError> {
+    if let Some(receipt) = &outcome.recorded_receipt {
+        return recorded_receipt(
+            receipt,
+            (&outcome.task.project_alias, outcome.task.task_id),
+            Some(expected_revision),
+            with_recipe,
+        );
+    }
     let task = &outcome.task;
     let mut map = Map::new();
     map.insert("project_alias".to_string(), json!(task.project_alias));
@@ -2089,7 +2298,7 @@ fn receipt_dict(outcome: &ControlOutcome, expected_revision: i64, with_recipe: b
     if with_recipe {
         map.insert("recipe_digest".to_string(), json!(task.recipe_digest));
     }
-    Value::Object(map)
+    Ok(Value::Object(map))
 }
 
 fn restrict_receipt(receipt: &Value, keys: &[&str]) -> Value {
@@ -2132,6 +2341,69 @@ mod tests {
             filed_defects: Vec::new(),
             workflow_required: None,
             workflow_phase: None,
+            updated_at: None,
+            workflow_enabled: None,
+            delivery: None,
+            retry_event: None,
+        }
+    }
+
+    #[test]
+    fn list_activity_fields_do_not_leak_into_detail_summary() {
+        let mut item = summary();
+        item.updated_at = Some("2026-11-28T00:00:00Z".into());
+        item.workflow_enabled = Some(false);
+        item.delivery = Some(json!({"state":"queued"}));
+        item.retry_event = Some(json!({"remaining":2}));
+        let listed = list_summary_dict(&item);
+        assert_eq!(
+            listed["updated_at"],
+            item.updated_at.as_ref().unwrap().as_str()
+        );
+        assert_eq!(listed["workflow_enabled"], false);
+        assert_eq!(listed["delivery"], item.delivery.as_ref().unwrap().clone());
+        assert_eq!(
+            listed["retry_event"],
+            item.retry_event.as_ref().unwrap().clone()
+        );
+        for key in ["updated_at", "workflow_enabled", "delivery", "retry_event"] {
+            assert!(summary_dict(&item).get(key).is_none());
+            assert!(list_summary_dict(&summary()).get(key).is_none());
+        }
+    }
+
+    #[test]
+    fn durable_receipt_projection_preserves_original_values_and_private_audit() {
+        let mut outcome = ControlOutcome {
+            receipt_id: Uuid::new_v4(),
+            task: summary(),
+            replayed: true,
+            recorded_receipt: None,
+        };
+        outcome.task.status = "completed".into();
+        outcome.task.revision = 8;
+        let receipt = json!({"project_alias":"homelab","task_id":outcome.task.task_id.to_string(),"base_revision":1,"revision":2,"status":"queued","recipe_digest":"b".repeat(64),"review_id":Uuid::new_v4().to_string(),"actor":{"kind":"operator","id":"private"},"source_proof":{"private":"retained"}});
+        outcome.recorded_receipt = Some(receipt.clone());
+        let projected = receipt_dict(&outcome, 1, true).unwrap();
+        assert_eq!(projected["revision"], 2);
+        assert_eq!(projected["status"], "queued");
+        for private in ["actor", "source_proof", "review_id"] {
+            assert!(projected.get(private).is_none());
+        }
+        let reviewed = receipt_with_extras(&outcome, 1, &["review_id"]).unwrap();
+        assert_eq!(reviewed["review_id"], receipt["review_id"]);
+        for key in [
+            "task_id",
+            "project_alias",
+            "base_revision",
+            "revision",
+            "status",
+            "recipe_digest",
+        ] {
+            let mut altered = receipt.clone();
+            altered[key] = json!("invalid-bound-field");
+            outcome.recorded_receipt = Some(altered);
+            assert!(receipt_dict(&outcome, 1, true).is_err(), "{key}");
         }
     }
 
@@ -2160,6 +2432,7 @@ mod tests {
             Ok(TaskPage {
                 items: vec![summary()],
                 next_cursor: None,
+                scope_counts: None,
             })
         }
         fn events(
@@ -2202,6 +2475,7 @@ mod tests {
                 receipt_id: Uuid::from_u128(9),
                 task: summary(),
                 replayed: false,
+                recorded_receipt: None,
             })
         }
         fn cancel(&self, _request: &CancelRequest) -> Result<ControlOutcome, WorkError> {
@@ -2328,12 +2602,37 @@ mod tests {
         let (_, versions) = destination(&good).expect("route");
         assert_eq!(versions.delivery, Some(1));
 
+        let name = "Forge-Defect-Metadata-Version".to_string();
+        good.push((name.clone(), "1".to_string()));
+        assert_eq!(destination(&good).unwrap().1.defect_metadata, Some(1));
+        good.push((name.clone(), "1".to_string()));
+        assert!(destination(&good).is_err());
+        let mut unknown = headers("ide.work.get");
+        unknown.push((name, "2".to_string()));
+        assert!(destination(&unknown).is_err());
+
         let mut extra = headers("ide.work.submit");
         extra.push(("Forge-Other".to_string(), "1".to_string()));
         assert!(destination(&extra).is_err());
         assert!(matches!(
             destination(&headers("ide.work.bogus")),
             Err(WorkError::Rejected { status: 404, .. })
+        ));
+    }
+
+    #[test]
+    fn raw_list_accepts_explicit_null_filters_from_older_clients() {
+        let list = decode_body(
+            "work_list",
+            json!({"status_filter":null,"task_kind_filter":null}),
+        );
+        assert!(matches!(
+            decode(WorkDestination::List, "req-1", &list),
+            Ok(WorkCommand::List {
+                status_filter: None,
+                task_kind_filter: None,
+                ..
+            })
         ));
     }
 
@@ -2437,6 +2736,37 @@ mod tests {
         assert_eq!(body, json!({"error": "invalid_request"}));
     }
 
+    #[test]
+    fn existing_and_new_portals_negotiate_defects_on_success_and_failure() {
+        let opened = json!({"event":{"kind":"work_opened","task":{"title":"T","task_kind":"defect","defect":{},"filed_defects":[]}}});
+        assert_eq!(
+            defect_metadata_response((200, opened.clone()), Some(1)).1,
+            opened
+        );
+        assert_eq!(
+            defect_metadata_response((200, opened), None).1["event"]["task"],
+            json!({"title":"T"})
+        );
+        let listed =
+            json!({"event":{"kind":"work_listed","tasks":[{"title":"T","task_kind":"feature"}]}});
+        assert_eq!(
+            defect_metadata_response((200, listed), None).1["event"]["tasks"],
+            json!([{"title":"T"}])
+        );
+        for (reason, present) in [("defect.task_kind_filter", false), ("workflow.stale", true)] {
+            let failed = json!({"event":{"kind":"work_failed","reason":reason}});
+            assert_eq!(
+                defect_metadata_response((400, failed.clone()), Some(1)).1,
+                failed
+            );
+            assert_eq!(
+                defect_metadata_response((400, failed), None).1["event"]
+                    .get("reason")
+                    .is_some(),
+                present
+            );
+        }
+    }
     #[test]
     fn wrappers_strip_unnegotiated_projections() {
         let listed = (

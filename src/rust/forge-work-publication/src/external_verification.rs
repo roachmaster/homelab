@@ -7,7 +7,6 @@ use forge_work::external_step::ExternalVerificationPort;
 use serde_json::{json, Value};
 
 use crate::ci_contract::CiGateContractFactory;
-use crate::ci_phases::EVENT_PROFILE;
 use crate::verification::protected_retry_observation;
 
 fn is_int(value: &Value) -> bool {
@@ -91,7 +90,7 @@ impl ExternalVerificationPort for CiGateVerification {
             );
         }
         let digest = receipt["check_receipt_sha256"].as_str().unwrap();
-        if profile != EVENT_PROFILE {
+        if !crate::ci_phases::is_event_profile(profile) {
             // Historical V1/V2 evidence cannot close a compile/test
             // episode.
             return Ok(json!({

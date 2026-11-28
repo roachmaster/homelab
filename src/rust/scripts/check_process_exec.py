@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # path relative to src/rust -> (max_count, reason)
 ALLOWED = {
     "forge-work-worker/src/process_exec.rs": (1, "canonical bounded process-exec IoClient adapter"),
+    "forge-work-worker/src/bin/forge-attempt-checks.rs": (1, "unprivileged PID-1 streaming check process with its own process group"),
     "forge-work-worker/src/runner.rs": (1, "streaming coding-agent CLI launcher with process_group(0)"),
     "forge-work-worker/src/usage_composition.rs": (1, "MetadataProcessFactory streaming launcher with uid/gid"),
     "forge-work-publication/src/delivery_ops.rs": (1, "bounded streaming stdin/stdout actor launcher with process_group(0)"),
@@ -27,6 +28,8 @@ ALLOWED = {
     "forge-jenkins/src/bin/forge-jenkins-client-token.rs": (1, "CLI binary"),
     "forge-jenkins/src/bin/forge-jenkins-connect-github.rs": (2, "CLI binary"),
     "forge-portal-release-actor/src/system.rs": (1, "standalone release-actor system adapter"),
+    "forge-ci-verifier/src/process.rs": (1, "credential-free segregated candidate supervisor with bounded dual pipes"),
+    "forge-ci-verifier/src/child.rs": (2, "private namespace launcher and fixed executable lookup"),
     "forge-postgres/src/pg_fixture.rs": (2, "PostgreSQL test fixture helper"),
     "forge-postgres/src/publication_composition.rs": (1, "host composition root"),
     "forge-postgres/src/worker_composition.rs": (1, "host composition root"),

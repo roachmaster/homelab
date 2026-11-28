@@ -71,41 +71,69 @@ pub fn run_env(
     let mut child = command
         .spawn()
         .map_err(|error| format!("{}: {error}", argv[0]))?;
+    // Drain both pipes while the child is running. The policy descriptor can
+    // exceed a kernel pipe buffer. Bound retained output independently so a
+    // full or inherited pipe cannot stall or exhaust the provisioning process.
+    fn drain(
+        mut input: impl std::io::Read + Send + 'static,
+    ) -> std::sync::mpsc::Receiver<std::io::Result<Vec<u8>>> {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            const MAX: usize = 4 * 1024 * 1024;
+            let result = (|| {
+                let mut bytes = Vec::new();
+                let mut buffer = [0u8; 8192];
+                let mut overflow = false;
+                loop {
+                    let n = input.read(&mut buffer)?;
+                    if n == 0 {
+                        break;
+                    }
+                    let keep = n.min(MAX - bytes.len());
+                    bytes.extend_from_slice(&buffer[..keep]);
+                    overflow |= keep < n;
+                }
+                if overflow {
+                    return Err(std::io::Error::other("Provisioning output exceeds limit"));
+                }
+                Ok(bytes)
+            })();
+            let _ = send.send(result);
+        });
+        receive
+    }
+    let stdout = drain(child.stdout.take().ok_or("Missing stdout pipe")?);
+    let stderr = drain(child.stderr.take().ok_or("Missing stderr pipe")?);
     let deadline = Instant::now() + Duration::from_secs(timeout_seconds);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                use std::io::Read;
-                if let Some(mut pipe) = child.stdout.take() {
-                    let _ = pipe.read_to_end(&mut stdout);
-                }
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = pipe.read_to_end(&mut stderr);
-                }
-                if status.success() {
-                    return Ok(String::from_utf8_lossy(&stdout).into_owned());
-                }
-                return Err(format!(
-                    "Command {} exited with {status}: {}",
-                    argv.join(" "),
-                    String::from_utf8_lossy(&stderr)
-                        .chars()
-                        .take(512)
-                        .collect::<String>()
-                ));
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("Command {} timed out", argv.join(" ")));
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => return Err(error.to_string()),
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            break status;
         }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("Command {} timed out", argv[0]));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let receive = |pipe: std::sync::mpsc::Receiver<std::io::Result<Vec<u8>>>| {
+        pipe.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|_| "Provisioning output timed out".to_string())?
+            .map_err(|e| e.to_string())
+    };
+    let output = receive(stdout)?;
+    let diagnostic = receive(stderr)?;
+    if status.success() {
+        Ok(String::from_utf8_lossy(&output).into_owned())
+    } else {
+        Err(format!(
+            "Command {} exited with {status}: {}",
+            argv[0],
+            String::from_utf8_lossy(&diagnostic)
+                .chars()
+                .take(512)
+                .collect::<String>()
+        ))
     }
 }
 

@@ -9,9 +9,8 @@
 //! keep the acquire flags (acquired/reentrant) that the typed
 //! branch adapter's row projection drops.
 //!
-//! No live adapter smoke test exists for these calls (the
-//! muse_events role has no USAGE on these schemas); the SQL is
-//! grounded on migrations 0022 + 0041 and the Python stores.
+//! The external delivery lease and receipt round trip is exercised against
+//! disposable PostgreSQL as the real scoped reconciler role.
 
 use forge_work_publication::external_delivery::{
     BranchUpsert, DeliveryStoreError, ExternalDeliveryLease, ExternalDeliveryStorePort,
@@ -80,7 +79,9 @@ impl PgExternalDeliveryStore {
             .map(|index| format!("${index}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let sql = format!("SELECT {schema}.{name}({placeholders})");
+        // Some lease and branch calls return SQL booleans; expose their actual
+        // scalar/record shape through the common JSON response port.
+        let sql = format!("SELECT to_jsonb({schema}.{name}({placeholders}))");
         session
             .in_tx(|tx| {
                 tx.call_void("SET LOCAL lock_timeout='5s'", &[])?;

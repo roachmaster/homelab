@@ -7,8 +7,8 @@
 //! increments on these ports.
 
 pub mod agent_branch;
+pub mod attempt_helper;
 pub mod branch;
-pub mod build_info;
 pub mod cli_argv;
 pub mod cli_parser;
 pub mod cli_transport;
@@ -33,7 +33,6 @@ pub mod ports_worker;
 pub mod process;
 pub mod process_exec;
 pub mod progress;
-pub mod progress_helper;
 pub mod provider_auth;
 pub mod provider_events;
 pub mod quota;

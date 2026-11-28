@@ -96,7 +96,8 @@ pub(crate) fn review_decide(
                 request.task_id,
                 revision,
                 true,
-            );
+            )
+            .map(|outcome| outcome.with_recorded_receipt(replay.clone()));
         }
         let not_reviewable = || forge_work::WorkError::rejected(409, "not_reviewable");
         if task.status != "awaiting_review" {
@@ -213,9 +214,8 @@ pub(crate) fn review_decide(
                     .recipe_digest
                     .as_deref()
                     .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
-                let recipe_document =
-                    pinned_recipe_for(tx, &store.owner, &request.project_alias, digest)?
-                        .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
+                let recipe_document = pinned_recipe_for(tx, store, &request.project_alias, digest)?
+                    .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
                 if recipe_document.get("mode").and_then(Value::as_str) != Some("implement") {
                     return Err(forge_work::WorkError::rejected(503, "unavailable"));
                 }
@@ -367,5 +367,6 @@ pub(crate) fn review_decide(
             request.expected_revision + 1,
             false,
         )
+        .map(|outcome| outcome.with_recorded_receipt(result.clone()))
     })
 }

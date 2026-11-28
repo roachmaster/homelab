@@ -6,7 +6,7 @@ After=postgresql@16-main.service
 [Service]
 User=forge_agent
 Group=forge_agent
-ExecStart=/usr/bin/python3 -B /opt/homelab-forge/agent-runner/runner.py
+ExecStart=/opt/homelab-forge/event-current/bin/forge-runner
 Environment=FORGE_RUNNER_MODE=dispatch
 LoadCredential=runner.token:/etc/homelab-forge/agent-runner/token
 Restart=on-failure

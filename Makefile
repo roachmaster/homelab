@@ -144,16 +144,22 @@ ci:
 	$(MAKE) ui-check
 	$(MAKE) ui-qa-check
 
-# Main pipeline build (docs/architecture/ci-pipeline.md): the branch gates
-# plus the out-of-memory stages — headless browser QA and the backend
-# suites (which spin up disposable PostgreSQL clusters). Runs only on
-# main; branches gate on `make ci` alone. Sequential on purpose: the
-# stages share the build output directory.
+# Run the backend crates against this checkout. The main gate requires the
+# disposable PostgreSQL fixture to start and verify the candidate SQL.
 backend-suites:
-	@python3 -B deploy/mission-control/backend-suites.py
+	@set -eu; case "$$SCOPE" in \
+	  branch) export FORGE_DISABLE_DISPOSABLE_POSTGRES=1; set -- ;; \
+	  main|all) export FORGE_REQUIRE_DISPOSABLE_POSTGRES=1; set -- --all-features ;; \
+	  *) echo 'backend-suites requires SCOPE=branch or SCOPE=main' >&2; exit 2 ;; \
+	esac; \
+	cargo test --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked "$$@" \
+		-p forge-host -p forge-work -p forge-work-worker -p forge-work-publication -p forge-postgres \
+		-p forge-portal-release-actor -p forge-jenkins -p forge-usage -p forge-agent-driver \
+		-p forge-services -p forge-studio -p forge-mcp-db -p forge-ci-verifier
 
 ci-preflight:
-	@python3 -B deploy/mission-control/backend-suites.py --scope preflight
+	@FORGE_DISABLE_DISPOSABLE_POSTGRES=1 cargo test --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --offline --locked --lib \
+		-p forge-work-publication -p forge-work-worker -p forge-jenkins -p forge-portal-release-actor -p forge-ci-verifier
 
 ci-verified:
 	$(MAKE) ci-preflight
@@ -162,7 +168,7 @@ ci-verified:
 ci-main:
 	$(MAKE) ci-verified
 	$(MAKE) ui-qa
-	$(MAKE) backend-suites
+	$(MAKE) backend-suites SCOPE=main
 
 session: ARGS =
 

@@ -38,7 +38,7 @@ project.addProperty(new ParametersDefinitionProperty([
     new StringParameterDefinition('FORGE_CANDIDATE_COMMIT', '', 'Prepared exact candidate commit'),
     new StringParameterDefinition('FORGE_CANDIDATE_TREE', '', 'Prepared exact candidate tree'),
     new StringParameterDefinition('FORGE_EXPECTED_MAIN', '', 'Integration base'),
-    new StringParameterDefinition('FORGE_GATE_MANIFEST', '', 'Fixed gate manifest SHA256'),
+    new StringParameterDefinition('FORGE_GATE_MANIFEST', '', 'Gate contract for the selected verification profile'),
     new StringParameterDefinition('FORGE_CORRELATION_ID', '', 'Task correlation UUID')
 ]))
 project.getBuildersList().replaceBy([new Shell('exec /usr/bin/sudo -n -- /usr/local/libexec/forge-ci-check "$FORGE_ACTION_ID"')])

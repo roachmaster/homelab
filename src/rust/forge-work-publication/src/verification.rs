@@ -14,8 +14,6 @@ use forge_work::diagnostic::diagnostic_text;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-use crate::ci_phases::event_stage_evidence;
-
 pub const MAX_DIAGNOSTIC_BYTES: usize = 2048;
 
 /// (workflow path, check name, logical gate) triples a hosted
@@ -215,7 +213,7 @@ pub fn protected_retry_observation(
     receipt: Option<&Value>,
     receipt_digest: Option<&str>,
 ) -> Result<Option<Value>, String> {
-    if plan_profile != crate::ci_phases::EVENT_PROFILE {
+    if !crate::ci_phases::is_event_profile(plan_profile) {
         return Ok(None);
     }
     let bound = receipt
@@ -230,7 +228,14 @@ pub fn protected_retry_observation(
                 && receipt.get("verification_profile").and_then(|v| v.as_str())
                     == Some(plan_profile)
                 && (version.as_i64().is_some() || version.as_u64().is_some())
-                && version.as_i64() == Some(3)
+                && version.as_i64()
+                    == Some(
+                        if plan_profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+                            4
+                        } else {
+                            3
+                        },
+                    )
                 && receipt_digest.is_some_and(|digest| {
                     digest.len() == 64
                         && digest
@@ -247,7 +252,12 @@ pub fn protected_retry_observation(
         Value::String(text) => Some(text.as_str()),
         _ => return Err("Invalid typed phase failure reason".to_string()),
     };
-    let expected = event_stage_evidence(plan_scope, &receipt["checks"], failure)?;
+    let expected = crate::ci_phases::event_stage_evidence_for_profile(
+        plan_profile,
+        plan_scope,
+        &receipt["checks"],
+        failure,
+    )?;
     if ["failure_kind", "passed_kinds", "phase_results"]
         .iter()
         .any(|key| receipt.get(*key) != Some(&expected[*key]))

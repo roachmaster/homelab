@@ -3,4 +3,7 @@
 //! (which itself depends on the worker/publication crates), so they
 //! cannot live inside the crates they compose.
 
+pub mod gpu_proxy;
 pub mod runner_http;
+
+mod runner_inference;

@@ -94,8 +94,29 @@ impl forge_work::WorkReadPort for PgWorkStore {
                 stage_id,
                 view,
                 cursor_token,
+                limit_bytes: 32768,
             },
             delivery_enabled,
+        )
+    }
+    fn cicd_stage_log_request(
+        &self,
+        request: forge_work::work_requests::StageLogReadRequest<'_>,
+    ) -> Result<forge_work::work_types::StageLogView, forge_work::WorkError> {
+        work_common::require_project(self, request.project_alias)?;
+        work_read_cicd::cicd_stage_log(
+            self,
+            request.project_alias,
+            request.task_id,
+            request.correlation_id,
+            request.action_id,
+            crate::work_read_cicd::LogPage {
+                stage_id: request.stage_id,
+                view: request.view,
+                cursor_token: request.cursor_token,
+                limit_bytes: request.limit_bytes,
+            },
+            request.delivery_enabled,
         )
     }
 }

@@ -3,7 +3,6 @@
 //! cursors. Transport lives in http.rs; authentication is the
 //! Authenticator trait (static tokens now, DualAuth with OAuth).
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -22,15 +21,15 @@ pub const MCP_PATH: &str = "/mcp";
 pub const PRESENCE_PATH: &str = "/internal/agent-presence";
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
-const LIST_TABLES_SQL: &str = "
-SELECT table_schema, table_name, table_type FROM information_schema.tables
+const TABLES_FROM: &str = "
+FROM information_schema.tables
 WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
   AND ($1::text IS NULL OR table_schema = $1::text)
 ORDER BY table_schema, table_name
 LIMIT $2 OFFSET $3
 ";
-const DESCRIBE_SQL: &str = "
-SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns
+const COLUMNS_FROM: &str = "
+FROM information_schema.columns
 WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position
 ";
 
@@ -51,18 +50,56 @@ impl Authenticator for crate::auth::BearerTokenAuth {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResultView {
+    Compact,
+    Structured,
+    Full,
+}
+
+impl ResultView {
+    fn parse(value: Option<&Value>) -> Result<Self, &'static str> {
+        match value {
+            None => Ok(Self::Compact),
+            Some(v) => match v.as_str() {
+                Some("compact") => Ok(Self::Compact),
+                Some("structured") => Ok(Self::Structured),
+                Some("full") => Ok(Self::Full),
+                _ => Err("view must be compact, structured or full"),
+            },
+        }
+    }
+
+    fn result(self, payload: Value) -> Value {
+        match self {
+            Self::Compact => {
+                json!({"content":[{"type":"text","text":payload.to_string()}], "isError":false})
+            }
+            Self::Structured => json!({"content":[], "structuredContent":payload, "isError":false}),
+            Self::Full => json!({"content":[{"type":"text","text":payload.to_string()}],
+                                 "structuredContent":payload, "isError":false}),
+        }
+    }
+}
+
+fn view_property() -> Value {
+    json!({"type":"string","enum":["compact","structured","full"],
+           "description":"compact: JSON text (default); structured: one object; full: legacy metadata and both forms."})
+}
+
 pub fn tools_json() -> Value {
     json!([
         {
             "name": "query",
             "title": "Run a read-only SQL query",
-            "description": "Run one read-only SQL statement (SELECT, WITH, VALUES, TABLE, EXPLAIN or SHOW) against the Forge PostgreSQL database. Results are paginated: each call returns up to page_size rows and, when more rows exist, a next_cursor. To get the next page, call again with the same sql and cursor=next_cursor. Include an ORDER BY on a unique key so pages are stable. EXPLAIN and SHOW return a single page. The transaction is always rolled back.",
+            "description": "Read-only SQL. Select the fields you need. Use a unique ORDER BY for paging and pass next_cursor with the same SQL and page size.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "view": view_property(),
                     "sql": {"type": "string", "description": "A single read-only SQL statement."},
                     "page_size": {"type": "integer", "minimum": 1,
-                                  "description": "Rows per page (default 100, capped at the server maximum)."},
+                                  "description": "Rows requested. Compact pages default to at most 10."},
                     "cursor": {"type": "string",
                                "description": "next_cursor from the previous page of this same sql."},
                 },
@@ -78,7 +115,7 @@ pub fn tools_json() -> Value {
             "description": "List tables and views this server's database role can read. Paginated like query: pass next_cursor back as cursor with the same schema filter.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"schema": {"type": "string", "description": "Optional schema filter."},
+                "properties": {"view":view_property(), "schema": {"type": "string", "description": "Optional schema filter."},
                                "page_size": {"type": "integer", "minimum": 1},
                                "cursor": {"type": "string"}},
                 "additionalProperties": false,
@@ -92,12 +129,22 @@ pub fn tools_json() -> Value {
             "description": "List the columns, types and nullability of one readable table or view.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"schema": {"type": "string"}, "table": {"type": "string"}},
+                "properties": {"view":view_property(), "schema": {"type": "string"}, "table": {"type": "string"}},
                 "required": ["schema", "table"],
                 "additionalProperties": false,
             },
             "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true,
                             "openWorldHint": false},
+        },
+        {
+            "name": "get_task",
+            "description": "Read a Forge task by ID. Start with its brief. Request assignment or metadata only when needed.",
+            "inputSchema": {"type":"object","properties":{
+                "id":{"type":"string","format":"uuid"},
+                "section":{"type":"string","enum":["brief","assignment","metadata"]},
+                "view":view_property()
+            },"required":["id"],"additionalProperties":false},
+            "annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         },
     ])
 }
@@ -107,7 +154,7 @@ pub fn heartbeat_tool_json() -> Value {
         "name": "heartbeat",
         "title": "Report this authenticated agent connection",
         "description": "Record connection presence for the administrator-mapped authenticated client. Call every 60 seconds while connected; presence becomes stale after 180 seconds. This never advertises execution readiness or changes PostgreSQL.",
-        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false},
+        "inputSchema": {"type": "object", "properties": {"view":view_property()}, "additionalProperties": false},
         "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true,
                         "openWorldHint": false},
     })
@@ -115,7 +162,7 @@ pub fn heartbeat_tool_json() -> Value {
 
 fn tool_scopes(name: &str) -> Option<&'static str> {
     match name {
-        "query" | "list_tables" | "describe_table" | "heartbeat" => Some("read"),
+        "query" | "list_tables" | "describe_table" | "get_task" | "heartbeat" => Some("read"),
         _ => None,
     }
 }
@@ -349,7 +396,7 @@ impl McpApp {
                         "capabilities": {"tools": {"listChanged": false}},
                         "serverInfo": {"name": SERVER_NAME, "title": "Homelab PostgreSQL (read-only)",
                                        "version": SERVER_VERSION},
-                        "instructions": "Read-only access to the Homelab Forge PostgreSQL database. Use list_tables and describe_table to explore, then query with a single SELECT.",
+                        "instructions": "Start with get_task(id). Request section=assignment or metadata when needed. Use query for specific fields or events. Follow next_cursor for more rows.",
                     }),
                 ))
             }
@@ -412,15 +459,21 @@ impl McpApp {
         if !arguments.is_object() {
             return tool_error("arguments must be an object");
         }
+        let view =
+            match ResultView::parse(arguments.as_object_mut().unwrap().remove("view").as_ref()) {
+                Ok(view) => view,
+                Err(message) => return tool_error(message),
+            };
         let started = Instant::now();
         let Some(_slot) = self.slots.acquire(Duration::from_secs(2)) else {
             return tool_error("server is busy; retry shortly");
         };
         let outcome = match name.as_str() {
-            "query" => self.tool_query(&arguments, principal),
-            "list_tables" => self.tool_list_tables(&arguments, principal),
-            "describe_table" => self.tool_describe_table(&arguments, principal),
-            "heartbeat" => self.tool_heartbeat(&arguments, principal),
+            "query" => self.tool_query(&arguments, principal, view),
+            "list_tables" => self.tool_list_tables(&arguments, principal, view),
+            "describe_table" => self.tool_describe_table(&arguments, principal, view),
+            "get_task" => self.tool_task(&arguments, view),
+            "heartbeat" => self.tool_heartbeat(&arguments, principal, view),
             _ => unreachable!(),
         };
         let (result, status) = match outcome {
@@ -437,31 +490,39 @@ impl McpApp {
         result
     }
 
-    fn tool_heartbeat(&self, arguments: &Value, principal: &Principal) -> Result<Value, String> {
+    fn tool_heartbeat(
+        &self,
+        arguments: &Value,
+        principal: &Principal,
+        view: ResultView,
+    ) -> Result<Value, String> {
         if arguments
             .as_object()
             .is_some_and(|object| !object.is_empty())
         {
-            return Err("heartbeat accepts only an empty arguments object".to_string());
+            return Err("heartbeat accepts only an optional view".to_string());
         }
         let Some(presence) = &self.presence else {
             return Err("connection presence is not enabled".to_string());
         };
         let result = presence.heartbeat(principal).map_err(|error| error.0)?;
-        Ok(json!({
-            "content": [{"type": "text", "text": serde_json::to_string(&result).unwrap()}],
-            "structuredContent": result,
-            "isError": false,
+        Ok(view.result(if view == ResultView::Full {
+            result
+        } else {
+            json!({"state": result["state"]})
         }))
     }
 
     // --- pagination -------------------------------------------------
 
-    fn page_args(&self, arguments: &Value) -> Result<i64, ToolError> {
-        let size = arguments
-            .get("page_size")
-            .cloned()
-            .unwrap_or(Value::from(self.config.default_page_size));
+    fn page_args(&self, arguments: &Value, view: ResultView) -> Result<i64, ToolError> {
+        let size = arguments.get("page_size").cloned().unwrap_or(Value::from(
+            if view == ResultView::Full {
+                self.config.default_page_size
+            } else {
+                self.config.default_page_size.min(10)
+            },
+        ));
         match size.as_i64() {
             Some(value) if !size.is_f64() && value >= 1 => Ok(value.min(self.config.max_rows)),
             _ => Err(ToolError(
@@ -544,51 +605,109 @@ impl McpApp {
         offset: i64,
         page_size: Option<i64>,
         binding: Option<&str>,
+        view: ResultView,
     ) -> Value {
-        let limit_chars = self.config.max_cell_chars;
-        let mut data: Vec<BTreeMap<String, Value>> = rows
+        let mut data: Vec<Value> = rows
             .iter()
             .map(|row| {
-                columns
+                let cells = row
                     .iter()
-                    .cloned()
-                    .zip(row.iter().map(|cell| json_value(cell, limit_chars)))
-                    .collect()
+                    .map(|cell| json_value(cell, self.config.max_cell_chars));
+                if view == ResultView::Full {
+                    Value::Object(columns.iter().cloned().zip(cells).collect())
+                } else {
+                    Value::Array(cells.collect())
+                }
             })
             .collect();
-        let mut size_cut = false;
+        let original_len = data.len();
+        let budget = if view == ResultView::Full {
+            self.config.max_response_bytes
+        } else {
+            self.config.max_response_bytes.min(8192)
+        };
         loop {
-            let more = has_more || size_cut;
+            let more = has_more || data.len() < original_len;
             let following = offset + data.len() as i64;
             let cursor = binding
                 .filter(|_| more && following <= self.config.max_offset)
                 .map(|binding| self.make_cursor(binding, following));
-            let payload = json!({
-                "columns": columns,
-                "rows": data,
-                "row_count": data.len(),
-                "offset": offset,
-                "page_size": page_size.unwrap_or(data.len() as i64),
-                "has_more": more,
-                "next_cursor": cursor,
-                "truncated": more,
-            });
-            let text = serde_json::to_string(&payload).unwrap();
-            if text.len() <= self.config.max_response_bytes || data.len() <= 1 {
-                return json!({
-                    "content": [{"type": "text", "text": text}],
-                    "structuredContent": payload,
-                    "isError": false,
-                });
+            let payload = if view == ResultView::Full {
+                json!({
+                    "columns": columns, "rows": data, "row_count": data.len(),
+                    "offset": offset, "page_size": page_size.unwrap_or(data.len() as i64),
+                    "has_more": more, "truncated": more, "next_cursor": cursor,
+                })
+            } else {
+                let mut page = json!({"columns": columns, "rows": data});
+                if let Some(cursor) = cursor {
+                    page["next_cursor"] = json!(cursor);
+                } else if more {
+                    page["truncated"] = json!(true);
+                }
+                page
+            };
+            if payload.to_string().len() <= budget {
+                return view.result(payload);
+            }
+            if data.len() <= 1 {
+                return tool_error("One row exceeds the result budget. Select fewer fields or request a slice of a large value.");
             }
             data.truncate(data.len() / 2);
-            size_cut = true;
         }
+    }
+
+    fn tool_task(&self, arguments: &Value, view: ResultView) -> Result<Value, String> {
+        if arguments
+            .as_object()
+            .unwrap()
+            .keys()
+            .any(|k| !matches!(k.as_str(), "id" | "section"))
+        {
+            return Err("get_task accepts id, section and view".into());
+        }
+        let id = arguments["id"]
+            .as_str()
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+            .ok_or("id must be a task UUID")?;
+        let section = arguments
+            .get("section")
+            .map_or(Some("brief"), Value::as_str);
+        let fields = match section {
+            Some("brief") => "title, status, mode, agent_profile",
+            Some("assignment") => "prompt, acceptance_criteria",
+            Some("metadata") => {
+                "project_alias, base_revision, workflow_id::text, task_kind, revision"
+            }
+            _ => return Err("section must be brief, assignment or metadata".into()),
+        };
+        let query =
+            format!("SELECT {fields} FROM forge_agent.coding_tasks WHERE id = $1::text::uuid");
+        let outcome = self
+            .backend
+            .run(&query, &[Param::Text(Some(id.to_string()))], 1, 0, false)
+            .map_err(|error| error.0)?;
+        let row = outcome.rows.first().ok_or("task not found")?;
+        let result = outcome
+            .columns
+            .iter()
+            .cloned()
+            .zip(
+                row.iter()
+                    .map(|cell| json_value(cell, self.config.max_cell_chars)),
+            )
+            .collect();
+        Ok(view.result(Value::Object(result)))
     }
 
     // --- tools ------------------------------------------------------
 
-    fn tool_query(&self, arguments: &Value, principal: &Principal) -> Result<Value, String> {
+    fn tool_query(
+        &self,
+        arguments: &Value,
+        principal: &Principal,
+        view: ResultView,
+    ) -> Result<Value, String> {
         if arguments
             .as_object()
             .unwrap()
@@ -599,7 +718,7 @@ impl McpApp {
         }
         let sql = check_read_only(arguments.get("sql").and_then(Value::as_str))
             .map_err(|error: GuardError| error.0)?;
-        let page_size = self.page_args(arguments).map_err(|error| error.0)?;
+        let page_size = self.page_args(arguments, view).map_err(|error| error.0)?;
         let stripped = strip_literals(&sql).map_err(|error: GuardError| error.0)?;
         let first = first_word(&stripped).unwrap_or_default().to_lowercase();
         let pageable = PAGEABLE_FIRST.contains(&first.as_str());
@@ -629,10 +748,16 @@ impl McpApp {
             offset,
             Some(page_size),
             binding.as_deref(),
+            view,
         ))
     }
 
-    fn tool_list_tables(&self, arguments: &Value, principal: &Principal) -> Result<Value, String> {
+    fn tool_list_tables(
+        &self,
+        arguments: &Value,
+        principal: &Principal,
+        view: ResultView,
+    ) -> Result<Value, String> {
         let schema = arguments.get("schema").cloned().unwrap_or(Value::Null);
         let keys_ok = arguments
             .as_object()
@@ -642,7 +767,7 @@ impl McpApp {
         if !keys_ok || !(schema.is_null() || schema.is_string()) {
             return Err("arguments are schema (string), page_size and cursor".to_string());
         }
-        let page_size = self.page_args(arguments).map_err(|error| error.0)?;
+        let page_size = self.page_args(arguments, view).map_err(|error| error.0)?;
         let binding = self.binding("list_tables", principal, &json!([schema, page_size]));
         let offset = self
             .read_cursor(arguments.get("cursor"), &binding)
@@ -652,9 +777,15 @@ impl McpApp {
             Param::Int(page_size + 1),
             Param::Int(offset),
         ];
+        let columns = if view == ResultView::Full {
+            "table_schema, table_name, table_type"
+        } else {
+            "table_schema, table_name"
+        };
+        let sql = format!("SELECT {columns} {TABLES_FROM}");
         let outcome = self
             .backend
-            .run(LIST_TABLES_SQL, &params, page_size + 1, 0, false)
+            .run(&sql, &params, page_size + 1, 0, false)
             .map_err(|error| error.0)?;
         let has_more = outcome.rows.len() as i64 > page_size;
         let rows: Vec<Vec<Cell>> = outcome.rows.into_iter().take(page_size as usize).collect();
@@ -665,6 +796,7 @@ impl McpApp {
             offset,
             Some(page_size),
             Some(&binding),
+            view,
         ))
     }
 
@@ -672,6 +804,7 @@ impl McpApp {
         &self,
         arguments: &Value,
         _principal: &Principal,
+        view: ResultView,
     ) -> Result<Value, String> {
         let schema = arguments.get("schema");
         let table = arguments.get("table");
@@ -690,24 +823,27 @@ impl McpApp {
             Param::Text(Some(schema.to_string())),
             Param::Text(Some(table.to_string())),
         ];
+        let columns = if view == ResultView::Full {
+            "column_name, data_type, is_nullable, column_default"
+        } else {
+            "column_name, data_type"
+        };
+        let sql = format!("SELECT {columns} {COLUMNS_FROM}");
         let outcome = self
             .backend
-            .run(DESCRIBE_SQL, &params, self.config.max_rows, 0, false)
+            .run(&sql, &params, self.config.max_rows, 0, false)
             .map_err(|error| error.0)?;
-        let result = self.rows_result(
+        if outcome.rows.is_empty() {
+            return Err(format!("no readable table {schema}.{table}"));
+        }
+        Ok(self.rows_result(
             outcome.columns,
             outcome.rows,
             outcome.has_more,
             0,
             None,
             None,
-        );
-        if result["structuredContent"]["rows"]
-            .as_array()
-            .is_some_and(|rows| rows.is_empty())
-        {
-            return Err(format!("no readable table {schema}.{table}"));
-        }
-        Ok(result)
+            view,
+        ))
     }
 }

@@ -25,7 +25,7 @@ pub const MAX_TOTAL: usize = 32 * 1024 * 1024;
 // handling. No allow rules.
 pub const CONFIG_SUFFIX: &str = "\n[permission]\nask = [\"Bash\", \"Read\", \"Edit\", \"Grep\", \"Glob\", \"run_terminal_command\", \"read_file\", \"list_dir\", \"grep\", \"search_replace\", \"write\"]\ndeny = [\"MCPTool(*)\"]\n";
 
-pub const DIRECTION: &str = "Use native read_file/grep/list_dir in the workspace, closed read-only git commands, or the exact report_progress.py helper. Implementation alone permits workspace edits and bounded build/test commands. Use plain report text. Do not use shell substitutions, glob/brace/tilde expansion, redirections, publishing, network or external tools.";
+pub const DIRECTION: &str = "Use native read_file/grep/list_dir in the workspace, closed read-only git commands, or the exact forge-report-progress helper. Implementation alone permits workspace edits and bounded build/test commands. Use plain report text. Do not use shell substitutions, glob/brace/tilde expansion, redirections, publishing, network or external tools.";
 
 const STOP_REASONS: [&str; 5] = [
     "end_turn",
@@ -1051,15 +1051,12 @@ impl Permissions {
         if args[0] == "echo" {
             return args.len() == 2 && echo_marker(&args[1]);
         }
-        if args.len() >= 2
-            && args[0] == "python3"
-            && args[1] == format!("{STATE}/report_progress.py")
-        {
+        if args[0] == format!("{STATE}/forge-report-progress") {
             return self.progress
-                && args.len() == 4
-                && matches!(args[2].as_str(), "plan" | "progress")
-                && !args[3].is_empty()
-                && args[3].len() <= 4096;
+                && args.len() == 3
+                && matches!(args[1].as_str(), "plan" | "progress")
+                && !args[2].is_empty()
+                && args[2].len() <= 4096;
         }
         if args[0] == "git" {
             if !self.paths.git_allows() {
@@ -2124,7 +2121,7 @@ mod tests {
     fn report_helper_and_implementation_capability() {
         let root = tempdir("helper");
         let (plan, _) = plan_permissions(&root);
-        let command = format!("python3 {STATE}/report_progress.py plan 'Inspect current baseline'");
+        let command = format!("{STATE}/forge-report-progress plan 'Inspect current baseline'");
         assert!(plan.terminal(Some(&json!(command)), None));
         let no_progress = Permissions::new("plan", plan.paths.clone(), false).unwrap();
         assert!(!no_progress.terminal(Some(&json!(command)), None));
