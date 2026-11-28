@@ -2,5 +2,6 @@
 
 pub mod actor;
 pub mod config;
+pub mod forge;
 pub mod ports;
 pub mod system;

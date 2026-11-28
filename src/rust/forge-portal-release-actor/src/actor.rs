@@ -1,6 +1,7 @@
-//! The release state machine (PortalReleaseActor + ActorFactory in
-//! portal_release_actor.py). State, plans and jobs are JSON values,
-//! exactly as the durable state.json holds them.
+//! The release state machine (PortalReleaseActor in
+//! portal_release_actor.py; its ActorFactory is in `crate::forge`).
+//! State, plans and jobs are JSON values, exactly as the durable
+//! state.json holds them.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -8,11 +9,12 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 
 use crate::config::{
-    artifact_commands, canonical, decode, is_gate_ref, is_sha40, is_sha64, main_checks, read_root,
+    artifact_commands, canonical, decode, is_gate_ref, is_sha40, is_sha64, main_checks,
     safe_relative, sha, v3_main_checks, v3_main_phases, ActorConfig, CORE, IDENTITY, POLICY,
     STARTUP_IDENTITY_SECONDS, UNIT,
 };
-use crate::ports::{ActorClock, ActorCollaborators, ProbeProvider, RootFiles};
+use crate::forge::ActorCollaborators;
+use crate::ports::{ActorClock, ProbeProvider, RootFiles};
 use crate::system::SystemPort;
 
 struct ReceiptEvidence {
@@ -1361,36 +1363,6 @@ impl PortalReleaseActor {
     }
 }
 
-/// ActorFactory: the configuration path is fixed.
-pub struct ActorFactory {
-    pub config_path: PathBuf,
-}
-
-impl ActorFactory {
-    pub fn new() -> Result<ActorFactory, String> {
-        Ok(ActorFactory {
-            config_path: PathBuf::from(crate::config::CONFIG_PATH),
-        })
-    }
-
-    pub fn create(&self) -> Result<PortalReleaseActor, String> {
-        if self.config_path != Path::new(crate::config::CONFIG_PATH) {
-            return Err("Actor configuration is fixed".to_string());
-        }
-        let config = ActorConfig::parse(&decode(&read_root(&self.config_path, 0)?)?)?;
-        Ok(PortalReleaseActor::new(
-            config,
-            ActorCollaborators::production(Box::new(crate::system::SubprocessSystem)),
-        ))
-    }
-}
-
-impl Default for ActorFactory {
-    fn default() -> Self {
-        ActorFactory::new().expect("fixed path")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1674,7 +1646,7 @@ mod tests {
                 system: Box::new(system),
                 files: Box::new(PlainFiles),
                 probes: Box::new(OkProbes),
-                clock: Box::new(crate::ports::SystemActorClock::new()),
+                clock: Box::new(crate::forge::SystemActorClock::new()),
             },
         );
         let job = json!({
@@ -1708,3 +1680,6 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 }
+
+// Transitional: callers move to `crate::forge` in the next commit.
+pub use crate::forge::ActorFactory;
