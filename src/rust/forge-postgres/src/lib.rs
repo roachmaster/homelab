@@ -60,6 +60,8 @@ pub mod worker_composition;
 pub mod worker_context;
 pub mod workflow_adapter;
 pub mod workflow_decision;
+mod workspace_snapshot;
+pub mod workspace_store;
 
 pub use branch::{AgentBranch, AgentBranchUpsert};
 pub use client::PgSession;

@@ -160,6 +160,7 @@ fn main() {
     let ready = Arc::new(AtomicBool::new(true));
 
     let services = Arc::new(Services {
+        workspace: runner_pg_config("mission-control").unwrap_or_else(|e| fail(&e)),
         work: work_service,
         jenkins: jenkins_service,
         usage: usage_service,

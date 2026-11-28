@@ -55,8 +55,15 @@ fn run_tx_mode<T>(
     repeatable: bool,
     body: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, forge_work::WorkError>,
 ) -> Result<T, forge_work::WorkError> {
+    run_session_tx(&mut store.session()?, repeatable, body)
+}
+
+pub(crate) fn run_session_tx<T>(
+    session: &mut crate::PgSession,
+    repeatable: bool,
+    body: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, forge_work::WorkError>,
+) -> Result<T, forge_work::WorkError> {
     const MARKER: &str = "forge-work: parked WorkError";
-    let mut session = store.session()?;
     let slot: std::cell::RefCell<Option<forge_work::WorkError>> = std::cell::RefCell::new(None);
     let transaction = |tx: &mut crate::tx::Tx<'_, '_>| match body(tx) {
         Ok(value) => Ok(value),
