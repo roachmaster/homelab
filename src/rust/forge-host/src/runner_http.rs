@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use forge_work::work_api::{self, ExtensionVersions, WorkApiService};
+use forge_work::work_api::{self, WorkApiService};
 use forge_work::WorkError;
 
 pub const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;

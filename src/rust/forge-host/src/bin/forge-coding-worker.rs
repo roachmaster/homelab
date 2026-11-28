@@ -31,18 +31,17 @@ fn run() -> Result<(), String> {
         .map_err(|error| format!("worker config {path} is invalid: {error}"))?;
     config.source_path = Some(PathBuf::from(&path));
 
-    let mut factory =
-        CodingWorkerFactory::new(config, Box::new(|config| coding_store_handles(config)))
-            .map_err(|error| error.to_string())?;
+    let mut factory = CodingWorkerFactory::new(config, Box::new(coding_store_handles))
+        .map_err(|error| error.to_string())?;
     factory.collector_factory = Some(usage_collector_factory(Arc::new(|config| {
         coding_usage_poll_store(config)
     })));
     factory.cooldown_factory = Some(Box::new(|config| {
         Ok(ProviderCooldownFactory::new(config.clone()).create())
     }));
-    factory.review_context_factory = Some(Box::new(|config| coding_review_contexts(config)));
-    factory.peer_context_factory = Some(Box::new(|config| coding_peer_contexts(config)));
-    factory.external_context_factory = Some(Box::new(|config| coding_external_contexts(config)));
+    factory.review_context_factory = Some(Box::new(coding_review_contexts));
+    factory.peer_context_factory = Some(Box::new(coding_peer_contexts));
+    factory.external_context_factory = Some(Box::new(coding_external_contexts));
 
     // Exactly one process-owned signal listener (the forge-agent
     // pattern): SIGINT/SIGTERM set the factory stop flag.
