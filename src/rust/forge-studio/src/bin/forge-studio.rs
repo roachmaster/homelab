@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use forge_studio::artifact;
-use forge_studio::composition::{create_service, create_store, create_worker};
+use forge_studio::forge::{create_service, create_store, create_worker};
 use forge_studio::service::{parse_strict_json, Catalog, Service};
 use serde_json::{json, Value};
 

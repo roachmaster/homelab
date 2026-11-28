@@ -4,7 +4,7 @@
 //! schema with Studio's own database roles.
 
 pub mod artifact;
-pub mod composition;
+pub mod forge;
 pub mod service;
 pub mod store;
 pub mod worker;
