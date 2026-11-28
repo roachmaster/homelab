@@ -10,8 +10,10 @@ use crate::lease::Lease;
 use crate::ports_runtime::{GitRunner, RunnerPort, SupervisorPort, WorkspacePort};
 use crate::ports_store::{ExecutionContextPort, ReconcilerPort, WorkerStorePort};
 use crate::ports_worker::{
-    CooldownPort, ExternalContextPort, PeerContextPort, PeerReviewValidatorPort,
-    ReviewContextFailure, ReviewContextPort, UsageCollectorPort, UsageNormalizerPort,
+    CooldownPort, ExternalContextPort, NoExternalContexts, NullUsageCollector, NullUsageNormalizer,
+    NullVerdictValidator, PeerContextPort, PeerReviewValidatorPort, ReviewContextFailure,
+    ReviewContextPort, UnavailablePeerContexts, UnavailableReviewContexts, UsageCollectorPort,
+    UsageNormalizerPort,
 };
 use crate::runner::{InvocationContexts, RunCallbacks, StopFlag};
 use crate::types::{
@@ -495,13 +497,13 @@ pub struct CodingWorker {
     workspaces: Box<dyn WorkspacePort>,
     supervisor: Box<dyn SupervisorPort>,
     git: Box<dyn GitRunner>,
-    collector: Option<Box<dyn UsageCollectorPort>>,
+    collector: Box<dyn UsageCollectorPort>,
     cooldowns: Arc<Mutex<Box<dyn CooldownPort>>>,
-    usage_normalizer: Option<Arc<dyn UsageNormalizerPort>>,
-    review_contexts: Option<Box<dyn ReviewContextPort>>,
-    peer_contexts: Option<Box<dyn PeerContextPort>>,
-    external_contexts: Option<Box<dyn ExternalContextPort>>,
-    verdict_validator: Option<Arc<dyn PeerReviewValidatorPort>>,
+    usage_normalizer: Arc<dyn UsageNormalizerPort>,
+    review_contexts: Box<dyn ReviewContextPort>,
+    peer_contexts: Box<dyn PeerContextPort>,
+    external_contexts: Box<dyn ExternalContextPort>,
+    verdict_validator: Arc<dyn PeerReviewValidatorPort>,
     clock: ClockFn,
     stop: StopFlag,
     incarnation: String,
@@ -530,13 +532,13 @@ impl CodingWorker {
         workspaces: Box<dyn WorkspacePort>,
         supervisor: Box<dyn SupervisorPort>,
         git: Box<dyn GitRunner>,
-        collector: Option<Box<dyn UsageCollectorPort>>,
+        collector: Box<dyn UsageCollectorPort>,
         cooldowns: Box<dyn CooldownPort>,
-        usage_normalizer: Option<Arc<dyn UsageNormalizerPort>>,
-        review_contexts: Option<Box<dyn ReviewContextPort>>,
-        peer_contexts: Option<Box<dyn PeerContextPort>>,
-        external_contexts: Option<Box<dyn ExternalContextPort>>,
-        verdict_validator: Option<Arc<dyn PeerReviewValidatorPort>>,
+        usage_normalizer: Arc<dyn UsageNormalizerPort>,
+        review_contexts: Box<dyn ReviewContextPort>,
+        peer_contexts: Box<dyn PeerContextPort>,
+        external_contexts: Box<dyn ExternalContextPort>,
+        verdict_validator: Arc<dyn PeerReviewValidatorPort>,
         clock: ClockFn,
         stop: StopFlag,
     ) -> CodingWorker {
@@ -632,11 +634,10 @@ impl CodingWorker {
     fn normalize_usage(&self, lease: &Lease, outcome: &CliOutcome) -> Option<Value> {
         let usage = outcome.usage.as_ref()?;
         let backend = lease.recipe["backend"].as_str().unwrap_or("");
-        match &self.usage_normalizer {
-            // Missing telemetry never changes a coherent result.
-            Some(normalizer) => normalizer.normalize(backend, usage, outcome.fresh_session),
-            None => None,
-        }
+        // Missing telemetry never changes a coherent result: the
+        // unbound default normalizes nothing.
+        self.usage_normalizer
+            .normalize(backend, usage, outcome.fresh_session)
     }
 
     fn make_callbacks(&self, control: &Arc<AttemptControl>, lease: &Lease) -> RunCallbacks {
@@ -713,26 +714,21 @@ impl CodingWorker {
         let Some(peer) = peer else {
             return Ok(outcome);
         };
-        if self.verdict_validator.is_none() {
-            return Ok(outcome);
-        }
         if outcome.status != "awaiting_review" || outcome.text.is_empty() {
             return Ok(outcome);
         }
+        // The unbound default validates no target, so the verdict is
+        // returned as produced.
         let target_valid = self
             .verdict_validator
-            .as_ref()
-            .unwrap()
             .target_valid(&peer.content, &peer.sha256);
         if !target_valid {
             return Ok(outcome);
         }
         for attempt in 0..=VERDICT_SELF_CHECK_RETRIES {
-            let verdict = self.verdict_validator.as_ref().unwrap().check(
-                &peer.content,
-                &peer.sha256,
-                &outcome.text,
-            );
+            let verdict = self
+                .verdict_validator
+                .check(&peer.content, &peer.sha256, &outcome.text);
             match verdict {
                 Ok(()) => return Ok(outcome),
                 Err(failure) => {
@@ -1048,10 +1044,7 @@ impl CodingWorker {
             )));
         }
         if lease.workflow_review_id.is_some() {
-            let prepared = match &mut self.peer_contexts {
-                Some(peers) => peers.prepare_source(lease),
-                None => Err(protocol("peer context provider unavailable")),
-            };
+            let prepared = self.peer_contexts.prepare_source(lease);
             if prepared.is_err() {
                 return Err(FlowError::Execution(needs_reconcile(
                     "The read-only reviewer source could not be verified.",
@@ -1108,10 +1101,7 @@ impl CodingWorker {
             }
             let mut contexts = InvocationContexts::default();
             if lease.workflow_review_id.is_some() {
-                let acquired = match &mut self.peer_contexts {
-                    Some(peers) => peers.acquire(lease, workspace),
-                    None => Err(protocol("peer context provider unavailable")),
-                };
+                let acquired = self.peer_contexts.acquire(lease, workspace);
                 match acquired {
                     Ok(peer) => contexts.peer = Some(peer),
                     Err(_) => {
@@ -1135,12 +1125,7 @@ impl CodingWorker {
                 || lease.feedback_id.is_some()
                 || lease.feedback_sha256.is_some()
             {
-                let acquired = match &mut self.review_contexts {
-                    Some(reviews) => reviews.acquire(lease, workspace),
-                    None => Err(ReviewContextFailure::Other(protocol(
-                        "review context provider unavailable",
-                    ))),
-                };
+                let acquired = self.review_contexts.acquire(lease, workspace);
                 match acquired {
                     Ok(Some(feedback)) => contexts.feedback = Some(feedback),
                     Ok(None) => {}
@@ -1156,14 +1141,11 @@ impl CodingWorker {
                 }
             }
             if lease.workflow_feedback_review_id.is_some() {
-                let acquired = match &mut self.peer_contexts {
-                    Some(peers) => peers.acquire_feedback(
-                        lease,
-                        contexts.plan.as_ref(),
-                        contexts.feedback.as_ref(),
-                    ),
-                    None => Err(protocol("peer context provider unavailable")),
-                };
+                let acquired = self.peer_contexts.acquire_feedback(
+                    lease,
+                    contexts.plan.as_ref(),
+                    contexts.feedback.as_ref(),
+                );
                 match acquired {
                     Ok(feedback) => contexts.peer_feedback = Some(feedback),
                     Err(_) => {
@@ -1174,15 +1156,13 @@ impl CodingWorker {
                 }
             }
             if lease.mode == "review" {
-                if let Some(externals) = &mut self.external_contexts {
-                    match externals.acquire(lease, workspace) {
-                        Ok(Some(external)) => contexts.external = Some(external),
-                        Ok(None) => {}
-                        Err(_) => {
-                            return Err(FlowError::Execution(needs_reconcile(
-                                "The complete external review context is unavailable.",
-                            )))
-                        }
+                match self.external_contexts.acquire(lease, workspace) {
+                    Ok(Some(external)) => contexts.external = Some(external),
+                    Ok(None) => {}
+                    Err(_) => {
+                        return Err(FlowError::Execution(needs_reconcile(
+                            "The complete external review context is unavailable.",
+                        )))
                     }
                 }
             }
@@ -1270,10 +1250,8 @@ impl CodingWorker {
     }
 
     pub fn collect_usage(&mut self) {
-        if let Some(collector) = &mut self.collector {
-            if !self.stop.is_set() && collector.run_once().is_err() {
-                eprintln!("Agent metadata collector unavailable");
-            }
+        if !self.stop.is_set() && self.collector.run_once().is_err() {
+            eprintln!("Agent metadata collector unavailable");
         }
     }
 
@@ -1321,57 +1299,68 @@ pub type PeerContextFactory = Box<dyn Fn(&WorkerConfig) -> Option<Box<dyn PeerCo
 pub type ExternalContextFactory =
     Box<dyn Fn(&WorkerConfig) -> Option<Box<dyn ExternalContextPort>>>;
 
-/// Effect-free selection; create() validates then acquires ready
-/// ports (CodingWorkerFactory). A None factory field selects the
-/// default implementation, mirroring the Python keyword defaults.
-pub struct CodingWorkerFactory {
-    pub config: WorkerConfig,
-    pub store_factory: StoreFactory,
-    pub runner_factory: Option<RunnerFactory>,
-    pub workspace_factory: Option<WorkspaceFactory>,
-    pub supervisor_factory: Option<SupervisorFactory>,
-    pub session_factory: Option<SessionFactory>,
-    pub codex_session_factory: Option<SessionFactory>,
-    pub collector_factory: Option<CollectorFactory>,
-    pub cooldown_factory: Option<CooldownFactory>,
-    pub review_context_factory: Option<ReviewContextFactory>,
-    pub peer_context_factory: Option<PeerContextFactory>,
-    pub external_context_factory: Option<ExternalContextFactory>,
+/// The host's selections for one coding worker. Every field is
+/// optional selection config read only by the factory: an unset
+/// runtime override selects the built-in implementation (mirroring
+/// the Python keyword defaults), and an unset optional collaborator
+/// binds its null-object port. The worker itself never sees an
+/// `Option` collaborator.
+#[derive(Default)]
+pub struct WorkerBindings {
+    pub runner: Option<RunnerFactory>,
+    pub workspace: Option<WorkspaceFactory>,
+    pub supervisor: Option<SupervisorFactory>,
+    pub session: Option<SessionFactory>,
+    pub codex_session: Option<SessionFactory>,
+    pub cooldown: Option<CooldownFactory>,
+    pub collector: Option<CollectorFactory>,
+    pub review_contexts: Option<ReviewContextFactory>,
+    pub peer_contexts: Option<PeerContextFactory>,
+    pub external_contexts: Option<ExternalContextFactory>,
     pub usage_normalizer: Option<Arc<dyn UsageNormalizerPort>>,
     pub verdict_validator: Option<Arc<dyn PeerReviewValidatorPort>>,
+}
+
+/// Effect-free selection; create() validates then acquires ready
+/// ports (CodingWorkerFactory). Selections arrive whole, as
+/// `WorkerBindings`, when the factory is built; nothing is assigned
+/// afterwards.
+pub struct CodingWorkerFactory {
+    pub config: WorkerConfig,
+    store_factory: StoreFactory,
+    bindings: WorkerBindings,
     pub clock: ClockFn,
     pub stop: StopFlag,
 }
 
 impl CodingWorkerFactory {
+    /// A factory with every selection at its default.
     pub fn new(
         config: WorkerConfig,
         store_factory: StoreFactory,
+    ) -> Result<CodingWorkerFactory, WorkerError> {
+        Self::with_bindings(config, store_factory, WorkerBindings::default())
+    }
+
+    /// A factory with the host's selections.
+    pub fn with_bindings(
+        config: WorkerConfig,
+        store_factory: StoreFactory,
+        bindings: WorkerBindings,
     ) -> Result<CodingWorkerFactory, WorkerError> {
         let config = crate::config::validated_copy(&config)
             .map_err(|error| WorkerError::Protocol(error.to_string()))?;
         Ok(CodingWorkerFactory {
             config,
             store_factory,
-            runner_factory: None,
-            workspace_factory: None,
-            supervisor_factory: None,
-            session_factory: None,
-            codex_session_factory: None,
-            collector_factory: None,
-            cooldown_factory: None,
-            review_context_factory: None,
-            peer_context_factory: None,
-            external_context_factory: None,
-            usage_normalizer: None,
-            verdict_validator: None,
+            bindings,
             clock: monotonic_clock(),
             stop: StopFlag::new(),
         })
     }
 
     fn supervisor(&self) -> Result<Box<dyn SupervisorPort>, WorkerError> {
-        if let Some(factory) = &self.supervisor_factory {
+        if let Some(factory) = &self.bindings.supervisor {
             return factory(&self.config);
         }
         let caches = crate::consumer_cache::configured_consumer_caches(&self.config)?;
@@ -1386,11 +1375,11 @@ impl CodingWorkerFactory {
         &self,
         supervisor: Box<dyn SupervisorPort>,
     ) -> Result<Box<dyn RunnerPort>, WorkerError> {
-        if let Some(factory) = &self.runner_factory {
+        if let Some(factory) = &self.bindings.runner {
             return factory(&self.config, supervisor);
         }
         let sessions = if self.config.binary("antigravity").is_some() {
-            Some(match &self.session_factory {
+            Some(match &self.bindings.session {
                 Some(factory) => factory(&self.config),
                 None => Box::new(crate::sessions::AntigravitySessionProvider::new(
                     self.config.clone(),
@@ -1400,7 +1389,7 @@ impl CodingWorkerFactory {
             None
         };
         let codex_sessions = if self.config.binary("codex").is_some() {
-            Some(match &self.codex_session_factory {
+            Some(match &self.bindings.codex_session {
                 Some(factory) => factory(&self.config),
                 None => Box::new(crate::sessions::CodexSessionProvider::new(
                     self.config.clone(),
@@ -1429,7 +1418,7 @@ impl CodingWorkerFactory {
         let handles = (self.store_factory)(config)?;
         let supervisor_worker = self.supervisor()?;
         let supervisor_runner = self.supervisor()?;
-        let mut workspaces: Box<dyn WorkspacePort> = match &self.workspace_factory {
+        let mut workspaces: Box<dyn WorkspacePort> = match &self.bindings.workspace {
             Some(factory) => factory(config)?,
             None => Box::new(crate::workspace_provider::WorkspaceProvider::new(
                 config.clone(),
@@ -1439,7 +1428,7 @@ impl CodingWorkerFactory {
             )),
         };
         let mut runner = self.runner(supervisor_runner)?;
-        let mut cooldowns: Box<dyn CooldownPort> = match &self.cooldown_factory {
+        let mut cooldowns: Box<dyn CooldownPort> = match &self.bindings.cooldown {
             Some(factory) => factory(config)?,
             None => Box::new(crate::ports_worker::NullCooldown::new(config)),
         };
@@ -1448,25 +1437,42 @@ impl CodingWorkerFactory {
         cooldowns.prepare()?;
         workspaces.prepare()?;
         runner.prepare()?;
-        let collector = match &self.collector_factory {
+        let collector: Box<dyn UsageCollectorPort> = match &self.bindings.collector {
             Some(factory) => factory(config)?,
             None => None,
-        };
-        let review_contexts = self
-            .review_context_factory
+        }
+        .unwrap_or_else(|| Box::new(NullUsageCollector));
+        let review_contexts: Box<dyn ReviewContextPort> = self
+            .bindings
+            .review_contexts
             .as_ref()
-            .and_then(|factory| factory(config));
-        let peer_contexts = self
-            .peer_context_factory
+            .and_then(|factory| factory(config))
+            .unwrap_or_else(|| Box::new(UnavailableReviewContexts));
+        let peer_contexts: Box<dyn PeerContextPort> = self
+            .bindings
+            .peer_contexts
             .as_ref()
-            .and_then(|factory| factory(config));
-        let external_contexts = if config.external_reviews {
-            self.external_context_factory
+            .and_then(|factory| factory(config))
+            .unwrap_or_else(|| Box::new(UnavailablePeerContexts));
+        let external_contexts: Box<dyn ExternalContextPort> = if config.external_reviews {
+            self.bindings
+                .external_contexts
                 .as_ref()
                 .and_then(|factory| factory(config))
         } else {
             None
-        };
+        }
+        .unwrap_or_else(|| Box::new(NoExternalContexts));
+        let usage_normalizer: Arc<dyn UsageNormalizerPort> = self
+            .bindings
+            .usage_normalizer
+            .clone()
+            .unwrap_or_else(|| Arc::new(NullUsageNormalizer));
+        let verdict_validator: Arc<dyn PeerReviewValidatorPort> = self
+            .bindings
+            .verdict_validator
+            .clone()
+            .unwrap_or_else(|| Arc::new(NullVerdictValidator));
         Ok(CodingWorker::new(
             config.clone(),
             handles,
@@ -1476,11 +1482,11 @@ impl CodingWorkerFactory {
             Box::new(crate::ports_runtime::CommandGitRunner::default()),
             collector,
             cooldowns,
-            self.usage_normalizer.clone(),
+            usage_normalizer,
             review_contexts,
             peer_contexts,
             external_contexts,
-            self.verdict_validator.clone(),
+            verdict_validator,
             self.clock.clone(),
             self.stop.clone(),
         ))
