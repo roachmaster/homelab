@@ -1680,6 +1680,3 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 }
-
-// Transitional: callers move to `crate::forge` in the next commit.
-pub use crate::forge::ActorFactory;

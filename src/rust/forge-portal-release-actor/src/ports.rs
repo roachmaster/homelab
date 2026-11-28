@@ -25,6 +25,3 @@ pub trait ActorClock: Send {
     fn monotonic(&self) -> f64;
     fn sleep(&self, seconds: f64);
 }
-
-// Transitional: callers move to `crate::forge` in the next commit.
-pub use crate::forge::{RootFilesystem, SystemActorClock};

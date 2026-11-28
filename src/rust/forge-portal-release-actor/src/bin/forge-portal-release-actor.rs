@@ -6,8 +6,8 @@
 use std::io::{Read, Write};
 use std::process::ExitCode;
 
-use forge_portal_release_actor::actor::ActorFactory;
 use forge_portal_release_actor::config::{canonical, decode};
+use forge_portal_release_actor::forge::ActorFactory;
 use nix::fcntl::{Flock, FlockArg};
 use serde_json::Value;
 

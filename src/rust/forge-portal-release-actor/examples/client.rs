@@ -7,8 +7,9 @@
 
 use std::path::Path;
 
-use forge_portal_release_actor::actor::ActorFactory;
-use forge_portal_release_actor::ports::{ActorClock, RootFiles, RootFilesystem, SystemActorClock};
+use forge_portal_release_actor::forge::ActorFactory;
+use forge_portal_release_actor::forge::{RootFilesystem, SystemActorClock};
+use forge_portal_release_actor::ports::{ActorClock, RootFiles};
 
 fn main() {
     let factory = ActorFactory::default();
