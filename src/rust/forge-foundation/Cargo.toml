@@ -1,0 +1,13 @@
+[package]
+name = "forge-foundation"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+description = "Provider lifecycles and typed per-environment wiring on top of forge-core"
+
+[lints]
+workspace = true
+
+[dependencies]
+forge-core.workspace = true
