@@ -3,6 +3,7 @@
 No subprocesses, credentials, session discovery or network effects live here.
 The existing supervisor owns the process, OS sandbox and credential lifetime.
 """
+from copy import deepcopy
 from dataclasses import dataclass
 import json
 from pathlib import Path, PurePosixPath
@@ -118,14 +119,118 @@ def harmless_git_config(content):
     return True
 
 
-def same_tool_input(previous,current):
-    if 'rawInput' in current and current['rawInput']!=previous.get('rawInput'):return False
+def _same_json(left,right):
+    # Preserve JSON types as well as field values: bool/number aliases are not
+    # byte-identical authoritative arguments, even when Python considers equal.
+    return json.dumps(left,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False)==json.dumps(right,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False)
+
+
+def _descriptor_path(raw,allowed_notes):
+    if not isinstance(raw,str) or not raw or len(raw)>4096 or '\x00' in raw:return None
+    path=PurePosixPath(raw)
+    if '..' in path.parts:return None
+    if not path.is_absolute():path=PurePosixPath(WORKSPACE)/path
+    root=PurePosixPath(WORKSPACE)
+    if path!=root and root not in path.parents and str(path) not in allowed_notes:return None
+    return str(path)
+
+
+def _native_metadata(block):
+    if (not isinstance(block,dict) or not {'namespace','name','version'}<=set(block)
+            or not set(block)<={'namespace','name','version','kind','label','read_only','input'}
+            or type(block['version'])is not int or block['version']!=1):return None
+    for key in ('namespace','name','kind','label'):
+        if key in block and (not isinstance(block[key],str) or not 0<len(block[key])<=128
+                or any(ord(c)<32 for c in block[key])):return None
+    if 'read_only' in block and type(block['read_only'])is not bool:return None
+    return {key:block[key]for key in ('namespace','name','version')}
+
+
+def _descriptor_matches(block,raw,allowed_notes):
+    if 'input' not in block:return True
+    value=block['input']
+    if not isinstance(value,dict) or not isinstance(raw,dict):return False
+    # Installed1.0.92 retained updates describe file reads with an absolute path
+    # and terminal calls with unchanged command/description. This descriptor is
+    # never substituted into authoritative rawInput or permission admission.
+    if block['name']=='read_file':
+        normalized=_descriptor_path(raw.get('target_file'),allowed_notes)
+        expected={'path':normalized,**{key:raw[key]for key in ('offset','limit')if key in raw}}
+        return normalized is not None and _same_json(value,expected)
+    if block['name']=='list_dir':
+        normalized=_descriptor_path(raw.get('target_directory'),allowed_notes)
+        return normalized is not None and set(value)=={'directory'} and value['directory']==normalized
+    if block['name']=='grep':
+        if not isinstance(raw.get('pattern'),str):return False
+        expected={'pattern':raw['pattern']}
+        if raw.get('path')is not None:
+            normalized=_descriptor_path(raw['path'],allowed_notes)
+            if normalized is None:return False
+            expected['path']=normalized
+        return _same_json(value,expected)
+    if block['name']=='run_terminal_command':
+        return (set(value)==set(raw) and set(value)<={'command','description'}
+                and isinstance(value.get('command'),str) and 0<len(value['command'])<=16384
+                and all(isinstance(v,str) for v in value.values()) and _same_json(value,raw))
+    if block['name']in {'write','search_replace'}:return _same_json(value,raw)
+    return False
+
+
+def same_tool_identity(previous,current):
+    """Progress annotations never replace captured arguments or tool identity."""
+    if current.get('toolCallId')!=previous.get('toolCallId'):return False
+    original_meta=previous.get('_meta',{});meta=current.get('_meta',{})
+    if not isinstance(original_meta,dict) or not isinstance(meta,dict):return False
+    original=original_meta.get('x.ai/tool');core=_native_metadata(original)
+    if 'x.ai/tool' not in meta:return True
+    value=meta['x.ai/tool']
+    if not isinstance(value,dict) or core is None:return False
+    return all(_same_json(value[key],core[key])for key in core if key in value)
+
+
+def same_tool_input(previous,current,*,allowed_notes=()):
+    """Affirmative permission proof, independent of discarded progress data.
+
+    Full current args must match the captured args, or use one of the observed
+    tagged equivalents. A complete known vendor descriptor can also prove the
+    original args. Missing/unknown/contradictory proof grants no permission.
+    """
+    if not same_tool_identity(previous,current):return False
     meta=current.get('_meta',{})
-    original_meta=previous.get('_meta',{})
-    if not isinstance(meta,dict) or not isinstance(original_meta,dict):return False
-    # Progress adds non-authoritative metadata such as toolNotRun. Only native
-    # tool identity is frozen; status/diagnostic metadata is not that identity.
-    return ('x.ai/tool' not in meta or meta['x.ai/tool']==original_meta.get('x.ai/tool'))
+    if not set(meta)<={'x.ai/tool','toolNotRun'}:return False
+    original=previous.get('_meta',{}).get('x.ai/tool')
+    if not isinstance(original,dict) or not isinstance(previous.get('rawInput'),dict):return False
+    augmented=meta.get('x.ai/tool')
+    if augmented is not None and (not isinstance(augmented,dict)or not set(augmented)<={'namespace','name','version','kind','label','read_only','input'}):return False
+    raw=previous['rawInput']
+    if 'rawInput' not in current:
+        if not isinstance(augmented,dict) or 'input' not in augmented:return False
+        # Only complete descriptors qualify; Grep previews omit filters/limits.
+        complete={'read_file':{'target_file','offset','limit'},'list_dir':{'target_directory'},
+                  'grep':{'pattern','path'},'run_terminal_command':{'command','description'},
+                  'write':{'file_path','target_file','path','contents','content'},
+                  'search_replace':{'file_path','target_file','path','old_string','new_string','replace_all'}}
+        fields=complete.get(original.get('name'))
+        return (fields is not None and set(raw)<=fields
+                and _descriptor_matches({**original,'input':augmented['input']},raw,allowed_notes))
+    tagged=current['rawInput']
+    if _same_json(tagged,raw):
+        if isinstance(augmented,dict) and 'input' in augmented:
+            return _descriptor_matches({**original,'input':augmented['input']},raw,allowed_notes)
+        return True
+    if not isinstance(tagged,dict):return False
+    variants={'read_file':('ReadFile',{}),'list_dir':('ListDir',{}),
+              'run_terminal_command':('Bash',{'is_background':False}),
+              'grep':('Grep',{'-i':False,'type':None,'multiline':False,'path':None,'glob':None})}
+    selected=variants.get(original.get('name'))
+    if selected is None:return False
+    variant,defaults=selected
+    additions={key:value for key,value in {'variant':variant,**defaults}.items()if key not in raw}
+    if set(tagged)!=set(raw)|set(additions):return False
+    if any(not _same_json(tagged[key],value)for key,value in additions.items()):return False
+    normalized={key:value for key,value in tagged.items()if key not in additions}
+    return (_same_json(normalized,raw)and(not isinstance(augmented,dict)or 'input' not in augmented
+            or _descriptor_matches({**original,'input':augmented['input']},raw,allowed_notes)))
 
 
 @dataclass(frozen=True)
@@ -263,17 +368,27 @@ class Permissions:
             write=name in {'write','search_replace'}
             if write and self.mode!='implement':return False
             fields={'read_file':{'target_file','offset','limit'},
-                    'list_dir':{'relative_workspace_path','path'},
-                    'grep':{'pattern','path','include_pattern','exclude_pattern','case_sensitive'},
+                    'list_dir':{'target_directory','relative_workspace_path','path'},
+                    'grep':{'pattern','path','glob','head_limit','-A','-i','type','multiline','include_pattern','exclude_pattern','case_sensitive'},
                     'write':{'file_path','target_file','path','contents','content'},
                     'search_replace':{'file_path','target_file','path','old_string','new_string','replace_all'}}[name]
             if not set(raw)<=fields:return False
-            pathfields=[key for key in ('target_file','relative_workspace_path','file_path','path') if key in raw]
-            if len(pathfields)!=1:return False
-            path=raw[pathfields[0]]
-            for key in ('include_pattern','exclude_pattern'):
+            pathfields=[key for key in ('target_file','target_directory','relative_workspace_path','file_path','path') if key in raw]
+            if name=='grep' and (not pathfields or pathfields==['path'] and raw['path']is None):
+                path=WORKSPACE
+            elif len(pathfields)==1:path=raw[pathfields[0]]
+            else:return False
+            if name=='grep':
+                if not isinstance(raw.get('pattern'),str) or not 0<len(raw['pattern'])<=8192:return False
+                for key in ('-i','multiline','case_sensitive'):
+                    if key in raw and type(raw[key])is not bool:return False
+                for key,minimum,maximum in (('head_limit',1,10000),('-A',0,4096)):
+                    if key in raw and(type(raw[key])is not int or not minimum<=raw[key]<=maximum):return False
+                if raw.get('type')is not None and (not isinstance(raw['type'],str)or re.fullmatch(r'[A-Za-z0-9_-]{1,64}',raw['type'])is None):return False
+            for key in ('include_pattern','exclude_pattern','glob'):
                 pattern=raw.get(key,'')
-                if not isinstance(pattern,str) or pattern.startswith('/') or '..' in PurePosixPath(pattern).parts:return False
+                if name=='grep' and key=='glob'and pattern is None:continue
+                if not isinstance(pattern,str) or len(pattern)>4096 or pattern.startswith('/') or '..' in PurePosixPath(pattern).parts:return False
             return self.paths.allows(path,write=write)
         return False
 
@@ -348,8 +463,9 @@ class Transport:
                 if not isinstance(call,str) or call not in self.calls:raise ValueError('Unbound ACP tool request')
                 # Native tool identity/input must agree with its preceding call.
                 previous=self.calls[call]
-                if not same_tool_input(previous,tool):raise ValueError('ACP permission identity changed')
-                admitted=self.permissions.admit(previous)
+                if not same_tool_identity(previous,tool):raise ValueError('ACP permission identity changed')
+                admitted=(same_tool_input(previous,tool,allowed_notes=tuple(child for child,_host in self.permissions.paths.notes))
+                    and self.permissions.admit(previous))
                 wanted='allow_once' if admitted else 'reject_once'
                 ids=[o.get('optionId') for o in options if isinstance(o,dict)]
                 selected=[o for o in options if isinstance(o,dict) and o.get('kind')==wanted]
@@ -442,12 +558,18 @@ class Transport:
             identity=update.get('toolCallId')
             if not isinstance(identity,str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',identity) or identity in self.calls or len(self.calls)>=4096:
                 raise ValueError('Invalid ACP tool identity')
-            self.calls[identity]=update
+            meta=update.get('_meta',{})
+            if (not isinstance(meta,dict)or not set(meta)<={'x.ai/tool','toolNotRun'}
+                    or 'x.ai/tool'in meta and _native_metadata(meta['x.ai/tool'])is None):
+                raise ValueError('Invalid ACP native tool metadata')
+            self.calls[identity]=deepcopy(update)
             return []
         if kind=='tool_call_update':
             identity=update.get('toolCallId')
             if not isinstance(identity,str) or identity not in self.calls:raise ValueError('Unbound ACP tool update')
-            if not same_tool_input(self.calls[identity],update):raise ValueError('ACP tool input changed after binding')
+            if not same_tool_identity(self.calls[identity],update):raise ValueError('ACP tool identity changed after binding')
+            # rawInput and vendor input are bounded display/progress annotations.
+            # They are neither merged nor used later as permission evidence.
             return []
         if kind in {'user_message_chunk','agent_thought_chunk','plan','available_commands','current_mode_update','config_option_update','usage_update'}:return []
         raise ValueError('Unsupported ACP update')

@@ -1,3 +1,41 @@
+## Grok ACP progress and permission separation — 2026-11-28
+
+This correction is based exactly on reviewed main f5e057c1. The new automatic
+repair 994467bd still used the old headless transport: native PermissionCancelled
+preceded worker and coordinator cancellation, with no operator control receipt.
+Its failed task/attempt/workflow history is retained. No revival was performed.
+
+Retained native 1.0.92 updates expose descriptive parsed-enum tags/defaults and
+vendor input summaries. A progress frame is not a new permission. The adapter
+now deep-copies the initial call/arguments, freezes any presented native core
+namespace/name/version, and discards bounded progress rawInput/vendor previews.
+It does not overwrite initial authority or infer permission from an absent field.
+
+Every permission request separately needs complete exact original arguments or a
+closed proven equivalent. Known read/list/grep/terminal tags/defaults and complete
+vendor descriptors are checked against originals. Contradictory, partial, unknown
+or missing proof selects the supplied reject_once option. Write/search_replace
+can be admitted only in implementation mode with exact complete original args
+and, when present, an exactly equivalent complete permission vendor input. Opaque
+edit progress does not terminate the turn or grant a write; original scoped path,
+mode, no-publishing rules and outer sandbox still decide. No guessed edit default,
+always-approve, mode downgrade, fallback, SQL or config change was introduced.
+
+An effect-free replay covers all 223 retained read/list/grep/terminal calls and
+updates from 8 worker session logs, with every original argument hash preserved:
+120 reads, 93 greps, 3 listings, 1 terminal admission in the scoped fixture and 6 expected
+terminal policy denials. This also verifies actual ListDir target_directory and
+Grep glob/head_limit/context/default forms. The fixture declares only workspace
+and three saved-note paths; it does not prove real path/symlink authority.
+
+No retained Write/SearchReplace frame is available. Exact-argument implementation
+permission fixtures and opaque-progress lifecycle tests are not native edit
+wire/e2e proof; that boundary remains explicit. No real CLI/model/auth/quota probe,
+production SQL/service change, old history rewrite or source push was performed.
+Focused tests and replay hashes are retained under
+/mnt/data/homelab-build/grok-permission-matcher-20261128; all final checks run after
+source and documentation edits, before the correction commit is handed off.
+
 ## Intermittent triage input ordering and bounded failure locations — 2026-11-28
 
 Jenkins143 on mainf5e057c1 failed inside the nested Agents triage journey, but the

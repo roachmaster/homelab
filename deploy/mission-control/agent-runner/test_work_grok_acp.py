@@ -216,16 +216,23 @@ class ProtocolTest(unittest.TestCase):
             if mutation!='unbound':update(transport,call)
             if mutation=='changed':call={**call,'rawInput':{'command':'git push'}}
             options=[{'optionId':'x','name':'Always','kind':'allow_always'}] if mutation=='no_once' else None
-            if mutation=='duplicate':
-                permission(transport,call);transport.drain()
-            with self.subTest(mutation=mutation),self.assertRaises(ValueError):permission(transport,call,options=options)
+            if mutation=='duplicate':permission(transport,call);transport.drain()
+            with self.subTest(mutation=mutation):
+                if mutation=='changed':
+                    permission(transport,call)
+                    self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+                else:
+                    with self.assertRaises(ValueError):permission(transport,call,options=options)
 
     def test_changed_tool_update_cannot_lend_original_permission_identity(self):
         transport=self.transport();initialize(transport)
-        call=tool('run_terminal_command',{'command':'git status'})
-        update(transport,call)
-        with self.assertRaises(ValueError):update(transport,{'sessionUpdate':'tool_call_update',
-            'toolCallId':'call-1','rawInput':{'command':'git push'}})
+        call=tool('run_terminal_command',{'command':'git status'});update(transport,call)
+        update(transport,{'sessionUpdate':'tool_call_update','toolCallId':'call-1','rawInput':{'command':'git push'}})
+        self.assertEqual(transport.calls['call-1']['rawInput'],{'command':'git status'})
+        permission(transport,{'toolCallId':'call-1'})
+        self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+        permission(transport,{**call,'rawInput':{'command':'git push'}},identity='changed-args')
+        self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
 
     def test_status_metadata_can_progress_without_changing_tool_identity(self):
         transport=self.transport();initialize(transport)
@@ -235,6 +242,215 @@ class ProtocolTest(unittest.TestCase):
             'status':'failed','_meta':{'toolNotRun':'cancelled'}}),b'')
         changed={'sessionUpdate':'tool_call_update','toolCallId':'call-1','_meta':{'x.ai/tool':{'name':'write'}}}
         with self.assertRaises(ValueError):update(transport,changed)
+
+    def test_observed_read_descriptor_is_normalized_without_replacing_original_arguments(self):
+        with TemporaryDirectory()as root:
+            path=Path(root);(path/'file').write_text('fixture')
+            transport=Transport('Task',Permissions('plan',NativePaths(path)));initialize(transport)
+            call=tool('read_file',{'target_file':'./file','limit':100})
+            call['_meta']['x.ai/tool'].update(kind='read',label='Read',read_only=True)
+            update(transport,call)
+            augmented={**call['_meta']['x.ai/tool'],'input':{'path':WORKSPACE+'/file','limit':100}}
+            progress={'sessionUpdate':'tool_call_update','toolCallId':'call-1','_meta':{'x.ai/tool':augmented}}
+            self.assertEqual(update(transport,progress),b'')
+            requested={**call,'_meta':{'x.ai/tool':augmented}}
+            permission(transport,requested)
+            self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-allow')
+            self.assertEqual(transport.calls['call-1']['rawInput'],{'target_file':'./file','limit':100})
+            self.assertNotIn('input',transport.calls['call-1']['_meta']['x.ai/tool'])
+
+    def test_observed_terminal_descriptor_continues_then_denies_unsupported_original_command_once(self):
+        transport=self.transport();initialize(transport)
+        raw={'command':'git status; git branch -vv | head -80','description':'Read git identity'}
+        call=tool('run_terminal_command',raw);update(transport,call)
+        augmented={**call['_meta']['x.ai/tool'],'input':dict(raw)}
+        update(transport,{'sessionUpdate':'tool_call_update','toolCallId':'call-1','_meta':{'x.ai/tool':augmented}})
+        permission(transport,{**call,'_meta':{'x.ai/tool':augmented}})
+        self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+        self.assertFalse(transport.complete)
+        self.assertIn(b'Alternative',update(transport,{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':'Alternative'}}))
+
+    def test_terminal_descriptor_cannot_change_or_add_arguments(self):
+        for descriptor in ({'command':'git push','description':'Inventory'},
+                           {'command':'git status','description':'Changed'},
+                           {'command':'git status','description':'Inventory','cwd':'/tmp'},
+                           {'command':'git status','description':'Inventory','allow_write':True},None,[]):
+            transport=self.transport();initialize(transport)
+            call=tool('run_terminal_command',{'command':'git status','description':'Inventory'});update(transport,call)
+            native={**call['_meta']['x.ai/tool'],'input':descriptor}
+            update(transport,{'sessionUpdate':'tool_call_update','toolCallId':'call-1','_meta':{'x.ai/tool':native}})
+            permission(transport,{**call,'_meta':{'x.ai/tool':native}})
+            self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+
+    def test_read_descriptor_cannot_redirect_or_loan_identity(self):
+        for descriptor in ({'path':'/etc/passwd'},{'path':WORKSPACE+'/other'},
+                           {'path':'file'},{'path':WORKSPACE+'/../outside'},
+                           {'path':WORKSPACE+'/file','allow_write':True},None,[]):
+            transport=self.transport();initialize(transport)
+            call=tool('read_file',{'target_file':'file'});update(transport,call)
+            native={**call['_meta']['x.ai/tool'],'input':descriptor}
+            permission(transport,{**call,'_meta':{'x.ai/tool':native}})
+            self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+
+    def test_descriptor_notes_are_exact_current_invocation_paths_only(self):
+        with TemporaryDirectory()as root:
+            path=Path(root);workspace=path/'workspace';workspace.mkdir()
+            note=path/'approved-plan.md';note.write_text('Plan')
+            transport=Transport('Task',Permissions('implement',NativePaths(workspace,((STATE+'/approved-plan.md',note),))))
+            initialize(transport)
+            call=tool('read_file',{'target_file':STATE+'/approved-plan.md'});update(transport,call)
+            native={**call['_meta']['x.ai/tool'],'input':{'path':STATE+'/approved-plan.md'}}
+            permission(transport,{**call,'_meta':{'x.ai/tool':native}})
+            self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-allow')
+            native['input']={'path':STATE+'/home/.grok/auth.json'}
+            update(transport,{'sessionUpdate':'tool_call_update','toolCallId':'call-1','_meta':{'x.ai/tool':native}})
+            permission(transport,{**call,'_meta':{'x.ai/tool':native}},identity='contradictory-note')
+            self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+
+    def test_augmented_identity_and_unknown_authority_fields_fail_closed(self):
+        for change in ({'namespace':'mcp'},{'name':'write'},{'version':True},{'version':2}):
+            transport=self.transport();initialize(transport)
+            call=tool('read_file',{'target_file':'file'});update(transport,call)
+            native={**call['_meta']['x.ai/tool'],'input':{'path':WORKSPACE+'/file'},**change}
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                update(transport,{'sessionUpdate':'tool_call_update','toolCallId':'call-1','_meta':{'x.ai/tool':native}})
+        transport=self.transport();initialize(transport);call=tool('read_file',{'target_file':'file'});update(transport,call)
+        native={**call['_meta']['x.ai/tool'],'always_approve':True}
+        update(transport,{'sessionUpdate':'tool_call_update','toolCallId':'call-1','_meta':{'x.ai/tool':native}})
+        permission(transport,{**call,'_meta':{'x.ai/tool':native}})
+        self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+        transport=self.transport();initialize(transport);call=tool('read_file',{'target_file':'file'})
+        call['_meta']['yoloMode']=True
+        with self.assertRaises(ValueError):update(transport,call)
+
+    def test_initial_descriptors_are_not_permission_authority(self):
+        transport=self.transport();initialize(transport)
+        call=tool('read_file',{'target_file':'file'})
+        call['_meta']['x.ai/tool']['input']={'path':'/etc/passwd'}
+        update(transport,call)
+        permission(transport,{**call,'rawInput':{'target_file':'other'}})
+        self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+        self.assertEqual(transport.calls['call-1']['rawInput'],{'target_file':'file'})
+
+    def test_retained_native_enum_tags_and_defaults_preserve_original_permission_arguments(self):
+        cases=(
+            ('read_file',{'target_file':'file','offset':1,'limit':100},
+             {'path':WORKSPACE+'/file','offset':1,'limit':100},{'variant':'ReadFile'}),
+            ('list_dir',{'target_directory':'.'},
+             {'directory':WORKSPACE},{'variant':'ListDir'}),
+            ('grep',{'path':WORKSPACE,'pattern':'source','glob':'*.py','head_limit':20},
+             {'path':WORKSPACE,'pattern':'source'},{'variant':'Grep','-i':False,'type':None,'multiline':False}),
+            ('grep',{'pattern':'source','glob':'*.py','-A':1},
+             {'pattern':'source'},{'variant':'Grep','-i':False,'type':None,'multiline':False,'path':None}),
+            ('grep',{'path':WORKSPACE,'pattern':'source'},
+             {'path':WORKSPACE,'pattern':'source'},{'variant':'Grep','-i':False,'type':None,'multiline':False,'glob':None}),
+            ('run_terminal_command',{'command':'git status','description':'Inventory'},
+             {'command':'git status','description':'Inventory'},{'variant':'Bash','is_background':False}))
+        with TemporaryDirectory()as root:
+            path=Path(root);(path/'file').write_text('source')
+            for name,raw,descriptor,additions in cases:
+                with self.subTest(name=name,fields=sorted(raw)):
+                    transport=Transport('Task',Permissions('plan',NativePaths(path)));initialize(transport)
+                    call=tool(name,raw);update(transport,call)
+                    tagged={**raw,**additions};native={**call['_meta']['x.ai/tool'],'input':descriptor}
+                    update(transport,{'sessionUpdate':'tool_call_update','toolCallId':'call-1','rawInput':tagged,'_meta':{'x.ai/tool':native}})
+                    permission(transport,{**call,'rawInput':tagged,'_meta':{'x.ai/tool':native}})
+                    self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-allow')
+                    self.assertEqual(json.dumps(transport.calls['call-1']['rawInput'],sort_keys=True),json.dumps(raw,sort_keys=True))
+
+    def test_tagged_defaults_unknown_fields_and_changed_effectful_arguments_reject(self):
+        raw={'command':'git status','description':'Inventory'}
+        for changes in ({'variant':'MCPTool'},{'is_background':True},{'is_background':0},
+                        {'cwd':'/tmp'},{'allow_write':True},{'command':'git push'},{'description':'Changed'}):
+            transport=self.transport();initialize(transport);call=tool('run_terminal_command',raw);update(transport,call)
+            current={**raw,'variant':'Bash','is_background':False,**changes}
+            native={**call['_meta']['x.ai/tool'],'input':dict(raw)}
+            with self.subTest(changes=changes):
+                permission(transport,{**call,'rawInput':current,'_meta':{'x.ai/tool':native}})
+                self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+        for changed in (True,1.0):
+            transport=self.transport();initialize(transport)
+            call=tool('read_file',{'target_file':'file','limit':1});update(transport,call)
+            native={**call['_meta']['x.ai/tool'],'input':{'path':WORKSPACE+'/file','limit':changed}}
+            with self.subTest(changed=changed):
+                current={**call,'rawInput':{'variant':'ReadFile','target_file':'file','limit':changed},'_meta':{'x.ai/tool':native}}
+                update(transport,{**current,'sessionUpdate':'tool_call_update'})
+                permission(transport,current)
+                self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+
+    def test_grep_unknown_default_or_scope_cannot_borrow_original_read_authority(self):
+        raw={'pattern':'source'}
+        tagged={**raw,'variant':'Grep','-i':False,'type':None,'multiline':False,'path':None,'glob':None}
+        for changes in ({'-i':True},{'path':'/etc'},{'glob':'/outside/*'},
+                        {'pattern':'changed'},{'type':'sh'},{'variant':'Write'}):
+            transport=self.transport();initialize(transport);call=tool('grep',raw);update(transport,call)
+            native={**call['_meta']['x.ai/tool'],'input':{'pattern':'source'}}
+            with self.subTest(changes=changes):
+                permission(transport,{**call,'rawInput':{**tagged,**changes},'_meta':{'x.ai/tool':native}})
+                self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+
+    def test_unknown_edit_progress_cannot_change_mode_or_authorize_missing_arguments(self):
+        for name in ('write','search_replace'):
+            with TemporaryDirectory()as root:
+                transport=Transport('Task',Permissions('implement',NativePaths(Path(root))));initialize(transport)
+                raw={'file_path':'file','contents':'edit'}if name=='write'else {'file_path':'file','old_string':'before','new_string':'after'}
+                call=tool(name,raw);update(transport,call)
+                native={**call['_meta']['x.ai/tool'],'input':{'opaque_preview':{'unproven':'SDK data'}}}
+                update(transport,{'sessionUpdate':'tool_call_update','toolCallId':'call-1',
+                    'rawInput':{'unknown_tag':'opaque','new_sdk_default':True},'_meta':{'x.ai/tool':native}})
+                permission(transport,{'toolCallId':'call-1','_meta':{'x.ai/tool':native}})
+                self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+                permission(transport,{**call,'rawInput':{**raw,'file_path':'/outside'}},identity='changed-edit')
+                self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+                permission(transport,call,identity='complete-original-edit')
+                self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-allow')
+                self.assertEqual(transport.calls['call-1']['rawInput'],raw)
+                self.assertEqual(transport.permissions.mode,'implement')
+
+    def test_complete_edit_args_do_not_override_conflicting_or_partial_permission_descriptor(self):
+        for name in ('write','search_replace'):
+            with TemporaryDirectory()as root:
+                transport=Transport('Task',Permissions('implement',NativePaths(Path(root))));initialize(transport)
+                raw={'file_path':'file','contents':'edit'}if name=='write'else {'file_path':'file','old_string':'before','new_string':'after'}
+                call=tool(name,raw);update(transport,call)
+                for index,descriptor in enumerate(({'file_path':'/outside'}, {'file_path':'file'},
+                        {**raw,'file_path':'/outside'}, {'opaque_preview':True})):
+                    native={**call['_meta']['x.ai/tool'],'input':descriptor}
+                    permission(transport,{**call,'_meta':{'x.ai/tool':native}},identity='conflict-'+str(index))
+                    self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+                native={**call['_meta']['x.ai/tool'],'input':dict(raw)}
+                permission(transport,{**call,'_meta':{'x.ai/tool':native}},identity='full-raw-descriptor')
+                self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-allow')
+                permission(transport,{'toolCallId':'call-1','_meta':{'x.ai/tool':native}},identity='descriptor-only')
+                self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-allow')
+
+    def test_metadata_only_proof_must_cover_every_original_effectful_argument(self):
+        cases=(('read_file',{'target_file':'file','limit':2},{'path':WORKSPACE+'/file'}),
+               ('grep',{'pattern':'source','glob':'*.py'},{'pattern':'source'}),
+               ('run_terminal_command',{'command':'git status','description':'Inventory'},{'command':'git status'}))
+        for name,raw,descriptor in cases:
+            transport=self.transport();initialize(transport);call=tool(name,raw);update(transport,call)
+            native={**call['_meta']['x.ai/tool'],'input':descriptor}
+            permission(transport,{'toolCallId':'call-1','_meta':{'x.ai/tool':native}})
+            self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
+        with TemporaryDirectory()as root:
+            path=Path(root);(path/'file').write_text('source')
+            transport=Transport('Task',Permissions('plan',NativePaths(path)));initialize(transport)
+            call=tool('read_file',{'target_file':'file','limit':2});update(transport,call)
+            native={'input':{'path':WORKSPACE+'/file','limit':2}}
+            permission(transport,{'toolCallId':'call-1','_meta':{'x.ai/tool':native}})
+            self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-allow')
+
+    def test_initial_argument_capture_is_not_a_mutable_progress_alias(self):
+        transport=self.transport();initialize(transport)
+        call=tool('run_terminal_command',{'command':'git status'})
+        transport._update(call)
+        call['rawInput']['command']='git push'
+        call['_meta']['x.ai/tool']['name']='write'
+        self.assertEqual(transport.calls['call-1']['rawInput'],{'command':'git status'})
+        self.assertEqual(transport.calls['call-1']['_meta']['x.ai/tool']['name'],'run_terminal_command')
+        permission(transport,{'toolCallId':'call-1','rawInput':{'command':'git push'}})
+        self.assertEqual(json.loads(transport.drain())['result']['outcome']['optionId'],'native-reject')
 
     def test_early_notification_requires_returned_session_identity(self):
         transport=self.transport();transport.drain()
@@ -371,6 +587,19 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(outcome.status,'awaiting_review');self.assertEqual(outcome.text,'Owned ACP result')
         self.assertEqual(outcome.conversation_id,SID);self.assertEqual(outcome.usage['total_tokens'],100)
         self.assertTrue(outcome.stop_proof['scope_stopped'])
+
+    def test_fake_sdk_unknown_edit_progress_is_not_a_protocol_failure_or_plan_write_grant(self):
+        progress=r'''
+write_call={'sessionUpdate':'tool_call','toolCallId':'write-preview','rawInput':{'file_path':'file','contents':'edit'},'_meta':{'x.ai/tool':{'version':1,'namespace':'grok_build','name':'write'}}}
+send({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':sid,'update':write_call}})
+send({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':sid,'update':{'sessionUpdate':'tool_call_update','toolCallId':'write-preview','rawInput':{'unknown_sdk_default':True},'_meta':{'x.ai/tool':{'version':1,'namespace':'grok_build','name':'write','input':{'opaque_preview':True}}}}}})
+send({'jsonrpc':'2.0','id':'ask-write','method':'session/request_permission','params':{'sessionId':sid,'toolCall':write_call,'options':[{'optionId':'deny-write','name':'Reject','kind':'reject_once'},{'optionId':'allow-write','name':'Allow','kind':'allow_once'}]}})
+assert receive()['result']['outcome']=={'outcome':'selected','optionId':'deny-write'}
+'''
+        script=FAKE_SERVER.replace("c=receive();assert c['method']=='session/prompt'", "c=receive();assert c['method']=='session/prompt'\n"+progress)
+        outcome=self.run_child(script)
+        self.assertEqual(outcome.status,'awaiting_review')
+        self.assertEqual(outcome.text,'Owned ACP result')
 
     def test_first_plan_progress_uses_only_the_controller_generated_helper(self):
         reports=[]
