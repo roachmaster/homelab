@@ -11,9 +11,9 @@ use std::time::{Instant, SystemTime};
 use serde_json::{json, Map, Value};
 
 use crate::config::{
-    artifact_commands, canonical, decode, is_gate_ref, is_sha40, is_sha64, main_checks, read_root,
-    safe_relative, sha, v3_main_checks, v3_main_phases, write_root, ActorConfig, CORE, IDENTITY,
-    POLICY, STARTUP_IDENTITY_SECONDS, UNIT,
+    artifact_commands_for_profile, canonical, decode, is_gate_ref, is_sha40, is_sha64, main_checks,
+    read_root, safe_relative, sha, v3_main_checks, v3_main_phases, write_root, ActorConfig, CORE,
+    IDENTITY, POLICY, STARTUP_IDENTITY_SECONDS, UNIT,
 };
 use crate::system::{portal_probe_factory, ProbeFactory, SystemPort};
 
@@ -224,21 +224,35 @@ impl PortalReleaseActor {
             return Err("CI result digest mismatch".to_string());
         }
         let profile = get_str(&result, "verification_profile").unwrap_or("");
-        if !matches!(profile, "forge-sdlc-jenkins-v2" | "forge-sdlc-jenkins-v3") {
+        if !matches!(
+            profile,
+            "forge-sdlc-jenkins-v2" | "forge-sdlc-jenkins-v3" | "forge-sdlc-jenkins-v4"
+        ) {
             return Err("Unsupported full main proof".to_string());
         }
-        let version: i64 = if profile == "forge-sdlc-jenkins-v3" {
+        let version: i64 = if profile == "forge-sdlc-jenkins-v4" {
+            4
+        } else if profile == "forge-sdlc-jenkins-v3" {
             3
         } else {
             2
         };
-        let commands = if version == 3 {
+        let commands = if version == 4 {
+            forge_jenkins::native_policy::native_phases_for_scope("main")?
+                .into_iter()
+                .map(|p| p.argv)
+                .collect()
+        } else if version == 3 {
             v3_main_checks()
         } else {
             main_checks()
         };
-        if version == 3 {
-            let phases = v3_main_phases();
+        if version >= 3 {
+            let phases = if version == 4 {
+                forge_jenkins::native_policy::native_phases_for_scope("main")?.into_iter().enumerate().map(|(index,p)|json!({"index":index,"phase_id":p.phase_id,"kind":p.kind,"argv":p.argv,"returncode":0})).collect()
+            } else {
+                v3_main_phases()
+            };
             let kinds: BTreeSet<String> = phases
                 .iter()
                 .filter_map(|row| row.get("kind").and_then(Value::as_str).map(str::to_string))
@@ -314,7 +328,7 @@ impl PortalReleaseActor {
                     "scope": "main",
                     "browser": "required",
                     "database": "required_zero_skips",
-                    "backend_suites": "all_four",
+                    "backend_suites": if version==4 {"rust"} else {"all_four"},
                 }))
         {
             return Err("Release requires exact full main verification and cleanup".to_string());
@@ -349,7 +363,8 @@ impl PortalReleaseActor {
             || get_str(&manifest, "action_id") != Some(ci_action)
             || get_str(&manifest, "source_commit") != get_str(job, "commit_sha")
             || get_str(&manifest, "source_tree") != get_str(job, "tree_sha")
-            || manifest.get("commands") != Some(&Value::Array(artifact_commands()))
+            || manifest.get("commands")
+                != Some(&Value::Array(artifact_commands_for_profile(profile)))
             || manifest.get("request_sha256") != result.get("request_sha256")
         {
             return Err("Artifact provenance mismatch".to_string());
@@ -1511,7 +1526,13 @@ mod tests {
 
     #[test]
     fn plan_seals_a_prepared_release() {
-        let root = std::env::temp_dir().join(format!("forge-actor-test-{}", std::process::id()));
+        for version in [2, 3, 4] {
+            plan_fixture(version);
+        }
+    }
+    fn plan_fixture(version: i64) {
+        let root =
+            std::env::temp_dir().join(format!("forge-actor-test-{}-{version}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let ci = root.join("ci");
         let web = root.join("web");
@@ -1565,13 +1586,13 @@ mod tests {
             "version": 1, "policy": "forge-portal-artifact-v1",
             "action_id": action, "source_commit": commit, "source_tree": tree,
             "request_sha256": "c".repeat(64),
-            "commands": artifact_commands(),
+            "commands": artifact_commands_for_profile(&format!("forge-sdlc-jenkins-v{version}")),
             "files": packet_files,
         });
         let manifest_raw = canonical(&manifest);
         std::fs::write(packet.join("manifest.json"), &manifest_raw).unwrap();
         let file_count = manifest["files"].as_array().unwrap().len();
-        let result = json!({
+        let mut result = json!({
             "action_id": action, "candidate_commit": commit, "candidate_tree": tree,
             "expected_main": commit, "gate_manifest_sha256": "d".repeat(64),
             "branch_scope": "main", "verification_profile": "forge-sdlc-jenkins-v2",
@@ -1589,6 +1610,36 @@ mod tests {
                 "file_count": file_count, "total_bytes": total,
             },
         });
+        if version >= 3 {
+            let profile = format!("forge-sdlc-jenkins-v{version}");
+            let phases = if version == 4 {
+                forge_jenkins::native_policy::native_phases_for_scope("main").unwrap().into_iter().enumerate().map(|(index,p)|json!({"index":index,"phase_id":p.phase_id,"kind":p.kind,"argv":p.argv,"returncode":0})).collect::<Vec<_>>()
+            } else {
+                v3_main_phases()
+            };
+            result["version"] = json!(version);
+            result["result_version"] = json!(version);
+            result["verification_profile"] = json!(profile);
+            result["checks"] = Value::Array(
+                phases
+                    .iter()
+                    .map(|p| json!({"index":p["index"],"argv":p["argv"],"returncode":0}))
+                    .collect(),
+            );
+            result["phase_results"] = json!(phases);
+            result["failure_kind"] = Value::Null;
+            result["passed_kinds"] = json!([
+                "browser",
+                "compilation",
+                "formatting",
+                "lint",
+                "tests",
+                "verification"
+            ]);
+            if version == 4 {
+                result["coverage"] = forge_jenkins::native_policy::native_coverage("main").unwrap();
+            }
+        }
         let result_raw = canonical(&result);
         std::fs::write(ci.join(format!("{action}.json")), &result_raw).unwrap();
         // The currently-live portal: config + override + replay assets.
@@ -1699,6 +1750,22 @@ mod tests {
             "ci_receipt_sha256": sha(&result_raw),
             "gate_manifest_sha256": "d".repeat(64),
         });
+        if version == 4 {
+            let mut bad = result.clone();
+            bad["checks"][45]["argv"] = json!([
+                "/usr/bin/python3",
+                "-B",
+                "deploy/mission-control/backend-suites.py",
+                "--scope",
+                "main"
+            ]);
+            let raw = canonical(&bad);
+            std::fs::write(ci.join(format!("{action}.json")), &raw).unwrap();
+            let mut bad_job = job.clone();
+            bad_job["ci_receipt_sha256"] = json!(sha(&raw));
+            assert!(actor.proof(&bad_job).is_err());
+            std::fs::write(ci.join(format!("{action}.json")), &result_raw).unwrap();
+        }
         let authority = json!({
             "generation": 1,
             "lease_token": "123e4567-e89b-12d3-a456-426614174003",

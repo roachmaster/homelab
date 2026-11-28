@@ -11,7 +11,7 @@ use base64::Engine;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::ci_phases::{event_phases_for_scope, CiPhase, EVENT_PROFILE};
+use crate::ci_phases::{event_phases_for_profile, CiPhase};
 
 pub const MAX_ERROR_EXCERPT_BYTES: usize = 4096;
 pub const MAX_STAGE_LOG_BYTES: usize = 262144;
@@ -870,10 +870,16 @@ pub fn extract_stage_evidence_from_receipt(
     let profile = receipt.get("verification_profile");
     let mut phase_by_index: std::collections::HashMap<i64, PhaseInfo> =
         std::collections::HashMap::new();
-    if profile == Some(&json!(EVENT_PROFILE)) {
-        for (idx, phase) in event_phases_for_scope(&params.branch_scope)
-            .into_iter()
-            .enumerate()
+    if profile
+        .and_then(Value::as_str)
+        .is_some_and(crate::ci_phases::is_event_profile)
+    {
+        for (idx, phase) in event_phases_for_profile(
+            profile.and_then(Value::as_str).unwrap_or_default(),
+            &params.branch_scope,
+        )
+        .into_iter()
+        .enumerate()
         {
             phase_by_index.insert(idx as i64, PhaseInfo::Planned(phase));
         }

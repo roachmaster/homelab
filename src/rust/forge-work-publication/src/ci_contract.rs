@@ -6,7 +6,8 @@
 //! declarations; it never imports this source file from a candidate
 //! checkout.
 
-use crate::ci_phases::{event_phases_for_scope, CiPhase, EVENT_PROFILE};
+use crate::ci_phases::{event_phases_for_profile, CiPhase, EVENT_PROFILE};
+use forge_jenkins::native_policy::{native_coverage, native_protects, NATIVE_PROFILE};
 
 pub const LEGACY_PROFILE: &str = "forge-sdlc-jenkins-v1";
 pub const SCOPED_PROFILE: &str = "forge-sdlc-jenkins-v2";
@@ -220,6 +221,8 @@ impl CiGatePlan {
     pub fn result_version(&self) -> i64 {
         if self.profile == LEGACY_PROFILE {
             1
+        } else if self.profile == NATIVE_PROFILE {
+            4
         } else if self.profile == EVENT_PROFILE {
             3
         } else {
@@ -230,6 +233,9 @@ impl CiGatePlan {
     pub fn coverage(&self) -> Option<serde_json::Value> {
         if self.profile == LEGACY_PROFILE {
             return None;
+        }
+        if self.profile == NATIVE_PROFILE {
+            return native_coverage(&self.scope).ok();
         }
         let main = self.scope == "main";
         Some(serde_json::json!({
@@ -249,7 +255,13 @@ impl CiGatePlan {
                 .map(|(path, name, gate)| [path.to_string(), name.to_string(), gate.to_string()])
                 .collect();
         }
-        let version = if self.profile == EVENT_PROFILE { 3 } else { 2 };
+        let version = if self.profile == NATIVE_PROFILE {
+            4
+        } else if matches!(self.profile.as_str(), EVENT_PROFILE | NATIVE_PROFILE) {
+            3
+        } else {
+            2
+        };
         self.logical_checks
             .iter()
             .map(|name| {
@@ -287,8 +299,8 @@ impl CiGateContract {
                 phases: Vec::new(),
             });
         }
-        if self.profile == EVENT_PROFILE {
-            let phases = event_phases_for_scope(branch_scope);
+        if matches!(self.profile.as_str(), EVENT_PROFILE | NATIVE_PROFILE) {
+            let phases = event_phases_for_profile(&self.profile, branch_scope);
             let logical: Vec<String> = if kind == "main" {
                 ["check", "real-browser", "backend-suites"]
             } else {
@@ -350,10 +362,10 @@ impl CiGateContract {
     /// graph. Cache storage itself remains isolated by its
     /// validated branch scope.
     pub fn cache_checks(&self) -> Vec<Vec<String>> {
-        if self.profile == EVENT_PROFILE {
+        if matches!(self.profile.as_str(), EVENT_PROFILE | NATIVE_PROFILE) {
             let mut checks = Vec::new();
             for scope in ["branch/cache", "main"] {
-                for phase in event_phases_for_scope(scope) {
+                for phase in event_phases_for_profile(&self.profile, scope) {
                     checks.push(phase.argv);
                 }
             }
@@ -369,6 +381,7 @@ impl CiGateContract {
 
     pub fn protects(&self, path: &str, legacy_predicate: impl Fn(&str) -> bool) -> bool {
         legacy_predicate(path)
+            || (self.profile == NATIVE_PROFILE && native_protects(path))
             || path == CONTRACT_PATH
             || (self.profile == EVENT_PROFILE && protected_event_policy_path(path))
             || ((self.profile == SCOPED_PROFILE || self.profile == EVENT_PROFILE)
@@ -383,7 +396,14 @@ pub struct CiGateContractFactory {
 
 impl CiGateContractFactory {
     pub fn new(profile: &str) -> Result<Self, String> {
-        if ![LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE].contains(&profile) {
+        if ![
+            LEGACY_PROFILE,
+            SCOPED_PROFILE,
+            EVENT_PROFILE,
+            NATIVE_PROFILE,
+        ]
+        .contains(&profile)
+        {
             return Err("Unsupported Jenkins verification profile".to_string());
         }
         Ok(CiGateContractFactory {
@@ -413,7 +433,8 @@ mod tests {
         assert!(validate_gate_reference(&"a".repeat(64)).is_ok());
         assert!(validate_gate_reference("forge-sdlc-jenkins-v3:main").is_ok());
         assert!(validate_gate_reference("forge-sdlc-jenkins-v2:branch/feature-x").is_ok());
-        assert!(validate_gate_reference("forge-sdlc-jenkins-v4:main").is_err());
+        assert!(validate_gate_reference("forge-sdlc-jenkins-v4:main").is_ok());
+        assert!(validate_gate_reference("forge-sdlc-jenkins-v5:main").is_err());
         assert!(validate_gate_reference("forge-sdlc-jenkins-v3:branch/Bad").is_err());
         assert_eq!(scope_kind("main").unwrap(), "main");
         assert_eq!(scope_kind("detached").unwrap(), "branch");
@@ -455,5 +476,36 @@ mod tests {
         assert!(contract.protects("deploy/mission-control/agent-runner/work_api.py", |_| false));
         assert!(!contract.protects("src/main.rs", |_| false));
         assert!(CiGateContractFactory::new("v9").is_err());
+    }
+}
+
+#[cfg(test)]
+mod native_v4_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn native_v4_plan_preserves_old_graphs_and_protects_rust_authority() {
+        let old = CiGateContractFactory::new(EVENT_PROFILE)
+            .unwrap()
+            .create()
+            .plan("main")
+            .unwrap();
+        let native = CiGateContractFactory::new(NATIVE_PROFILE).unwrap().create();
+        let plan = native.plan("main").unwrap();
+        assert_eq!(plan.result_version(), 4);
+        assert_eq!(old.result_version(), 3);
+        assert_eq!(plan.coverage().unwrap()["backend_suites"], json!("rust"));
+        assert_eq!(old.coverage().unwrap()["backend_suites"], json!("all_four"));
+        assert_eq!(&plan.checks[..45], &old.checks[..45]);
+        assert_ne!(plan.checks[45], old.checks[45]);
+        for prefix in forge_jenkins::native_policy::NATIVE_PROTECTED_PREFIXES {
+            let path = format!("{prefix}authority.rs");
+            assert!(native.protects(&path, |_| false));
+            assert!(forge_work_worker::review_job::protected_gate_path(
+                &path,
+                NATIVE_PROFILE
+            ));
+        }
+        assert_eq!(plan.required_hosted_checks()[0][1], "Forge main CI v4");
     }
 }

@@ -556,7 +556,10 @@ pub fn is_gate_ref(value: &str) -> bool {
     };
     if !matches!(
         profile,
-        "forge-sdlc-jenkins-v1" | "forge-sdlc-jenkins-v2" | "forge-sdlc-jenkins-v3"
+        "forge-sdlc-jenkins-v1"
+            | "forge-sdlc-jenkins-v2"
+            | "forge-sdlc-jenkins-v3"
+            | "forge-sdlc-jenkins-v4"
     ) {
         return false;
     }
@@ -579,6 +582,15 @@ pub fn is_gate_ref(value: &str) -> bool {
             .unwrap_or(false)
 }
 
+/// V4 export records the native host's actual fixed Make invocation.
+pub fn artifact_commands_for_profile(profile: &str) -> Vec<Value> {
+    let mut commands = artifact_commands();
+    if profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+        commands[1] = serde_json::json!({"argv":["/usr/bin/make","ui-check"],"returncode":0});
+    }
+    commands
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,7 +609,8 @@ mod tests {
         assert!(is_gate_ref(&"a".repeat(64)));
         assert!(is_gate_ref("forge-sdlc-jenkins-v3:main"));
         assert!(is_gate_ref("forge-sdlc-jenkins-v2:branch/feature-x"));
-        assert!(!is_gate_ref("forge-sdlc-jenkins-v4:main"));
+        assert!(is_gate_ref("forge-sdlc-jenkins-v4:main"));
+        assert!(!is_gate_ref("forge-sdlc-jenkins-v5:main"));
         assert!(!is_gate_ref("forge-sdlc-jenkins-v2:branch/-bad"));
         assert!(!is_gate_ref("forge-sdlc-jenkins-v2:other"));
     }

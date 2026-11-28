@@ -65,6 +65,8 @@ pub fn binding_version(profile: &str) -> Result<String, String> {
     CiGateContractFactory::new(profile)?;
     Ok(if profile == LEGACY_PROFILE {
         VERSION.to_string()
+    } else if profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+        "forge-native-jenkins-v4".to_string()
     } else if profile == EVENT_PROFILE {
         "forge-native-jenkins-v3".to_string()
     } else {
@@ -404,7 +406,9 @@ impl NativeJenkinsVerification {
         {
             return Err(err("native_ci_state_changed"));
         }
-        if self.contract.profile == SCOPED_PROFILE || self.contract.profile == EVENT_PROFILE {
+        if self.contract.profile == SCOPED_PROFILE
+            || crate::ci_phases::is_event_profile(&self.contract.profile)
+        {
             let plan = self.plan(&value)?;
             if plan.checks != self.config.checks
                 || plan.required_hosted_checks() != self.config.required_hosted_checks
@@ -427,9 +431,16 @@ impl NativeJenkinsVerification {
             "results": selected.results_root.to_string_lossy(),
             "verifier": selected.verifier.to_string_lossy(),
         });
-        if self.contract.profile == SCOPED_PROFILE || self.contract.profile == EVENT_PROFILE {
+        if self.contract.profile == SCOPED_PROFILE
+            || crate::ci_phases::is_event_profile(&self.contract.profile)
+        {
             identity["verification_profile"] = json!(self.contract.profile);
             identity["verification_scope"] = json!(self.config.jenkins_verification_scope);
+        }
+        if self.contract.profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+            identity["policy_path"] = json!(selected.policy_path);
+            identity["policy_sha256"] = json!(selected.policy_sha256);
+            identity["verifier_sha256"] = json!(selected.verifier_sha256);
         }
         Ok(sha256_hex(&canonical_bytes(&identity)))
     }
@@ -473,7 +484,7 @@ impl NativeJenkinsVerification {
                     .unwrap_or("detached"),
             )
             .map_err(|message| PublicationError::new(&message))?;
-        if (profile == SCOPED_PROFILE || profile == EVENT_PROFILE)
+        if (profile == SCOPED_PROFILE || crate::ci_phases::is_event_profile(&profile))
             && (binding.get("logical_checks") != Some(&json!(plan.logical_checks))
                 || binding.get("policy_required_hosted_checks")
                     != Some(&json!(plan.logical_checks)))
@@ -745,7 +756,10 @@ impl NativeJenkinsVerification {
             .to_string();
         if !matches!(
             profile.as_str(),
-            LEGACY_PROFILE | SCOPED_PROFILE | EVENT_PROFILE
+            LEGACY_PROFILE
+                | SCOPED_PROFILE
+                | EVENT_PROFILE
+                | forge_jenkins::native_policy::NATIVE_PROFILE
         ) {
             return Some(false);
         }
@@ -1653,13 +1667,14 @@ impl NativeJenkinsVerification {
             return Err(err("native_ci_gate_changed"));
         }
         let files = self.files(repository, &head)?;
-        let (source, helper, gate) =
-            if self.contract.profile == SCOPED_PROFILE || self.contract.profile == EVENT_PROFILE {
-                jenkins_gate_manifest(&self.delivery.config, &files, branch_scope, false)
-            } else {
-                jenkins_gate_manifest(&self.delivery.config, &files, None, true)
-            }
-            .map_err(|error| PublicationError::new(&error.to_string()))?;
+        let (source, helper, gate) = if self.contract.profile == SCOPED_PROFILE
+            || crate::ci_phases::is_event_profile(&self.contract.profile)
+        {
+            jenkins_gate_manifest(&self.delivery.config, &files, branch_scope, false)
+        } else {
+            jenkins_gate_manifest(&self.delivery.config, &files, None, true)
+        }
+        .map_err(|error| PublicationError::new(&error.to_string()))?;
         Ok((head, tree, native_gate, source, helper, gate))
     }
 
@@ -1667,8 +1682,12 @@ impl NativeJenkinsVerification {
         let plan = NativeVerificationIdentityProvider::plan(snapshot)
             .map_err(|message| PublicationError::new(&message))?;
         let provenance = &snapshot["provenance"];
-        let verifier_raw = read_private(&self.delivery.config.verifier, 1024 * 1024, Some(0))
-            .map_err(|message| PublicationError::new(&message))?;
+        let verifier_raw = read_private(
+            &self.delivery.config.verifier,
+            crate::trusted_delivery::verifier_maximum(&self.delivery.config.verification_profile),
+            Some(0),
+        )
+        .map_err(|message| PublicationError::new(&message))?;
         if plan.profile != self.contract.profile
             || plan.checks != self.config.checks
             || plan.required_hosted_checks() != self.config.required_hosted_checks
@@ -1979,8 +1998,8 @@ impl NativeJenkinsVerification {
                 }
             }
         }
-        let scoped_profile =
-            self.contract.profile == SCOPED_PROFILE || self.contract.profile == EVENT_PROFILE;
+        let scoped_profile = self.contract.profile == SCOPED_PROFILE
+            || crate::ci_phases::is_event_profile(&self.contract.profile);
         let source_branch: Option<String> =
             if let Some(receipt) = publication.as_ref().filter(|_| scoped_profile) {
                 Some(text(receipt, "branch").to_string())
@@ -2350,7 +2369,11 @@ impl NativeJenkinsVerification {
             Some(&metadata),
         );
         report.checks = accounting.checks.clone();
-        if plan.profile == EVENT_PROFILE && schema_valid && accounting.valid && clean {
+        if crate::ci_phases::is_event_profile(&plan.profile)
+            && schema_valid
+            && accounting.valid
+            && clean
+        {
             let witness = protected_retry_observation(
                 &plan.profile,
                 &plan.scope,
@@ -2946,7 +2969,7 @@ impl NativeJenkinsVerification {
             }
             .to_string();
             let (states, logical): (Vec<String>, std::collections::HashMap<String, String>) =
-                if plan.profile == EVENT_PROFILE {
+                if crate::ci_phases::is_event_profile(&plan.profile) {
                     let mut states = Vec::new();
                     for name in &plan.logical_checks {
                         let members: Vec<&str> = plan
@@ -3330,7 +3353,9 @@ pub fn create_native_jenkins(
     if selected.owner != config.worker.owner
         || selected.github_config_dir != config.github_config_dir
         || config.checks != expected_plan.checks
-        || if contract.profile == SCOPED_PROFILE || contract.profile == EVENT_PROFILE {
+        || if contract.profile == SCOPED_PROFILE
+            || crate::ci_phases::is_event_profile(&contract.profile)
+        {
             config.required_hosted_checks != expected_plan.required_hosted_checks()
         } else {
             !legacy_logical_ok

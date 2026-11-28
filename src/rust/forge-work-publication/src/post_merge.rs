@@ -139,7 +139,7 @@ fn is_gate_contract(value: &str) -> bool {
     let Some((version, scope)) = rest.split_once(':') else {
         return false;
     };
-    if !matches!(version, "1" | "2" | "3") {
+    if !matches!(version, "1" | "2" | "3" | "4") {
         return false;
     }
     if matches!(scope, "main" | "detached") {
@@ -183,7 +183,7 @@ pub fn validate_request(job: &Value, request: &Value) -> Result<(), String> {
         return Err("Invalid post-merge request shape".to_string());
     }
     let profile = request["verification_profile"].as_str().unwrap_or_default();
-    if profile != SCOPED_PROFILE && profile != EVENT_PROFILE {
+    if profile != SCOPED_PROFILE && !crate::ci_phases::is_event_profile(profile) {
         return Err("Unsupported post-merge verification profile".to_string());
     }
     let post_merge_id = job["post_merge_id"].as_str().unwrap_or_default();
@@ -222,7 +222,7 @@ pub fn passed_receipt(request: &Value, receipt: &Value) -> bool {
         return false;
     }
     let profile = request["verification_profile"].as_str().unwrap_or_default();
-    if profile != SCOPED_PROFILE && profile != EVENT_PROFILE {
+    if profile != SCOPED_PROFILE && !crate::ci_phases::is_event_profile(profile) {
         return false;
     }
     let plan = match (CiGateContractFactory {
@@ -291,7 +291,7 @@ pub fn stopped_receipt(request: &Value, receipt: &Value) -> bool {
         return false;
     }
     let profile = request["verification_profile"].as_str().unwrap_or_default();
-    if profile != SCOPED_PROFILE && profile != EVENT_PROFILE {
+    if profile != SCOPED_PROFILE && !crate::ci_phases::is_event_profile(profile) {
         return false;
     }
     let proof = receipt["cleanup_confirmed"] == Value::Bool(true)
@@ -311,7 +311,13 @@ pub fn stopped_receipt(request: &Value, receipt: &Value) -> bool {
         "branch_scope": "main",
         "correlation_id": request["correlation_id"],
     });
-    let version: i64 = if profile == EVENT_PROFILE { 3 } else { 2 };
+    let version: i64 = if profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+        4
+    } else if profile == EVENT_PROFILE {
+        3
+    } else {
+        2
+    };
     proof
         && receipt["version"].as_i64() == Some(version)
         && expected
@@ -823,7 +829,8 @@ mod tests {
     fn gate_contract_shapes() {
         assert!(is_gate_contract("forge-sdlc-jenkins-v2:main"));
         assert!(is_gate_contract("forge-sdlc-jenkins-v3:branch/feat-1.x"));
-        assert!(!is_gate_contract("forge-sdlc-jenkins-v4:main"));
+        assert!(is_gate_contract("forge-sdlc-jenkins-v4:main"));
+        assert!(!is_gate_contract("forge-sdlc-jenkins-v5:main"));
         assert!(!is_gate_contract("forge-sdlc-jenkins-v2:branch/-bad"));
         assert!(!is_gate_contract("forge-sdlc-jenkins-v2:branch/"));
     }

@@ -16,7 +16,6 @@ use forge_work_worker::config::{parse_config as parse_worker_config, WorkerConfi
 use forge_work_worker::native_identity::NativeIdentityConfig;
 
 use crate::ci_contract::{CiGateContractFactory, LEGACY_PROFILE, SCOPED_PROFILE};
-use crate::ci_phases::EVENT_PROFILE;
 use crate::verification::DEFAULT_REQUIRED_HOSTED_CHECKS;
 
 pub const CONFIG_ENV: &str = "FORGE_PUBLICATION_CONFIG";
@@ -320,7 +319,7 @@ pub fn parse_config(
     if execution_scope != "branch" && execution_scope != "main" {
         return Err("Invalid Jenkins verification scope".to_string());
     }
-    if (profile == SCOPED_PROFILE || profile == EVENT_PROFILE)
+    if (profile == SCOPED_PROFILE || crate::ci_phases::is_event_profile(&profile))
         && ![
             "jenkins_verification_scope",
             "checks",
@@ -338,7 +337,11 @@ pub fn parse_config(
     } else {
         "detached"
     })?;
-    let checks_limit = if profile == EVENT_PROFILE { 64 } else { 8 };
+    let checks_limit = if crate::ci_phases::is_event_profile(&profile) {
+        64
+    } else {
+        8
+    };
     let checks: Vec<Vec<String>> = match object.get("checks") {
         None if object.get("hosted_provider").and_then(Value::as_str) == Some("jenkins") => {
             plan.checks.clone()
@@ -504,7 +507,7 @@ pub fn parse_config(
                     triple[index] = text.to_string();
                 }
                 let prefix_ok = if hosted_provider == "jenkins"
-                    && (profile == SCOPED_PROFILE || profile == EVENT_PROFILE)
+                    && (profile == SCOPED_PROFILE || crate::ci_phases::is_event_profile(&profile))
                 {
                     triple[0].starts_with("jenkins/")
                 } else {
@@ -576,7 +579,8 @@ pub fn parse_config(
         }
     };
     if delivery_enabled
-        && (!post_merge_enabled || (profile != SCOPED_PROFILE && profile != EVENT_PROFILE))
+        && (!post_merge_enabled
+            || (profile != SCOPED_PROFILE && !crate::ci_phases::is_event_profile(&profile)))
     {
         return Err("Unified delivery requires scoped main Jenkins verification".to_string());
     }

@@ -12,7 +12,7 @@ ALLOWED = {
     "forge-usage": {("forge-core", "normal")},
     "forge-agent-driver": set(),
     "forge-services": set(),
-    "forge-portal-release-actor": set(),
+    "forge-portal-release-actor": {("forge-jenkins", "normal")},
     "forge-studio": set(),
     "forge-mcp-db": set(),
     "forge-ide-ui": set(),
@@ -38,7 +38,7 @@ ALLOWED = {
     "forge-mcp-host": {("forge-mcp", "normal")},
     "forge-postgres": {("forge-mcp-db", "dev"), ("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-work-publication", "normal"), ("forge-jenkins", "normal"), ("forge-usage", "normal")},
     "forge-work": {("forge-core", "normal")},
-    "forge-work-worker": {("forge-core", "normal"), ("forge-usage", "normal")},
+    "forge-work-worker": {("forge-core", "normal"), ("forge-usage", "normal"), ("forge-jenkins", "normal")},
     "forge-work-publication": {("forge-core", "normal"), ("forge-work", "normal"), ("forge-work-worker", "normal"), ("forge-jenkins", "normal")},
     "forge-host": {(name, "normal") for name in ("forge-core", "forge-work", "forge-work-worker", "forge-work-publication", "forge-jenkins", "forge-usage", "forge-postgres")},
 }

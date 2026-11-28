@@ -13,7 +13,6 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::ci_contract::SCOPED_PROFILE;
-use crate::ci_phases::EVENT_PROFILE;
 use crate::delivery_stores::RequireLease;
 use crate::durable_files::{effective_uid, read_private};
 use crate::post_merge::PostMergeProviderPort;
@@ -59,7 +58,9 @@ pub struct PostMergeVerificationProvider {
 impl PostMergeVerificationProvider {
     pub fn new(delivery: TrustedDeliveryPort) -> Result<Self, ProviderError> {
         let contract = contract_for_config(&delivery.config).map_err(provider_error)?;
-        if contract.profile != SCOPED_PROFILE && contract.profile != EVENT_PROFILE {
+        if contract.profile != SCOPED_PROFILE
+            && !crate::ci_phases::is_event_profile(&contract.profile)
+        {
             return value_error("Post-merge verification requires a scoped Jenkins profile");
         }
         Ok(PostMergeVerificationProvider { delivery })
@@ -134,8 +135,12 @@ impl PostMergeVerificationProvider {
         let verifier_sha256 = format!(
             "{:x}",
             Sha256::digest(
-                read_private(&selected.verifier, 1024 * 1024, Some(0))
-                    .map_err(ProviderError::Other)?
+                read_private(
+                    &selected.verifier,
+                    crate::trusted_delivery::verifier_maximum(&selected.verification_profile),
+                    Some(0)
+                )
+                .map_err(ProviderError::Other)?
             )
         );
         let body = json!({
@@ -432,7 +437,7 @@ impl PostMergeProviderFactory {
                 .keys()
                 .all(|alias| config.repositories.contains_key(alias));
         if (selected.verification_profile != SCOPED_PROFILE
-            && selected.verification_profile != EVENT_PROFILE)
+            && !crate::ci_phases::is_event_profile(&selected.verification_profile))
             || selected.owner != config.worker.owner
             || selected.github_config_dir != config.github_config_dir
             || !projects_match

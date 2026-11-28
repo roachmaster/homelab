@@ -1,3 +1,40 @@
+## Native v4 final local validation — 2026-11-28
+
+The six affected Rust packages passed 412 tests with zero failures or ignored
+cases, including the real required PostgreSQL fixture and an independent normal
+producer formatter consumer. All-target/all-feature strict Clippy and the full
+repository dependency architecture guard passed. The saved wire fixture retains
+real historical branch/main input and public-spool identities; its v4 derivatives
+are clearly test-only. The host parser's fixture consumer remains a separate
+integration proof owned by the native verifier. All 55 existing migration files
+compare byte-for-byte with b3ab834d. No production data, selector, service, remote
+branch, or protected CI receipt was changed. Evidence is retained privately at
+/mnt/data/homelab-build/native-v4-contract-evidence-20261128. These local checks do
+not replace whole-main CI, backup-data rehearsal, or a paired native rollout.
+
+## Native v4 consumers and additive M56 — 2026-11-28
+
+The publication/worker/actor path explicitly selects native v4 without changing
+historical phase tables. Native parity reads a bounded Root-pinned JSON descriptor
+and independently pinned executable, never CPython. Historical AST tests now use
+only extracted policy declarations, with no retained Python supervisor. Native
+transport identities freeze descriptor path/checksum and binary checksum; native
+binary reads remain bounded to 64 MiB. The actor retains old artifact command
+receipts and accepts v4's actual `make ui-check` export command separately.
+
+M56 adds native validation using exact predecessor-body checks, full changed-body
+and security pins, and two owner-only helpers. Original main receipt branches
+remain intact for v2/v3; v4 requires its actual Rust backend command, truthful
+coverage and all 46 phase witnesses. Named gate checks add v4 while existing
+management verifiers retain their predecessor projections. No applied migration
+1–54 or reserved 55 is edited, and the normal apply path does not run cutover55.
+The real disposable PG fixture accepts exact v2/v3/v4 requests/receipts, rejects
+legacy argv/coverage, wrong numeric version, partial and failed v4 proofs, verifies
+normal apply again and detects whole-function body drift. The migration performs
+no history/receipt updates. Production upgrade still requires a fresh backup and
+rehearsal against actual data, and exact-source CI and paired native activation.
+
+
 ## Native deployment cutover in qualification — 2026-11-28
 
 Codex's integration branch removes all 367 deployment Python sources from

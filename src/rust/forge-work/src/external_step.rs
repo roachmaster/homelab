@@ -41,7 +41,7 @@ pub trait ExternalVerificationPort: Send + Sync {
 }
 
 /// work_ci_contract.validate_gate_reference: a 64-hex
-/// digest, or forge-sdlc-jenkins-v[1-3]:(main|detached|
+/// digest, or forge-sdlc-jenkins-v[1-4]:(main|detached|
 /// `branch/<slug>`) as a full match.
 pub fn validate_gate_reference(value: &Value) -> Result<String, WorkError> {
     let invalid = || WorkError::store("Invalid delivery gate");
@@ -58,7 +58,7 @@ pub fn validate_gate_reference(value: &Value) -> Result<String, WorkError> {
         .ok_or_else(invalid)?;
     let mut chars = rest.chars();
     match chars.next() {
-        Some('1' | '2' | '3') => {}
+        Some('1' | '2' | '3' | '4') => {}
         _ => return Err(invalid()),
     }
     if chars.next() != Some(':') {

@@ -13,7 +13,6 @@ use forge_work::external_review::{ExternalSourceIntegration, EXTERNAL_DIFF_FLAGS
 
 use crate::artifact_identity::VerificationPolicySnapshot;
 use crate::ci_contract::SCOPED_PROFILE;
-use crate::ci_phases::EVENT_PROFILE;
 use crate::durable_files::{durable_json, effective_uid, group_id, home_dir, read_private};
 use crate::external_delivery::{BranchUpsert, ExternalDeliveryLease, ExternalDeliveryStorePort};
 use crate::external_identity::{ci_policy_body, ExternalCandidateIdentityProvider};
@@ -814,8 +813,11 @@ impl TrustedDeliveryPort {
             source_digest = transport[0].as_str().unwrap_or_default().to_string();
             helper_digest = transport[1].as_str().unwrap_or_default().to_string();
             gate = transport[2].as_str().unwrap_or_default().to_string();
-            if sha256_hex(&read_private(&self.config.verifier, 1024 * 1024, Some(0))?)
-                != helper_digest
+            if sha256_hex(&read_private(
+                &self.config.verifier,
+                crate::trusted_delivery::verifier_maximum(&self.config.verification_profile),
+                Some(0),
+            )?) != helper_digest
             {
                 return value_error(
                     "Frozen verification executor changed; create a new generation",
@@ -835,7 +837,8 @@ impl TrustedDeliveryPort {
                 .cloned()
                 .unwrap_or_default();
         } else {
-            let scoped = contract.profile == SCOPED_PROFILE || contract.profile == EVENT_PROFILE;
+            let scoped = contract.profile == SCOPED_PROFILE
+                || crate::ci_phases::is_event_profile(&contract.profile);
             let (source, helper, gate_value) = jenkins_gate_manifest(
                 &self.config,
                 &files,
@@ -1030,6 +1033,33 @@ impl TrustedDeliveryPort {
     }
 }
 
+/// Exact public spool envelope; persisted DB/binding requests are a different shape.
+/// The normal writer and the producer/host compatibility fixture share this formatter.
+pub fn submission_request_record(
+    request: &Value,
+    plan: &crate::ci_contract::CiGatePlan,
+    branch_scope: &str,
+    bundle_sha256: &str,
+) -> DeliveryResult<Value> {
+    let candidate_commit = sha(request["candidate_commit"].as_str().unwrap_or_default())?;
+    let expected_main = sha(request["integration_base"].as_str().unwrap_or_default())?;
+    crate::trusted_delivery::digest(bundle_sha256)?;
+    Ok(json!({
+            "version": plan.result_version(),
+            "action_id": validate_uid(request["action_id"].as_str().unwrap_or_default())?,
+            "workflow_id": validate_uid(request["workflow_id"].as_str().unwrap_or_default())?,
+            "project_alias": request["project_alias"],
+            "candidate_commit": candidate_commit,
+            "candidate_tree": sha(request["candidate_tree"].as_str().unwrap_or_default())?,
+            "expected_main": expected_main,
+            "branch_scope": branch_scope,
+            "gate_manifest_sha256": gate_ref(request["gate_manifest_sha256"].as_str().unwrap_or_default())?,
+            "bundle_sha256": bundle_sha256,
+            "verification_profile": plan.profile,
+            "correlation_id": validate_uid(request["correlation_id"].as_str().unwrap_or_default())?,
+    }))
+}
+
 impl TrustedDeliveryPort {
     pub fn parameters(&self, request: &Value) -> DeliveryResult<Value> {
         Ok(json!({
@@ -1102,7 +1132,11 @@ impl TrustedDeliveryPort {
         {
             return value_error("CI content generation or source scope changed");
         }
-        let verifier = sha256_hex(&read_private(&self.config.verifier, 1024 * 1024, Some(0))?);
+        let verifier = sha256_hex(&read_private(
+            &self.config.verifier,
+            crate::trusted_delivery::verifier_maximum(&self.config.verification_profile),
+            Some(0),
+        )?);
         let policy_snapshot = VerificationPolicySnapshot::parse_dict(&reference["policy"])
             .map_err(DeliveryError::value)?;
         let policy = policy_snapshot.to_dict()["policy"].clone();
@@ -1189,20 +1223,8 @@ impl TrustedDeliveryPort {
         {
             return value_error("Unsafe CI submission");
         }
-        let record = json!({
-            "version": plan.result_version(),
-            "action_id": validate_uid(request["action_id"].as_str().unwrap_or_default())?,
-            "workflow_id": validate_uid(request["workflow_id"].as_str().unwrap_or_default())?,
-            "project_alias": request["project_alias"],
-            "candidate_commit": candidate_commit,
-            "candidate_tree": sha(request["candidate_tree"].as_str().unwrap_or_default())?,
-            "expected_main": expected_main,
-            "branch_scope": branch_scope,
-            "gate_manifest_sha256": gate_ref(request["gate_manifest_sha256"].as_str().unwrap_or_default())?,
-            "bundle_sha256": sha256_hex(&bundle),
-            "verification_profile": contract.profile,
-            "correlation_id": validate_uid(request["correlation_id"].as_str().unwrap_or_default())?,
-        });
+        let record =
+            submission_request_record(request, &plan, &branch_scope, &sha256_hex(&bundle))?;
         let request_path = path.join("request.json");
         if request_path.exists() {
             let existing = parse_json(&read_private(&request_path, 65536, Some(self.owner))?)?;
@@ -1402,12 +1424,14 @@ impl TrustedDeliveryPort {
         let plan = contract_for_config(&self.config)?
             .plan(record["branch_scope"].as_str().unwrap_or_default())
             .map_err(DeliveryError::value)?;
-        if plan.profile == SCOPED_PROFILE || plan.profile == EVENT_PROFILE {
+        if plan.profile == SCOPED_PROFILE || crate::ci_phases::is_event_profile(&plan.profile) {
             receipt["verification_profile"] = result["verification_profile"].clone();
             receipt["result_version"] = result["version"].clone();
             receipt["coverage"] = result["coverage"].clone();
         }
-        if plan.profile == EVENT_PROFILE && result["cleanup_confirmed"] == Value::Bool(true) {
+        if crate::ci_phases::is_event_profile(&plan.profile)
+            && result["cleanup_confirmed"] == Value::Bool(true)
+        {
             // Only the protected result file can supply
             // fixed-phase witnesses. Copy exact validated
             // fields; never classify a failure from logs.
@@ -1859,11 +1883,32 @@ impl DeliveryProviderFactory {
                 .symlink_metadata()
                 .map(|meta| meta.file_type().is_symlink())
                 .unwrap_or(false);
-        if contract.profile == SCOPED_PROFILE
-            || contract.profile == EVENT_PROFILE
+        if contract.profile == forge_jenkins::native_policy::NATIVE_PROFILE {
+            let descriptor = read_private(
+                self.config
+                    .policy_path
+                    .as_ref()
+                    .ok_or_else(|| DeliveryError::value("Missing native policy path"))?,
+                262144,
+                Some(0),
+            )?;
+            crate::verifier_parity::verify_native_policy_descriptor(
+                &descriptor,
+                self.config.policy_sha256.as_deref().unwrap_or_default(),
+            )?;
+            let binary = read_private(&self.config.verifier, 64 * 1024 * 1024, Some(0))?;
+            if self.config.verifier_sha256.as_deref() != Some(sha256_hex(&binary).as_str()) {
+                return value_error("Pinned native verifier changed");
+            }
+        } else if contract.profile == SCOPED_PROFILE
+            || contract.profile == crate::ci_phases::EVENT_PROFILE
             || verifier_exists
         {
-            let verifier_source = read_private(&self.config.verifier, 1024 * 1024, Some(0))?;
+            let verifier_source = read_private(
+                &self.config.verifier,
+                crate::trusted_delivery::verifier_maximum(&self.config.verification_profile),
+                Some(0),
+            )?;
             crate::verifier_parity::verify_verifier_policy_parity_contract(
                 &contract,
                 &verifier_source,

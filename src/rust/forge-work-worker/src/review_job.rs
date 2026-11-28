@@ -608,6 +608,8 @@ pub fn protected_gate_path(path: &str, profile: &str) -> bool {
         || path.contains("/.config/")
         || name.starts_with("test_")
         || named
+        || (profile == forge_jenkins::native_policy::NATIVE_PROFILE
+            && forge_jenkins::native_policy::native_protects(path))
         || path == "deploy/mission-control/agent-runner/work_ci_contract.py"
         || ((profile == SCOPED_PROFILE || profile == EVENT_PROFILE)
             && V2_PROTECTED_PATHS.contains(&path))

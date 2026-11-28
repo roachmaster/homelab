@@ -125,3 +125,30 @@ References: [Jenkins scripted-client authentication](https://www.jenkins.io/doc/
 [remote access API](https://www.jenkins.io/doc/book/using/remote-access-api/),
 [asynchronous build abort](https://www.jenkins.io/doc/book/using/aborting-a-build/),
 and [official tree-range parser](https://github.com/jenkinsci/stapler/blob/master/core/src/main/java/org/kohsuke/stapler/export/NamedPathPruner.java).
+
+### Native v4 policy
+
+`forge_jenkins::native_policy` is a pure shared contract for the native verifier,
+publication producer, review worker and release actor. `native_phases_for_scope`,
+`native_gate_contract`, `native_coverage`, `native_stage_evidence`,
+`native_policy_descriptor`, `native_policy_sha256` and `native_protects` perform
+no acquisition or execution. The profile is `forge-sdlc-jenkins-v4`, with numeric
+public-spool/protected-result version 4 and gate identity `<profile>:<scope>`.
+Persisted DB/binding requests keep their existing identity fields without a numeric
+version; the normal producer converts them to the distinct public spool envelope. Valid scopes are
+`main`, `detached`, or the closed `branch/<slug>` form.
+
+The 45 branch / 46 main phases retain the feature matrix, development quality
+checks and real-browser journey. Their backend tail is `make backend-suites
+SCOPE=branch` or `SCOPE=main`; the latter requires actual disposable PostgreSQL
+with zero silently skipped database coverage. Repository build/test Python tools
+remain development commands; the installed verifier and its root-owned policy,
+process supervision and artifact export are native Rust.
+
+The descriptor has version 1 and contains `verification_profile`, closed source
+protection rules, branch/main phase lists and branch/main coverage. Its checksum
+is SHA256 of compact recursively key-sorted JSON without a trailing newline.
+Installed v4 delivery configuration binds an absolute `policy_path` to adjacent
+immutable `policy.json`, `policy_sha256`, and separately `verifier_sha256`.
+Historical profiles retain their existing command and receipt acceptance rules;
+the new profile never substitutes Rust commands inside historical receipts.

@@ -320,8 +320,12 @@ fn validate_factory_selection(
     }
     if (config.delivery_enabled
         && (!config.post_merge_enabled
-            || !["forge-sdlc-jenkins-v2", "forge-sdlc-jenkins-v3"]
-                .contains(&config.jenkins_verification_profile.as_str())))
+            || ![
+                "forge-sdlc-jenkins-v2",
+                "forge-sdlc-jenkins-v3",
+                "forge-sdlc-jenkins-v4",
+            ]
+            .contains(&config.jenkins_verification_profile.as_str())))
         || ((config.release_enabled || config.source_observation_enabled)
             && !config.delivery_enabled)
     {
