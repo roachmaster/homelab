@@ -14,6 +14,7 @@ pub mod consumer;
 pub mod emit_tool;
 pub mod emitter;
 pub mod events;
+pub mod native_policy;
 mod observation;
 #[cfg(feature = "provisioning")]
 pub mod provisioning;

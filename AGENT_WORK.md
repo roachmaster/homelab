@@ -1,3 +1,15 @@
+## Native v4 gate policy — isolated contract work, 2026-11-28
+
+The pure forge-jenkins::native_policy module defines an additive v4 profile,
+closed branch/main phases, named contract, truthful Rust backend coverage and
+canonical descriptor hash. Its 45/46 phase graph retains the existing feature
+matrix, repository development checks and real browser gate; backend commands
+select the Rust backend-suites target by scope. Rust verifier/policy/producer,
+worker, actor and SQL authority paths are protected. Historical v1-v3 tables
+are unchanged. Two focused policy tests passed, including legacy backend argv
+substitution and incomplete-main rejection. This shared policy is a contract
+building block, not qualification or deployment of the new verifier.
+
 ## Deployment Python source cutoff — 2026-11-28
 
 This candidate applies the deployment-source removal from Muse's bedc2bfd to
