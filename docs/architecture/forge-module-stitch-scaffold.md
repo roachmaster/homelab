@@ -43,3 +43,19 @@ Every crate in `src/rust/` belongs to one of five layers enforced by [`src/rust/
    - `cargo test --manifest-path src/rust/Cargo.toml -p forge-<name>`
    - `python3 src/rust/scripts/check_core_layers.py`
    - `python3 src/rust/scripts/check_dependencies.py`
+
+## 4. Explicit Classification of Standalone Crates
+
+Not every crate should be forced into S2/S5 stitches. The five newer standalone crates are classified explicitly:
+
+| Crate | Current Classification | Decision & Trigger to Graduate |
+| --- | --- | --- |
+| `forge-services` | **L1 (Intentionally stitch-free)** | Local systemd/service operator CLI; keep standalone unless a host embeds service management programmatically. |
+| `forge-studio` | **L1 (Intentionally stitch-free)** | Standalone artifact/studio service with its own tokio/postgres binary; graduate to S2 (`PreparedGroup`) only if a second host consumes it as a library. |
+| `forge-portal-release-actor` | **L1 (Intentionally stitch-free)** | Isolated release-actor binary invoked via `delivery_ops::actor_command`; keep standalone to preserve its process boundary. |
+| `forge-mcp-db` | **L1 → Scheduled for S2** | Currently a standalone read-only PostgreSQL MCP server; add an S2 `PreparedGroup` registrar if `forge-mcp-host` embeds its backend directly. |
+| `forge-mcp-host` | **L4-candidate → Scheduled for S2 + S5** | Already wraps `forge-mcp` with a fake/live backend seam (`0435481`); adopt `PreparedGroup` + `Bridge` when adding multi-backend admission or shared host routing. |
+
+### Process-Execution Guard
+
+Run `python3 src/rust/scripts/check_process_exec.py` alongside `check_core_layers.py` and `check_dependencies.py` to block new raw `std::process::Command::new` calls outside approved `IoClient` adapters (`forge-work-worker/src/process_exec.rs`) and documented streaming/CLI allowlist sites.
