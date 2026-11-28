@@ -20,6 +20,42 @@ ownership, and changed receipts/logs/identities, symlinks and lost leases cannot
 persist evidence. Private logs: /mnt/data/homelab-build/main-stage-tail-evidence-20261128.
 No runtime, database, CI selector or remote branch was changed.
 
+## Repair-only author selection — isolated follow-up, 2026-11-28
+
+Based on preserved source49efdebb, the Python API accepts optional typed
+`delivery_repair_authors` with per-native-project author aliases. The configured
+profile must be enabled, distinct from the independent reviewer and bound to its
+owned feature branch. Frozen-role compatibility is required. A pure derived
+WorkflowPolicy changes only the author and its Plan/implementation recipes;
+normal project author defaults, reviewer, revision allowances and existing frozen
+workflows remain unchanged. Existing public WorkConfig positional fields retain
+their ordering; the optional field is appended and absent by default.
+
+The normal DeliveryRepairConsumerFactory freezes this derived snapshot/digest
+for new repair requests. WorkService selects it only for the private
+WorkSubmit.delivery_admission path; WorkStore's existing atomic leased operation
+and stored-intent check runs first. No HTTP field or new authority is introduced.
+An already saved exact old normal-policy request can complete normal admission
+without rewriting its checkpoint, source identity or spent lineage budget.
+
+All61 tests across four unchanged normal MainProcessProvider module runs pass,
+with zero skips/errors/failures: new repair selector7, existing delivery21,
+frozen-role compatibility6 and API27. New actual disposable PostgreSQL checks
+use content-v2 identities and follow Plan publication, independent Plan approval,
+Codex implementation claim, local checks, independent code review and publication
+claim. They preserve an ordinary Grok workflow and both frozen snapshots, reject
+public override/changed command/fake lease and exercise saved-old-request replay.
+Artifacts and model/check providers are fixtures; no model, GitHub or deployment
+proof is claimed. Package/source syntax and diff checks pass; no SQL migration,
+helper policy path set, runtime source closure, live state or service changed.
+
+A root-private unselected API draft adds only the repair selector while keeping
+normal Grok and the current empty repair-admission project list. Its config hash
+and manifest transition must be reviewed against the incoming major source change
+before selection. The Rust runtime does not yet implement this new Python-only
+selector and must not be selected with it. This isolated commit is not pushed or
+deployed; the orchestrator owns incoming-main reconciliation and qualification.
+
 ## Disposable database scope — 2026-11-28
 
 All disposable PostgreSQL tests must honor the shared `PG16_AVAILABLE` selection,

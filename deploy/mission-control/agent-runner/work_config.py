@@ -1,6 +1,6 @@
 """Frozen configuration and pure recipe catalog for Forge coding admission."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 from pathlib import Path
@@ -12,7 +12,7 @@ from work_policy import (POLICY_DIGEST, POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIE
                          native_policy_digest, native_policy_matches)
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, POLICY_DIGEST as EXTERNAL_POLICY_DIGEST, MODES as EXTERNAL_MODES, MODEL as EXTERNAL_MODEL, POLICIES as EXTERNAL_POLICIES
 from work_external_flow_config import freeze_external_workflows
-from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS, default_agent_branch, validate_persistent_branch, validate_profile_branch
+from work_agent_branch import AGENT_BRANCH_INSTRUCTIONS, OWNED_FEATURE_BRANCHES, default_agent_branch, validate_persistent_branch, validate_profile_branch
 
 CONFIG_ENV_VAR = "FORGE_RUNNER_WORK_CONFIG"
 USAGE_CONFIG_ENV_VAR = "FORGE_RUNNER_USAGE_CONFIG"
@@ -33,7 +33,7 @@ PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects", "identity_protocol", "workflow_policy_compatibility"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows", "delivery_enabled", "delivery_repair_projects", "delivery_repair_authors", "identity_protocol", "workflow_policy_compatibility"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
 PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled", "backup_models", "quota_handoff_profile", "branch"}
 
@@ -443,6 +443,7 @@ class WorkConfig:
     delivery_repair_projects: frozenset[str] = field(default_factory=frozenset)
     identity_protocol: str = 'legacy-v1'
     workflow_policy_compatibility: str = 'strict-defaults-v1'
+    delivery_repair_authors: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
 
     def __post_init__(self):
         if self.workflow_policy_compatibility not in ('strict-defaults-v1','forge-frozen-workflow-roles-v1'):
@@ -507,6 +508,34 @@ class WorkConfig:
             if policy is None or any(not copied_profiles[p].execution_enabled for p in (policy.author_profile,policy.reviewer_profile)):
                 raise ValueError('Delivery repair requires current enabled author and reviewer policy')
         object.__setattr__(self,'delivery_repair_projects',selected)
+        overrides = self.delivery_repair_authors
+        if not isinstance(overrides, (dict, MappingProxyType)) or len(overrides) > 64:
+            raise ValueError('Invalid delivery repair authors')
+        frozen = {}
+        for project, author in overrides.items():
+            validate_identifier(project, 'delivery repair project')
+            validate_identifier(author, 'delivery repair author')
+            policy = self.project_workflows.get(project)
+            if (policy is None or author not in copied_profiles
+                    or self.workflow_policy_compatibility != 'forge-frozen-workflow-roles-v1'):
+                raise ValueError('Delivery repair author requires native frozen-role policy')
+            if copied_profiles[author].branch != OWNED_FEATURE_BRANCHES.get(author) or author not in OWNED_FEATURE_BRANCHES:
+                raise ValueError('Delivery repair author requires its owned feature branch')
+            derived = replace(policy, author_profile=author)
+            if any(not copied_profiles[p].execution_enabled for p in
+                   (derived.author_profile, derived.reviewer_profile)):
+                raise ValueError('Delivery repair requires enabled role profiles')
+            if copied_profiles[author].quota_handoff_profile == derived.reviewer_profile:
+                raise ValueError('Delivery repair handoff author and reviewer must be distinct')
+            derived.snapshot(WorkCatalog(copied_profiles), repair_policy)
+            frozen[project] = author
+        object.__setattr__(self, 'delivery_repair_authors', MappingProxyType(frozen))
+
+    def delivery_repair_workflow(self, project):
+        """Pure selected native policy; normal project defaults remain untouched."""
+        policy = self.project_workflows.get(project)
+        author = self.delivery_repair_authors.get(project)
+        return replace(policy, author_profile=author) if author is not None else policy
 
     def project_label(self, alias):
         return self.project_labels.get(alias, alias)
@@ -596,6 +625,7 @@ def parse_work_config(raw):
         external_workflows=raw.get("external_workflows",{}),
         delivery_enabled=raw.get('delivery_enabled',False),
         delivery_repair_projects=raw.get('delivery_repair_projects',()),
+        delivery_repair_authors=raw.get('delivery_repair_authors',{}),
         identity_protocol=raw.get('identity_protocol','legacy-v1'),
         workflow_policy_compatibility=raw.get('workflow_policy_compatibility','strict-defaults-v1'),
     )
