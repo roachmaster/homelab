@@ -191,13 +191,9 @@ pub(crate) fn resume(
         if pending >= store.max_pending {
             return Err(forge_work::WorkError::rejected(503, "queue_full"));
         }
-        let recipe_document = pinned_recipe_for(
-            tx,
-            &store.owner,
-            &request.project_alias,
-            &request.recipe_digest,
-        )?
-        .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
+        let recipe_document =
+            pinned_recipe_for(tx, store, &request.project_alias, &request.recipe_digest)?
+                .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
         let review_required = task.mode == "implement";
         let update_params: &[&(dyn ToSql + Sync)] = &[
             &request.agent_profile,

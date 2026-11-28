@@ -43,6 +43,8 @@ impl ReviewPolicy {
 /// cap, and the review policy - the WorkStore's configuration, with no
 /// behavior of its own beyond session acquisition.
 pub struct PgWorkStore {
+    pub(crate) delivery_enabled: bool,
+    pub(crate) recipes: Vec<forge_work::pinned_recipe::PinnedRecipe>,
     /// The factory fresh sessions are created through, per operation.
     pub(crate) factory: PgSessionFactory,
     /// The owner scope every query binds.
@@ -65,12 +67,42 @@ impl PgWorkStore {
         repair_policy: ReviewPolicy,
     ) -> PgWorkStore {
         PgWorkStore {
+            delivery_enabled: false,
+            recipes: Vec::new(),
             factory,
             owner: owner.into(),
             allowed_projects,
             max_pending,
             repair_policy,
         }
+    }
+
+    /// Bind the validated current catalog without requiring a previous task to seed a recipe.
+    pub fn with_recipe_catalog(
+        mut self,
+        config: &forge_work::work_config::WorkApiConfig,
+    ) -> Result<Self, forge_work::WorkError> {
+        if config.owner != self.owner || config.allowed_projects != self.allowed_projects {
+            return Err(forge_work::WorkError::store(
+                "Recipe catalog scope mismatch",
+            ));
+        }
+        self.recipes = config
+            .profiles
+            .iter()
+            .flat_map(|profile| {
+                config
+                    .allowed_modes
+                    .iter()
+                    .filter_map(|mode| config.resolve_recipe(&profile.alias, mode))
+            })
+            .collect();
+        Ok(self)
+    }
+
+    pub fn with_delivery_enabled(mut self, enabled: bool) -> Self {
+        self.delivery_enabled = enabled;
+        self
     }
 
     /// Creates a fresh session through the factory (a transient session

@@ -131,6 +131,12 @@ fn main() {
         }
     }
 
+    // Acquire the listener before any background claimant can start.
+    let listener = match TcpListener::bind(("127.0.0.1", port)) {
+        Ok(listener) => listener,
+        Err(error) => fail(&format!("unable to bind 127.0.0.1:{port}: {error}")),
+    };
+
     // Background services (runner.py's background_services):
     // start the workflow coordinator thread and the Jenkins
     // consumer, then report ready.
@@ -153,10 +159,6 @@ fn main() {
     }
     let ready = Arc::new(AtomicBool::new(true));
 
-    let listener = match TcpListener::bind(("127.0.0.1", port)) {
-        Ok(listener) => listener,
-        Err(error) => fail(&format!("unable to bind 127.0.0.1:{port}: {error}")),
-    };
     let services = Arc::new(Services {
         work: work_service,
         jenkins: jenkins_service,
@@ -169,6 +171,7 @@ fn main() {
         ready,
         Arc::clone(&stop),
     );
+    stop.store(true, Ordering::SeqCst);
     for handle in background {
         let _ = handle.join();
     }

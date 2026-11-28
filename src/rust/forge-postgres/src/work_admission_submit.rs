@@ -91,9 +91,9 @@ fn identity_ready(tx: &mut crate::tx::Tx<'_, '_>) -> Result<bool, forge_work::Wo
 /// digest-variant tolerance for the workflow fence switch), the
 /// pending cap, the workflow merge-head base fence, the task
 /// insert, the review policy, the workflow row and identity
-/// recording, and the queued event + notify. Delivery admission and
-/// external-profile enqueue are host concerns the request does not
-/// carry (documented v1 boundary).
+/// recording, and the queued event + notify. Private repair admission and
+/// lineage binding share this transaction; external-profile enqueue is
+/// a separate readiness boundary.
 pub(crate) fn submit(
     store: &PgWorkStore,
     request: &forge_work::work_requests::SubmitRequest,
@@ -145,8 +145,51 @@ pub(crate) fn submit(
         if pending >= store.max_pending {
             return Err(forge_work::WorkError::rejected(503, "queue_full"));
         }
+        if let Some(authority) = &request.delivery_admission {
+            if !store.delivery_enabled {
+                return Err(forge_work::WorkError::rejected(403, "denied"));
+            }
+            let rows = tx
+                .query_rows(
+                    "SELECT forge_agent.delivery_repair_admit($1,$2,$3,$4)",
+                    &[
+                        &authority.operation_id,
+                        &authority.generation,
+                        &authority.lease_token,
+                        &intent,
+                    ],
+                )
+                .map_err(work_err)?;
+            if !rows
+                .first()
+                .and_then(|row| row.try_get::<_, bool>(0).ok())
+                .unwrap_or(false)
+            {
+                return Err(forge_work::WorkError::rejected(403, "denied"));
+            }
+        }
+        let trusted_main = if store.delivery_enabled {
+            tx.call_json(
+                "SELECT forge_agent.delivery_project_head($1)",
+                &[&request.project_alias],
+            )
+            .map_err(work_err)?
+            .and_then(|value| value["commit_sha"].as_str().map(str::to_string))
+        } else {
+            None
+        };
+        if trusted_main
+            .as_ref()
+            .is_some_and(|head| head != &request.base_revision)
+        {
+            return Err(forge_work::work_config::rejected_reason(
+                409,
+                "result_mismatch",
+                "base_stale",
+            ));
+        }
         let has_workflow = request.workflow_policy_digest.is_some();
-        if has_workflow {
+        if has_workflow && trusted_main.is_none() {
             let heads = tx
                 .query_rows(
                     "SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w USING (workflow_id) WHERE a.owner_id = $1 AND a.project_alias = $2 AND a.kind = 'merge' AND a.status = 'completed' AND a.finish_receipt->>'status' = 'merged' AND a.finish_receipt->'receipt'->>'merge_commit' = a.intent->>'merge_commit' AND w.phase = 'completed' ORDER BY a.updated_at DESC, a.action_id DESC LIMIT 1",
@@ -164,13 +207,9 @@ pub(crate) fn submit(
                 }
             }
         }
-        let recipe_document = pinned_recipe_for(
-            tx,
-            &store.owner,
-            &request.project_alias,
-            &request.recipe_digest,
-        )?
-        .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
+        let recipe_document =
+            pinned_recipe_for(tx, store, &request.project_alias, &request.recipe_digest)?
+                .ok_or_else(|| forge_work::WorkError::rejected(503, "unavailable"))?;
         // A defect's discovering references must resolve before
         // the task is created (WorkStore.submit). Python also
         // falls back to the external workflow table for a workflow
@@ -343,13 +382,34 @@ pub(crate) fn submit(
             &request.project_alias,
             task_id,
             "queued",
-            receipt,
+            receipt.clone(),
             crate::work_rows::EventOptions {
                 actor: &request.actor,
                 cause: None,
                 first: true,
             },
         )?;
+        if let Some(authority) = &request.delivery_admission {
+            let rows = tx
+                .query_rows(
+                    "SELECT forge_agent.delivery_repair_bind($1,$2,$3,$4,$5)",
+                    &[
+                        &authority.operation_id,
+                        &authority.generation,
+                        &authority.lease_token,
+                        &task_id,
+                        &receipt,
+                    ],
+                )
+                .map_err(work_err)?;
+            if !rows
+                .first()
+                .and_then(|row| row.try_get::<_, bool>(0).ok())
+                .unwrap_or(false)
+            {
+                return Err(forge_work::WorkError::rejected(403, "denied"));
+            }
+        }
         notify(tx)?;
         outcome_for(tx, &store.owner, &request.project_alias, task_id, 1, false)
     })

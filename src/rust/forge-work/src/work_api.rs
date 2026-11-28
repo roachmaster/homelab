@@ -599,6 +599,7 @@ impl<'a> Body<'a> {
 
 #[derive(Debug, Clone)]
 pub struct WorkSubmit {
+    pub delivery_admission: Option<crate::work_requests::DeliveryAdmission>,
     pub project_alias: String,
     pub base_revision: String,
     pub mode: String,
@@ -851,6 +852,7 @@ pub fn decode(
                 workflow_policy_id,
                 task_kind,
                 defect,
+                delivery_admission: None,
             }))
         }
         WorkDestination::Get => {
@@ -1798,7 +1800,19 @@ impl WorkApiService {
             return Err(rejected_reason(403, "denied", "profile_not_granted"));
         }
         let recipe = self.resolve_for_submit(command)?;
-        let snapshot = self.config.workflow_snapshot(
+        let repair_config = command
+            .delivery_admission
+            .as_ref()
+            .map(|_| {
+                self.config.delivery_submission_config(
+                    &command.project_alias,
+                    &command.agent_profile,
+                    command.workflow_policy_digest.as_deref(),
+                )
+            })
+            .transpose()?;
+        let selected_config = repair_config.as_ref().unwrap_or(&self.config);
+        let snapshot = selected_config.workflow_snapshot(
             &command.project_alias,
             &command.mode,
             &command.agent_profile,
@@ -1817,6 +1831,7 @@ impl WorkApiService {
         match self.call(
             correlation,
             WorkPayload::Submit(SubmitRequest {
+                delivery_admission: command.delivery_admission.clone(),
                 project_alias: command.project_alias.clone(),
                 base_revision: command.base_revision.clone(),
                 mode: command.mode.clone(),

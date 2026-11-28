@@ -331,6 +331,34 @@ pub struct ReviewContext {
     pub author_handoff: Option<serde_json::Value>,
 }
 
+/// Omit only a saved Plan's legacy note after that exact Plan is approved
+/// for implementation. Later implementation notes and bound repair packets
+/// remain authoritative; the persisted note itself is never modified.
+pub fn current_phase_context<'a>(
+    lease: &crate::lease::Lease,
+    context: Option<&'a ReviewContext>,
+    plan: Option<&serde_json::Value>,
+) -> Option<&'a ReviewContext> {
+    let expected = lease
+        .plan_decision_id
+        .as_deref()
+        .or(lease.scope_plan_decision_id.as_deref());
+    let obsolete_note = context.is_some_and(|context| context.feedback_id.is_none())
+        && lease.mode == "implement"
+        && expected.is_some()
+        && plan.is_some_and(|plan| {
+            plan["decision_id"].as_str() == expected
+                && plan["decision"].as_str() == Some("resume")
+                && lease.resume_attempt_id.is_some()
+                && plan["plan_attempt_id"].as_str() == lease.resume_attempt_id.as_deref()
+        });
+    if obsolete_note {
+        None
+    } else {
+        context
+    }
+}
+
 /// The exact build inspection context bound to a repair
 /// (work_build_context).
 #[derive(Debug, Clone, PartialEq)]

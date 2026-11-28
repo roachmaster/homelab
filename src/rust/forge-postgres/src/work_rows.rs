@@ -225,10 +225,18 @@ pub(crate) fn outcome_for(
 /// resolved to digests only, never documents.
 pub(crate) fn pinned_recipe_for(
     tx: &mut crate::tx::Tx<'_, '_>,
-    owner: &str,
+    store: &crate::work_store::PgWorkStore,
     project_alias: &str,
     recipe_digest: &str,
 ) -> Result<Option<Value>, forge_work::WorkError> {
+    if let Some(recipe) = store
+        .recipes
+        .iter()
+        .find(|recipe| recipe.digest == recipe_digest)
+    {
+        return Ok(Some(recipe.to_dict()));
+    }
+    let owner = &store.owner;
     let params: &[&(dyn ToSql + Sync)] = &[&owner, &project_alias, &recipe_digest];
     let rows = tx
         .query_rows(

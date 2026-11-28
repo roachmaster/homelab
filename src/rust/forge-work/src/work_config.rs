@@ -423,6 +423,7 @@ pub struct WorkApiConfig {
     pub delivery_repair_projects: Vec<String>,
     pub identity_protocol: String,
     pub workflow_policy_compatibility: String,
+    pub delivery_repair_authors: Vec<(String, String)>,
 }
 
 impl WorkApiConfig {
@@ -588,7 +589,46 @@ impl WorkApiConfig {
             delivery_repair_projects: self.delivery_repair_projects.clone(),
             identity_protocol: self.identity_protocol.clone(),
             workflow_policy_compatibility: self.workflow_policy_compatibility.clone(),
+            delivery_repair_authors: self.delivery_repair_authors.clone(),
         }
+    }
+
+    /// Repair-only derived roles; normal project defaults and frozen workflows remain untouched.
+    pub fn delivery_repair_workflow(&self, project: &str) -> Option<ProjectWorkflowPolicy> {
+        let mut policy = self.project_workflow(project)?.clone();
+        if let Some((_, author)) = self
+            .delivery_repair_authors
+            .iter()
+            .find(|(alias, _)| alias == project)
+        {
+            policy.author_profile = author.clone();
+        }
+        Some(policy)
+    }
+
+    pub fn delivery_submission_config(
+        &self,
+        project: &str,
+        profile: &str,
+        digest: Option<&str>,
+    ) -> Result<Self, WorkError> {
+        if !self.delivery_enabled || !self.delivery_repair_projects.iter().any(|p| p == project) {
+            return Err(WorkError::rejected(403, "denied"));
+        }
+        let mut selected = self.clone();
+        if let Some(policy) = self.delivery_repair_workflow(project) {
+            let snapshot = policy.snapshot(self, &self.repair_policy, &native_policy_matches)?;
+            if profile == policy.author_profile && digest == snapshot["policy_digest"].as_str() {
+                if let Some((_, current)) = selected
+                    .project_workflows
+                    .iter_mut()
+                    .find(|(alias, _)| alias == project)
+                {
+                    *current = policy;
+                }
+            }
+        }
+        Ok(selected)
     }
 
     /// WorkService._workflow_snapshot + _require_workflow_submission:
@@ -758,7 +798,7 @@ impl WorkflowCatalog for WorkApiConfig {
 // --- parse_work_config (work_config.py) ---
 
 const CONFIG_REQUIRED_KEYS: [&str; 4] = ["owner", "allowed_projects", "allowed_modes", "profiles"];
-const CONFIG_ALLOWED_KEYS: [&str; 13] = [
+const CONFIG_ALLOWED_KEYS: [&str; 14] = [
     "owner",
     "allowed_projects",
     "allowed_modes",
@@ -770,6 +810,7 @@ const CONFIG_ALLOWED_KEYS: [&str; 13] = [
     "external_workflows",
     "delivery_enabled",
     "delivery_repair_projects",
+    "delivery_repair_authors",
     "identity_protocol",
     "workflow_policy_compatibility",
 ];
@@ -1062,6 +1103,7 @@ pub fn parse_work_config(raw: &Value) -> Result<WorkApiConfig, String> {
         delivery_repair_projects: Vec::new(),
         identity_protocol,
         workflow_policy_compatibility,
+        delivery_repair_authors: Vec::new(),
     };
     // WorkCatalog.__init__ quota-handoff validation.
     for profile in &config.profiles {
@@ -1178,6 +1220,47 @@ pub fn parse_work_config(raw: &Value) -> Result<WorkApiConfig, String> {
         }
     }
     config.delivery_repair_projects = delivery_repair_projects;
+    if let Some(raw) = object.get("delivery_repair_authors") {
+        let map = raw
+            .as_object()
+            .filter(|map| map.len() <= 64)
+            .ok_or("Invalid delivery repair authors")?;
+        for (project, author) in map {
+            let author = author
+                .as_str()
+                .filter(|value| is_identifier_str(value))
+                .ok_or("Invalid delivery repair author")?;
+            if config.workflow_policy_compatibility != "forge-frozen-workflow-roles-v1" {
+                return Err("Delivery repair author requires native frozen-role policy".into());
+            }
+            let base = config
+                .project_workflow(project)
+                .ok_or("Delivery repair author requires native frozen-role policy")?;
+            let profile = config
+                .profile(author)
+                .ok_or("Invalid delivery repair author")?;
+            if owned_feature_branch(author) != Some(profile.branch.as_str()) {
+                return Err("Delivery repair author requires its owned feature branch".into());
+            }
+            if !profile.execution_enabled
+                || profile.quota_handoff_profile.as_deref() == Some(base.reviewer_profile.as_str())
+                || !config
+                    .profile(&base.reviewer_profile)
+                    .is_some_and(|p| p.execution_enabled)
+                || author == base.reviewer_profile
+            {
+                return Err("Delivery repair requires enabled independent role profiles".into());
+            }
+            let mut derived = base.clone();
+            derived.author_profile = author.into();
+            derived
+                .snapshot(&config, &config.repair_policy, &native_policy_matches)
+                .map_err(|e| format!("Invalid repair workflow: {e:?}"))?;
+            config
+                .delivery_repair_authors
+                .push((project.clone(), author.into()));
+        }
+    }
     Ok(config)
 }
 
@@ -1203,6 +1286,105 @@ mod tests {
                 },
             },
         })
+    }
+
+    fn repair_sample() -> Value {
+        let mut value = sample();
+        value["profiles"]["codex-author"]["branch"] = json!("feature/codex");
+        value["profiles"]["codex-primary"] =
+            json!({"backend":"codex","model":"gpt-5","resource_profile":"forge-coding-v10"});
+        value["profiles"]["grok-primary"] = json!({"backend":"grok","model":"fixture","resource_profile":"forge-coding-v10","branch":"feature/grok","execution_enabled":true});
+        value["project_workflows"] =
+            json!({"homelab":{"author_profile":"grok-primary","reviewer_profile":"codex-primary"}});
+        value["workflow_policy_compatibility"] = json!("forge-frozen-workflow-roles-v1");
+        value["delivery_enabled"] = json!(true);
+        value["delivery_repair_projects"] = json!(["homelab"]);
+        value
+    }
+
+    #[test]
+    fn repair_author_is_private_derived_policy_and_preserves_old_intents() {
+        let legacy = parse_work_config(&repair_sample()).unwrap();
+        assert!(legacy.delivery_repair_authors.is_empty());
+        let mut value = repair_sample();
+        value["delivery_repair_authors"] = json!({"homelab":"codex-author"});
+        let config = parse_work_config(&value).unwrap();
+        assert_eq!(
+            config.project_workflow("homelab").unwrap().author_profile,
+            "grok-primary"
+        );
+        let derived = config.delivery_repair_workflow("homelab").unwrap();
+        assert_eq!(derived.author_profile, "codex-author");
+        assert_eq!(derived.reviewer_profile, "codex-primary");
+        let snapshot = derived
+            .snapshot(&config, &config.repair_policy, &native_policy_matches)
+            .unwrap();
+        let selected = config
+            .delivery_submission_config(
+                "homelab",
+                "codex-author",
+                snapshot["policy_digest"].as_str(),
+            )
+            .unwrap();
+        assert_eq!(
+            selected.project_workflow("homelab").unwrap().author_profile,
+            "codex-author"
+        );
+        let normal = legacy
+            .project_workflow("homelab")
+            .unwrap()
+            .snapshot(&legacy, &legacy.repair_policy, &native_policy_matches)
+            .unwrap();
+        let selected = config
+            .delivery_submission_config("homelab", "grok-primary", normal["policy_digest"].as_str())
+            .unwrap();
+        assert_eq!(
+            selected.project_workflow("homelab").unwrap().author_profile,
+            "grok-primary"
+        );
+        assert_eq!(
+            normal,
+            selected
+                .project_workflow("homelab")
+                .unwrap()
+                .snapshot(&selected, &selected.repair_policy, &native_policy_matches)
+                .unwrap()
+        );
+        assert!(config
+            .delivery_submission_config("other", "codex-author", None)
+            .is_err());
+        let mut disabled = config;
+        disabled.delivery_enabled = false;
+        assert!(disabled
+            .delivery_submission_config(
+                "homelab",
+                "codex-author",
+                snapshot["policy_digest"].as_str()
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn repair_author_requires_current_independent_owned_role() {
+        for author in [json!("missing"), json!("codex-primary"), json!(false)] {
+            let mut value = repair_sample();
+            value["delivery_repair_authors"] = json!({"homelab":author});
+            assert!(parse_work_config(&value).is_err());
+        }
+        for (field, setting) in [
+            ("branch", json!("forge/agent/codex-author")),
+            ("execution_enabled", json!(false)),
+            ("quota_handoff_profile", json!("codex-primary")),
+        ] {
+            let mut value = repair_sample();
+            value["delivery_repair_authors"] = json!({"homelab":"codex-author"});
+            value["profiles"]["codex-author"][field] = setting;
+            assert!(parse_work_config(&value).is_err(), "{field}");
+        }
+        let mut value = repair_sample();
+        value["delivery_repair_authors"] = json!({"homelab":"codex-author"});
+        value["workflow_policy_compatibility"] = json!("strict-defaults-v1");
+        assert!(parse_work_config(&value).is_err());
     }
 
     #[test]

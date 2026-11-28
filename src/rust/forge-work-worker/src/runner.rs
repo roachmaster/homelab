@@ -630,12 +630,17 @@ impl CommandRunnerProvider {
         }
         let mut feedback_file: Option<PathBuf> = None;
         let mut build_files: Vec<PathBuf> = Vec::new();
-        if lease.feedback_id.is_some() && contexts.feedback.is_none() {
+        let feedback_context = crate::contexts::current_phase_context(
+            lease,
+            contexts.feedback.as_ref(),
+            contexts.plan.as_ref(),
+        );
+        if lease.feedback_id.is_some() && feedback_context.is_none() {
             return Err(needs_reconcile(
                 "The admitted repair feedback is unavailable.",
             ));
         }
-        if let Some(feedback) = &contexts.feedback {
+        if let Some(feedback) = feedback_context {
             let valid = feedback.content.len() <= MAX_FEEDBACK_BYTES
                 && sha256_hex(&feedback.content) == feedback.sha256
                 && feedback.feedback_id == lease.feedback_id

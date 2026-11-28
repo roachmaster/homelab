@@ -152,9 +152,7 @@ pub fn validate_lease(lease: &Lease) -> Result<(), WorkerError> {
     } else if lease.workflow_feedback_sha256.is_some() {
         return Err(protocol("Unbound workflow feedback context"));
     }
-    let linked = lease.parent_task_id.is_some()
-        || lease.repair_source_review_id.is_some()
-        || lease.repair_candidate_commit.is_some();
+    let linked = lease.repair_source_review_id.is_some() || lease.repair_candidate_commit.is_some();
     if linked {
         let valid = lease.parent_task_id.is_some()
             && lease.repair_source_review_id.is_some()
@@ -162,6 +160,20 @@ pub fn validate_lease(lease: &Lease) -> Result<(), WorkerError> {
             && lease.repair_candidate_commit.as_deref() == Some(lease.base_revision.as_str());
         if !valid {
             return Err(protocol("Incomplete linked repair authority"));
+        }
+    } else if let Some(parent) = &lease.parent_task_id {
+        // Lineage alone is not code-repair authority. These children execute
+        // through the independently bound workflow/approved-Plan readers.
+        let valid = lease.workflow_id.is_some()
+            && lease.workflow_review_id.is_none()
+            && matches!(lease.mode.as_str(), "plan" | "implement")
+            && (lease.feedback_id.is_none() || lease.mode == "implement")
+            && parent != &lease.task_id
+            && (lease.mode != "implement"
+                || lease.plan_decision_id.is_some()
+                || lease.scope_plan_decision_id.is_some());
+        if !valid {
+            return Err(protocol("Incomplete workflow continuation authority"));
         }
     }
     let expected_unit = crate::supervisor::unit_name(&lease.attempt_id)
@@ -1142,7 +1154,17 @@ impl CodingWorker {
                     ))),
                 };
                 match acquired {
-                    Ok(Some(feedback)) => contexts.feedback = Some(feedback),
+                    Ok(Some(feedback)) => {
+                        if crate::contexts::current_phase_context(
+                            lease,
+                            Some(&feedback),
+                            contexts.plan.as_ref(),
+                        )
+                        .is_some()
+                        {
+                            contexts.feedback = Some(feedback);
+                        }
+                    }
                     Ok(None) => {}
                     Err(ReviewContextFailure::DeliveryUnavailable) => {
                         let _ = self.store.checkpoint(lease, RECOVERY_SUMMARY);
@@ -1568,6 +1590,81 @@ mod tests {
         value.feedback_sha256 = Some("d".repeat(64));
         value.repair_candidate_commit = Some(value.base_revision.clone());
         assert!(validate_lease(&value).is_ok());
+    }
+
+    #[test]
+    fn workflow_lineage_requires_its_own_approved_implementation_authority() {
+        let mut value = lease();
+        value.parent_task_id = Some("77777777-7777-7777-7777-777777777777".into());
+        value.workflow_id = Some("55555555-5555-5555-5555-555555555555".into());
+        value.mode = "plan".into();
+        assert!(validate_lease(&value).is_ok());
+        value.mode = "implement".into();
+        assert!(validate_lease(&value).is_err());
+        value.plan_decision_id = Some("66666666-6666-6666-6666-666666666666".into());
+        assert!(validate_lease(&value).is_ok());
+        value.plan_decision_id = None;
+        value.scope_plan_decision_id = Some("66666666-6666-6666-6666-666666666666".into());
+        assert!(validate_lease(&value).is_ok());
+        value.parent_task_id = Some(value.task_id.clone());
+        assert!(validate_lease(&value).is_err());
+        value.parent_task_id = Some("77777777-7777-7777-7777-777777777777".into());
+        value.workflow_id = None;
+        assert!(validate_lease(&value).is_err());
+        value.workflow_id = Some("55555555-5555-5555-5555-555555555555".into());
+        value.mode = "review".into();
+        assert!(validate_lease(&value).is_err());
+        value.mode = "plan".into();
+        value.feedback_id = Some("99999999-9999-9999-9999-999999999999".into());
+        value.feedback_sha256 = Some("d".repeat(64));
+        assert!(validate_lease(&value).is_err());
+        value.mode = "implement".into();
+        assert!(validate_lease(&value).is_ok());
+        value.repair_candidate_commit = Some(value.base_revision.clone());
+        assert!(validate_lease(&value).is_err());
+    }
+
+    #[test]
+    fn approved_plan_drops_only_its_own_legacy_direction() {
+        let mut lease = lease();
+        lease.plan_decision_id = Some("66666666-6666-6666-6666-666666666666".into());
+        lease.resume_attempt_id = Some("77777777-7777-7777-7777-777777777777".into());
+        let mut context = crate::contexts::ReviewContext {
+            content: vec![],
+            sha256: String::new(),
+            feedback_id: None,
+            finding_ids: vec![],
+            legacy_resume_note: "Plan only".into(),
+            build: None,
+            author_handoff: None,
+        };
+        let plan = serde_json::json!({"decision_id":lease.plan_decision_id,"decision":"resume","plan_attempt_id":lease.resume_attempt_id});
+        assert!(
+            crate::contexts::current_phase_context(&lease, Some(&context), Some(&plan)).is_none()
+        );
+        assert!(crate::contexts::current_phase_context(&lease, Some(&context), None).is_some());
+        for key in ["decision_id", "decision", "plan_attempt_id"] {
+            let mut changed = plan.clone();
+            changed[key] = serde_json::json!("other");
+            assert!(
+                crate::contexts::current_phase_context(&lease, Some(&context), Some(&changed))
+                    .is_some()
+            );
+        }
+        lease.mode = "plan".into();
+        assert!(
+            crate::contexts::current_phase_context(&lease, Some(&context), Some(&plan)).is_some()
+        );
+        lease.mode = "implement".into();
+        context.feedback_id = Some("88888888-8888-8888-8888-888888888888".into());
+        assert!(
+            crate::contexts::current_phase_context(&lease, Some(&context), Some(&plan)).is_some()
+        );
+        context.feedback_id = None;
+        lease.resume_attempt_id = Some("99999999-9999-9999-9999-999999999999".into());
+        assert!(
+            crate::contexts::current_phase_context(&lease, Some(&context), Some(&plan)).is_some()
+        );
     }
 
     #[test]

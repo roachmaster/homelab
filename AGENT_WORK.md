@@ -3208,3 +3208,37 @@ the owned module with its other delivery modules. The unchanged import-closure
 regression and shell syntax check pass. No installer was executed live. Jenkins157
 was superseded through the normal cancellation/cleanup port; it is not qualified.
 The complete corrected branch suite must pass before another Jenkins submission.
+
+### 2026-11-28 — Rust API repair admission and native continuation parity
+
+The Rust-only readiness review found concrete cutover defects in the normal
+composition: current recipes required a previously stored task; repair authority
+was dropped; the private repair ready port returned a public receipt missing its
+private audit actor; ordinary catalog reads used incompatible PostgreSQL scalar
+types; and linked workflow children were mistaken for code repairs. This slice
+binds the current recipe catalog, keeps repair-only role overrides separate from
+ordinary project defaults, and admits/binds the immutable repair operation in the
+normal task transaction through the existing protected SQL functions. Public JSON
+cannot supply the private proof; no schema, grants, recipes or intent formats
+change. Private finishing reads the exact durable queued receipt.
+
+Worker claim parsing, defect reads and pure lease validation now commit together.
+The worker and invocation builder suppress only a legacy Plan note bound to the
+exact approved Plan decision and saved Plan attempt; real repair feedback and
+later implementation notes remain intact. The HTTP listener binds before any
+background claimant starts, and shutdown signals those claimants before joining.
+
+Validation: 138 forge-work and 98 forge-work-worker unit tests; 39 forge-postgres
+library tests including a real owned PostgreSQL16 repair consumer/API flow and
+claim rollback fixture, all passed with zero ignored tests. The PG flow exercises
+first recipe admission, derived Codex repair versus ordinary Grok, protected
+admit/bind/finish, exact private receipt, replay without another lineage charge,
+refused private proof/lease, Get/Catalog reads, stale-main refusal, and actual
+claim rollback followed by a valid claim. No production services, rows, branches
+or model calls were changed. External profile admission and content-v2 ID-only
+submission remain separate identified readiness work; this slice does not claim
+full Rust runtime cutover readiness.
+
+Strict all-target/all-feature Clippy for forge-work, forge-work-worker, forge-postgres
+and forge-host also passed with `-D warnings`; selected formatting and diff checks
+passed. Logs remain outside source under `/mnt/data/homelab-build/rust-repair-*`.

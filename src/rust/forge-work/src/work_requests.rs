@@ -1,9 +1,48 @@
 use uuid::Uuid;
 
+/// Private failed-main admission proof. Never decoded from a public HTTP command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryAdmission {
+    pub operation_id: Uuid,
+    pub generation: i32,
+    pub lease_token: Uuid,
+}
+impl DeliveryAdmission {
+    pub fn from_value(value: &serde_json::Value) -> Result<Self, crate::WorkError> {
+        let denied = || crate::WorkError::rejected(403, "denied");
+        let object = value.as_object().ok_or_else(denied)?;
+        if object.len() != 3
+            || !["operation_id", "generation", "lease_token"]
+                .iter()
+                .all(|key| object.contains_key(*key))
+        {
+            return Err(denied());
+        }
+        let uid = |key: &str| -> Result<Uuid, crate::WorkError> {
+            let text = object[key].as_str().ok_or_else(denied)?;
+            let uid = Uuid::parse_str(text).map_err(|_| denied())?;
+            if uid.to_string() != text {
+                return Err(denied());
+            }
+            Ok(uid)
+        };
+        let generation = object["generation"]
+            .as_i64()
+            .filter(|v| (1..=i32::MAX as i64).contains(v))
+            .ok_or_else(denied)? as i32;
+        Ok(Self {
+            operation_id: uid("operation_id")?,
+            generation,
+            lease_token: uid("lease_token")?,
+        })
+    }
+}
+
 /// A submit intent: new work for one project, fully resolved (the
 /// recipe digest comes from the frozen catalog) and actor-carrying.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubmitRequest {
+    pub delivery_admission: Option<DeliveryAdmission>,
     pub project_alias: String,
     pub base_revision: String,
     pub mode: String,
@@ -108,5 +147,29 @@ mod tests {
         assert_eq!(PlanDecision::parse("revise"), Some(PlanDecision::Revise));
         assert_eq!(PlanDecision::parse("cancel"), Some(PlanDecision::Cancel));
         assert_eq!(PlanDecision::parse("approve"), None);
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    #[test]
+    fn private_proof_requires_canonical_exact_bound_identity() {
+        let proof = serde_json::json!({"operation_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","generation":1,"lease_token":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"});
+        assert!(DeliveryAdmission::from_value(&proof).is_ok());
+        for (field, value) in [
+            ("generation", serde_json::json!(0)),
+            ("generation", serde_json::json!(true)),
+            ("generation", serde_json::json!(2147483648_i64)),
+            (
+                "lease_token",
+                serde_json::json!("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"),
+            ),
+            ("extra", serde_json::json!(1)),
+        ] {
+            let mut bad = proof.clone();
+            bad[field] = value;
+            assert!(DeliveryAdmission::from_value(&bad).is_err());
+        }
     }
 }
