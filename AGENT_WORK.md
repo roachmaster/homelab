@@ -1,3 +1,26 @@
+## Real-browser and upgrade corrections — 2026-11-28
+
+Full-main Jenkins137 exposed a real phone layout regression in the new defect
+filter. The scope grid is now compact: the390px first task starts at358px rather
+than402px, retaining labels,44px targets and the original fold assertion.
+Real browser execution also caught an invalid fixture phase(planning instead of
+the closed wire value plan), then a product navigation guard that ignored trusted
+discovery/filed-defect links outside the current filtered list. The guard now
+admits only those links from the currently accepted task; unrelated and stale
+IDs remain rejected and server owner/project checks are unchanged.
+
+The unchanged browser driver and supervisor report28/28 with all cleanup passed
+and unchanged source; outer make exited143 as the child completed, so this is
+behavior evidence, not a successful Jenkins gate.109 reducer tests,35 generator
+tests and actual release WASM/ABI/playtest checks passed. The obsolete root
+Jenkins138 candidate was normally cancelled and trusted cleanup confirmed;
+qualify the integrated successor rather than treating it as green.
+
+The local full runner inventory caught one stale trace-upgrade expectation for
+M53's additive columns. It now compares every old field and independently asserts
+feature/NULL defaults; all7 trace tests pass. Remaining database-backed modules
+still require execution. No live schema/source/portal switch has occurred.
+
 ## Combined event-stream maintenance and ABI19 handoff — 2026-11-27
 
 Native workflow5aded552 completed normally after a real independent revise/repair

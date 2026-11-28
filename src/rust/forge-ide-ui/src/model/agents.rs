@@ -799,6 +799,14 @@ impl Agents {
             }
             UiEvent::OpenAgentTask { task_id } if work => {
                 if self.tasks.iter().any(|t| t.task_id == task_id)
+                    || self.task.as_ref().is_some_and(|task| {
+                        task.defect.as_ref().is_some_and(|defect| {
+                            defect.discovering_task_id.as_ref() == Some(&task_id)
+                        }) || task
+                            .filed_defects
+                            .iter()
+                            .any(|link| link.task_id == task_id)
+                    })
                     || self
                         .task
                         .as_ref()
