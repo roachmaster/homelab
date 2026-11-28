@@ -14,14 +14,12 @@ use uuid::Uuid;
 use crate::peer_review::{parse_review_target, PeerReviewError};
 use crate::pinned_recipe::PinnedRecipe;
 use crate::retry_policy::AGENT_RETRY_LIMIT;
-use crate::superseding_classify::{
-    classify_context_transcription, classify_revision_attestations,
-};
+use crate::superseding_classify::{classify_context_transcription, classify_revision_attestations};
 use crate::work_error::WorkError;
 use crate::workflow::{
-    bool_of, coordinator_actor, denied, int_of, text, uuid_of, CorrectionContext,
+    bool_of, coordinator_actor, denied, int_of, text, uuid_of, CorrectionContext, StoreRef,
     SupersedingHook, WorkflowStore, NATIVE_POLICY_DIGESTS,
-StoreRef};
+};
 use crate::workflow_ingress::parse_ts;
 use crate::workflow_tx::WorkflowTx;
 
@@ -79,11 +77,7 @@ impl SupersedingReviewProvider {
 
     /// root_review_id: walk the supersedes chain to the
     /// generation-0 root, checking each generation step.
-    fn root_review_id_tx(
-        &self,
-        tx: &mut dyn WorkflowTx,
-        peer: &Value,
-    ) -> Result<Uuid, WorkError> {
+    fn root_review_id_tx(&self, tx: &mut dyn WorkflowTx, peer: &Value) -> Result<Uuid, WorkError> {
         let mut current = peer.clone();
         let mut seen: Vec<Uuid> = Vec::new();
         loop {
@@ -100,9 +94,7 @@ impl SupersedingReviewProvider {
                     return Ok(identity);
                 }
                 Some(parent) => {
-                    let prior = tx
-                        .workflow_review(parent, false)?
-                        .ok_or_else(mismatch)?;
+                    let prior = tx.workflow_review(parent, false)?.ok_or_else(mismatch)?;
                     if opt_uuid(&prior, "workflow_id") != opt_uuid(peer, "workflow_id")
                         || int_of(&current, "review_generation")
                             != int_of(&prior, "review_generation") + 1
@@ -117,12 +109,7 @@ impl SupersedingReviewProvider {
 
     /// _stopped: the task's latest attempt is genuinely
     /// stopped with a systemd stop receipt.
-    fn stopped(
-        &self,
-        tx: &mut dyn WorkflowTx,
-        w: &Value,
-        task: &Value,
-    ) -> Result<(), WorkError> {
+    fn stopped(&self, tx: &mut dyn WorkflowTx, w: &Value, task: &Value) -> Result<(), WorkError> {
         let project = text(w, "project_alias");
         let attempt_id = uuid_of(task, "latest_attempt_id");
         let attempt = tx.attempt(uuid_of(task, "id"), attempt_id)?;
@@ -162,10 +149,8 @@ impl SupersedingReviewProvider {
             || attempt["pinned_recipe"] != task["pinned_recipe"]
             || attempt["recipe_digest"].as_str() != task["recipe_digest"].as_str()
             || opt_uuid(&attempt, "workflow_id") != opt_uuid(task, "workflow_id")
-            || opt_uuid(&attempt, "workflow_review_id")
-                != opt_uuid(task, "workflow_review_id")
-            || attempt["review_target_sha256"].as_str()
-                != task["review_target_sha256"].as_str()
+            || opt_uuid(&attempt, "workflow_review_id") != opt_uuid(task, "workflow_review_id")
+            || attempt["review_target_sha256"].as_str() != task["review_target_sha256"].as_str()
         {
             return Err(reconcile_required());
         }
@@ -190,10 +175,7 @@ impl SupersedingReviewProvider {
         let flow = &self.flow.get();
         flow.current_policy(tx, w)?;
         let p = flow.snapshot_of(w)?;
-        for profile in [
-            text(&p, "author_profile"),
-            text(&p, "reviewer_profile"),
-        ] {
+        for profile in [text(&p, "author_profile"), text(&p, "reviewer_profile")] {
             let enabled = flow
                 .config()
                 .profiles
@@ -247,8 +229,7 @@ impl SupersedingReviewProvider {
             || text(critic, "mode") != "review"
             || text(critic, "status") != "awaiting_review"
             || !critic["cancelled_at"].is_null()
-            || opt_uuid(critic, "workflow_review_id")
-                != opt_uuid(peer, "workflow_review_id")
+            || opt_uuid(critic, "workflow_review_id") != opt_uuid(peer, "workflow_review_id")
             || critic["review_target_sha256"].as_str() != peer["target_sha256"].as_str()
             || source["agent_profile"].as_str() == critic["agent_profile"].as_str()
         {
@@ -266,8 +247,8 @@ impl SupersedingReviewProvider {
             ),
             (critic, text(&p, "reviewer_profile"), "reviewer_review"),
         ] {
-            let recipe = PinnedRecipe::from_snapshot(&p, entry, flow.native())
-                .map_err(WorkError::store)?;
+            let recipe =
+                PinnedRecipe::from_snapshot(&p, entry, flow.native()).map_err(WorkError::store)?;
             if task["agent_profile"].as_str() != Some(profile)
                 || task["pinned_recipe"] != recipe.to_dict()
                 || task["recipe_digest"].as_str() != Some(recipe.digest.as_str())
@@ -301,10 +282,7 @@ impl SupersedingReviewProvider {
         {
             return Err(mismatch());
         }
-        let artifact = tx.artifact(
-            uuid_of(source, "id"),
-            uuid_of(source, "latest_attempt_id"),
-        )?;
+        let artifact = tx.artifact(uuid_of(source, "id"), uuid_of(source, "latest_attempt_id"))?;
         if artifact["result_sha256"].as_str() != peer["source_result_sha256"].as_str()
             || artifact["content"].as_str() != target["source_text"].as_str()
         {
@@ -315,8 +293,7 @@ impl SupersedingReviewProvider {
             .task_in_project(project, uuid_of(w, "root_task_id"), false)?
             .ok_or_else(mismatch)?;
         if target["request_prompt"].as_str() != assignment["prompt"].as_str()
-            || target["acceptance_criteria"].as_str()
-                != assignment["acceptance_criteria"].as_str()
+            || target["acceptance_criteria"].as_str() != assignment["acceptance_criteria"].as_str()
         {
             return Err(mismatch());
         }
@@ -360,8 +337,7 @@ impl SupersedingReviewProvider {
                 || int_of(&q, "source_revision") != int_of(source, "revision")
                 || text(&q, "status") != "awaiting_review"
                 || q["candidate_commit"].as_str() != peer["candidate_commit"].as_str()
-                || q["gate_manifest_sha256"].as_str()
-                    != peer["gate_manifest_sha256"].as_str()
+                || q["gate_manifest_sha256"].as_str() != peer["gate_manifest_sha256"].as_str()
                 || q["verification"]["checks_passed"].as_bool() != Some(true)
                 || q["verification"]["cleanup_confirmed"].as_bool() != Some(true)
                 || !q["repair_task_id"].is_null()
@@ -371,8 +347,7 @@ impl SupersedingReviewProvider {
                 || q["verification"]["integration_base"].as_str()
                     != target["integration_base"].as_str()
                 || q["candidate_commit"].as_str() != target["candidate_commit"].as_str()
-                || q["gate_manifest_sha256"].as_str()
-                    != target["gate_manifest_sha256"].as_str()
+                || q["gate_manifest_sha256"].as_str() != target["gate_manifest_sha256"].as_str()
                 || target["findings"] != Value::Array(expected_findings)
             {
                 return Err(mismatch());
@@ -404,8 +379,7 @@ impl SupersedingReviewProvider {
                 || outcome["disposition"].as_str() != Some("awaiting_review")
                 || outcome["verification"] != q["verification"]
                 || outcome["candidate_commit"].as_str() != q["candidate_commit"].as_str()
-                || outcome["gate_manifest_sha256"].as_str()
-                    != q["gate_manifest_sha256"].as_str()
+                || outcome["gate_manifest_sha256"].as_str() != q["gate_manifest_sha256"].as_str()
             {
                 return Err(mismatch());
             }
@@ -415,18 +389,14 @@ impl SupersedingReviewProvider {
                 .and_then(|id| tx.plan_decision(id).ok())
                 .flatten()
                 .ok_or_else(mismatch)?;
-            let plan_artifact = tx.artifact(
-                uuid_of(&plan, "task_id"),
-                uuid_of(&plan, "plan_attempt_id"),
-            )?;
+            let plan_artifact =
+                tx.artifact(uuid_of(&plan, "task_id"), uuid_of(&plan, "plan_attempt_id"))?;
             if text(&plan, "decision") != "resume"
                 || plan["decision_id"].as_str() != target["plan_decision_id"].as_str()
                 || plan["plan_attempt_id"].as_str()
                     != target["approved_plan"]["attempt_id"].as_str()
-                || plan["plan_sha256"].as_str()
-                    != target["approved_plan"]["sha256"].as_str()
-                || plan_artifact["content"].as_str()
-                    != target["approved_plan"]["content"].as_str()
+                || plan["plan_sha256"].as_str() != target["approved_plan"]["sha256"].as_str()
+                || plan_artifact["content"].as_str() != target["approved_plan"]["content"].as_str()
             {
                 return Err(mismatch());
             }
@@ -455,12 +425,13 @@ impl SupersedingReviewProvider {
         ] {
             flow.grant(tx, w, profile, mode)?;
         }
-        let digests: Vec<String> =
-            NATIVE_POLICY_DIGESTS.iter().map(|d| d.to_string()).collect();
+        let digests: Vec<String> = NATIVE_POLICY_DIGESTS
+            .iter()
+            .map(|d| d.to_string())
+            .collect();
         let ready = tx.readiness(Some(&digests))?;
-        let reviewer_recipe =
-            PinnedRecipe::from_snapshot(&p, "reviewer_review", flow.native())
-                .map_err(WorkError::store)?;
+        let reviewer_recipe = PinnedRecipe::from_snapshot(&p, "reviewer_review", flow.native())
+            .map_err(WorkError::store)?;
         if !crate::workflow::ready_for_recipe(
             &ready,
             project,
@@ -505,12 +476,9 @@ impl SupersedingReviewProvider {
                 || text(&prior, "status") != "completed"
                 || !intent.is_object()
                 || intent["policy"].as_str() != Some(SUPERSEDING_POLICY)
-                || intent["source_review_id"].as_str()
-                    != Some(&peer_id.to_string())
-                || intent["source_attempt_id"].as_str()
-                    != critic["latest_attempt_id"].as_str()
-                || intent["source_result_sha256"].as_str()
-                    != result["result_sha256"].as_str()
+                || intent["source_review_id"].as_str() != Some(&peer_id.to_string())
+                || intent["source_attempt_id"].as_str() != critic["latest_attempt_id"].as_str()
+                || intent["source_result_sha256"].as_str() != result["result_sha256"].as_str()
                 || intent["target_sha256"].as_str() != peer["target_sha256"].as_str()
                 || !finish.is_object()
                 || finish["status"].as_str() != Some("superseding_review_queued")
@@ -519,9 +487,7 @@ impl SupersedingReviewProvider {
             }
             return Ok(Some(finish["receipt"].clone()));
         }
-        let Some(diagnostics) =
-            self.validated(tx, w, peer, source, critic, result, legacy)?
-        else {
+        let Some(diagnostics) = self.validated(tx, w, peer, source, critic, result, legacy)? else {
             return Ok(None);
         };
         let attempt_key = format!(
@@ -674,9 +640,9 @@ impl SupersedingReviewProvider {
         if !flow.retry_events_enabled() {
             return Ok(false);
         }
-        let available = flow.tx_factory().run(true, &mut |tx| {
-            Ok(json!(tx.superseding_available()?))
-        })?;
+        let available = flow
+            .tx_factory()
+            .run(true, &mut |tx| Ok(json!(tx.superseding_available()?)))?;
         if available != json!(true) {
             return Ok(false);
         }
@@ -723,9 +689,9 @@ impl SupersedingReviewProvider {
                     uuid_of(&critic, "id"),
                     uuid_of(&critic, "latest_attempt_id"),
                 )?;
-                match self.correct_in_tx(
-                    tx, &workflow, &peer, &source, &critic, &result, true, None,
-                )? {
+                match self
+                    .correct_in_tx(tx, &workflow, &peer, &source, &critic, &result, true, None)?
+                {
                     Some(_) => Ok(json!(true)),
                     None => Ok(json!(false)),
                 }
@@ -745,11 +711,7 @@ impl SupersedingHook for SupersedingReviewProvider {
         self.recover().map(|_| ())
     }
 
-    fn root_review_id(
-        &self,
-        tx: &mut dyn WorkflowTx,
-        review: &Value,
-    ) -> Result<Uuid, WorkError> {
+    fn root_review_id(&self, tx: &mut dyn WorkflowTx, review: &Value) -> Result<Uuid, WorkError> {
         self.root_review_id_tx(tx, review)
     }
 
