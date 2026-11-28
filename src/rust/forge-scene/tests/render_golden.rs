@@ -119,3 +119,12 @@ fn semantic_rules_catch_wiring_the_template_cannot_compile() {
     let bound_assisted = DOG_YAML.replace("bind: [rex]", "bind: [rex, engraved_collar]");
     assert!(rejects(&bound_assisted).contains("assisted"));
 }
+
+#[test]
+fn feature_files_parse_into_the_feature_schema() {
+    use forge_scene::bdd::{check_voice, parse, FEATURE_SCHEMA};
+    let schema: serde_json::Value = serde_json::from_str(FEATURE_SCHEMA).unwrap();
+    let feature = parse(include_str!("../features/dog.feature")).unwrap();
+    forge_scene::json_schema::validate(&schema, &feature.to_json()).unwrap();
+    assert!(check_voice(&feature).is_empty(), "{}", feature.title);
+}
