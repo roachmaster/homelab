@@ -72,8 +72,10 @@ impl ResultView {
 
     fn result(self, payload: Value) -> Value {
         match self {
-            Self::Compact => json!({"content":[{"type":"text","text":payload.to_string()}]}),
-            Self::Structured => json!({"content":[], "structuredContent":payload}),
+            Self::Compact => {
+                json!({"content":[{"type":"text","text":payload.to_string()}], "isError":false})
+            }
+            Self::Structured => json!({"content":[], "structuredContent":payload, "isError":false}),
             Self::Full => json!({"content":[{"type":"text","text":payload.to_string()}],
                                  "structuredContent":payload, "isError":false}),
         }
