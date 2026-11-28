@@ -43,6 +43,7 @@ pub mod work_decision;
 pub mod work_decision_more;
 pub mod work_decision_plan;
 pub mod work_decision_review;
+mod work_projection;
 pub mod work_read;
 pub mod work_read_cicd;
 pub mod work_read_events;

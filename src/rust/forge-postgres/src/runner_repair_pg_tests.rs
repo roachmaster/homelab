@@ -261,6 +261,40 @@ fn actual_private_repair_uses_normal_admission_atomic_lease_and_queued_receipt()
         .unwrap()
         .unwrap();
     assert_eq!(claimed.task_id, task.to_string());
+    let (_, running) = normal
+        .service
+        .dispatch(
+            WorkDestination::Get,
+            "fixture",
+            WorkCommand::Get {
+                project_alias: "homelab".into(),
+                task_id: task,
+            },
+            Some(1),
+        )
+        .unwrap();
+    let detail = &running["event"]["task"];
+    assert_eq!(detail["workflow"]["author_profile"], "codex-author");
+    assert_eq!(detail["attempt"]["phase"], "starting");
+    assert!(detail["attempt"]["finished_at"].is_null());
+    assert!(detail.get("result").is_none());
+    for forbidden in [
+        "latest_attempt_id",
+        "plan_decision_id",
+        "workflow_id",
+        "workflow_review_id",
+    ] {
+        assert!(detail.get(forbidden).is_none());
+    }
+    for forbidden in [
+        "published_at",
+        "result_sha256",
+        "result_byte_count",
+        "result_chunk_count",
+    ] {
+        assert!(detail["attempt"].get(forbidden).is_none());
+    }
+
     let read_store = pg_work_store(&config, &pg).unwrap();
     assert_eq!(
         crate::work_common::run_read_tx(&read_store, |tx| tx
@@ -418,6 +452,74 @@ fn external_admission_and_context_share_task_transaction() {
                 assert_eq!(admin.query_one("SELECT count(*) FROM forge_external_workflow.tasks",&[]).await.unwrap().get::<_,i64>(0),0);
             }
         });
+        let (_, opened) = normal
+            .service
+            .dispatch(
+                WorkDestination::Get,
+                "fixture",
+                WorkCommand::Get {
+                    project_alias: "homelab".into(),
+                    task_id: task,
+                },
+                Some(1),
+            )
+            .unwrap();
+        if managed {
+            assert_eq!(
+                opened["event"]["task"]["workflow"]["kind"],
+                "external_database"
+            );
+        }
+        runtime.block_on(async {
+            let admin=cluster.connect("postgres").await.unwrap();
+            admin.batch_execute("GRANT CONNECT ON DATABASE forge_agent TO fixture_muse; GRANT USAGE ON SCHEMA forge_external_agent_api TO fixture_muse; GRANT EXECUTE ON FUNCTION forge_external_agent_api.advertise(text,text,text),forge_external_agent_api.claim(text,text),forge_external_agent_api.progress(uuid,integer,uuid,text),forge_external_agent_api.finish(uuid,integer,uuid,text,text) TO fixture_muse;").await.unwrap();
+            let external=cluster.connect("fixture_muse").await.unwrap();
+            external.query_one("SELECT forge_external_agent_api.advertise('homelab','muse-db-primary','fixture-reader')",&[]).await.unwrap();
+            let claim:Value=external.query_one("SELECT forge_external_agent_api.claim('homelab','muse-db-primary')",&[]).await.unwrap().get(0);
+            let assignment=Uuid::parse_str(claim["assignment_id"].as_str().unwrap()).unwrap();
+            let token=Uuid::parse_str(claim["token"].as_str().unwrap()).unwrap();
+            let generation=claim["generation"].as_i64().unwrap() as i32;
+            external.query_one("SELECT forge_external_agent_api.progress($1,$2,$3,'Owned external fixture progress')",&[&assignment,&generation,&token]).await.unwrap();
+            external.query_one("SELECT forge_external_agent_api.finish($1,$2,$3,'Owned fixture plan content','Owned fixture plan summary')",&[&assignment,&generation,&token]).await.unwrap();
+        });
+        let (_, opened) = normal
+            .service
+            .dispatch(
+                WorkDestination::Get,
+                "fixture",
+                WorkCommand::Get {
+                    project_alias: "homelab".into(),
+                    task_id: task,
+                },
+                Some(1),
+            )
+            .unwrap();
+        assert_eq!(
+            opened["event"]["task"]["external_result"]["content"],
+            "Owned fixture plan content"
+        );
+        assert!(opened["event"]["task"].get("attempt").is_none());
+        let (_, history) = normal
+            .service
+            .dispatch(
+                WorkDestination::Events,
+                "fixture",
+                WorkCommand::Events {
+                    project_alias: "homelab".into(),
+                    task_id: task,
+                    after_sequence: 0,
+                    limit: 100,
+                },
+                None,
+            )
+            .unwrap();
+        assert!(history["event"]["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |event| event["external_progress"]["summary"] == "Owned external fixture progress"
+            ));
         if managed {
             let workflow = runtime.block_on(async {
                 cluster

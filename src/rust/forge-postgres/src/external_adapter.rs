@@ -119,6 +119,42 @@ pub(crate) fn enqueue_work_admission(
     handle.enqueue(project, task)
 }
 
+/// Existing scoped external history reads in the caller's coherent snapshot.
+pub(crate) fn project_work_task(
+    tx: &mut Tx<'_, '_>,
+    store: &crate::work_store::PgWorkStore,
+    project: &str,
+    task: Uuid,
+    profile: &str,
+) -> Result<(Option<Value>, Option<Value>), WorkError> {
+    let Some(config) = store.catalog.as_ref() else {
+        return Ok((None, None));
+    };
+    let mut handle = ExternalTxImpl {
+        tx,
+        owner: &store.owner,
+    };
+    let workflow = if let Some(workflow) =
+        crate::runner_composition::build_external_store(config, store.factory.config())?
+    {
+        workflow.project(&mut handle, project, task)?
+    } else {
+        None
+    };
+    let artifact = if config
+        .profile(profile)
+        .is_some_and(|profile| profile.is_external())
+    {
+        handle
+            .artifact_by_task(project, task)?
+            .map(|artifact| validate_external_artifact(&artifact).map_err(WorkError::store))
+            .transpose()?
+    } else {
+        None
+    };
+    Ok((workflow, artifact))
+}
+
 type Params = Vec<Box<dyn ToSql + Sync + Send>>;
 
 fn refs(params: &Params) -> Vec<&(dyn ToSql + Sync)> {

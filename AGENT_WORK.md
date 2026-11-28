@@ -3336,3 +3336,26 @@ generation, workflow cause/link fences and deadline ownership/order. Strict
 all-target/all-feature Clippy for both crates and selected formatting passed.
 Logs: `/mnt/data/homelab-build/rust-event-projection-final-{tests,clippy}.log`.
 Portal task detail/list projections are still separate required readiness work.
+
+### 2026-11-28 — Rust task detail and retained external history reads
+
+Task detail now follows the existing portal DTO: internal task control IDs are
+not leaked, unpublished attempts tolerate nullable result columns, attempt fields
+and published result manifests use the current public names/types, and quota
+summaries omit their private native-error fingerprint. Reads share the coherent
+snapshot introduced for Events. Current native workflow policy/handoff and retry
+budgets are projected without rewriting frozen identities; reconciliation and
+publication proofs retain exact owner/project/task/attempt/revision predicates.
+Scoped external workflow and artifact ports are reused for retained external
+history, preserving external provenance without inventing native attempts.
+
+Validation: 41 PostgreSQL library tests passed, zero ignored. The final two real
+PG normal-API tests passed again (11.20s), including native starting-attempt
+NULL-result reads and workflow metadata, plus actual scoped external advertise,
+claim, progress and finish followed by Get artifact and Events history reads for
+both external versions. Fixture-only grants/role live inside each disposable
+cluster; no production state or native/model process was touched. Strict
+all-target/all-feature PostgreSQL Clippy and selected formatting passed.
+Logs: `/mnt/data/homelab-build/rust-task-get-{tests,pg4,clippy}.log`.
+Review/CICD and list classification/count projections still require parity before
+whole-runtime cutover qualification.
