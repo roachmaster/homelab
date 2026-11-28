@@ -1,5 +1,5 @@
 [workspace]
-members = ["forge-jenkins", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-agent", "forge-remote", "forge-remote-https", "forge-ide", "forge-template", "forge-core", "forge-system", "forge-local", "forge-terminal", "forge-jobs"]
+members = ["forge-jenkins", "forge-foundation", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-agent", "forge-remote", "forge-remote-https", "forge-ide", "forge-template", "forge-core", "forge-system", "forge-local", "forge-terminal", "forge-jobs"]
 resolver = "2"
 
 [workspace.package]
@@ -13,6 +13,7 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 forge-jenkins = { path = "forge-jenkins", default-features = false }
 forge-core = { path = "forge-core" }
+forge-foundation = { path = "forge-foundation" }
 
 forge-system = { path = "forge-system" }
 

@@ -307,6 +307,13 @@ name = "forge-core"
 version = "0.1.0"
 
 [[package]]
+name = "forge-foundation"
+version = "0.1.0"
+dependencies = [
+ "forge-core",
+]
+
+[[package]]
 name = "forge-game-runtime"
 version = "0.1.0"
 
