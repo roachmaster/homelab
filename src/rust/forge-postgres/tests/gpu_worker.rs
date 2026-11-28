@@ -33,17 +33,17 @@ fn queued_inference_reaches_loopback_model_then_publishes_a_fenced_result() {
         ..PgConfig::new("mission-control")
     };
     let input = json!({"messages":[{"role":"user","content":"fixture prompt"}],"max_tokens":32});
-    let job = inference_runs::submit(&coordinator, &input, Some("fixture"), MODEL).unwrap();
+    let job = inference_runs::submit(&coordinator, &input, Some("fixture"), MODEL, false).unwrap();
     let run = job["run_id"].as_str().unwrap();
     assert_eq!(job["status"], "queued");
     assert_eq!(
-        inference_runs::submit(&coordinator, &input, Some("fixture"), MODEL).unwrap(),
+        inference_runs::submit(&coordinator, &input, Some("fixture"), MODEL, false).unwrap(),
         job
     );
     let mut changed = input.clone();
     changed["max_tokens"] = 31.into();
     assert_eq!(
-        inference_runs::submit(&coordinator, &changed, Some("fixture"), MODEL).unwrap_err(),
+        inference_runs::submit(&coordinator, &changed, Some("fixture"), MODEL, false).unwrap_err(),
         forge_work::WorkError::rejected(409, "request_id_conflict")
     );
     let cfg = PgConfig {

@@ -77,6 +77,7 @@ pub fn submit(
     body: &Value,
     key: Option<&str>,
     default_model: &str,
+    allow_partial: bool,
 ) -> Result<Value, WorkError> {
     if !body.as_object().is_some_and(|o| {
         o.keys().all(|s| {
@@ -153,7 +154,7 @@ pub fn submit(
     let digest = fingerprint(
         &json!({"model":model,"messages":messages,"stream":false,"temperature":temp,"max_tokens":max}),
     );
-    let settings = json!({"model":model,"temperature":temp,"max_tokens":max,"fingerprint":digest,"allow_partial":false});
+    let settings = json!({"model":model,"temperature":temp,"max_tokens":max,"fingerprint":digest,"allow_partial":allow_partial});
     transaction(pg, false, |tx| {
         tx.call_void("SELECT pg_advisory_xact_lock(20261112,2)", &[])
             .map_err(work_err)?;

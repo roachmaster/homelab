@@ -2,7 +2,7 @@
 use crate::runner_http::{header_values, parse_body, Request, Services};
 use forge_postgres::inference_runs;
 use forge_work::WorkError;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
 fn cursor(query: &str) -> Result<(i64, u64), WorkError> {
@@ -24,12 +24,56 @@ fn cursor(query: &str) -> Result<(i64, u64), WorkError> {
     Ok((after.unwrap_or(0), wait.unwrap_or(0)))
 }
 
+fn wait_for_completion(services: &Services, accepted: Value) -> Result<(u16, Value), WorkError> {
+    let id = accepted["run_id"]
+        .as_str()
+        .ok_or_else(|| WorkError::store("Missing admitted run ID"))?;
+    let deadline = Instant::now() + Duration::from_secs(13);
+    loop {
+        let run = inference_runs::lookup(&services.workspace, id, None)?;
+        match run["status"].as_str() {
+            Some("completed") => {
+                let reason = run["finish_reason"].as_str().unwrap_or("stop");
+                let answer = run["answer"]
+                    .as_str()
+                    .ok_or_else(|| WorkError::store("Missing completed answer"))?;
+                let content = if reason == "length" {
+                    format!(
+                        "{}\n\n[Answer cut off at the output limit.]",
+                        answer.trim_end()
+                    )
+                } else {
+                    answer.to_owned()
+                };
+                return Ok((
+                    200,
+                    json!({"run_id": id, "model": run["model"], "choices": [{
+                        "message":{"role":"assistant","content":content}, "finish_reason":reason
+                    }]}),
+                ));
+            }
+            Some("failed" | "interrupted" | "cancelled") => {
+                return Ok((502, json!({"run_id": id, "error":run["status"]})));
+            }
+            _ if Instant::now() >= deadline => {
+                return Ok((504, json!({"run_id":id,"error":"reply_pending"})))
+            }
+            _ => std::thread::sleep(
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(250)),
+            ),
+        }
+    }
+}
+
 pub(crate) fn route(
     services: &Services,
     request: &Request,
 ) -> Option<Result<(u16, Value), WorkError>> {
     let default = services.inference_model.as_ref()?;
-    if request.method == "POST" && request.path == "/v1/runs" {
+    let sync = request.path == "/v1/chat/completions";
+    if request.method == "POST" && (request.path == "/v1/runs" || sync) {
         return Some((|| {
             if let Some((status, code)) = request.body_error {
                 return Err(WorkError::rejected(status, code));
@@ -46,9 +90,18 @@ pub(crate) fn route(
             if keys.len() > 1 {
                 return Err(WorkError::rejected(400, "invalid_request_id"));
             }
-            let response =
-                inference_runs::submit(&services.workspace, &body, keys.first().copied(), default)?;
-            Ok((202, response))
+            let response = inference_runs::submit(
+                &services.workspace,
+                &body,
+                keys.first().copied(),
+                default,
+                sync,
+            )?;
+            if sync {
+                wait_for_completion(services, response)
+            } else {
+                Ok((202, response))
+            }
         })());
     }
     if request.method != "GET" {
