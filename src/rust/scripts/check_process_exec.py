@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # path relative to src/rust -> (max_count, reason)
 ALLOWED = {
     "forge-work-worker/src/process_exec.rs": (1, "canonical bounded process-exec IoClient adapter"),
+    "forge-work-worker/src/bin/forge-attempt-checks.rs": (1, "unprivileged PID-1 streaming check process with its own process group"),
     "forge-work-worker/src/runner.rs": (1, "streaming coding-agent CLI launcher with process_group(0)"),
     "forge-work-worker/src/usage_composition.rs": (1, "MetadataProcessFactory streaming launcher with uid/gid"),
     "forge-work-publication/src/delivery_ops.rs": (1, "bounded streaming stdin/stdout actor launcher with process_group(0)"),

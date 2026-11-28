@@ -26,16 +26,9 @@ pub fn default_checks() -> Vec<Vec<String>> {
         vec!["/usr/bin/make".to_string(), "ci".to_string()],
         vec!["/usr/bin/make".to_string(), "ui-qa".to_string()],
         vec![
-            "/usr/bin/python3".to_string(),
-            "-B".to_string(),
-            "-m".to_string(),
-            "unittest".to_string(),
-            "discover".to_string(),
-            "-s".to_string(),
-            "deploy/mission-control/agent-runner".to_string(),
-            "-p".to_string(),
-            "test_*.py".to_string(),
-            "-v".to_string(),
+            "/usr/bin/make".into(),
+            "backend-suites".into(),
+            "SCOPE=main".into(),
         ],
     ]
     .to_vec()
@@ -347,6 +340,9 @@ pub fn parse_config(
     })?;
     let checks_limit = if profile == EVENT_PROFILE { 64 } else { 8 };
     let checks: Vec<Vec<String>> = match object.get("checks") {
+        None if object.get("hosted_provider").and_then(Value::as_str) == Some("jenkins") => {
+            plan.checks.clone()
+        }
         None => default_checks(),
         Some(Value::Array(commands)) => {
             if commands.is_empty() || commands.len() > checks_limit {

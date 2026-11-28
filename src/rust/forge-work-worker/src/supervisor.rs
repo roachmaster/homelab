@@ -294,7 +294,8 @@ impl SupervisorPort for SystemdSupervisor {
                     || boundary.permissions.paths.git_configs != git_configs
                     || boundary.permissions.progress
                         != invocation.readonly_files.iter().any(|path| {
-                            path.file_name().and_then(|n| n.to_str()) == Some("report_progress.py")
+                            path.file_name().and_then(|n| n.to_str())
+                                == Some(crate::attempt_helper::PROGRESS)
                         })
                     || boundary.phase != "initialize"
                 {
@@ -495,11 +496,12 @@ impl SupervisorPort for SystemdSupervisor {
                         | "agent-review.json"
                         | "agent-review-feedback.json"
                         | "external-review.json"
-                        | "verify.py"
+                        | "checks.json"
+                        | crate::attempt_helper::CHECKS
                         | "build-info.json"
                         | "build.log"
-                        | "build_info.py"
-                        | "report_progress.py"
+                        | crate::attempt_helper::BUILD_INFO
+                        | crate::attempt_helper::PROGRESS
                 )
             );
             if path.parent() != Some(invocation.scratch.as_path())
@@ -512,13 +514,17 @@ impl SupervisorPort for SystemdSupervisor {
             {
                 return Err(failed("The immutable execution context is unavailable."));
             }
-            if path.file_name().and_then(|n| n.to_str()) == Some("report_progress.py")
-                && (invocation.transport.is_none()
-                    || std::fs::read(path)
-                        .map(|bytes| bytes != crate::progress_helper::PROGRESS_HELPER)
-                        .unwrap_or(true))
+            if let Some(
+                name @ (crate::attempt_helper::PROGRESS
+                | crate::attempt_helper::BUILD_INFO
+                | crate::attempt_helper::CHECKS),
+            ) = path.file_name().and_then(|n| n.to_str())
             {
-                return Err(failed("The immutable public progress helper changed."));
+                if (name == crate::attempt_helper::PROGRESS && invocation.transport.is_none())
+                    || !crate::attempt_helper::matches_release(path, name)
+                {
+                    return Err(failed("The immutable attempt helper changed."));
+                }
             }
             readonly_bindings.push(format!(
                 "{}:{}",

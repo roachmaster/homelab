@@ -439,9 +439,9 @@ impl CommandRunnerProvider {
             prompt.push_str(
                 "\n\nPUBLIC PLAN AND PROGRESS REPORTING (required): Before editing, publish a concise \
                  public plan using this exact provisioned helper via the command tool:\n\
-                 python3 /run/forge-coding-attempt/report_progress.py plan 'Your public plan or Markdown'\n\
+                 /run/forge-coding-attempt/forge-report-progress plan 'Your public plan or Markdown'\n\
                  Then report meaningful milestones using:\n\
-                 python3 /run/forge-coding-attempt/report_progress.py progress 'Public milestone summary'\n\
+                 /run/forge-coding-attempt/forge-report-progress progress 'Public milestone summary'\n\
                  Use shell-safe quoting or a literal subprocess argv; keep each summary within 4096 UTF-8 \
                  bytes and at most 128 reports total. Include only intended steps, observable actions, \
                  results and blockers. Never include private reasoning, credentials, raw tool arguments \
@@ -679,7 +679,6 @@ impl CommandRunnerProvider {
                     for (name, data) in [
                         ("build-info.json", build.metadata.as_slice()),
                         ("build.log", build.log.as_slice()),
-                        ("build_info.py", crate::build_info::BUILD_INFO_SCRIPT),
                     ] {
                         let path = scratch.join(name);
                         write_exclusive(&path, data).map_err(|_| {
@@ -687,15 +686,23 @@ impl CommandRunnerProvider {
                         })?;
                         paths.push(path);
                     }
+                    paths.push(
+                        crate::attempt_helper::stage(&scratch, crate::attempt_helper::BUILD_INFO)
+                            .map_err(|_| {
+                            needs_reconcile("The exact build inspection helper is unavailable.")
+                        })?,
+                    );
                     Ok(paths)
                 })()?;
                 build_files = staged;
                 prompt.push_str(&format!(
-                    "\n\nBUILD REFERENCE: Use python3 -I -B {} status for this build and \
+                    "\n\nBUILD REFERENCE: Use {} status for this build and \
                      logs --offset 0 --limit 16384 to inspect its paginated log. \
                      Investigate with the CLI, fix the source, and report completion; \
                      the owned branch is published automatically from your stopped result.",
-                    Path::new(CHILD_STATE).join("build_info.py").display()
+                    Path::new(CHILD_STATE)
+                        .join(crate::attempt_helper::BUILD_INFO)
+                        .display()
                 ));
             }
         }
@@ -796,7 +803,7 @@ impl CommandRunnerProvider {
                 }
                 note_paths.extend(build_files.iter().cloned());
                 if progress {
-                    note_paths.push(scratch.join("report_progress.py"));
+                    note_paths.push(scratch.join(crate::attempt_helper::PROGRESS));
                 }
                 let notes: Vec<(String, PathBuf)> = note_paths
                     .iter()
@@ -894,7 +901,7 @@ impl CommandRunnerProvider {
         }
         readonly_files.extend(build_files);
         if transport.is_some() && progress {
-            readonly_files.push(scratch.join("report_progress.py"));
+            readonly_files.push(scratch.join(crate::attempt_helper::PROGRESS));
         }
         Ok(Invocation {
             argv,

@@ -2,10 +2,8 @@
 //! Reports are model claims, never task-state or execution
 //! authority. The reader pins a directory descriptor before the
 //! child can mutate it and revalidates every report on each poll;
-//! provision() stages the helper (the Python module itself,
-//! carried as an asset) into the attempt scratch.
+//! provision() stages the release-matched native helper into the attempt scratch.
 
-use crate::progress_helper::PROGRESS_HELPER;
 use nix::fcntl::{openat, AtFlags, OFlag};
 use nix::sys::stat::{fstat, fstatat, Mode};
 use std::os::fd::OwnedFd;
@@ -294,18 +292,67 @@ pub fn provision(scratch: &Path) -> Result<PathBuf, ProgressFailure> {
         .mode(0o700)
         .create(&path)
         .map_err(|_| ProgressFailure::Invalid)?;
-    let helper = scratch.join("report_progress.py");
-    let fd = nix::fcntl::open(
-        &helper,
+    crate::attempt_helper::stage(scratch, crate::attempt_helper::PROGRESS)
+        .map_err(|_| ProgressFailure::Invalid)?;
+    Ok(path)
+}
+
+/// Append one public report under the same directory identity and lock used
+/// to determine its sequence. Readers never observe an incomplete record.
+pub fn write_report(path: &Path, kind: &str, summary: &str) -> Result<(), ProgressFailure> {
+    use nix::fcntl::{Flock, FlockArg};
+    use std::io::Write;
+    let bad = |_| ProgressFailure::Invalid;
+    let reader = ProgressReader::new(path.to_path_buf(), Box::new(|_, _, _| Ok(())))?;
+    let dir = reader.directory.as_ref().ok_or(ProgressFailure::Invalid)?;
+    let fd = openat(
+        dir,
+        ".lock",
+        OFlag::O_CREAT | OFlag::O_RDWR | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(bad)?;
+    let info = fstat(&fd).map_err(bad)?;
+    if info.st_mode & nix::libc::S_IFMT != nix::libc::S_IFREG || info.st_nlink != 1 {
+        return Err(ProgressFailure::Invalid);
+    }
+    let _lock = Flock::lock(fd, FlockArg::LockExclusive).map_err(|_| ProgressFailure::Invalid)?;
+    let seq = (reader.names()?.len() + 1) as u32;
+    let record = serde_json::json!({"version":1,"sequence":seq,"kind":kind,"summary":summary});
+    validate_report(&record, Some(seq))?;
+    let mut bytes = serde_json::to_vec(&record).map_err(|_| ProgressFailure::Invalid)?;
+    bytes.push(b'\n');
+    if bytes.len() > MAX_RECORD_BYTES {
+        return Err(ProgressFailure::Invalid);
+    }
+    let tmp = format!(".report-{}.tmp", uuid::Uuid::new_v4().simple());
+    let dest = format!("{seq:06}.json");
+    let tmpfd = openat(
+        dir,
+        tmp.as_str(),
         OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW,
         Mode::from_bits_truncate(0o600),
     )
-    .map_err(|_| ProgressFailure::Invalid)?;
-    use std::io::Write;
-    let mut file = std::fs::File::from(fd);
-    file.write_all(PROGRESS_HELPER)
-        .map_err(|_| ProgressFailure::Invalid)?;
-    Ok(path)
+    .map_err(bad)?;
+    let mut file = std::fs::File::from(tmpfd);
+    let result = (|| {
+        file.write_all(&bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|_| ProgressFailure::Invalid)?;
+        nix::fcntl::renameat2(
+            dir,
+            tmp.as_str(),
+            dir,
+            dest.as_str(),
+            nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+        )
+        .map_err(bad)?;
+        nix::unistd::fsync(dir).map_err(bad)
+    })();
+    if result.is_err() {
+        let _ = nix::unistd::unlinkat(dir, tmp.as_str(), nix::unistd::UnlinkatFlags::NoRemoveDir);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -322,6 +369,24 @@ mod tests {
         assert!(validate_report(&wrong_kind, Some(2)).is_err());
         let control = serde_json::json!({"version": 1, "sequence": 1, "kind": "plan", "summary": "bad\u{0007}"});
         assert!(validate_report(&control, None).is_err());
+    }
+
+    #[test]
+    fn writers_publish_once_in_order_under_a_shared_lock() {
+        let dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&dir).unwrap();
+        assert!(write_report(&dir, "progress", "early").is_err());
+        write_report(&dir, "plan", "Investigate").unwrap();
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| write_report(&dir, "progress", "Checked").unwrap());
+            }
+        });
+        let mut reader = ProgressReader::new(dir.clone(), Box::new(|_, _, _| Ok(()))).unwrap();
+        reader.poll().unwrap();
+        assert_eq!(reader.accepted.len(), 5);
+        assert!(write_report(&dir, "plan", "second plan").is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

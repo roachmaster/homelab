@@ -45,5 +45,4 @@ pub mod strict_json;
 pub mod trusted_delivery;
 pub mod trusted_delivery_provider;
 pub mod verification;
-pub mod verification_init;
 pub mod verifier_parity;
