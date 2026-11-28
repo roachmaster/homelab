@@ -9,14 +9,39 @@ import json
 import logging
 import re
 import threading
+from typing import Protocol
 from uuid import UUID, uuid5
 
 from work_ci_contract import SCOPED_PROFILE, EVENT_PROFILE, CiGateContractFactory
 from work_publication_clients import PublicationError
 from work_external_delivery import SourceArtifactRejected
-from work_verification import diagnostic_text
+from work_external_delivery import read_private
+from work_verification import diagnostic_text, MAX_DIAGNOSTIC_BYTES
 
 LOG = logging.getLogger('forge-post-merge')
+
+
+class MainStageEvidencePort(Protocol):
+    def record_jenkins_stage_evidence(self, evidence: dict, chunks=()) -> dict: ...
+
+
+def failed_check_diagnostic(request, receipt, summary):
+    """Keep verified action/check identity and the redacted failure tail."""
+    failed = [check for check in receipt.get('checks', [])
+              if isinstance(check, dict)
+              and type(check.get('index')) is int and type(check.get('returncode')) is int
+              and check['returncode'] != 0]
+    if not failed:
+        return diagnostic_text(summary)
+    header = 'Main verification failed: action ' + request['action_id']
+    for check in failed:
+        header += '; fixed check ' + str(check['index']) + ', exit ' + str(check['returncode'])
+    marker = '\n[bounded diagnostic tail]\n'
+    # Redact before selecting the suffix so truncation cannot split a secret.
+    clean = diagnostic_text(summary, maximum=len(summary.encode('utf-8')))
+    prefix = diagnostic_text(header, maximum=MAX_DIAGNOSTIC_BYTES - len(marker.encode()) - 1) + marker
+    budget = MAX_DIAGNOSTIC_BYTES - len(prefix.encode('utf-8'))
+    return prefix + clean.encode('utf-8')[-budget:].decode('utf-8', 'ignore')
 
 REQUEST_KEYS = frozenset(('action_id', 'prepare_action_id', 'workflow_id',
     'project_alias', 'candidate_commit', 'candidate_tree', 'integration_base',
@@ -138,33 +163,41 @@ class PostMergeWorker:
                 raise PublicationError('post_merge_start_not_authorized')
 
         def persist_stage_artifacts(req, rcpt):
-            raw_store = getattr(self.store, '_store', self.store)
+            raw_store: MainStageEvidencePort = self.store
             if not callable(getattr(type(raw_store), 'record_jenkins_stage_evidence', None)):
                 return
             action_id = req.get('action_id')
             if not action_id or not isinstance(rcpt, dict):
                 return
             try:
+                require_lease()
                 from work_cicd_artifacts import extract_stage_evidence_from_receipt
                 delivery_cfg = getattr(getattr(self.provider, 'delivery', None), 'config', None)
                 results_root = getattr(delivery_cfg, 'results_root', None)
                 job_name = getattr(delivery_cfg, 'jenkins_job', None) or 'forge-main-post-merge'
-                full_receipt = rcpt
-                receipt_sha = rcpt.get('check_receipt_sha256')
-                log_bytes = None
-                if results_root is not None:
-                    result_path = results_root / (action_id + '.json')
-                    if result_path.is_file():
-                        raw_res = result_path.read_bytes()
-                        full_receipt = json.loads(raw_res.decode('utf-8'))
-                        receipt_sha = hashlib.sha256(raw_res).hexdigest()
-                    log_path = results_root / (action_id + '.log')
-                    if log_path.is_file():
-                        log_bytes = log_path.read_bytes()
-                if not isinstance(receipt_sha, str) or len(receipt_sha) != 64:
-                    receipt_sha = hashlib.sha256(
-                        json.dumps(full_receipt, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
-                    ).hexdigest()
+                if results_root is None:
+                    return
+                raw_res = read_private(results_root / (action_id + '.json'),
+                                       owner=0, maximum=2 * 1024 * 1024)
+                receipt_sha = hashlib.sha256(raw_res).hexdigest()
+                if receipt_sha != rcpt.get('check_receipt_sha256'):
+                    raise ValueError('Protected main receipt changed')
+                full_receipt = json.loads(raw_res.decode('utf-8'))
+                expected = {key: req[key] for key in ('action_id', 'workflow_id',
+                    'candidate_commit', 'candidate_tree', 'branch_scope',
+                    'gate_manifest_sha256', 'verification_profile', 'correlation_id')}
+                expected['expected_main'] = req['integration_base']
+                if (any(full_receipt.get(key) != value for key, value in expected.items())
+                        or full_receipt.get('checks') != rcpt.get('checks')
+                        or full_receipt.get('coverage') != rcpt.get('coverage')
+                        or full_receipt.get('version') != rcpt.get('result_version')
+                        or full_receipt.get('cleanup_confirmed') is not True):
+                    raise ValueError('Protected main evidence identity changed')
+                log_bytes = read_private(results_root / (action_id + '.log'),
+                                         owner=0, maximum=64 * 1024 * 1024)
+                if (hashlib.sha256(log_bytes).hexdigest() != full_receipt.get('log_sha256')
+                        or full_receipt.get('log_sha256') != rcpt.get('log_sha256')):
+                    raise ValueError('Protected main evidence log changed')
                 entries = extract_stage_evidence_from_receipt(
                     full_receipt,
                     log_bytes,
@@ -181,12 +214,15 @@ class PostMergeWorker:
                     receipt_sha256=receipt_sha,
                 )
                 for evidence, chunks in entries:
+                    require_lease()
                     raw_store.record_jenkins_stage_evidence(evidence, chunks)
             except Exception:
                 LOG.warning('Post-merge stage evidence persistence deferred for action %s', action_id)
 
         def finish(status, receipt, summary):
             require_lease()
+            if status == 'failed' and request is not None:
+                summary = failed_check_diagnostic(request, receipt, summary)
             if not self.store.post_merge_finish(job, status, receipt, diagnostic_text(summary)):
                 raise PublicationError('post_merge_lease_lost')
 

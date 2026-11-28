@@ -43,6 +43,10 @@ class DeliveryVerificationStore:
     def post_merge_finish(self, job, status, receipt, summary):
         return self.store.delivery_finish(job, status, receipt, summary)
 
+    def record_jenkins_stage_evidence(self, evidence: dict, chunks=()) -> dict:
+        """Delegate evidence through the selected reconciler store, without new authority."""
+        return self.store.record_jenkins_stage_evidence(evidence, chunks)
+
 
 def validate_plan(identity, plan):
     if (not isinstance(plan, dict) or set(plan) != PLAN_KEYS

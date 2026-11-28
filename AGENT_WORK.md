@@ -1,3 +1,25 @@
+## Main-stage evidence and failure-tail projection — 2026-11-28
+
+DeliveryVerificationStore now delegates the existing typed main-stage evidence
+port to its selected reconciler store. PostMergeWorker uses that port directly;
+it no longer silently looks for a nonexistent adapter `_store` field. Evidence
+requires the Root-owned protected receipt and log, exact request/source identity,
+matching receipt/log checksums, and a current lease before each write. Native
+branch persistence, SQL grants, task-log authorization and CI plans are unchanged.
+
+Failed main checks retain a bounded labeled diagnostic tail and the verified
+action/check/exit header. Redaction precedes UTF-8 suffix selection; the stored
+summary stays within 2048 bytes. Generic diagnostic_text retains its head
+semantics and non-check failures keep their previous projection.
+
+The old composed adapter deterministically persisted zero of 46 main stages.
+The corrected composition passes 60 focused memory tests plus three real owned
+PostgreSQL tests covering terminal main persistence and existing exact-action /
+commit/correlation task-log authorization. No operator UUID receives task-log
+ownership, and changed receipts/logs/identities, symlinks and lost leases cannot
+persist evidence. Private logs: /mnt/data/homelab-build/main-stage-tail-evidence-20261128.
+No runtime, database, CI selector or remote branch was changed.
+
 ## Disposable database scope — 2026-11-28
 
 All disposable PostgreSQL tests must honor the shared `PG16_AVAILABLE` selection,

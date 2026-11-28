@@ -166,6 +166,70 @@ class DeliveryAutomationPGTest(unittest.TestCase):
             q.execute('SELECT forge_agent.delivery_actor_authorize(%s,%s,%s,%s)',(job['release_id'],job['generation'],job['lease_token'],start));return q.fetchone()[0]
     def observe(self,commit='a',tree='b',expected=None):
         return self.db.delivery_observe('homelab','fixture/project',commit*40,tree*40,expected)
+
+    def test_normal_main_worker_adapter_persists_protected_stages_without_task_ownership(self):
+        from copy import deepcopy
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from test_main_stage_evidence import protected_fixture, fixture_reader
+        from test_work_post_merge import configuration
+        from test_agent_branch_ownership import AgentBranchOwnershipPostgresTest
+        from work_delivery_worker import DeliveryVerificationStore
+        from work_post_merge import PostMergeWorker
+        from work_store import WorkStore
+
+        self.observe()
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _ = configuration(root)
+            config = replace(config, worker=replace(config.worker, owner=OWNER))
+            calls = []
+            class Provider:
+                delivery = SimpleNamespace(config=SimpleNamespace(
+                    results_root=root / 'results', jenkins_job='forge-native-candidate'))
+                def prepare(selected, job, require_lease):
+                    require_lease()
+                    calls.append(deepcopy(job))
+                    selected.request = request(job)
+                    selected.receipt, selected.full = protected_fixture(root / 'results', selected.request)
+                    return {'status': 'prepared', 'request': selected.request}
+                def verify(selected, job, value, require_lease):
+                    require_lease()
+                    self.assertEqual(value, selected.request)
+                    return {'status': 'passed', 'receipt': selected.receipt, 'summary': 'Exact main passed.'}
+            provider = Provider()
+            worker = PostMergeWorker(config, DeliveryVerificationStore(self.db), provider)
+            with patch('work_post_merge.read_private', side_effect=fixture_reader):
+                self.assertTrue(worker.run_once())
+            action = provider.request['action_id']
+            stages = self.rows('SELECT * FROM forge_agent.jenkins_stage_results WHERE action_id=%s', (action,))
+            self.assertEqual(len(stages), len(provider.full['checks']))
+            self.assertTrue(all(row['pipeline_scope'] == 'main' and row['task_id'] is None for row in stages))
+            self.assertTrue(all(row['receipt_sha256'] == provider.receipt['check_receipt_sha256'] for row in stages))
+            self.assertTrue(self.rows('SELECT 1 FROM forge_agent.jenkins_stage_log_chunks WHERE action_id=%s', (action,)))
+            self.assertEqual(self.rows('SELECT verification_status FROM forge_agent.delivery_ledger WHERE verification_id=%s', (action,)),
+                             [{'verification_status': 'passed'}])
+
+            # An arbitrary operator UUID has no delivery lease and cannot reach preparation/persistence.
+            forged = deepcopy(calls[0]); forged['post_merge_id'] = str(uuid4())
+            worker.process(forged)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(self.rows('SELECT 1 FROM forge_agent.jenkins_stage_results WHERE action_id=%s',
+                                      (forged['post_merge_id'],)), [])
+
+            # A project/main commit is not a task ownership grant, including registered unowned main.
+            task, correlation = AgentBranchOwnershipPostgresTest._insert_task(
+                SimpleNamespace(cluster=self.pg), OWNER, 'homelab', 'agy-primary')
+            portal = WorkStore(OWNER, ('homelab',), lambda: self.pg.connect('forge_agent'))
+            for selected in (UUID(action), UUID(forged['post_merge_id'])):
+                with self.assertRaises(Rejected) as denied:
+                    portal.cicd_stage_log(project_alias='homelab', task_id=task,
+                        correlation_id=correlation, action_id=selected,
+                        stage_id=stages[0]['logical_stage_id'], view='console')
+                self.assertEqual(denied.exception.status, 404)
+
     def verification(self,status='passed'):
         self.observe();job=self.db.delivery_claim('verify');value=request(job);self.db.delivery_checkpoint(job,value)
         receipt=passed(value)
