@@ -24,7 +24,7 @@ CONFIG_SUFFIX='\n[permission]\nask = ["Bash", "Read", "Edit", "Grep", "Glob", "r
 
 DIRECTION=('Use native read_file/grep/list_dir in the workspace, closed read-only git commands, '
            'or the exact report_progress.py helper. Implementation alone permits workspace edits and bounded build/test commands. '
-           'Use plain report text; do not use shell substitutions, glob/brace/tilde expansion, '
+           'Use plain report text. Do not use shell substitutions, glob/brace/tilde expansion, '
            'redirections, publishing, network or external tools.')
 
 
