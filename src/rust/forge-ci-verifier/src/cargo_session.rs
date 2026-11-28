@@ -166,7 +166,7 @@ impl CacheLease {
             if entry.path.join(PENDING).symlink_metadata().is_ok()
                 && marker(&entry.path, self.cache.owner)?
             {
-                crate::cargo_publication::recover(&entry.path, self.cache.owner)?;
+                crate::cargo_publication::recover(&entry.path, self.cache.owner, self.cache.group)?;
             }
         }
         Ok(())
@@ -407,7 +407,13 @@ impl CacheLease {
         }
         fs::rename(&staged.path, &path).map_err(|_| "cache_snapshot_publish_failed")?;
         sync_dir(&entry)?;
-        let publication = Publication::prepare(&entry, pointer.clone(), action, self.cache.owner)?;
+        let publication = Publication::prepare(
+            &entry,
+            pointer.clone(),
+            action,
+            self.cache.owner,
+            self.cache.group,
+        )?;
         Ok((
             publication,
             CacheOutcome {
@@ -591,6 +597,7 @@ mod tests {
         root: PathBuf,
         cache: NativeCargoCache,
         uid: u32,
+        gid: u32,
     }
     impl Fixture {
         fn new() -> Self {
@@ -599,6 +606,7 @@ mod tests {
             fs::create_dir(&root).unwrap();
             fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
             let uid = nix::unistd::geteuid().as_raw();
+            let gid = nix::unistd::getegid().as_raw();
             Self {
                 cache: NativeCargoCache {
                     config: CargoCacheConfig {
@@ -611,10 +619,11 @@ mod tests {
                         seed_from_siblings: true,
                     },
                     owner: uid,
-                    group: uid,
+                    group: gid,
                 },
                 root,
                 uid,
+                gid,
             }
         }
         fn key(&self, scope: &str) -> CacheKey {
@@ -686,7 +695,7 @@ mod tests {
                 .finish(
                     &self.root.join(format!("{action}.json")),
                     &result,
-                    self.uid,
+                    self.gid,
                     &AtomicBool::new(false),
                     &self.root.join("cancelled"),
                 )
@@ -714,7 +723,7 @@ mod tests {
             .restore(
                 &f.key("branch/feature-codex"),
                 &fresh,
-                (f.uid, f.uid),
+                (f.uid, f.gid),
                 &AtomicBool::new(false),
             )
             .unwrap();
@@ -734,7 +743,7 @@ mod tests {
                 .restore(
                     &f.key("branch/feature-codex"),
                     &next,
-                    (f.uid, f.uid),
+                    (f.uid, f.gid),
                     &AtomicBool::new(false)
                 )
                 .unwrap()
@@ -754,7 +763,7 @@ mod tests {
             &main_entry.join(PENDING),
             b"{\"unrecognized\":true}",
             f.uid,
-            f.uid,
+            f.gid,
             0o600,
         )
         .unwrap();
@@ -784,7 +793,7 @@ mod tests {
                 .restore(
                     &f.key("main"),
                     &main,
-                    (f.uid, f.uid),
+                    (f.uid, f.gid),
                     &AtomicBool::new(false)
                 )
                 .unwrap()
@@ -800,7 +809,7 @@ mod tests {
             .restore(
                 &f.key("branch/new"),
                 &fresh,
-                (f.uid, f.uid),
+                (f.uid, f.gid),
                 &AtomicBool::new(false),
             )
             .unwrap();
@@ -822,7 +831,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         let fresh = f.layout("fresh", false);
         assert!(
-            matches!(lease.restore(&f.key("main"),&fresh,(f.uid,f.uid),&AtomicBool::new(true)),Err(e) if e=="cache_cancelled")
+            matches!(lease.restore(&f.key("main"),&fresh,(f.uid,f.gid),&AtomicBool::new(true)),Err(e) if e=="cache_cancelled")
         );
         assert!(fresh.package_targets.join("per-manifest").is_dir());
         assert!(fs::read_dir(&fresh.target).unwrap().next().is_none());
@@ -930,7 +939,7 @@ mod tests {
                 &AtomicBool::new(false),
             )
             .unwrap();
-        pending.finish(&f.root.join(format!("{action}.json")),&json!({"action_id":action,"status":"passed","cleanup_confirmed":true,"cache":{"publish_status":"published"}}),f.uid,&AtomicBool::new(false),&f.root.join("cancelled")).unwrap();
+        pending.finish(&f.root.join(format!("{action}.json")),&json!({"action_id":action,"status":"passed","cleanup_confirmed":true,"cache":{"publish_status":"published"}}),f.gid,&AtomicBool::new(false),&f.root.join("cancelled")).unwrap();
         let fresh = || {
             for target in [&layout.target, &layout.package_targets] {
                 fs::remove_dir_all(target).unwrap();
@@ -949,7 +958,7 @@ mod tests {
             .restore(
                 &f.key("main"),
                 &layout,
-                (f.uid, f.uid),
+                (f.uid, f.gid),
                 &AtomicBool::new(false),
             )
             .unwrap();
@@ -971,7 +980,7 @@ mod tests {
             .restore(
                 &f.key("main"),
                 &layout,
-                (f.uid, f.uid),
+                (f.uid, f.gid),
                 &AtomicBool::new(false),
             )
             .unwrap();

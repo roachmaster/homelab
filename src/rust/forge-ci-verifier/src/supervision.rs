@@ -21,6 +21,7 @@ pub(crate) fn record_temporary(
     path: &Path,
     uid: u32,
     owner: u32,
+    group: u32,
 ) -> Result<(), String> {
     let body = TemporaryRecord {
         version: 1,
@@ -30,7 +31,7 @@ pub(crate) fn record_temporary(
     let raw = crate::filesystem::canonical(
         &serde_json::to_value(body).map_err(|_| "temporary_record_encode_failed")?,
     );
-    write_new(&active.join("temporary.json"), &raw, owner, owner, 0o600)?;
+    write_new(&active.join("temporary.json"), &raw, owner, group, 0o600)?;
     sync_dir(active)
 }
 pub(crate) fn cleanup_recorded_temporary(
@@ -229,17 +230,18 @@ mod tests {
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let uid = nix::unistd::geteuid().as_raw();
+        let gid = nix::unistd::getegid().as_raw();
         let action = uuid::Uuid::new_v4().to_string();
-        capture_intent(&root, &action, b"original intent\n", uid, uid).unwrap();
+        capture_intent(&root, &action, b"original intent\n", uid, gid).unwrap();
         assert_eq!(
-            capture_intent(&root, &action, b"different", uid, uid).unwrap_err(),
+            capture_intent(&root, &action, b"different", uid, gid).unwrap_err(),
             "replay_intent_changed"
         );
         write_new(
             &root.join(format!("{action}.log")),
             b"real partial output\n",
             uid,
-            uid,
+            gid,
             0o640,
         )
         .unwrap();
@@ -263,9 +265,10 @@ mod tests {
         fs::create_dir(&active).unwrap();
         fs::set_permissions(&active, fs::Permissions::from_mode(0o700)).unwrap();
         let uid = nix::unistd::geteuid().as_raw();
+        let gid = nix::unistd::getegid().as_raw();
         let temporary =
             std::path::PathBuf::from(format!("/tmp/fci-{}", uuid::Uuid::new_v4().simple()));
-        record_temporary(&active, &temporary, uid, uid).unwrap();
+        record_temporary(&active, &temporary, uid, uid, gid).unwrap();
         cleanup_recorded_temporary(&active, uid, uid).unwrap();
         fs::create_dir(&temporary).unwrap();
         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700)).unwrap();

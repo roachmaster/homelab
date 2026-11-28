@@ -87,11 +87,11 @@ fn optional(path: &Path, owner: u32, maximum: usize) -> Result<Option<String>, S
         Err(_) => Err("cache_metadata_unavailable".into()),
     }
 }
-fn restore(path: &Path, raw: &Option<String>, owner: u32) -> Result<(), String> {
+fn restore(path: &Path, raw: &Option<String>, owner: u32, group: u32) -> Result<(), String> {
     let parent = path.parent().ok_or("cache_parent_missing")?;
     if let Some(raw) = raw {
         let temporary = parent.join(format!(".rollback-{}", uuid::Uuid::new_v4()));
-        write_new(&temporary, &decode(raw, 16384)?, owner, owner, 0o600)?;
+        write_new(&temporary, &decode(raw, 16384)?, owner, group, 0o600)?;
         if fs::symlink_metadata(path).is_ok() {
             read_owned(path, owner, 16384)?;
         }
@@ -177,18 +177,18 @@ fn matching_result(j: &Journal, owner: u32) -> Result<Option<Value>, String> {
         Ok(None)
     }
 }
-fn save(entry: &Path, j: &Journal, owner: u32) -> Result<(), String> {
+fn save(entry: &Path, j: &Journal, owner: u32, group: u32) -> Result<(), String> {
     atomic_json(
         &entry.join(JOURNAL),
         &serde_json::to_value(j).map_err(|_| "cache_journal_encode_failed")?,
         owner,
-        owner,
+        group,
     )
 }
 
 /// Resolve an existing native publication before same-action replay. A committed
 /// but unreadable result remains uncertain: never downgrade it or delete proof.
-pub fn recover(entry: &Path, owner: u32) -> Result<(), String> {
+pub fn recover(entry: &Path, owner: u32, group: u32) -> Result<(), String> {
     let mut j = read_journal(entry, owner)?;
     if j.committed {
         if matching_result(&j, owner)?.is_none() {
@@ -204,9 +204,14 @@ pub fn recover(entry: &Path, owner: u32) -> Result<(), String> {
         return sync_dir(entry);
     }
     j.committed = false;
-    save(entry, &j, owner)?;
-    restore(&entry.join("current.json"), &j.old_current, owner)?;
-    restore(&entry.join("last_used.json"), &j.old_last_used, owner)?;
+    save(entry, &j, owner, group)?;
+    restore(&entry.join("current.json"), &j.old_current, owner, group)?;
+    restore(
+        &entry.join("last_used.json"),
+        &j.old_last_used,
+        owner,
+        group,
+    )?;
     if let Some(mut result) = matching_result(&j, owner)? {
         result["status"] = json!("failed");
         result["failure"] = json!("cancelled_or_timed_out");
@@ -259,6 +264,7 @@ pub fn recover(entry: &Path, owner: u32) -> Result<(), String> {
 pub struct Publication {
     entry: PathBuf,
     owner: u32,
+    group: u32,
 }
 impl Publication {
     /// Snapshot is already immutable, validated, and renamed into this entry.
@@ -267,6 +273,7 @@ impl Publication {
         pointer: Pointer,
         action: &str,
         owner: u32,
+        group: u32,
     ) -> Result<Self, String> {
         pointer.validate()?;
         if !crate::admission::canonical_uuid(action)
@@ -293,13 +300,14 @@ impl Publication {
         let current = Self {
             entry: entry.into(),
             owner,
+            group,
         };
-        save(entry, &journal, owner)?;
+        save(entry, &journal, owner, group)?;
         read_journal(entry, owner)?;
         Ok(current)
     }
     pub fn abort(self) -> Result<(), String> {
-        recover(&self.entry, self.owner)
+        recover(&self.entry, self.owner, self.group)
     }
     pub fn finish(
         self,
@@ -326,7 +334,7 @@ impl Publication {
             path: path.into(),
             sha256: digest(&canonical(result)),
         });
-        save(&self.entry, &j, self.owner)?;
+        save(&self.entry, &j, self.owner, self.group)?;
         let check = || {
             if cancelled.load(Ordering::SeqCst) || cancel_file.exists() {
                 Err("cache_commit_cancelled".to_string())
@@ -340,31 +348,31 @@ impl Publication {
                 &self.entry.join("current.json"),
                 &serde_json::to_value(&j.new_pointer).map_err(|_| "cache_encode_failed")?,
                 self.owner,
-                self.owner,
+                self.group,
             )?;
             check()?;
             atomic_json(
                 &self.entry.join("last_used.json"),
                 &json!({"last_used_at_ns":j.new_pointer.published_at_ns}),
                 self.owner,
-                self.owner,
+                self.group,
             )?;
             check()?;
             atomic_json(path, result, self.owner, reader_group)?;
             check()?;
             j.committed = true;
-            save(&self.entry, &j, self.owner)?;
+            save(&self.entry, &j, self.owner, self.group)?;
             // A signal before this checkpoint rolls back; after this point no
             // fallible GC or cleanup is allowed to invalidate actual success.
             check()
         })();
         if let Err(error) = write {
             j.committed = false;
-            save(&self.entry, &j, self.owner)?;
-            recover(&self.entry, self.owner)?;
+            save(&self.entry, &j, self.owner, self.group)?;
+            recover(&self.entry, self.owner, self.group)?;
             return Err(error);
         }
-        let _ = recover(&self.entry, self.owner);
+        let _ = recover(&self.entry, self.owner, self.group);
         Ok(())
     }
 }
@@ -377,6 +385,7 @@ mod tests {
         root: PathBuf,
         entry: PathBuf,
         uid: u32,
+        gid: u32,
         old: Vec<u8>,
         pointer: Pointer,
         action: String,
@@ -391,6 +400,7 @@ mod tests {
             fs::create_dir(&entry).unwrap();
             fs::set_permissions(&entry, fs::Permissions::from_mode(0o700)).unwrap();
             let uid = nix::unistd::geteuid().as_raw();
+            let gid = nix::unistd::getegid().as_raw();
             let action = uuid::Uuid::new_v4().to_string();
             let old_pointer = Pointer {
                 snapshot_id: format!("1-{}", uuid::Uuid::new_v4()),
@@ -400,12 +410,12 @@ mod tests {
             };
             let old =
                 format!("{}\n", serde_json::to_string_pretty(&old_pointer).unwrap()).into_bytes();
-            write_new(&entry.join("current.json"), &old, uid, uid, 0o600).unwrap();
+            write_new(&entry.join("current.json"), &old, uid, gid, 0o600).unwrap();
             write_new(
                 &entry.join("last_used.json"),
                 b"{\"last_used_at_ns\": 9}\n",
                 uid,
-                uid,
+                gid,
                 0o600,
             )
             .unwrap();
@@ -426,13 +436,21 @@ mod tests {
                 root,
                 entry,
                 uid,
+                gid,
                 old,
                 pointer,
                 action,
             }
         }
         fn publication(&self) -> Publication {
-            Publication::prepare(&self.entry, self.pointer.clone(), &self.action, self.uid).unwrap()
+            Publication::prepare(
+                &self.entry,
+                self.pointer.clone(),
+                &self.action,
+                self.uid,
+                self.gid,
+            )
+            .unwrap()
         }
         fn result(&self) -> Value {
             json!({"action_id":self.action,"status":"passed","cleanup_confirmed":true,"candidate_commit":"unchanged","checks":[{"returncode":0}],"cache":{"publish_status":"published"}})
@@ -457,16 +475,16 @@ mod tests {
             path: f.result_path(),
             sha256: digest(&canonical(&result)),
         });
-        save(&f.entry, &j, f.uid).unwrap();
+        save(&f.entry, &j, f.uid, f.gid).unwrap();
         atomic_json(
             &f.entry.join("current.json"),
             &serde_json::to_value(&f.pointer).unwrap(),
             f.uid,
-            f.uid,
+            f.gid,
         )
         .unwrap();
-        atomic_json(&f.result_path(), &result, f.uid, f.uid).unwrap();
-        recover(&f.entry, f.uid).unwrap();
+        atomic_json(&f.result_path(), &result, f.uid, f.gid).unwrap();
+        recover(&f.entry, f.uid, f.gid).unwrap();
         assert_eq!(fs::read(f.entry.join("current.json")).unwrap(), f.old);
         assert_eq!(
             fs::read(f.entry.join("last_used.json")).unwrap(),
@@ -489,12 +507,12 @@ mod tests {
             path: f.result_path(),
             sha256: "a".repeat(64),
         });
-        save(&f.entry, &j, f.uid).unwrap();
+        save(&f.entry, &j, f.uid, f.gid).unwrap();
         let result = f.result();
-        atomic_json(&f.result_path(), &result, f.uid, f.uid).unwrap();
+        atomic_json(&f.result_path(), &result, f.uid, f.gid).unwrap();
         let raw = fs::read(f.result_path()).unwrap();
         assert_eq!(
-            recover(&f.entry, f.uid).unwrap_err(),
+            recover(&f.entry, f.uid, f.gid).unwrap_err(),
             "cache_result_conflict"
         );
         assert_eq!(fs::read(f.result_path()).unwrap(), raw);
@@ -508,7 +526,7 @@ mod tests {
         p.finish(
             &f.result_path(),
             &f.result(),
-            f.uid,
+            f.gid,
             &AtomicBool::new(false),
             &f.root.join("cancelled"),
         )
@@ -528,7 +546,7 @@ mod tests {
             p.finish(
                 &f.result_path(),
                 &f.result(),
-                f.uid,
+                f.gid,
                 &AtomicBool::new(true),
                 &f.root.join("cancelled")
             )
@@ -545,10 +563,10 @@ mod tests {
             sha256: "b".repeat(64),
         });
         j.committed = true;
-        save(&f.entry, &j, f.uid).unwrap();
+        save(&f.entry, &j, f.uid, f.gid).unwrap();
         let before = fs::read(f.entry.join(JOURNAL)).unwrap();
         assert_eq!(
-            recover(&f.entry, f.uid).unwrap_err(),
+            recover(&f.entry, f.uid, f.gid).unwrap_err(),
             "committed_cache_result_unavailable"
         );
         assert_eq!(fs::read(f.entry.join(JOURNAL)).unwrap(), before);

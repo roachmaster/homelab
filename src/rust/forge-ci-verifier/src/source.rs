@@ -309,7 +309,7 @@ pub(crate) fn prepare<
     }
     symlink(&p.config.node_modules, &node).map_err(|_| "candidate_output_path")?;
     let short_tmp = PathBuf::from(format!("/tmp/fci-{}", uuid::Uuid::new_v4().simple()));
-    crate::supervision::record_temporary(p.active, &short_tmp, p.uid, 0)?;
+    crate::supervision::record_temporary(p.active, &short_tmp, p.uid, 0, 0)?;
     fs::create_dir(&short_tmp).map_err(|_| "tmp_create_failed")?;
     chown(
         &short_tmp,
