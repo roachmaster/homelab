@@ -84,6 +84,8 @@ fn admission_rejects_scope_identity_cache_and_unpinned_helpers() {
     assert!(bad.validate(&r.action_id, &c).is_err());
     let mut bad = c.clone();
     bad.cargo_cache = Some(json!({"enabled":true}));
+    assert!(bad.validate().is_ok());
+    bad.cargo_cache = Some(json!({"enabled":true,"arbitrary_command":"rejected"}));
     assert!(bad.validate().unwrap_err().contains("cache"));
     bad = c.clone();
     bad.policy_path = "/tmp/policy.json".into();

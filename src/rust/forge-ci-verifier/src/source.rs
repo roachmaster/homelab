@@ -23,9 +23,10 @@ pub(crate) struct SourcePreparation<'a> {
     pub cancellation: Arc<AtomicBool>,
 }
 pub(crate) struct SealedSource {
+    pub paths: Vec<String>,
+    pub package_targets: PathBuf,
     pub source: PathBuf,
     pub target: PathBuf,
-    pub short_tmp: PathBuf,
     pub environment: BTreeMap<String, String>,
 }
 
@@ -308,6 +309,7 @@ pub(crate) fn prepare<
     }
     symlink(&p.config.node_modules, &node).map_err(|_| "candidate_output_path")?;
     let short_tmp = PathBuf::from(format!("/tmp/fci-{}", uuid::Uuid::new_v4().simple()));
+    crate::supervision::record_temporary(p.active, &short_tmp, p.uid, 0)?;
     fs::create_dir(&short_tmp).map_err(|_| "tmp_create_failed")?;
     chown(
         &short_tmp,
@@ -353,9 +355,10 @@ pub(crate) fn prepare<
         environment.insert("FORGE_DISABLE_DISPOSABLE_POSTGRES".into(), "1".into());
     }
     Ok(SealedSource {
+        paths,
+        package_targets: scratch.join("package-targets"),
         source,
         target,
-        short_tmp,
         environment,
     })
 }

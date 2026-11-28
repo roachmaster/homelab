@@ -22,7 +22,7 @@ pub struct Pointer {
     pub file_count: usize,
 }
 impl Pointer {
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         let (time, action) = self
             .snapshot_id
             .split_once('-')
@@ -211,6 +211,8 @@ pub fn recover(entry: &Path, owner: u32) -> Result<(), String> {
         result["status"] = json!("failed");
         result["failure"] = json!("cancelled_or_timed_out");
         result["cache"]["publish_status"] = json!("rolled_back");
+        result["cache"]["published_bytes"] = json!(0);
+        result["cache"]["published_files"] = json!(0);
         if result["verification_profile"] == forge_jenkins::native_policy::NATIVE_PROFILE {
             let scope = result["branch_scope"]
                 .as_str()

@@ -158,11 +158,7 @@ impl Config {
                 }
             }
         }
-        if let Some(cache) = &self.cargo_cache {
-            if !cache.is_object() || cache.get("enabled") != Some(&Value::Bool(false)) {
-                return Err("enabled_native_cache_not_supported".into());
-            }
-        }
+        crate::cargo_cache::CargoCacheConfig::parse(self.cargo_cache.as_ref())?;
         self.child_path()?;
         Ok(())
     }

@@ -336,7 +336,6 @@ fn copy_file(
         .set_permissions(fs::Permissions::from_mode(mode))
         .map_err(|_| "cache_mode_failed")?;
     set_time(&output, mtime)?;
-    output.sync_all().map_err(|_| "cache_sync_failed")?;
     Ok(CachedFile {
         path: relative.into(),
         bytes: count,
@@ -418,7 +417,7 @@ fn copy_tree(
             return Err("unsafe_cache_entry".into());
         }
     }
-    sync_dir(to)
+    Ok(())
 }
 
 fn snapshot_inventory(root: &Path, owner: u32) -> Result<BTreeSet<String>, String> {
@@ -483,9 +482,13 @@ fn snapshot_inventory(root: &Path, owner: u32) -> Result<BTreeSet<String>, Strin
     Ok(files)
 }
 
-fn pristine_destination(path: &Path, owner: u32, visited: &mut usize) -> Result<(), String> {
-    *visited += 1;
-    if *visited > 40000 {
+fn pristine_destination(
+    path: &Path,
+    owner: u32,
+    originals: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    originals.push(path.into());
+    if originals.len() > 40000 {
         return Err("cache_entry_bound".into());
     }
     no_symlink_components(path)?;
@@ -498,7 +501,7 @@ fn pristine_destination(path: &Path, owner: u32, visited: &mut usize) -> Result<
         {
             return Err("restore_destination_not_empty".into());
         }
-        pristine_destination(&path, owner, visited)?;
+        pristine_destination(&path, owner, originals)?;
     }
     Ok(())
 }
@@ -510,6 +513,15 @@ pub fn validate_snapshot(
     metadata: &SnapshotMetadata,
     owner: u32,
 ) -> Result<(), String> {
+    validate_snapshot_cancelled(root, metadata, owner, &AtomicBool::new(false))
+}
+fn validate_snapshot_cancelled(
+    root: &Path,
+    metadata: &SnapshotMetadata,
+    owner: u32,
+    cancelled: &AtomicBool,
+) -> Result<(), String> {
+    forge_jenkins::native_policy::native_gate_contract(&metadata.branch_scope)?;
     if metadata.version != 1
         || metadata.native_format != 1
         || !crate::admission::hex(&metadata.compat_key, 64)
@@ -535,6 +547,9 @@ pub fn validate_snapshot(
     let mut max_art = 0;
     let mut max_fp = 0;
     for entry in &metadata.files {
+        if cancelled.load(Ordering::SeqCst) {
+            return Err("cache_cancelled".into());
+        }
         if !safe_relative(&entry.path)
             || !matches!(
                 entry.path.split('/').next(),
@@ -569,6 +584,9 @@ pub fn validate_snapshot(
         let mut hasher = Sha256::new();
         let mut buffer = vec![0u8; 1024 * 1024];
         loop {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err("cache_cancelled".into());
+            }
             let n = file.read(&mut buffer).map_err(|_| "snapshot_read_failed")?;
             if n == 0 {
                 break;
@@ -619,9 +637,9 @@ pub struct StagedSnapshot {
 }
 #[derive(Debug, Clone)]
 pub struct NativeCargoCache {
-    config: CargoCacheConfig,
-    owner: u32,
-    group: u32,
+    pub(crate) config: CargoCacheConfig,
+    pub(crate) owner: u32,
+    pub(crate) group: u32,
 }
 impl NativeCargoCache {
     pub fn new(config: CargoCacheConfig) -> Result<Self, String> {
@@ -635,7 +653,7 @@ impl NativeCargoCache {
     pub fn enabled(&self) -> bool {
         self.config.enabled
     }
-    fn ensure_root(&self) -> Result<(), String> {
+    pub(crate) fn ensure_root(&self) -> Result<(), String> {
         no_symlink_components(self.config.root.parent().ok_or("invalid_cache_root")?)?;
         if self.config.root.symlink_metadata().is_err() {
             use std::os::unix::fs::DirBuilderExt;
@@ -765,8 +783,14 @@ impl NativeCargoCache {
                 return Err("cache_metadata_bound".into());
             }
             write_new(&path.join("meta.json"), &raw, self.owner, self.group, 0o600)?;
+            // Flush this staging filesystem once, including all copied data,
+            // modes, times and subdirectories, before any pointer can select
+            // it. Thousands of per-artifact fsync calls are unnecessary; the
+            // legacy supervisor used a broader whole-system sync here.
+            let filesystem = File::open(&path).map_err(|_| "cache_sync_failed")?;
+            nix::unistd::syncfs(&filesystem).map_err(|_| "cache_sync_failed")?;
             sync_dir(&path)?;
-            validate_snapshot(&path, &metadata, self.owner)?;
+            validate_snapshot_cancelled(&path, &metadata, self.owner, cancelled)?;
             Ok(StagedSnapshot {
                 path: path.clone(),
                 metadata,
@@ -778,6 +802,13 @@ impl NativeCargoCache {
         result
     }
     pub fn read_snapshot(&self, path: &Path) -> Result<SnapshotMetadata, String> {
+        self.read_snapshot_cancelled(path, &AtomicBool::new(false))
+    }
+    fn read_snapshot_cancelled(
+        &self,
+        path: &Path,
+        cancelled: &AtomicBool,
+    ) -> Result<SnapshotMetadata, String> {
         if !path.starts_with(&self.config.root) {
             return Err("snapshot_path_escaped".into());
         }
@@ -787,7 +818,7 @@ impl NativeCargoCache {
             self.owner,
             MAX_METADATA,
         )?)?;
-        validate_snapshot(path, &metadata, self.owner)?;
+        validate_snapshot_cancelled(path, &metadata, self.owner, cancelled)?;
         Ok(metadata)
     }
 
@@ -803,7 +834,7 @@ impl NativeCargoCache {
         cancelled: &AtomicBool,
     ) -> Result<CacheOutcome, String> {
         let started = std::time::Instant::now();
-        let metadata = self.read_snapshot(path)?;
+        let metadata = self.read_snapshot_cancelled(path, cancelled)?;
         if metadata.project_alias != key.project_alias || metadata.compat_key != key.compat_key {
             return Err("snapshot_identity_changed".into());
         }
@@ -822,10 +853,11 @@ impl NativeCargoCache {
             .ok_or("empty_source_inventory")?;
         validate_timestamp_order(&metadata, now_ns()?, min_fresh)?;
         let (uid, gid) = build_identity;
+        let mut original_directories = Vec::new();
         for destination in [&layout.target, &layout.package_targets] {
             // Only pristine scratch may receive a snapshot. No overlay or
             // inherited stale objects can evade the captured inventory.
-            pristine_destination(destination, uid, &mut 0)?;
+            pristine_destination(destination, uid, &mut original_directories)?;
         }
         let limits = CopyLimits {
             expected_uid: self.owner,
@@ -899,10 +931,12 @@ impl NativeCargoCache {
             }
             for target in [&layout.target, &layout.package_targets] {
                 fs::remove_dir_all(target).map_err(|_| "restore_rollback_failed")?;
-                fs::create_dir(target).map_err(|_| "restore_rollback_failed")?;
-                chown(target, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
+            }
+            for target in original_directories {
+                fs::create_dir(&target).map_err(|_| "restore_rollback_failed")?;
+                chown(&target, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
                     .map_err(|_| "restore_rollback_failed")?;
-                fs::set_permissions(target, fs::Permissions::from_mode(0o700))
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o700))
                     .map_err(|_| "restore_rollback_failed")?;
             }
         }

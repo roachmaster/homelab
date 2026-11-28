@@ -4,13 +4,16 @@ mod admission;
 mod artifacts;
 mod assembly;
 pub mod cargo_cache;
+mod cargo_profile;
 pub mod cargo_publication;
+pub mod cargo_session;
 mod child;
 mod filesystem;
 mod host;
 mod process;
 mod source;
 mod stage;
+mod supervision;
 
 pub use admission::{ActionRequest, Config, Launcher};
 pub use artifacts::{seal_portal_artifacts, ArtifactExport, ArtifactIdentity, ArtifactSealRequest};

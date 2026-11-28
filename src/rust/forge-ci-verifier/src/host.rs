@@ -1,8 +1,10 @@
 //! Normal protected execution lifecycle: admit, lock, capture, prepare, execute,
 //! quiesce, seal actual artifacts, clean up, then durably commit the receipt.
-use crate::filesystem::{
-    atomic_json, digest, directory, new_file, read_owned, sync_dir, write_new,
+use crate::cargo_cache::{
+    capture_sources, CacheLayout, CacheOutcome, CargoCacheConfig, NativeCargoCache,
 };
+use crate::cargo_session::CacheLease;
+use crate::filesystem::{atomic_json, digest, directory, new_file, read_owned, write_new};
 use crate::process::{ChildSpec, ChildState, ChildStatus};
 use crate::source::{
     check_clean, classify_prepare_failure, prepare, trusted_environment, SourcePreparation,
@@ -127,6 +129,16 @@ fn progress(file: &mut File, value: &Value) -> Result<(), String> {
     file.write_all(&raw)
         .and_then(|_| file.sync_all())
         .map_err(|_| "progress_write_failed".into())
+}
+
+fn mark_cancelled(result: &mut Value, scope: &str) -> Result<(), String> {
+    result["status"] = json!("failed");
+    result["failure"] = json!("cancelled_or_timed_out");
+    let evidence = native_stage_evidence(scope, &result["checks"], Some("cancelled_or_timed_out"))?;
+    for (key, value) in evidence.as_object().ok_or("stage_evidence_invalid")? {
+        result[key] = value.clone();
+    }
+    Ok(())
 }
 
 fn validate_pins(config: &Config) -> Result<(), String> {
@@ -259,6 +271,11 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
         }
         let started = Instant::now();
         let deadline = started + Duration::from_secs(self.config.timeout_seconds);
+        let _deadline_guard = crate::supervision::DeadlineGuard::start(
+            deadline,
+            cancellation.clone(),
+            Some(request_dir.join("cancelled")),
+        )?;
         let lock_wait = LockWait {
             deadline,
             cancellation: cancellation.clone(),
@@ -272,17 +289,53 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
             &lock_wait,
         )?;
         let result_path = self.config.results_root.join(format!("{action}.json"));
+        let cache_config = CargoCacheConfig::parse(self.config.cargo_cache.as_ref())?;
+        let cache_enabled = cache_config.enabled;
+        let mut cache_unavailable = false;
+        let mut cache_unavailable_reason = None;
+        let cache_lease = if cache_enabled {
+            match NativeCargoCache::new(cache_config)
+                .and_then(|cache| CacheLease::open(cache, deadline, &cancellation))
+                .and_then(|lease| {
+                    lease.recover_pending()?;
+                    Ok(lease)
+                }) {
+                Ok(lease) => Some(lease),
+                Err(reason) => {
+                    cache_unavailable = true;
+                    cache_unavailable_reason = Some(reason);
+                    None
+                }
+            }
+        } else {
+            None
+        };
         if result_path.symlink_metadata().is_ok() {
+            if cache_unavailable {
+                return Err(format!(
+                    "cache_replay_recovery_unavailable:{}",
+                    cache_unavailable_reason.as_deref().unwrap_or("unknown")
+                ));
+            }
             let previous: Value = strict(&read_owned(&result_path, 0, 1024 * 1024)?)?;
             if previous.get("request_sha256") != Some(&json!(digest(&raw))) {
                 return Err("replay_intent_changed".into());
             }
             return Ok(previous);
         }
+        crate::supervision::capture_intent(
+            &self.config.results_root,
+            action,
+            &raw,
+            0,
+            submitter.gid.as_raw(),
+        )?;
+        crate::supervision::preserve_abandoned(&self.config.results_root, action, 0)?;
         self.quiesce(account.uid.as_raw())?;
         let active = self.config.work_root.join("active");
         if active.symlink_metadata().is_ok() {
             directory(&active, 0)?;
+            crate::supervision::cleanup_recorded_temporary(&active, account.uid.as_raw(), 0)?;
             fs::remove_dir_all(&active).map_err(|_| "active_cleanup_failed")?
         }
         fs::create_dir(&active).map_err(|_| "active_create_failed")?;
@@ -321,6 +374,22 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
         let mut failure = None;
         let mut sealed = None;
         let mut source = None;
+        let mut cache_key = None;
+        let mut cache_restore = CacheOutcome {
+            status: if cache_enabled {
+                "unavailable"
+            } else {
+                "disabled"
+            }
+            .into(),
+            reason: cache_unavailable_reason,
+            ..CacheOutcome::default()
+        };
+        let mut cache_publish = CacheOutcome {
+            status: if cache_enabled { "not_run" } else { "disabled" }.into(),
+            ..CacheOutcome::default()
+        };
+        let mut publication = None;
         let execution = (|| -> Result<(), String> {
             let prepared = prepare(
                 SourcePreparation {
@@ -350,6 +419,55 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
             }
             stages.push(json!({"name":"prepare_source","status":"passed","elapsed_ms":started.elapsed().as_millis()}));
             let layout = source.as_ref().ok_or("source_missing")?;
+            if let Some(lease) = &cache_lease {
+                match crate::cargo_profile::compatibility(
+                    &self.config,
+                    &request,
+                    layout,
+                    &self.process,
+                    deadline,
+                    cancellation.clone(),
+                ) {
+                    Ok(key) => {
+                        let cache_layout = CacheLayout {
+                            source: layout.source.clone(),
+                            target: layout.target.clone(),
+                            package_targets: layout.package_targets.clone(),
+                        };
+                        let restore_started = Instant::now();
+                        match lease.restore(
+                            &key,
+                            &cache_layout,
+                            (account.uid.as_raw(), account.gid.as_raw()),
+                            &cancellation,
+                        ) {
+                            Ok(outcome) => cache_restore = outcome,
+                            Err(reason) => {
+                                if reason == "restore_rollback_failed" {
+                                    return Err("verification_unavailable".into());
+                                }
+                                cache_restore = CacheOutcome {
+                                    status: "corrupt_fallback".into(),
+                                    reason: Some("snapshot_rejected".into()),
+                                    ..CacheOutcome::default()
+                                };
+                            }
+                        }
+                        cache_restore.elapsed_ms = restore_started
+                            .elapsed()
+                            .as_millis()
+                            .try_into()
+                            .unwrap_or(u64::MAX);
+                        cache_key = Some(key);
+                    }
+                    Err(_) => {
+                        cache_restore.reason = Some("compatibility_unavailable".into());
+                    }
+                }
+            }
+            if cancellation.load(Ordering::SeqCst) {
+                return Err("cancelled".into());
+            }
             let phases = native_phases_for_scope(&request.branch_scope)?;
             for (index, phase) in phases.iter().enumerate() {
                 let before = Instant::now();
@@ -528,6 +646,48 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
                     cancelled: &cancellation,
                 })?);
             }
+            if failure.is_none() {
+                if let (Some(lease), Some(key)) = (&cache_lease, &cache_key) {
+                    if request.branch_scope == "detached" {
+                        cache_publish.status = "skipped_detached".into();
+                    } else {
+                        let inventory = capture_sources(&layout.source, &layout.paths, 0)?;
+                        let cache_layout = CacheLayout {
+                            source: layout.source.clone(),
+                            target: layout.target.clone(),
+                            package_targets: layout.package_targets.clone(),
+                        };
+                        let publish_started = Instant::now();
+                        match lease.stage(
+                            key,
+                            &cache_layout,
+                            inventory,
+                            account.uid.as_raw(),
+                            action,
+                            &cancellation,
+                        ) {
+                            Ok((pending, outcome)) => {
+                                publication = Some(pending);
+                                cache_publish = outcome;
+                            }
+                            Err(reason) => {
+                                cache_publish.status = if reason == "cache_capacity_exceeded" {
+                                    "skipped_capacity"
+                                } else {
+                                    "skipped_unavailable"
+                                }
+                                .into();
+                                cache_publish.reason = Some("snapshot_not_published".into());
+                            }
+                        }
+                        cache_publish.elapsed_ms = publish_started
+                            .elapsed()
+                            .as_millis()
+                            .try_into()
+                            .unwrap_or(u64::MAX);
+                    }
+                }
+            }
             Ok(())
         })();
         if let Err(reason) = execution {
@@ -545,9 +705,7 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
         // Its failure is recorded honestly; no cleanup or pass proof is invented.
         let cleanup = (|| -> Result<(), String> {
             self.quiesce(account.uid.as_raw())?;
-            if let Some(layout) = source {
-                fs::remove_dir_all(&layout.short_tmp).map_err(|_| "temporary_cleanup_failed")?;
-            }
+            crate::supervision::cleanup_recorded_temporary(&active, account.uid.as_raw(), 0)?;
             fs::remove_dir_all(&active).map_err(|_| "active_cleanup_failed")?;
             Ok(())
         })();
@@ -560,6 +718,14 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
         }
         if cancellation.load(Ordering::SeqCst) || cancelled.exists() {
             failure = Some("cancelled_or_timed_out".into());
+        }
+        if failure.is_some() {
+            if let Some(pending) = publication.take() {
+                pending.abort()?;
+                cache_publish.status = "rolled_back".into();
+                cache_publish.bytes = 0;
+                cache_publish.files = 0;
+            }
         }
         log.sync_all().map_err(|_| "log_sync_failed")?;
         let checked = native_phases_for_scope(&request.branch_scope)?.len();
@@ -575,8 +741,45 @@ impl<P: IoClient<Request = ExecutionRequest, Response = ExecutionResult, Error =
             result["artifact_export"] =
                 serde_json::to_value(export).map_err(|_| "artifact_receipt_encode_failed")?;
         }
-        atomic_json(&result_path, &result, 0, submitter.gid.as_raw())?;
-        sync_dir(&self.config.results_root)?;
+        result["cache"] = json!({"enabled":cache_enabled,"provider":if cache_enabled {"native-rust-v1"} else {"null"},"project_alias":request.project_alias,"branch_scope":request.branch_scope,"compat_key":cache_key.as_ref().map(|key|&key.compat_key),"restore_status":cache_restore.status,"restore_fallback_reason":cache_restore.reason,"restore_elapsed_ms":cache_restore.elapsed_ms,"restored_bytes":cache_restore.bytes,"restored_files":cache_restore.files,"publish_status":cache_publish.status,"publish_elapsed_ms":cache_publish.elapsed_ms,"published_bytes":cache_publish.bytes,"published_files":cache_publish.files,"publish_reason":cache_publish.reason});
+        if let Some(pending) = publication {
+            if let Err(reason) = pending.finish(
+                &result_path,
+                &result,
+                submitter.gid.as_raw(),
+                &cancellation,
+                &cancelled,
+            ) {
+                // Other errors include an uncertain/conflicting protected
+                // receipt and must not be overwritten with invented recovery.
+                if reason != "cache_commit_cancelled" {
+                    return Err(reason);
+                }
+                result["status"] = json!("failed");
+                result["failure"] = json!("cancelled_or_timed_out");
+                result["cache"]["publish_status"] = json!("rolled_back");
+                result["cache"]["published_bytes"] = json!(0);
+                result["cache"]["published_files"] = json!(0);
+                let evidence = native_stage_evidence(
+                    &request.branch_scope,
+                    &result["checks"],
+                    Some("cancelled_or_timed_out"),
+                )?;
+                for (key, value) in evidence.as_object().ok_or("stage_evidence_invalid")? {
+                    result[key] = value.clone();
+                }
+                atomic_json(&result_path, &result, 0, submitter.gid.as_raw())?;
+            }
+        } else {
+            if cancellation.load(Ordering::SeqCst) || cancelled.exists() {
+                mark_cancelled(&mut result, &request.branch_scope)?;
+            }
+            atomic_json(&result_path, &result, 0, submitter.gid.as_raw())?;
+            if cancellation.load(Ordering::SeqCst) || cancelled.exists() {
+                mark_cancelled(&mut result, &request.branch_scope)?;
+                atomic_json(&result_path, &result, 0, submitter.gid.as_raw())?;
+            }
+        }
         Ok(result)
     }
     fn build_command(&self, command: BuildCommand<'_>) -> Result<i32, String> {

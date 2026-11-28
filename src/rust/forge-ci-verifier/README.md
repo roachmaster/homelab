@@ -52,9 +52,30 @@ hardlink alias, then atomically seals artifact-v1 into the root-owned results
 root. Source/request identities, actual commands, hashes and sizes are preserved.
 Replay checks every export path and byte.
 
-Current checkpoint limitations: configured enabled Cargo caching is rejected
-before effects, never silently downgraded. Explicit `cargo_cache:{"enabled":false}`
-or absent cache is a real cold mode. Native cache transactions remain follow-up work. Native HTTP stage emission
+Enabled Cargo caching uses the established `scopes/project/scope/compat` layout.
+Compatibility binds both fixed phase graphs, compiler/toolchain fingerprints,
+platform, selected compiler environment, build config and canonical source path.
+Native entries have an explicit format marker; legacy snapshots are not treated
+as native snapshots. Complete validated file inventories restore first; unchanged
+source mtimes align last and changed files keep genuine fresh times. Main/sibling
+seeding leaves the seed's LRU untouched. Retention counts physical bytes, reserves
+predecessor plus new snapshot, and protects pending transactions. One staging
+filesystem sync replaces thousands of per-artifact fsync calls.
+
+The root cache lease spans selection, execution and final publication. A journal
+binds the proposed pointer and exact receipt hash. Interrupted publication restores
+exact before-images before provisional receipt access and downgrades only its own
+matching provisional pass. Conflicting or uncertain committed proof is preserved.
+Unknown historical pending journals remain untouched. Unusable optional cache can
+fall back to a cold fresh verification; uncertain saved results cannot replay.
+Disabled/absent cache remains an honest cold mode.
+
+The whole-run guard observes the monotonic deadline and cancellation file without
+busy waiting. Retrying a killed run preserves its root-captured request and bounded
+partial logs, quiesces the dedicated UID, and removes only recorded scratch paths.
+No generic historical cleanup or task/database mutation belongs to this host.
+
+Native HTTP stage emission
 captures the supervisor identity once, groups the exact closed phases, uses fixed
 loopback/credential paths, and permits at most two attempts per event within a
 thirty-second aggregate monotonic budget. Transport failure is observational and
@@ -63,3 +84,9 @@ receipt remain independent of emission. No live verifier selection, installed jo
 privileged candidate run or whole branch/main execution has been performed by
 these package tests. Local tests exercise actual unprivileged process and file
 boundaries; the shared plan tests validate the full closed branch/main plans.
+
+Cache tests also compile a real tiny Rust executable, restore an unchanged source
+snapshot and observe Cargo Fresh, then change source and prove recompilation with
+changed executable output. Package tests do not qualify the installed-path/UID/
+network warm host or a complete main artifact release; those remain explicit
+integration checks before activation.
