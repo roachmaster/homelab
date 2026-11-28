@@ -113,15 +113,23 @@ class GraphInputIntegrityTests(unittest.TestCase):
 
 
 class WorkflowExitStatusTests(unittest.TestCase):
+    def test_deploy_tree_contains_no_python_files(self):
+        deploy = SCRIPTS.parents[2] / "deploy"
+        unexpected = sorted(str(path.relative_to(deploy)) for path in deploy.rglob("*.py"))
+        self.assertEqual(unexpected, [], "Deployment Python belongs outside the deploy tree")
+
     def test_every_required_agent_check_runs_for_all_pull_request_paths(self):
         # Missing checks remain pending forever, so backend/docs-only tasks
         # need the same required check witnesses as frontend tasks.
         repository = SCRIPTS.parents[2]
-        module = ast.parse((repository / "deploy/mission-control/agent-runner/work_verification.py").read_text())
-        declaration = next(node for node in module.body if isinstance(node, ast.Assign)
-                           and any(isinstance(name, ast.Name) and name.id == "DEFAULT_REQUIRED_HOSTED_CHECKS"
-                                   for name in node.targets))
-        for path, workflow_name, job in ast.literal_eval(declaration.value):
+        # The constant lives in the Rust port now (forge-work-publication's
+        # verification module); the Python original was retired at cutover.
+        source = (repository / "src/rust/forge-work-publication/src/verification.rs").read_text()
+        declaration = source.split("DEFAULT_REQUIRED_HOSTED_CHECKS", 1)[1].split("];", 1)[0]
+        literals = [part for index, part in enumerate(declaration.split('"')) if index % 2 == 1]
+        required = [tuple(literals[i:i + 3]) for i in range(0, len(literals), 3)]
+        self.assertTrue(required, "The required hosted check list must be nonempty")
+        for path, workflow_name, job in required:
             with self.subTest(workflow=path, required_job=job):
                 workflow = yaml_io.load_yaml((repository / path).read_text())
                 events = workflow.get("on", workflow.get(True))

@@ -4,19 +4,19 @@ Mission Control uses native systemd services. The [Forge IDE system inventory](.
 
 ## Inspect the deployment
 
-Run from the Homelab checkout. The script uses Python 3 and the installed PyYAML module.
+Run the Rust `forge-services` binary from the Homelab checkout so it can find the service inventory. Set `FORGE_SERVICES_INVENTORY` to the inventory path when invoking it from elsewhere.
 
 ```bash
-deploy/mission-control/services.py list
-deploy/mission-control/services.py status
-deploy/mission-control/services.py status forge-ide-web-host
+forge-services list
+forge-services status
+forge-services status forge-ide-web-host
 ```
 
 `list` reads the inventory. `status` checks systemd and local TCP listeners on Mission Control.
 
 ## Install, update, or remove a service
 
-Prepare a reviewed bundle containing the unit file and the drop-ins registered for that service. Put the release binaries, assets, and configuration at the paths referenced by the unit before running the script. For the Forge IDE web host, use this bundle layout.
+Prepare a reviewed bundle containing the unit file and the drop-ins registered for that service. Put the release binaries, assets, and configuration at the paths referenced by the unit before invoking the service manager. For the Forge IDE web host, use this bundle layout.
 
 ```text
 bundle/
@@ -28,9 +28,9 @@ bundle/
 Use the component ID from the inventory.
 
 ```bash
-sudo deploy/mission-control/services.py install forge-ide-web-host /path/to/bundle
-sudo deploy/mission-control/services.py update forge-ide-web-host /path/to/bundle
-sudo deploy/mission-control/services.py delete forge-ide-web-host
+sudo forge-services install forge-ide-web-host /path/to/bundle
+sudo forge-services update forge-ide-web-host /path/to/bundle
+sudo forge-services delete forge-ide-web-host
 ```
 
 - `install` installs the unit, enables it at boot, and starts it. Repeating the command with the same bundle keeps the running service in place.

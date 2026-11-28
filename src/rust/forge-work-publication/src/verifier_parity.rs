@@ -11,7 +11,7 @@
 //! script, in the spirit of work_verification_init's fixed
 //! launcher), and every extraction, comparison and bounded
 //! evaluation rule below is Rust. The verifier file stays Python
-//! (deploy/mission-control/jenkins/verify-candidate.py is outside
+//! (src/rust/scripts/jenkins/verify-candidate.py is outside
 //! the agent-runner migration map), so the parity proof must keep
 //! reading Python source.
 
@@ -1579,7 +1579,7 @@ mod tests {
 
     fn verifier_source() -> Vec<u8> {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../deploy/mission-control/jenkins/verify-candidate.py");
+            .join("../scripts/jenkins/verify-candidate.py");
         std::fs::read(&path).expect("the real verifier source is a parity fixture")
     }
 

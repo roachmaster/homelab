@@ -1,3 +1,27 @@
+## Deployment Python source cutoff — 2026-11-28
+
+This candidate applies the deployment-source removal from Muse's bedc2bfd to
+reviewed main 6fa2e13d, including the four Python files added after their common
+base. Of the 367 tracked deployment Python files on main, 366 are removed. The
+Jenkins verifier moves byte-for-byte to src/rust/scripts/jenkins/verify-candidate.py
+inside the protected tooling path. The source audit rejects future Python files
+under deploy/. Non-Python deployment assets include applied SQL and existing
+service definitions.
+
+Repository preflight now executes the Rust delivery, worker, Jenkins and release
+actor suites. The backend target runs the Rust backend crates with a required,
+disposable PostgreSQL 16 cluster. Local results were 204 preflight tests and
+473 backend tests. These counts overlap and describe the Rust suites. The former
+v3 Python inventory was distinct. An explicitly disabled cluster caused the
+required database case to fail as intended.
+
+The installed v3 Jenkins profile, its protected receipt validation in PostgreSQL,
+and its release consumer require a command at the deleted backend-suites.py path.
+Current service definitions and installed releases also select Python entry points.
+A green local Cargo run alone cannot qualify a v3 receipt or activate the Rust
+services. Retain previous release artifacts for rollback. The production API's
+repair-author routing config requires support in the Rust runner before switching it.
+
 ## MCP host library ownership — isolated correction, 2026-11-28
 
 The incoming MCP host library defined Backend and input_schema directly in its

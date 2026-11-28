@@ -60,7 +60,7 @@ jobs:
         run: make ci
       - name: Verify Mission Control portal backend suites (zero silent skips)
         if: github.event_name != 'pull_request'
-        run: python3 -B deploy/mission-control/backend-suites.py
+        run: make backend-suites
 
   pr-fast-gate:
     if: github.event_name == 'pull_request'
