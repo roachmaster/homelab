@@ -194,7 +194,9 @@ impl PgSession {
         // decode panic - row.get::<T> panics on NULL.
         Ok(self
             .run_query(select, params, true)?
-            .and_then(|row| row.get::<usize, Option<T>>(0)))
+            .map(|row| row.try_get::<usize, Option<T>>(0))
+            .transpose()?
+            .flatten())
     }
 
     /// Executes a query that does not return any result.
