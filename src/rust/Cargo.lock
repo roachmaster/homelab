@@ -759,6 +759,7 @@ dependencies = [
  "chrono",
  "forge-core",
  "forge-jenkins",
+ "forge-mcp-db",
  "forge-usage",
  "forge-work",
  "forge-work-publication",

@@ -28,3 +28,6 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["fs", "user"] }
+
+[dev-dependencies]
+forge-mcp-db.workspace = true
