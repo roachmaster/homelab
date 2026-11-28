@@ -31,8 +31,11 @@ impl TempCgroup {
     fn write_populated(&self, unit: &str, populated: &str) {
         let dir = self.0.join("system.slice").join(format!("{unit}.service"));
         fs::create_dir_all(&dir).expect("create unit cgroup dir");
-        fs::write(dir.join("cgroup.events"), format!("populated {populated}\nfrozen 0\n"))
-            .expect("write cgroup.events");
+        fs::write(
+            dir.join("cgroup.events"),
+            format!("populated {populated}\nfrozen 0\n"),
+        )
+        .expect("write cgroup.events");
     }
 }
 
@@ -129,7 +132,10 @@ fn run_proof(w: &mut World, exec: ScriptedExec, cg: TempCgroup, unit: &str) {
 
 fn steps() -> Steps<World> {
     Steps::new()
-        .given("the supervisor can validate coding scope names", |_: &mut World, _| Ok(()))
+        .given(
+            "the supervisor can validate coding scope names",
+            |_: &mut World, _| Ok(()),
+        )
         .given(
             "the supervisor can inspect systemd state over an injected executor",
             |_: &mut World, _| Ok(()),
@@ -138,12 +144,15 @@ fn steps() -> Steps<World> {
             "the supervisor can stop a coding scope over an injected executor",
             |_: &mut World, _| Ok(()),
         )
-        .when("a stop proof is requested for an invalid scope name", |w, _| {
-            let exec = ScriptedExec::new(Vec::new());
-            let cg = TempCgroup::new();
-            run_proof(w, exec, cg, "forge-coding-INVALID");
-            Ok(())
-        })
+        .when(
+            "a stop proof is requested for an invalid scope name",
+            |w, _| {
+                let exec = ScriptedExec::new(Vec::new());
+                let cg = TempCgroup::new();
+                run_proof(w, exec, cg, "forge-coding-INVALID");
+                Ok(())
+            },
+        )
         .when(
             "systemctl reports inactive with MainPID zero and an unpopulated cgroup",
             |w, _| {
@@ -220,25 +229,40 @@ fn steps() -> Steps<World> {
             w._cgroup = Some(cg);
             Ok(())
         })
-        .then("proof fails with a protocol error and zero commands run", |w, _| {
-            ensure(
-                matches!(w.error, Some(WorkerError::Protocol(_))),
-                format!("expected protocol error, got {:?}", w.error),
-            )?;
-            ensure(
-                w.requests.is_empty(),
-                format!("expected 0 commands, got {}", w.requests.len()),
-            )
-        })
+        .then(
+            "proof fails with a protocol error and zero commands run",
+            |w, _| {
+                ensure(
+                    matches!(w.error, Some(WorkerError::Protocol(_))),
+                    format!("expected protocol error, got {:?}", w.error),
+                )?;
+                ensure(
+                    w.requests.is_empty(),
+                    format!("expected 0 commands, got {}", w.requests.len()),
+                )
+            },
+        )
         .then("the stop proof confirms the scope is stopped", |w, _| {
             let proof = w.proof.as_ref().ok_or("missing stop proof")?;
-            ensure(proof.scope_stopped, format!("scope_stopped was false: {proof:?}"))?;
-            ensure(proof.source == "systemd", format!("source was {}", proof.source))
+            ensure(
+                proof.scope_stopped,
+                format!("scope_stopped was false: {proof:?}"),
+            )?;
+            ensure(
+                proof.source == "systemd",
+                format!("source was {}", proof.source),
+            )
         })
-        .then("the stop proof reports the scope is still running", |w, _| {
-            let proof = w.proof.as_ref().ok_or("missing stop proof")?;
-            ensure(!proof.scope_stopped, format!("expected false, got {proof:?}"))
-        })
+        .then(
+            "the stop proof reports the scope is still running",
+            |w, _| {
+                let proof = w.proof.as_ref().ok_or("missing stop proof")?;
+                ensure(
+                    !proof.scope_stopped,
+                    format!("expected false, got {proof:?}"),
+                )
+            },
+        )
         .then(
             "systemctl stop runs before systemctl show and confirms the scope is stopped",
             |w, _| {

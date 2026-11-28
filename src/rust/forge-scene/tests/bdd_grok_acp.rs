@@ -21,10 +21,8 @@ impl Directory {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "forge-scene-acp-{}-{nanos}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("forge-scene-acp-{}-{nanos}", std::process::id()));
         fs::create_dir(&path).unwrap();
         Self(path)
     }
@@ -90,18 +88,20 @@ fn request_permission(world: &mut World, call: Value) -> Result<(), String> {
     transport.feed(&wire(&json!({"jsonrpc": "2.0", "id": "permission-1",
         "method": "session/request_permission",
         "params": {"sessionId": SID, "toolCall": call, "options": options}})))?;
-    let reply: Value =
-        serde_json::from_slice(&transport.drain()).map_err(|e| e.to_string())?;
+    let reply: Value = serde_json::from_slice(&transport.drain()).map_err(|e| e.to_string())?;
     world.reply = Some(reply);
     Ok(())
 }
 
 fn steps() -> Steps<World> {
     Steps::new()
-        .given("the permission broker can judge a captured tool call", |w: &mut World, _| {
-            w.transport = Some(start_transport()?);
-            Ok(())
-        })
+        .given(
+            "the permission broker can judge a captured tool call",
+            |w: &mut World, _| {
+                w.transport = Some(start_transport()?);
+                Ok(())
+            },
+        )
         .given("the broker can admit read-only searches", |w, _| {
             let directory = Directory::new();
             let workspace = directory.0.join("workspace");
@@ -125,9 +125,10 @@ fn steps() -> Steps<World> {
             "a permission request restates them in a complete descriptor",
             |w, _| request_permission(w, descriptor("git status")),
         )
-        .when("a permission request describes a different command", |w, _| {
-            request_permission(w, descriptor("git push"))
-        })
+        .when(
+            "a permission request describes a different command",
+            |w, _| request_permission(w, descriptor("git push")),
+        )
         .when("a permission request presents changed arguments", |w, _| {
             let changed = tool("run_terminal_command", json!({"command": "git push"}));
             request_permission(w, changed)
@@ -143,33 +144,41 @@ fn steps() -> Steps<World> {
             }
             Ok(())
         })
-        .when("a tool call arrives with incomplete native metadata", |w, _| {
-            let partial = json!({"sessionUpdate": "tool_call", "toolCallId": "call-9",
+        .when(
+            "a tool call arrives with incomplete native metadata",
+            |w, _| {
+                let partial = json!({"sessionUpdate": "tool_call", "toolCallId": "call-9",
                 "rawInput": {"command": "git status"},
                 "_meta": {"x.ai/tool": {"name": "run_terminal_command"}}});
-            match update(w, partial) {
-                Ok(output) => w.update_output = Some(output),
-                Err(error) => w.update_error = Some(error),
-            }
-            Ok(())
-        })
-        .when("a grep names no path and stays within its bounds", |w, _| {
-            let permissions = w.permissions.as_ref().ok_or("no broker")?;
-            w.admitted = Some(permissions.admit(&tool(
-                "grep",
-                json!({"pattern": "needle", "glob": null, "-i": false,
+                match update(w, partial) {
+                    Ok(output) => w.update_output = Some(output),
+                    Err(error) => w.update_error = Some(error),
+                }
+                Ok(())
+            },
+        )
+        .when(
+            "a grep names no path and stays within its bounds",
+            |w, _| {
+                let permissions = w.permissions.as_ref().ok_or("no broker")?;
+                w.admitted = Some(permissions.admit(&tool(
+                    "grep",
+                    json!({"pattern": "needle", "glob": null, "-i": false,
                        "head_limit": 25, "type": "rust"}),
-            )));
-            Ok(())
-        })
-        .when("a grep asks for more context than the bound allows", |w, _| {
-            let permissions = w.permissions.as_ref().ok_or("no broker")?;
-            w.admitted = Some(permissions.admit(&tool(
-                "grep",
-                json!({"pattern": "needle", "-A": 5000}),
-            )));
-            Ok(())
-        })
+                )));
+                Ok(())
+            },
+        )
+        .when(
+            "a grep asks for more context than the bound allows",
+            |w, _| {
+                let permissions = w.permissions.as_ref().ok_or("no broker")?;
+                w.admitted = Some(
+                    permissions.admit(&tool("grep", json!({"pattern": "needle", "-A": 5000}))),
+                );
+                Ok(())
+            },
+        )
         .then("the request is allowed once", |w, _| {
             let reply = w.reply.as_ref().ok_or("no reply")?;
             ensure(
@@ -193,7 +202,10 @@ fn steps() -> Steps<World> {
         .then("the update is accepted silently", |w, _| {
             ensure(w.update_error.is_none(), "the update was refused")?;
             ensure(
-                w.update_output.as_ref().map(|o| o.is_empty()).unwrap_or(false),
+                w.update_output
+                    .as_ref()
+                    .map(|o| o.is_empty())
+                    .unwrap_or(false),
                 "the update produced output",
             )
         })

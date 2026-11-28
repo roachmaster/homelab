@@ -126,11 +126,9 @@ fn git(root: &Path, args: &[&str]) -> Result<(i32, Vec<u8>), WorkerError> {
             ("GIT_TERMINAL_PROMPT", "0"),
         ],
     );
-    let output = forge_core::io_client::IoClient::execute(
-        &crate::process_exec::SystemProcessExec,
-        request,
-    )
-    .map_err(|_| unverified())?;
+    let output =
+        forge_core::io_client::IoClient::execute(&crate::process_exec::SystemProcessExec, request)
+            .map_err(|_| unverified())?;
     Ok((output.exit_code, output.stdout))
 }
 

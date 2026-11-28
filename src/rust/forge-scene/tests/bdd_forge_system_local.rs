@@ -17,7 +17,8 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("forge-scene-disk-{}", Uuid::new_v4().simple()));
+        let path =
+            std::env::temp_dir().join(format!("forge-scene-disk-{}", Uuid::new_v4().simple()));
         fs::create_dir(&path).expect("create temp dir");
         Self(path)
     }
@@ -94,30 +95,42 @@ fn steps() -> Steps<World> {
                 Ok(())
             },
         )
-        .when("the application bootstraps with no disk directory", |w, _| {
-            let app = Application::bootstrap(LocalConfig {
-                node_id: "bdd-local".into(),
-                disk_directory: None,
-            })
-            .map_err(|e| format!("{e:?}"))?;
-            let cmds = app.commands().map_err(|e| format!("{e:?}"))?;
-            w.discovered = cmds.into_iter().map(|c| c.descriptor.name.to_string()).collect();
-            w.app = Some(app);
-            Ok(())
-        })
-        .when("the application bootstraps with a temporary directory", |w, _| {
-            let dir = TempDir::new();
-            let app = Application::bootstrap(LocalConfig {
-                node_id: "bdd-local".into(),
-                disk_directory: Some(dir.0.clone()),
-            })
-            .map_err(|e| format!("{e:?}"))?;
-            let cmds = app.commands().map_err(|e| format!("{e:?}"))?;
-            w.discovered = cmds.into_iter().map(|c| c.descriptor.name.to_string()).collect();
-            w._dir = Some(dir);
-            w.app = Some(app);
-            Ok(())
-        })
+        .when(
+            "the application bootstraps with no disk directory",
+            |w, _| {
+                let app = Application::bootstrap(LocalConfig {
+                    node_id: "bdd-local".into(),
+                    disk_directory: None,
+                })
+                .map_err(|e| format!("{e:?}"))?;
+                let cmds = app.commands().map_err(|e| format!("{e:?}"))?;
+                w.discovered = cmds
+                    .into_iter()
+                    .map(|c| c.descriptor.name.to_string())
+                    .collect();
+                w.app = Some(app);
+                Ok(())
+            },
+        )
+        .when(
+            "the application bootstraps with a temporary directory",
+            |w, _| {
+                let dir = TempDir::new();
+                let app = Application::bootstrap(LocalConfig {
+                    node_id: "bdd-local".into(),
+                    disk_directory: Some(dir.0.clone()),
+                })
+                .map_err(|e| format!("{e:?}"))?;
+                let cmds = app.commands().map_err(|e| format!("{e:?}"))?;
+                w.discovered = cmds
+                    .into_iter()
+                    .map(|c| c.descriptor.name.to_string())
+                    .collect();
+                w._dir = Some(dir);
+                w.app = Some(app);
+                Ok(())
+            },
+        )
         .when(
             "disk.list is invoked on a directory containing beta.txt and alpha.txt",
             |w, _| {

@@ -2557,7 +2557,12 @@ mod tests {
         // Missing task_id, an unknown key, a malformed UUID and a
         // correlation mismatch are all invalid.
         assert_eq!(
-            decode(WorkDestination::Get, "req-1", &decode_body("work_get", json!({}))).err(),
+            decode(
+                WorkDestination::Get,
+                "req-1",
+                &decode_body("work_get", json!({}))
+            )
+            .err(),
             Some(invalid())
         );
         assert_eq!(
@@ -2874,5 +2879,4 @@ mod tests {
             Some(invalid())
         );
     }
-
 }
