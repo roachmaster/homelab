@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 User=lrocha
 Group=lrocha
-ExecStart=/usr/bin/python3 -B /opt/homelab-forge/coding-worker/work_worker.py
+ExecStart=/opt/homelab-forge/event-current/bin/forge-coding-worker
 Environment=FORGE_CODING_WORKER_CONFIG=/etc/homelab-forge/coding-worker/worker.json
 Restart=on-failure
 RestartSec=5

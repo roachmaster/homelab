@@ -48,21 +48,21 @@ sequenceDiagram
 
 ## Install and verify
 
+The runner unit selects `/opt/homelab-forge/event-current/bin/forge-runner`.
+The same immutable release supplies the coding worker, publisher, portal
+release actor, and attempt helpers. First-install provisioning validates the
+release files and PostgreSQL grants, and reuses the existing runner token.
+
 ```bash
+sudo deploy/mission-control/agent-runner/setup-runner.sh --check
 sudo deploy/mission-control/agent-runner/setup-runner.sh
-sudo deploy/mission-control/agent-runner/connect-ide.py
 sudo journalctl -u forge-agent-runner.service
 ```
 
-The setup script checks the database, installs the Ubuntu psycopg2 package when
-needed, and installs the native service. systemd supplies separate incoming and
-outgoing bearer credentials. The incoming credential is created under
-`/etc/homelab-forge/agent-runner/`. Keep it on Mission Control.
-
-The IDE connection script updates the existing chat relay endpoint, restarts the
-web host, and checks an authenticated chat plus its database events. It restores
-the previous configuration if verification fails. To reconnect the IDE directly
-to Forge, run `sudo deploy/mission-control/agent-runner/connect-ide.py --rollback`.
+For an existing installation, stage the release, drain native actions, and
+change all six systemd selectors together with the release actor configuration.
+Confirm the actual process paths and authenticated portal calls before resuming
+admissions. The selected database transport remains direct PostgreSQL.
 
 ## Local API
 

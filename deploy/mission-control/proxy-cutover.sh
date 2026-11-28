@@ -112,25 +112,10 @@ reconcile_expired_leases() {
         printf 'warning: cannot read the coordinator token; expired leases will lapse on their own\n'
         return 0
     }
-    result="$(/usr/bin/python3 - "$token" <<'PY' 2>/dev/null
-import http.client
-import json
-import sys
-
-connection = http.client.HTTPConnection("127.0.0.1", 18087, timeout=15)
-connection.request("POST", "/v1/operation",
-                   body=json.dumps({
-                       "operation": "fn.forge_external_agent_api.reconcile",
-                       "args": {"p_owner": "mission-control"}}),
-                   headers={"Authorization": f"Bearer {sys.argv[1]}",
-                            "Content-Type": "application/json"})
-response = connection.getresponse()
-payload = json.loads(response.read() or b"{}")
-if response.status != 200:
-    raise SystemExit(f"proxy error: {payload.get('error', response.status)}")
-print(payload.get("result", {}).get("count", "?"))
-PY
-)" || {
+    result="$(printf 'Authorization: Bearer %s\n' "$token" |
+        curl -fsS --max-time 15 --header @- --header 'Content-Type: application/json' \
+            --data-binary '{"operation":"fn.forge_external_agent_api.reconcile","args":{"p_owner":"mission-control"}}' \
+            http://127.0.0.1:18087/v1/operation | jq -er '.result.count | numbers')" || {
         printf 'warning: proxy reconcile call failed; expired leases will lapse on their own\n'
         return 0
     }
@@ -173,18 +158,11 @@ config_selects_proxy() {
     # $1 = config file, $2 = dotted path to the database object
     # (e.g. database or worker.database). Returns 0 when the config
     # selects the proxy transport (database.proxy.url + token_file).
-    /usr/bin/python3 - "$1" "$2" <<'PY' 2>/dev/null
-import json
-import sys
-
-config = json.load(open(sys.argv[1]))
-node = config
-for part in sys.argv[2].split("."):
-    node = node[part]
-proxy = node["proxy"]
-assert isinstance(proxy["url"], str) and proxy["url"]
-assert isinstance(proxy["token_file"], str) and proxy["token_file"]
-PY
+    jq -e --arg selector "$2" '
+        getpath($selector | split(".")) | .proxy |
+        (.url | type == "string" and length > 0) and
+        (.token_file | type == "string" and length > 0)
+    ' "$1" >/dev/null 2>&1
 }
 
 check_caller_routing() {
@@ -194,8 +172,7 @@ check_caller_routing() {
     # 1. The pre-cutover verification sequence: every caller
     # authenticates and runs a safe probe through the proxy, and the
     # proxy OS user is admitted as each caller role via peer auth.
-    /usr/bin/python3 "$directory/agent-runner/proxy_verify.py" \
-        --config-dir /etc/homelab-forge/forge-pg-proxy || ready=false
+    "$directory/agent-runner/verify-proxy.sh" || ready=false
     # 2. The migrated callers' deployed configs select the proxy
     # transport. The config path comes from the installed unit, not
     # a hardcoded filename (the worker config is release-versioned).
@@ -332,8 +309,7 @@ install -d -m 0700 "$credential_directory"
 for role in forge_gpu_worker muse_events; do
     temporary="$(mktemp "$credential_directory/.password-XXXXXXXX")"
     trap 'rm -f -- "$temporary"' EXIT
-    /usr/bin/python3 -c 'import secrets; print(secrets.token_urlsafe(32))' \
-        > "$temporary"
+    openssl rand -hex 32 > "$temporary"
     new_password="$(cat -- "$temporary")"
     psql_as postgres postgres -c \
         "ALTER ROLE $role PASSWORD '$new_password'"
@@ -370,28 +346,15 @@ printf 'provisioning verified at the post-cutover stage\n'
 # running before. The proxy readiness check lives in
 # setup-runner.sh (127.0.0.1:18087 /health).
 systemctl restart forge-pg-proxy.service
-/usr/bin/python3 - <<'PY'
-import http.client
-import sys
-import time
-
-for _ in range(40):
-    connection = http.client.HTTPConnection("127.0.0.1", 18087, timeout=1)
-    try:
-        connection.request("GET", "/health")
-        response = connection.getresponse()
-        response.read()
-        if response.status == 200:
-            print("Forge Postgres proxy ready")
-            break
-    except (OSError, http.client.HTTPException):
-        pass
-    finally:
-        connection.close()
-    time.sleep(0.25)
-else:
-    sys.exit("Forge Postgres proxy did not become ready")
-PY
+ready=false
+for ((attempt=0; attempt<40; attempt++)); do
+    if curl -fsS --max-time 1 --output /dev/null http://127.0.0.1:18087/health; then
+        ready=true
+        break
+    fi
+    sleep 0.25
+done
+[[ $ready == true ]] || fail 'Forge PostgreSQL proxy did not become ready.'
 for unit in "${stopped_units[@]}"; do
     systemctl start "$unit"
     printf 'restarted %s\n' "$unit"
