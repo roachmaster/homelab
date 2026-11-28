@@ -1,7 +1,7 @@
 //! Client example: select a backend through typed config, build it with
 //! the factory, and run one request through the server handler.
 //!
-//! `cargo run -p forge-mcp-host --example client` uses the fake backend
+//! `cargo run -p forge-mcp-host --example forge-mcp-host-client` uses the fake backend
 //! (zero external effects). With `FORGE_MCP_BACKEND=live` and no DSN or
 //! token, the live backend binds its null collaborators, which answer
 //! `Unavailable` without touching the network.

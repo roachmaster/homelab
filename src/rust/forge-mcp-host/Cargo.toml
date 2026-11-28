@@ -18,3 +18,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio-postgres = "0.7"
 uuid = { version = "1", features = ["v4"] }
 axum = "0.8"
+
+[[example]]
+name = "forge-mcp-host-client"
+path = "examples/client.rs"

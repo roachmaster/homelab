@@ -3,7 +3,7 @@
 //! effects; the actor itself is created by `ActorFactory` from the fixed
 //! Root configuration path, which this example only reports.
 //!
-//! `cargo run -p forge-portal-release-actor --example client`
+//! `cargo run -p forge-portal-release-actor --example forge-portal-release-actor-client`
 
 use std::path::Path;
 
