@@ -850,28 +850,51 @@ pub struct GitRepositoryProvider {
     config: PublicationConfig,
     execute: Box<dyn CommandExecutor>,
     remote_url_factory: Box<dyn Fn(&str) -> String + Send>,
-    branch_provider: Option<Box<dyn PublicationBranchPort>>,
+    /// `NoBranchRecords` unless persistent branches are selected.
+    branch_provider: Box<dyn PublicationBranchPort>,
+}
+
+/// Null-object branch port: shared branches keep no sync records and
+/// no reservation owner to verify, as when no provider was selected.
+pub struct NoBranchRecords;
+
+impl PublicationBranchPort for NoBranchRecords {
+    fn record_sync(&mut self, _record: &BranchSyncRecord) -> ProviderResult<()> {
+        Ok(())
+    }
+    fn verify_owner(&mut self, _reservation: &Value) -> ProviderResult<()> {
+        Ok(())
+    }
+}
+
+/// The production remote URL selection: each alias's GitHub HTTPS
+/// remote from the publication config's repositories.
+pub fn github_remote_urls(config: &PublicationConfig) -> Box<dyn Fn(&str) -> String + Send> {
+    github_remote_urls_for(config.repositories.clone())
+}
+
+fn github_remote_urls_for(
+    repositories: std::collections::BTreeMap<String, String>,
+) -> Box<dyn Fn(&str) -> String + Send> {
+    Box::new(move |alias: &str| {
+        format!(
+            "https://github.com/{}.git",
+            repositories.get(alias).cloned().unwrap_or_default()
+        )
+    })
 }
 
 impl GitRepositoryProvider {
     pub fn new(
         config: PublicationConfig,
         execute: Box<dyn CommandExecutor>,
-        remote_url_factory: Option<Box<dyn Fn(&str) -> String + Send>>,
-        branch_provider: Option<Box<dyn PublicationBranchPort>>,
+        remote_url_factory: Box<dyn Fn(&str) -> String + Send>,
+        branch_provider: Box<dyn PublicationBranchPort>,
     ) -> GitRepositoryProvider {
-        let fallback_config = config.clone();
         GitRepositoryProvider {
             config,
             execute,
-            remote_url_factory: remote_url_factory.unwrap_or_else(|| {
-                Box::new(move |alias: &str| {
-                    format!(
-                        "https://github.com/{}.git",
-                        fallback_config.repositories.get(alias).cloned().unwrap_or_default()
-                    )
-                })
-            }),
+            remote_url_factory,
             branch_provider,
         }
     }
@@ -1155,10 +1178,7 @@ impl GitRepositoryProvider {
         &mut self,
         record: &BranchSyncRecord,
     ) -> ProviderResult<()> {
-        match &mut self.branch_provider {
-            Some(provider) => provider.record_sync(record),
-            None => Ok(()),
-        }
+        self.branch_provider.record_sync(record)
     }
 
     fn prepare_inner(
@@ -1829,9 +1849,7 @@ impl GitRepositoryProvider {
         let branch = branch_name(job, Some(&self.config))?;
         let remote = self.remote_url(text_of(job, "project_alias"));
         if let Some(reservation) = reservation {
-            if let Some(provider) = &mut self.branch_provider {
-                provider.verify_owner(reservation)?;
-            }
+            self.branch_provider.verify_owner(reservation)?;
             if let Some(pull_requests) = pull_requests {
                 let mut listing_job = job.clone();
                 listing_job["branch_name"] = json!(branch);
@@ -2373,8 +2391,8 @@ mod tests {
         let mut provider = GitRepositoryProvider::new(
             config,
             Box::new(ProcessCommandExecutor),
-            Some(Box::new(move |_| canonical_text.clone())),
-            None,
+            Box::new(move |_| canonical_text.clone()),
+            Box::new(NoBranchRecords),
         );
         let publication_id = "123e4567-e89b-42d3-a456-426614174000";
         let job = json!({
@@ -2522,5 +2540,24 @@ impl SnapshotPort for SharedSnapshots {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .create(job)
+    }
+}
+
+#[cfg(test)]
+mod null_object_tests {
+    use super::*;
+
+    #[test]
+    fn github_remote_urls_follow_the_configured_repositories() {
+        let urls = github_remote_urls_for(
+            [("homelab".to_string(), "roachmaster/homelab".to_string())].into(),
+        );
+        assert_eq!(urls("homelab"), "https://github.com/roachmaster/homelab.git");
+        assert_eq!(urls("unknown"), "https://github.com/.git");
+    }
+
+    #[test]
+    fn no_branch_records_accepts_every_sync_and_owner_check() {
+        assert!(NoBranchRecords.verify_owner(&json!({"branch_name": "b"})).is_ok());
     }
 }

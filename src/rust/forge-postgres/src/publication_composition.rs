@@ -69,8 +69,9 @@ use forge_work_publication::publication::PublicationWorker;
 use forge_work_publication::publication_checks::IsolatedCheckRunner;
 use forge_work_publication::publication_clients::ProviderError;
 use forge_work_publication::publication_clients::{
-    CodingWorkspacesAdapter, CommandExecutor, GitHubPullRequestClient, GitRepositoryProvider,
-    ProcessCommandExecutor, PublicationBranchPort, SharedSnapshots, WorkspaceSnapshotProvider,
+    github_remote_urls, CodingWorkspacesAdapter, CommandExecutor, GitHubPullRequestClient,
+    GitRepositoryProvider, NoBranchRecords, ProcessCommandExecutor, PublicationBranchPort,
+    SharedSnapshots, WorkspaceSnapshotProvider,
 };
 use forge_work_publication::publication_config::PublicationConfig;
 use forge_work_publication::source_revision::VerifiedSourceSyncProvider;
@@ -255,16 +256,21 @@ fn make_candidates(config: &PublicationConfig) -> FactoryResult<ReviewedCandidat
         json!(config.required_hosted_checks),
         config.jenkins_verification_profile.clone(),
         projects_map(config),
-        Box::new(make_git(config, None)),
+        Box::new(make_git(config, Box::new(NoBranchRecords))),
         identities,
     ))
 }
 
 fn make_git(
     config: &PublicationConfig,
-    branch_provider: Option<Box<dyn PublicationBranchPort>>,
+    branch_provider: Box<dyn PublicationBranchPort>,
 ) -> GitRepositoryProvider {
-    GitRepositoryProvider::new(config.clone(), executor(), None, branch_provider)
+    GitRepositoryProvider::new(
+        config.clone(),
+        executor(),
+        github_remote_urls(config),
+        branch_provider,
+    )
 }
 
 fn make_branch_provider(
@@ -528,8 +534,10 @@ pub fn create_publication_worker(
 
     let git = make_git(
         config,
-        make_branch_provider(config, &pg)?
-            .map(|provider| Box::new(provider) as Box<dyn PublicationBranchPort>),
+        match make_branch_provider(config, &pg)? {
+            Some(provider) => Box::new(provider) as Box<dyn PublicationBranchPort>,
+            None => Box::new(NoBranchRecords),
+        },
     );
     let pulls = GitHubPullRequestClient::new(config.clone(), executor());
 
@@ -578,7 +586,7 @@ pub fn create_publication_worker(
         let native = create_native_jenkins(
             config,
             Box::new(PgNativeCiStore::new(pg.clone())),
-            make_git(config, None),
+            make_git(config, Box::new(NoBranchRecords)),
             make_candidates(config)?,
             supervisor(&config.worker)?,
             options,
@@ -592,7 +600,7 @@ pub fn create_publication_worker(
             let repair = || -> FactoryResult<BranchFirstRepairProvider> {
                 Ok(BranchFirstRepairProvider::new(
                     config.clone(),
-                    make_git(config, None),
+                    make_git(config, Box::new(NoBranchRecords)),
                     make_candidates(config)?,
                     Box::new(shared.clone()),
                 ))
@@ -646,7 +654,7 @@ pub fn create_publication_worker(
         review_config,
         Arc::new(PgReviewStore::new(PgSessionFactory::new(pg.clone()))),
         Box::new(snapshots.clone()),
-        Box::new(make_git(config, None)),
+        Box::new(make_git(config, Box::new(NoBranchRecords))),
         reviewer_checks,
         make_candidates(config)?,
         reviewer_hosted,
@@ -662,7 +670,7 @@ pub fn create_publication_worker(
         let provider = GitHubExactTreeMergeProvider {
             config: config.clone(),
             client: GitHubPullRequestClient::new(config.clone(), executor()),
-            git: make_git(config, None),
+            git: make_git(config, Box::new(NoBranchRecords)),
             candidates: make_candidates(config)?,
             hosted: merge_hosted,
             now: Box::new(|| {
@@ -680,7 +688,7 @@ pub fn create_publication_worker(
             provider: Box::new(provider),
             source_sync: Box::new(VerifiedSourceSyncProvider {
                 config: config.clone(),
-                git: make_git(config, None),
+                git: make_git(config, Box::new(NoBranchRecords)),
             }),
             stop: Arc::clone(&stop),
             native_ci: match native_shared.as_ref() {
