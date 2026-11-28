@@ -2078,16 +2078,16 @@ fn event_dict(event: &EventView) -> Value {
     let mut map = Map::new();
     map.insert("sequence".to_string(), json!(event.sequence));
     map.insert("kind".to_string(), json!(event.kind.as_str()));
-    if let Some(actor) = &event.actor {
-        map.insert(
-            "actor".to_string(),
-            json!({"kind": actor.kind.as_str(), "id": actor.id}),
-        );
+    map.insert("event_id".into(), json!(event.event_id.to_string()));
+    map.insert(
+        "correlation_id".into(),
+        json!(event.correlation_id.to_string()),
+    );
+    if let Some(fields) = event.public.as_object() {
+        for (key, value) in fields {
+            map.insert(key.clone(), value.clone());
+        }
     }
-    if let Some(cause) = &event.cause {
-        map.insert("cause".to_string(), json!(cause));
-    }
-    map.insert("payload".to_string(), event.payload.clone());
     map.insert("created_at".to_string(), json!(event.created_at));
     Value::Object(map)
 }

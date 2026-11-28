@@ -261,6 +261,74 @@ fn actual_private_repair_uses_normal_admission_atomic_lease_and_queued_receipt()
         .unwrap()
         .unwrap();
     assert_eq!(claimed.task_id, task.to_string());
+    let read_store = pg_work_store(&config, &pg).unwrap();
+    assert_eq!(
+        crate::work_common::run_read_tx(&read_store, |tx| tx
+            .call_scalar::<String>("SELECT current_setting('transaction_isolation')", &[])
+            .map_err(work_err))
+        .unwrap()
+        .as_deref(),
+        Some("repeatable read")
+    );
+    assert_eq!(
+        crate::work_common::run_tx(&read_store, |tx| tx
+            .call_scalar::<String>("SELECT current_setting('transaction_isolation')", &[])
+            .map_err(work_err))
+        .unwrap()
+        .as_deref(),
+        Some("read committed")
+    );
+    // Public event projection is checked through the same ready API over
+    // immutable fixture rows, including forged/malformed report payloads.
+    runtime.block_on(async {
+        let admin=cluster.connect("postgres").await.unwrap();
+        let reports=[
+            ("checkpoint",json!({"attempt_id":claimed.attempt_id.to_string(),"progress_sequence":1,"stage":"plan","summary":"Owned progress","actor":{"kind":"worker","id":"fixture"}})),
+            ("checkpoint",json!({"attempt_id":Uuid::new_v4().to_string(),"progress_sequence":1,"stage":"plan","summary":"Foreign report","actor":{"kind":"worker","id":"fixture"}})),
+            ("failed",json!({"cause":"agent_failed","cause_summary":"Bounded failure","private":"never expose"})),
+            ("cancelled",json!({"actor":{"kind":"operator","id":"fixture"},"cause":"operator_request","cause_detail":"Recorded operator stop","private":"never expose"})),
+            ("checkpoint",json!({"workflow_id":claimed.workflow_id.unwrap().to_string(),"phase":"plan","summary":"Bound workflow progress","related_task_id":task.to_string(),"actor":{"kind":"coordinator","id":"fixture"}})),
+            ("checkpoint",json!({"summary":"private arbitrary checkpoint"})),
+            ("blocked_auth",json!({"actor":{"kind":"worker","id":"fixture"}})),
+        ];
+        for (index,(kind,payload)) in reports.iter().enumerate() {
+            admin.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) VALUES('repair-fixture','homelab',$1,$2,$3,$4)",&[&task,&(index as i64+3),kind,payload]).await.unwrap();
+        }
+    });
+    let (_, events) = normal
+        .service
+        .dispatch(
+            WorkDestination::Events,
+            "fixture",
+            WorkCommand::Events {
+                project_alias: "homelab".into(),
+                task_id: task,
+                after_sequence: 0,
+                limit: 100,
+            },
+            None,
+        )
+        .unwrap();
+    let events = events["event"]["events"].as_array().unwrap();
+    assert_eq!(events.len(), 9);
+    assert_eq!(events[2]["progress"]["summary"], "Owned progress");
+    assert_eq!(events[2]["progress_verified"], true);
+    assert!(events[3].get("progress").is_none());
+    assert_eq!(events[4]["failure"]["summary"], "Bounded failure");
+    assert_eq!(events[5]["attribution"]["detail"], "Recorded operator stop");
+    assert_eq!(
+        events[6]["workflow_progress"]["related_task_id"],
+        task.to_string()
+    );
+    assert!(events[7].get("progress").is_none());
+    assert_eq!(events[8]["kind"], "blocked_auth");
+    for event in events {
+        assert!(event["event_id"].as_str().is_some());
+        assert!(event["correlation_id"].as_str().is_some());
+        for forbidden in ["payload", "actor", "cause", "private", "summary"] {
+            assert!(event.get(forbidden).is_none());
+        }
+    }
     cluster.stop();
 }
 

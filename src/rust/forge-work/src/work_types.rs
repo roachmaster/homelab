@@ -61,6 +61,10 @@ pub struct TaskView {
 /// One coding_events row as a typed view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventView {
+    pub event_id: Uuid,
+    pub correlation_id: Uuid,
+    /// Guarded public fields; raw payload stays internal.
+    pub public: Value,
     /// The event's sequence within the task's stream.
     pub sequence: i64,
     /// The event kind, from the canonical vocabulary.

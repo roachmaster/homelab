@@ -9,6 +9,7 @@ pub mod context_recovery;
 pub mod decision_requests;
 pub mod defect;
 pub mod diagnostic;
+pub mod event_projection;
 pub mod execution_policy;
 pub mod external_dto;
 pub mod external_grants;

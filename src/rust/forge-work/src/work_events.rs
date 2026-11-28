@@ -13,6 +13,7 @@ pub enum EventKind {
     NeedsReconcile,
     QuotaBlocked,
     BlockedPermission,
+    BlockedAuth,
 }
 
 impl EventKind {
@@ -31,6 +32,7 @@ impl EventKind {
             EventKind::NeedsReconcile => "needs_reconcile",
             EventKind::QuotaBlocked => "quota_blocked",
             EventKind::BlockedPermission => "blocked_permission",
+            EventKind::BlockedAuth => "blocked_auth",
         }
     }
 
@@ -49,6 +51,7 @@ impl EventKind {
             "needs_reconcile" => Some(EventKind::NeedsReconcile),
             "quota_blocked" => Some(EventKind::QuotaBlocked),
             "blocked_permission" => Some(EventKind::BlockedPermission),
+            "blocked_auth" => Some(EventKind::BlockedAuth),
             _ => None,
         }
     }

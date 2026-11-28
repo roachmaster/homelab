@@ -40,16 +40,36 @@ pub(crate) fn run_tx<T>(
     store: &crate::work_store::PgWorkStore,
     body: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, forge_work::WorkError>,
 ) -> Result<T, forge_work::WorkError> {
+    run_tx_mode(store, false, body)
+}
+
+pub(crate) fn run_read_tx<T>(
+    store: &crate::work_store::PgWorkStore,
+    body: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, forge_work::WorkError>,
+) -> Result<T, forge_work::WorkError> {
+    run_tx_mode(store, true, body)
+}
+
+fn run_tx_mode<T>(
+    store: &crate::work_store::PgWorkStore,
+    repeatable: bool,
+    body: impl FnOnce(&mut crate::tx::Tx<'_, '_>) -> Result<T, forge_work::WorkError>,
+) -> Result<T, forge_work::WorkError> {
     const MARKER: &str = "forge-work: parked WorkError";
     let mut session = store.session()?;
     let slot: std::cell::RefCell<Option<forge_work::WorkError>> = std::cell::RefCell::new(None);
-    let out = session.in_tx(|tx| match body(tx) {
+    let transaction = |tx: &mut crate::tx::Tx<'_, '_>| match body(tx) {
         Ok(value) => Ok(value),
         Err(error) => {
             *slot.borrow_mut() = Some(error);
             Err(crate::error::AdapterError::Protocol(MARKER.to_string()))
         }
-    });
+    };
+    let out = if repeatable {
+        session.in_tx_repeatable(transaction)
+    } else {
+        session.in_tx(transaction)
+    };
     match out {
         Ok(value) => Ok(value),
         Err(adapter) => match slot.into_inner() {

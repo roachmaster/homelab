@@ -3307,3 +3307,32 @@ for both crates and selected format/diff checks passed. Logs are
 `/mnt/data/homelab-build/rust-external-admission-*`. No production model, service,
 SQL, role, branch publication or deployment action was performed. Portal read
 projection parity is still a separate required cutover qualification.
+
+### 2026-11-28 — Rust portal event projection parity
+
+Rust Events previously exposed raw payload/actor/cause fields and omitted required
+event/correlation IDs, so the existing strict portal event DTO could not decode
+it. The event read now returns the existing public shape only: IDs, recorded
+stop attribution, bounded failure summaries, verified native progress, scoped
+external progress, bound workflow/related-task progress and owned deadline
+extensions. Raw audit payloads remain internal. No arbitrary checkpoint prose is
+promoted into public progress and no cancellation reason is invented for legacy
+rows. Recorded blocked_auth events now parse through the existing vocabulary.
+
+Attempt membership, native/external workflow identity and related-task links are
+read independently in the same owner/project snapshot. The new read-only-purpose
+transaction path selects REPEATABLE READ before its owner query while permitting
+the existing protected external FOR SHARE readers; mutation transactions retain
+READ COMMITTED. Context7 quota was exhausted; the ordering was checked against
+PostgreSQL16 SET TRANSACTION documentation and then actual disposable PG tests.
+
+Validation: 143 forge-work and 40 forge-postgres library tests passed, zero
+ignored. The actual normal API PG fixture verifies public event IDs, owned versus
+foreign progress, bound workflow related-task progress, recorded failure and
+operator attribution, legacy/raw checkpoint suppression and blocked_auth, plus
+READ COMMITTED/REPEATABLE READ transaction isolation. Four pure projection tests
+cover private/unknown payloads, authority mismatches, bounded text, external
+generation, workflow cause/link fences and deadline ownership/order. Strict
+all-target/all-feature Clippy for both crates and selected formatting passed.
+Logs: `/mnt/data/homelab-build/rust-event-projection-final-{tests,clippy}.log`.
+Portal task detail/list projections are still separate required readiness work.
