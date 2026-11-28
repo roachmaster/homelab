@@ -36,6 +36,8 @@ pub mod workflow_ingress;
 pub mod workflow_continuation;
 pub mod workflow_tx;
 pub mod workflow_policy;
+pub mod work_api;
+pub mod work_config;
 pub mod operator_dtos;
 pub mod owner_control;
 pub mod owner_reverification;
