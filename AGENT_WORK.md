@@ -1,3 +1,19 @@
+## Grok native permission-cancellation containment — 2026-11-28
+
+Main137's automatic repairbf84a2c4 began on Grok and was cancelled by the native
+permission gate for a read-only Git inventory. Retained native events prove
+permission_cancelled preceded worker publication and coordinator cancellation;
+there was no operator control receipt, deadline stop or admission compensation.
+The generic historical workflow_cancelled event does not establish the real cause.
+Those old tasks/events remain unchanged and are not revived.
+
+Source now distinguishes a bounded, known-call native permission refusal plus
+cancelled terminal outcome as blocked_permission; real interrupted runs remain
+cancelled. Model prose and unbound failures cannot acquire a permission cause.
+This is truthful containment, not an upstream matcher fix. A constrained ACP
+transport/broker is being prepared separately; do not enable always-approve or
+guess that changing an allow rule repairs the installed headless client.
+
 ## Real-browser and upgrade corrections — 2026-11-28
 
 Full-main Jenkins137 exposed a real phone layout regression in the new defect

@@ -143,6 +143,9 @@ class GrokEvents:
         self.complete=False
         self.failure=None
         self.cancelled=False
+        self.permission_cancelled=False
+        # IDs/names only, never arguments, command text, tool bodies or prompts.
+        self._permission_tools={}
         self.saw_work=False
     def record(self,event):
         kind=event.get('type')
@@ -151,7 +154,28 @@ class GrokEvents:
         if kind=='text':
             if not isinstance(event.get('data'),str):raise ValueError('Invalid Grok text')
             self.response+=event['data'];self.saw_work=True
-        elif kind in {'tool_call','tool_call_update'}:self.saw_work=True
+        elif kind in {'tool_call','tool_call_update'}:
+            self.saw_work=True
+            identity=event.get('toolCallId')
+            if isinstance(identity,str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',identity):
+                if kind=='tool_call':
+                    name=event.get('toolName')
+                    if name in {'read_file','grep','list_dir','run_terminal_command','search_replace','write'}:
+                        if len(self._permission_tools)>=64:self._permission_tools.pop(next(iter(self._permission_tools)))
+                        self._permission_tools[identity]=name
+                elif event.get('status') in {'completed','failed'}:
+                    name=self._permission_tools.pop(identity,None)
+                    # Installed1.0.92's handle_tool_not_executed emits this exact
+                    # ACP content when its permission callback returns Cancelled.
+                    # streaming-json copies content but need not copy ACP _meta.
+                    # An unknown/unbound failure or model prose grants no cause.
+                    content=event.get('content')
+                    expected=[{'type':'content','content':{'type':'text',
+                        'text':'User cancelled the execution for tool `'+str(name)+'`'}}]
+                    meta=event.get('_meta',{})
+                    if (name is not None and event.get('status')=='failed' and content==expected
+                            and isinstance(meta,dict) and meta.get('toolNotRun','cancelled')=='cancelled'):
+                        self.permission_cancelled=True
         elif kind=='error':
             message=event.get('message')
             if not isinstance(message,str):raise ValueError('Invalid Grok error')

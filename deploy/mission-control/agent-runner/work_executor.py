@@ -778,6 +778,9 @@ class CliParser:
             return CliOutcome("cancelled", "", self.conversation_id, self.usage,
                               "Agent scope stopped after an interruption request.", proof)
         if self._grok_events is not None and self._grok_events.cancelled:
+            if self._grok_events.permission_cancelled:
+                return CliOutcome("blocked_permission", "", self.conversation_id, self.usage,
+                                  "Grok permission_cancelled: its headless permission gate cancelled a tool request; the process scope stopped.", proof)
             return CliOutcome("cancelled", "", self.conversation_id, self.usage,
                               "Grok cancelled the run and its process scope stopped.", proof)
         if self._muse_events is not None and self._muse_events.cancelled:
