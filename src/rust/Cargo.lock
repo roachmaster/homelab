@@ -792,6 +792,7 @@ dependencies = [
  "forge-jobs",
  "forge-template",
  "forge-work",
+ "forge-work-publication",
  "forge-work-worker",
  "serde",
  "serde_json",
