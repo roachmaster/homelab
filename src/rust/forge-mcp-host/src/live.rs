@@ -9,42 +9,35 @@ use forge_mcp::{
 };
 use serde_json::{json, Value};
 
+use crate::ports::{DispatchCredential, ReadSource};
+
 pub struct LivePort {
-    pg_dsn: Option<String>,
+    reads: Box<dyn ReadSource>,
     dispatch_url: String,
-    token: Option<String>,
+    credential: Box<dyn DispatchCredential>,
     http: reqwest::Client,
 }
 
 impl LivePort {
-    pub fn new(pg_dsn: Option<String>, dispatch_url: String, token: Option<String>) -> Self {
+    pub fn new(
+        reads: Box<dyn ReadSource>,
+        dispatch_url: String,
+        credential: Box<dyn DispatchCredential>,
+    ) -> Self {
         Self {
-            pg_dsn,
+            reads,
             dispatch_url,
-            token,
+            credential,
             http: reqwest::Client::new(),
         }
     }
 
     async fn pg(&self) -> Result<tokio_postgres::Client, McError> {
-        let dsn = self.pg_dsn.as_deref().ok_or_else(|| McError::Unavailable {
-            detail: "no Postgres DSN configured for reads".into(),
-        })?;
-        let (client, connection) = tokio_postgres::connect(dsn, tokio_postgres::NoTls)
-            .await
-            .map_err(|e| McError::Unavailable {
-                detail: format!("postgres connect: {e}"),
-            })?;
-        tokio::spawn(async move {
-            let _ = connection.await;
-        });
-        Ok(client)
+        self.reads.connect().await
     }
 
     async fn dispatch(&self, destination: &str, body: Value) -> Result<Value, McError> {
-        let token = self.token.as_deref().ok_or_else(|| McError::Unavailable {
-            detail: "no dispatch credential configured".into(),
-        })?;
+        let token = self.credential.bearer()?;
         let request_id = body
             .get("request_id")
             .and_then(Value::as_str)

@@ -4,7 +4,7 @@
 //! external effects; live only when explicitly configured), validates the
 //! selection before construction, and then opens stdio or Streamable HTTP.
 
-use forge_mcp_host::{Backend, FakePort, LivePort, McpServer};
+use forge_mcp_host::{create_backend, Backend, BackendConfig, McpServer};
 
 struct Config {
     backend: Backend,
@@ -12,8 +12,8 @@ struct Config {
 }
 
 /// Build the selected backend from the environment. Validation happens
-/// here, before construction: `live` without a token file is a config
-/// error, not a runtime surprise.
+/// in the factory, before anything serves: a named token file that
+/// cannot be read is a config error, not a runtime surprise.
 fn configure() -> Result<Config, Box<dyn std::error::Error>> {
     let mut http_addr = None;
     let mut args = std::env::args().skip(1);
@@ -23,21 +23,8 @@ fn configure() -> Result<Config, Box<dyn std::error::Error>> {
             other => return Err(format!("unknown argument {other}").into()),
         }
     }
-    let backend = match std::env::var("FORGE_MCP_BACKEND").as_deref() {
-        Ok("live") => {
-            let token = match std::env::var("FORGE_MCP_TOKEN_FILE") {
-                Ok(path) => Some(std::fs::read_to_string(&path)?.trim().to_owned()),
-                Err(_) => None,
-            };
-            Backend::Live(LivePort::new(
-                std::env::var("FORGE_MCP_PG_DSN").ok(),
-                std::env::var("FORGE_MCP_DISPATCH_URL")
-                    .unwrap_or_else(|_| "http://127.0.0.1:18083/v1/dispatch".into()),
-                token,
-            ))
-        }
-        _ => Backend::Fake(FakePort),
-    };
+    let config = BackendConfig::from_env(|key| std::env::var(key).ok());
+    let backend = create_backend(config)?;
     Ok(Config { backend, http_addr })
 }
 
