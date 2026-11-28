@@ -271,7 +271,7 @@ pub fn changed_snapshot(
     original: &Value,
     catalog: &dyn WorkflowCatalog,
     model: &str,
-    native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
 ) -> Result<Value, WorkError> {
     let denied = || WorkError::rejected(403, "denied");
     let mut selected = original.clone();
@@ -333,7 +333,7 @@ mod tests {
             &self,
             _alias: &str,
             _mode: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }
@@ -342,7 +342,7 @@ mod tests {
             _alias: &str,
             mode: &str,
             model: &str,
-            native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             let document = json!({
                 "version": 2, "backend": "antigravity", "model": model,

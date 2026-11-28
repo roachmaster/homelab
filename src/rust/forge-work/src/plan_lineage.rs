@@ -23,7 +23,6 @@ use crate::workflow::{
     WorkflowStore, NATIVE_POLICY_DIGESTS,
 };
 use crate::workflow_continuation::{is_retained_source, recipe, OWNED_FEATURE_BRANCHES};
-use crate::workflow_tx::WorkflowTx;
 
 pub const SUMMARY: &str =
     "The saved plan could not be verified; review is required before execution.";

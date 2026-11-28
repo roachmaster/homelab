@@ -221,7 +221,7 @@ pub fn validate_feedback(value: &Value) -> Result<Value, FeedbackError> {
     let authority_ok = is_int(&object["source_revision"])
         && object["source_revision"]
             .as_i64()
-            .map(|v| v >= 1 && v < (1i64 << 53))
+            .map(|v| (1..(1i64 << 53)).contains(&v))
             .unwrap_or(false)
         && is_int(&object["round"])
         && object["round"]

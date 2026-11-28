@@ -285,7 +285,7 @@ fn validate_target_inner(value: &Value) -> PResult<Value> {
             && is_int(source_revision)
             && source_revision
                 .as_i64()
-                .map(|v| v >= 1 && v < (1i64 << 53))
+                .map(|v| (1..(1i64 << 53)).contains(&v))
                 .unwrap_or(false)
             && is_int(plan_revision)
             && plan_revision

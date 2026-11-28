@@ -4,14 +4,14 @@
 //! Python's store factory builds the store, then creates each
 //! sub-port from the store itself (ReviewerCorrectionFactory(flow),
 //! ExecutionPolicyFactory(flow), ...) and assigns it, checking the
-//! port is "ready". The Rust providers take `Arc<WorkflowStore>` at
+//! port is "ready". The Rust providers take `Rc<WorkflowStore>` at
 //! construction — the same self-reference — and readiness is
 //! structural (the hook traits carry exactly the required methods),
 //! so create() wires the defaults and installs them. The execution
 //! policy hook is host-supplied: its provider composes its own
 //! catalog/transaction/handoff ports, which the host owns.
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::context_recovery::{FeedbackRecoveryProvider, PeerFeedbackRecoveryProvider};
 use crate::reviewer_correction::ReviewerCorrectionProvider;
@@ -23,8 +23,7 @@ use crate::workflow::{
 use crate::workflow_policy::WorkflowCatalog;
 use crate::workflow_tx::WorkflowTxFactory;
 
-pub type NativePolicyMatches =
-    Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>;
+pub type NativePolicyMatches = crate::workflow_policy::SharedNativePolicyMatcher;
 
 /// Builds a WorkflowStore with the default sub-port providers
 /// installed (WorkflowStoreFactory).
@@ -44,8 +43,8 @@ pub struct WorkflowStoreFactory {
 }
 
 impl WorkflowStoreFactory {
-    pub fn create(self) -> Arc<WorkflowStore> {
-        let store = Arc::new(WorkflowStore::new(
+    pub fn create(self) -> Rc<WorkflowStore> {
+        let store = Rc::new(WorkflowStore::new(
             self.config,
             self.catalog,
             self.tx_factory,
@@ -53,14 +52,12 @@ impl WorkflowStoreFactory {
             self.native_policy_matches,
             self.retry_events_enabled,
         ));
-        store.set_reviewer_correction(Box::new(ReviewerCorrectionProvider::new(Arc::clone(
+        store.set_reviewer_correction(Box::new(ReviewerCorrectionProvider::new(Rc::clone(&store))));
+        store.set_feedback_recovery(Box::new(FeedbackRecoveryProvider::new(Rc::clone(&store))));
+        store.set_peer_feedback_recovery(Box::new(PeerFeedbackRecoveryProvider::new(Rc::clone(
             &store,
         ))));
-        store.set_feedback_recovery(Box::new(FeedbackRecoveryProvider::new(Arc::clone(&store))));
-        store.set_peer_feedback_recovery(Box::new(PeerFeedbackRecoveryProvider::new(Arc::clone(
-            &store,
-        ))));
-        store.set_superseding_review(Box::new(SupersedingReviewProvider::new(Arc::clone(&store))));
+        store.set_superseding_review(Box::new(SupersedingReviewProvider::new(Rc::clone(&store))));
         if let Some(hook) = self.execution_policy {
             store.set_execution_policy(hook);
         }
@@ -72,7 +69,7 @@ impl WorkflowStoreFactory {
 /// (WorkflowCoordinatorFactory): the external maintenance, external
 /// workflow and delivery repair hooks are installed when supplied.
 pub struct WorkflowCoordinatorFactory {
-    pub store: Arc<WorkflowStore>,
+    pub store: Rc<WorkflowStore>,
     pub worker_id: String,
     pub interval_seconds: u64,
     pub external_maintenance: Option<Box<dyn RunOnceHook>>,
@@ -118,7 +115,7 @@ mod tests {
             &self,
             _alias: &str,
             _mode: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }
@@ -127,7 +124,7 @@ mod tests {
             _alias: &str,
             _mode: &str,
             _model: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }
@@ -135,7 +132,7 @@ mod tests {
             &self,
             _alias: &str,
             _mode: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<(String, PinnedRecipe)> {
             None
         }

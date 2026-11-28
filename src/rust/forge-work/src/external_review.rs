@@ -235,7 +235,7 @@ pub fn validate_target(raw: &str, digest: &str) -> Result<Value, String> {
         .as_array()
         .filter(|items| {
             items.len() <= 256
-                && items.iter().all(|item| is_identifier(item))
+                && items.iter().all(is_identifier)
                 && items
                     .iter()
                     .map(|item| item.as_str().unwrap_or_default())

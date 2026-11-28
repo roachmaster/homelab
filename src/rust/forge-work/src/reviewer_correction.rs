@@ -12,7 +12,7 @@
 //! (the F4c fused split), where the bound authority is
 //! re-validated against freshly locked rows.
 
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -154,11 +154,11 @@ fn valid_key(key: &str) -> bool {
 }
 
 pub struct ReviewerCorrectionProvider {
-    flow: Arc<WorkflowStore>,
+    flow: Rc<WorkflowStore>,
 }
 
 impl ReviewerCorrectionProvider {
-    pub fn new(flow: Arc<WorkflowStore>) -> Self {
+    pub fn new(flow: Rc<WorkflowStore>) -> Self {
         Self { flow }
     }
 
@@ -835,7 +835,7 @@ impl ReviewerCorrectionProvider {
                             &source,
                             &critic,
                             &result,
-                            &incomplete,
+                            incomplete,
                             None,
                             Some(command),
                         ),

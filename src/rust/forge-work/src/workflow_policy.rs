@@ -11,6 +11,12 @@ use crate::canonical::{canonical_json, sha256_hex};
 use crate::pinned_recipe::PinnedRecipe;
 use crate::retry_policy::budget_compatible_snapshot;
 
+/// Borrowed native-policy admission predicate; capture lifetime stays caller-owned.
+pub type NativePolicyMatcher<'a> = dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + 'a;
+/// Owned policy predicate shared by the selected workflow configuration.
+pub type SharedNativePolicyMatcher =
+    Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>;
+
 pub const POLICY: &str = "forge-frozen-workflow-roles-v1";
 pub const STRICT_POLICY: &str = "strict-defaults-v1";
 
@@ -39,14 +45,14 @@ pub trait WorkflowCatalog {
         &self,
         alias: &str,
         mode: &str,
-        native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Option<PinnedRecipe>;
     fn resolve_backup(
         &self,
         alias: &str,
         mode: &str,
         model: &str,
-        native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Option<PinnedRecipe>;
     /// work_config.resolve_handoff: the source profile's
     /// configured quota-handoff target, resolved for an author
@@ -57,7 +63,7 @@ pub trait WorkflowCatalog {
         &self,
         alias: &str,
         mode: &str,
-        native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Option<(String, PinnedRecipe)> {
         if mode != "plan" && mode != "implement" {
             return None;
@@ -124,7 +130,7 @@ pub fn compatible_snapshot(
     current: &Value,
     effective: &Value,
     catalog: &dyn WorkflowCatalog,
-    native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
 ) -> Option<Value> {
     if ![frozen, current, effective]
         .iter()
@@ -199,14 +205,14 @@ pub fn compatible_snapshot(
 pub struct WorkflowPolicyProvider<'a> {
     pub policy: String,
     pub catalog: &'a dyn WorkflowCatalog,
-    pub native_policy_matches: &'a dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    pub native_policy_matches: &'a NativePolicyMatcher<'a>,
 }
 
 impl<'a> WorkflowPolicyProvider<'a> {
     pub fn new(
         policy: &str,
         catalog: &'a dyn WorkflowCatalog,
-        native_policy_matches: &'a dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        native_policy_matches: &'a NativePolicyMatcher<'a>,
     ) -> Result<Self, String> {
         if policy != STRICT_POLICY && policy != POLICY {
             return Err("Invalid workflow policy compatibility".to_string());
@@ -287,7 +293,7 @@ impl ProjectWorkflowPolicy {
         &self,
         catalog: &dyn WorkflowCatalog,
         repair_policy: &Value,
-        native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Result<Value, crate::work_error::WorkError> {
         let stale = || {
             crate::work_error::WorkError::store(
@@ -370,7 +376,7 @@ mod tests {
             &self,
             _alias: &str,
             mode: &str,
-            native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             recipe(mode, native)
         }
@@ -379,7 +385,7 @@ mod tests {
             _alias: &str,
             _mode: &str,
             _model: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }
@@ -387,7 +393,7 @@ mod tests {
 
     fn recipe(
         mode: &str,
-        native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        native: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Option<PinnedRecipe> {
         let document = json!({
             "version": 2, "backend": "codex", "model": "gpt-5",

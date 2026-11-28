@@ -5,7 +5,7 @@
 //! the next worker receives genuine native workspace
 //! feedback, not a substituted candidate-tree receipt.
 
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -236,17 +236,6 @@ pub(crate) fn require_owner_capability(tx: &mut dyn WorkflowTx) -> Result<(), Wo
         return Err(WorkError::rejected(503, "unavailable"));
     }
     Ok(())
-}
-
-/// owner_continuation_used.
-pub(crate) fn owner_continuation_used(
-    tx: &mut dyn WorkflowTx,
-    workflow_id: Uuid,
-) -> Result<bool, WorkError> {
-    Ok(tx
-        .action_by_source(workflow_id, "decide", &owner_source_key(workflow_id))?
-        .map(|action| text(&action, "status") == "completed")
-        .unwrap_or(false))
 }
 
 /// _followup_replay: validate one recorded followup action
@@ -517,7 +506,7 @@ fn owner_source_history(
             || *receipt != expected
             || peers
                 .iter()
-                .any(|peer| peer == &intent["peer_review_id"].as_str().unwrap_or(""))
+                .any(|peer| peer == intent["peer_review_id"].as_str().unwrap_or(""))
             || !chain_ok
         {
             return Err(reconcile_required());
@@ -677,14 +666,14 @@ fn review_request_doc(command: &ReviewDecideRequest) -> Value {
 /// NativeOwnerControl: the ready narrow owner port. Never
 /// called by the automatic coordinator.
 pub struct OwnerControlProvider {
-    flow: Arc<WorkflowStore>,
-    correction: Option<Arc<ReviewerCorrectionProvider>>,
+    flow: Rc<WorkflowStore>,
+    correction: Option<Rc<ReviewerCorrectionProvider>>,
 }
 
 impl OwnerControlProvider {
     pub fn new(
-        flow: Arc<WorkflowStore>,
-        correction: Option<Arc<ReviewerCorrectionProvider>>,
+        flow: Rc<WorkflowStore>,
+        correction: Option<Rc<ReviewerCorrectionProvider>>,
     ) -> Self {
         Self { flow, correction }
     }

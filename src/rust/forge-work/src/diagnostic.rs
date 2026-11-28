@@ -116,7 +116,7 @@ fn bearer_match(rest: &str) -> Option<usize> {
     };
     let _ = prefix;
     pos = skip_ws(rest, pos);
-    if rest[pos..].chars().next() != Some(':') {
+    if !rest[pos..].starts_with(':') {
         return None;
     }
     pos += 1;

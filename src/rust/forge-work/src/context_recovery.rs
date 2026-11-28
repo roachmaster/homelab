@@ -7,7 +7,7 @@
 //! classifier and refuses to run without the canonical
 //! retry-event provider.
 
-use std::sync::Arc;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -777,11 +777,11 @@ fn run_once(spec: &RecoverySpec, flow: &WorkflowStore) -> Result<(), WorkError> 
 
 /// work_context_recovery.FeedbackRecovery.
 pub struct FeedbackRecoveryProvider {
-    flow: Arc<WorkflowStore>,
+    flow: Rc<WorkflowStore>,
 }
 
 impl FeedbackRecoveryProvider {
-    pub fn new(flow: Arc<WorkflowStore>) -> Self {
+    pub fn new(flow: Rc<WorkflowStore>) -> Self {
         Self { flow }
     }
 
@@ -815,11 +815,11 @@ impl RunOnceHook for FeedbackRecoveryProvider {
 /// same engine, the linked-child classifier, and a hard
 /// dependency on the canonical retry-event provider.
 pub struct PeerFeedbackRecoveryProvider {
-    flow: Arc<WorkflowStore>,
+    flow: Rc<WorkflowStore>,
 }
 
 impl PeerFeedbackRecoveryProvider {
-    pub fn new(flow: Arc<WorkflowStore>) -> Self {
+    pub fn new(flow: Rc<WorkflowStore>) -> Self {
         Self { flow }
     }
 

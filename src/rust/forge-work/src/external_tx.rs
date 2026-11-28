@@ -37,6 +37,10 @@ pub trait ExternalTx: RetryEvents {
     fn clock_now(&mut self) -> Result<i128, WorkError>;
     /// work_events.insert_event over coding_events (the
     /// caller merges workflow fields into the payload).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Mirrors the existing actor/cause event insertion port and SQL adapter contract. "
+    )]
     fn insert_event(
         &mut self,
         project: &str,
@@ -193,6 +197,10 @@ pub trait ExternalTx: RetryEvents {
         task_id: Uuid,
         idempotency_key: &str,
     ) -> Result<Option<Value>, WorkError>;
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserves the existing immutable control receipt identity/revision SQL port contract. "
+    )]
     fn insert_control_receipt(
         &mut self,
         project: &str,

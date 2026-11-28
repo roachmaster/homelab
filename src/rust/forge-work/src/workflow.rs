@@ -16,7 +16,7 @@
 //! back, converging with Python's outcome.
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -451,8 +451,7 @@ pub struct WorkflowStore {
     catalog: Box<dyn WorkflowCatalog>,
     tx_factory: Box<dyn WorkflowTxFactory>,
     decisions: Box<dyn WorkflowDecisionPort>,
-    native_policy_matches:
-        Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+    native_policy_matches: crate::workflow_policy::SharedNativePolicyMatcher,
     /// Mirrors Python's `self.retry_events is not None`: the
     /// transaction itself implements RetryEvents; this flag says
     /// the durable retry-event accounting is engaged (vs. the
@@ -473,9 +472,7 @@ impl WorkflowStore {
         catalog: Box<dyn WorkflowCatalog>,
         tx_factory: Box<dyn WorkflowTxFactory>,
         decisions: Box<dyn WorkflowDecisionPort>,
-        native_policy_matches: Box<
-            dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync,
-        >,
+        native_policy_matches: crate::workflow_policy::SharedNativePolicyMatcher,
         retry_events_enabled: bool,
     ) -> WorkflowStore {
         WorkflowStore {
@@ -558,7 +555,7 @@ impl WorkflowStore {
         self.config.repair_policy[key].as_i64().unwrap_or(0)
     }
 
-    pub(crate) fn native(&self) -> &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool {
+    pub(crate) fn native(&self) -> &crate::workflow_policy::NativePolicyMatcher<'_> {
         &*self.native_policy_matches
     }
 
@@ -2150,7 +2147,7 @@ impl WorkflowStore {
                 "enabled": workflow["enabled"],
                 "escalation_reason": workflow["escalation_reason"],
             });
-            match self.revive_in_tx(tx, &workflow, &prior, &key, &intent, note, &actor) {
+            match self.revive_in_tx(tx, &workflow, &prior, (&key, &intent), note, &actor) {
                 Ok(receipt) => Ok(receipt),
                 Err(RevivalError::Refused(refused)) => {
                     refusal = Some(refused);
@@ -2201,11 +2198,11 @@ impl WorkflowStore {
         tx: &mut dyn WorkflowTx,
         workflow: &Value,
         prior: &Value,
-        key: &str,
-        intent: &Value,
+        continuation: (&str, &Value),
         note: &str,
         actor: &Actor,
     ) -> Result<Value, RevivalError> {
+        let (key, intent) = continuation;
         let workflow_id = uuid_of(workflow, "workflow_id");
         let project = text(workflow, "project_alias");
         if bool_of(workflow, "enabled") || text(workflow, "phase") != "escalated" {
@@ -2393,7 +2390,7 @@ impl WorkflowStore {
 /// and thread lifecycle are host concerns (S7); the pass-through
 /// ingresses are the store's own methods (F4d).
 pub struct WorkflowCoordinator {
-    pub store: Arc<WorkflowStore>,
+    pub store: Rc<WorkflowStore>,
     pub worker_id: String,
     pub interval_seconds: u64,
     external_maintenance: RefCell<Option<Box<dyn RunOnceHook>>>,
@@ -2403,7 +2400,7 @@ pub struct WorkflowCoordinator {
 }
 
 impl WorkflowCoordinator {
-    pub fn new(store: Arc<WorkflowStore>, worker_id: &str, interval_seconds: u64) -> Self {
+    pub fn new(store: Rc<WorkflowStore>, worker_id: &str, interval_seconds: u64) -> Self {
         WorkflowCoordinator {
             store,
             worker_id: worker_id.to_string(),

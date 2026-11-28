@@ -473,10 +473,9 @@ fn grant_and_ready(
     workflow: &Value,
     snapshot: &Value,
     project: &str,
-    role: &str,
-    mode: &str,
-    entry: &str,
+    selection: (&str, &str, &str),
 ) -> Result<(), WorkError> {
+    let (role, mode, entry) = selection;
     let profile = text(snapshot, role);
     flow.grant(tx, workflow, profile, mode)?;
     let digests: Vec<String> = NATIVE_POLICY_DIGESTS
@@ -721,9 +720,7 @@ impl NativeCiPostfixRecovery {
                 &workflow,
                 &snapshot,
                 &command.project_alias,
-                "reviewer_profile",
-                "review",
-                "reviewer_review",
+                ("reviewer_profile", "review", "reviewer_review"),
             )?;
             let authority = BoundPostfixVerificationAuthority::admit(
                 BoundPreparationRetryAuthority {
@@ -984,9 +981,7 @@ impl NativeCiReprepareRecovery {
                 &workflow,
                 &snapshot,
                 &command.project_alias,
-                "author_profile",
-                "implement",
-                "author_implement",
+                ("author_profile", "implement", "author_implement"),
             )?;
             grant_and_ready(
                 flow,
@@ -994,9 +989,7 @@ impl NativeCiReprepareRecovery {
                 &workflow,
                 &snapshot,
                 &command.project_alias,
-                "reviewer_profile",
-                "review",
-                "reviewer_review",
+                ("reviewer_profile", "review", "reviewer_review"),
             )?;
             let authority = BoundPreparationRetryAuthority {
                 workflow_id,

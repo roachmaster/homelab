@@ -103,11 +103,11 @@ pub(crate) fn verify_plan_result(
     tx: &mut dyn ExternalTx,
     w: &Value,
     review: &Value,
-    target: &Value,
-    critic: &Value,
+    participants: (&Value, &Value),
     evidence: &mut dyn EvidenceLock,
     mismatch_on_validation: bool,
 ) -> Result<(Value, Value, Value), WorkError> {
+    let (target, critic) = participants;
     let receipt = &review["receipt"];
     if !receipt.is_object() || receipt["decision"].as_str() != Some("revise") {
         return Err(mismatch());
@@ -376,8 +376,7 @@ impl ExternalWorkflowStore {
                 tx,
                 &w,
                 &review,
-                &target,
-                &critic,
+                (&target, &critic),
                 &mut *evidence,
                 false,
             )?;
@@ -617,8 +616,7 @@ impl ExternalWorkflowStore {
                 tx,
                 &w,
                 &review,
-                &target,
-                &critic,
+                (&target, &critic),
                 &mut *evidence,
                 true,
             )?;

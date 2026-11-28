@@ -21,6 +21,7 @@
 //!   the publication composition.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Map, Value};
@@ -963,7 +964,7 @@ fn pg_workflow_tx_factory(config: &WorkApiConfig, pg: &PgConfig) -> PgWorkflowTx
 fn build_workflow_store(
     config: &WorkApiConfig,
     pg: &PgConfig,
-) -> Result<Arc<forge_work::workflow::WorkflowStore>, WorkError> {
+) -> Result<Rc<forge_work::workflow::WorkflowStore>, WorkError> {
     let handoff = forge_work::agent_handoff::AgentHandoffProvider::new(
         Box::new(pg_workflow_tx_factory(config, pg)),
         Box::new(config.clone()),
@@ -1276,7 +1277,7 @@ fn workflow_thread_main(
     } = start;
     let external_store = build_external_store(&config, &pg)?;
     let workflow_store = build_workflow_store(&config, &pg)?;
-    let correction = Arc::new(ReviewerCorrectionProvider::new(Arc::clone(&workflow_store)));
+    let correction = Rc::new(ReviewerCorrectionProvider::new(Rc::clone(&workflow_store)));
     let owner_control = OwnerControlProvider::new(workflow_store, Some(correction));
     let external_maintenance: Option<Box<dyn RunOnceHook>> =
         if config.profiles.iter().any(|p| p.is_external()) {

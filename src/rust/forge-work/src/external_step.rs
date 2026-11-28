@@ -202,9 +202,8 @@ impl ExternalWorkflowStore {
         w: &Value,
         action: &Value,
     ) -> Result<Value, WorkError> {
-        let target_receipt = if action["result"].is_null() {
-            json!({})
-        } else if action["result"]["receipt"].is_null() {
+        let target_receipt = if action["result"].is_null() || action["result"]["receipt"].is_null()
+        {
             json!({})
         } else {
             action["result"]["receipt"].clone()
@@ -1070,8 +1069,7 @@ impl ExternalWorkflowStore {
                     tx,
                     w,
                     &review,
-                    &task,
-                    &source,
+                    (&task, &source),
                     "Native reviewer result was oversized or did not match its immutable publication receipt.",
                     false,
                 );
@@ -1092,8 +1090,7 @@ impl ExternalWorkflowStore {
                     tx,
                     w,
                     &review,
-                    &task,
-                    &source,
+                    (&task, &source),
                     &format!(
                         "Native reviewer could not finish: {}",
                         text(&critic, "status")
@@ -1116,8 +1113,7 @@ impl ExternalWorkflowStore {
                     tx,
                     w,
                     &review,
-                    &task,
-                    &source,
+                    (&task, &source),
                     "Native reviewer returned an invalid bound verdict.",
                     false,
                 );
@@ -1223,11 +1219,11 @@ impl ExternalWorkflowStore {
         tx: &mut dyn ExternalTx,
         w: &mut Value,
         review: &Value,
-        task: &Value,
-        source: &Value,
+        source_binding: (&Value, &Value),
         summary: &str,
         infrastructure: bool,
     ) -> Result<bool, WorkError> {
+        let (task, source) = source_binding;
         let review_id = uuid_of(review, "review_id");
         if tx.task_attempt_active(uuid_of(review, "reviewer_task_id"))? {
             return Ok(false);

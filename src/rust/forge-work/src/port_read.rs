@@ -38,6 +38,10 @@ pub trait WorkReadPort {
     ) -> Result<ResultChunk, WorkError>;
 
     /// cicd_stage_log - Retrieve a stage log view for a task by project alias, task ID, correlation ID, action ID, stage ID, view, and cursor token.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Frozen task-scoped stage-log read port preserves owner/action/commit and pagination arguments."
+    )]
     fn cicd_stage_log(
         &self,
         project_alias: &str,

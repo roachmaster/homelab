@@ -46,7 +46,7 @@ pub fn task_binding(task: &Value) -> Value {
 
 pub fn is_retained_source(task: &Value, bindings: &[Value]) -> bool {
     let binding = task_binding(task);
-    bindings.iter().any(|candidate| *candidate == binding)
+    bindings.contains(&binding)
 }
 
 fn note_valid(note: &str) -> bool {
@@ -1237,7 +1237,7 @@ mod tests {
         let binding = task_binding(&task);
         assert_eq!(binding["revision"], json!("3"));
         assert_eq!(binding["latest_attempt_id"], Value::Null);
-        assert!(is_retained_source(&task, &[binding.clone()]));
+        assert!(is_retained_source(&task, std::slice::from_ref(&binding)));
         assert!(!is_retained_source(&task, &[]));
     }
 

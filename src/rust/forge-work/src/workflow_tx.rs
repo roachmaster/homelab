@@ -68,6 +68,10 @@ pub trait WorkflowTx: RetryEvents {
     fn rollback_to_savepoint(&mut self, name: &str) -> Result<(), WorkError>;
     fn release_savepoint(&mut self, name: &str) -> Result<(), WorkError>;
     fn notify_jobs(&mut self) -> Result<(), WorkError>;
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Mirrors the existing actor/cause event insertion port and SQL adapter contract. "
+    )]
     fn insert_event(
         &mut self,
         project: &str,
@@ -637,6 +641,10 @@ pub trait WorkflowTx: RetryEvents {
     fn owner_capability(&mut self) -> Result<Option<Value>, WorkError>;
     /// Insert one coding_control_receipts row (the owner
     /// paths write these directly, as Python does).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserves the existing immutable control receipt identity/revision SQL port contract. "
+    )]
     fn insert_control_receipt(
         &mut self,
         project: &str,

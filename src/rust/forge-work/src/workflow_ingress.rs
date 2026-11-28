@@ -651,10 +651,9 @@ impl WorkflowStore {
         project: &str,
         workflow: &Value,
         review: &Value,
-        task: &Value,
-        critic: &Value,
-        target: &Value,
+        source_binding: (&Value, &Value, &Value),
     ) -> Result<Value, WorkError> {
+        let (task, critic, target) = source_binding;
         let plan_decision = if present(task, "plan_decision_id") {
             text(task, "plan_decision_id")
         } else {
@@ -764,9 +763,7 @@ impl WorkflowStore {
             text(review, "project_alias"),
             workflow,
             review,
-            task,
-            critic,
-            target,
+            (task, critic, target),
         )?;
         let review_id = uuid_of(review, "workflow_review_id");
         tx.update_workflow_review(review_id, &json!({"status": "escalated"}))?;
@@ -1060,7 +1057,11 @@ impl WorkflowStore {
             parse_review_verdict(text(&result, "content").as_bytes(), &target)
                 .map_err(|_| mismatch())?;
             let review_row = self.verify_peer_recovery_source(
-                tx, &project, &workflow, &review, &task, &critic, &target,
+                tx,
+                &project,
+                &workflow,
+                &review,
+                (&task, &critic, &target),
             )?;
             let action_key = format!("{reviewer_attempt_id}:{result_sha}");
             let action = tx.action_by_source_review(

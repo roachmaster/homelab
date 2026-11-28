@@ -90,6 +90,10 @@ pub fn validate_proof(kind: &str, source_id: &str, digest: &str) -> Result<(), S
 
 /// The retry-event surface, called inside a workflow transaction.
 pub trait RetryEvents {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Public transaction port mirrors retry-event SQL identity, phase and passed-evidence admission fields."
+    )]
     fn observe_failure(
         &mut self,
         scope: &RetryScope,

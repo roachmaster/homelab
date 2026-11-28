@@ -192,7 +192,7 @@ pub fn canonical_profile_slug(profile_alias: &str) -> Result<String, String> {
         return Err("Invalid canonical profile slug".to_string());
     }
     let truncated: String = slug.chars().take(64).collect();
-    let slug = truncated.trim_end_matches(|c| c == '.' || c == '_' || c == '-');
+    let slug = truncated.trim_end_matches(['.', '_', '-']);
     if slug.is_empty()
         || slug.len() > 64
         || !slug
@@ -739,7 +739,7 @@ impl WorkflowCatalog for WorkApiConfig {
         &self,
         alias: &str,
         mode: &str,
-        _native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        _native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Option<PinnedRecipe> {
         self.resolve_recipe(alias, mode)
     }
@@ -749,7 +749,7 @@ impl WorkflowCatalog for WorkApiConfig {
         alias: &str,
         mode: &str,
         model: &str,
-        _native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+        _native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
     ) -> Option<PinnedRecipe> {
         self.resolve_backup_recipe(alias, mode, model)
     }

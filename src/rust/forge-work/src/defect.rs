@@ -45,7 +45,7 @@ const OPTIONAL: [&str; 2] = ["discovering_task_id", "discovering_workflow_id"];
 const SEVERITIES: [&str; 4] = ["low", "medium", "high", "critical"];
 
 fn invalid(field: &str) -> WorkError {
-    WorkError::rejected(400, &format!("invalid_request:defect.{field}"))
+    WorkError::rejected(400, format!("invalid_request:defect.{field}"))
 }
 
 /// The bounded defect text rule: a non-blank string within

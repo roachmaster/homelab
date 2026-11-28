@@ -99,7 +99,7 @@ pub fn validate_recovery_note(
     note: &str,
     lease: &Value,
     feedback: &Value,
-    native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
 ) -> bool {
     validate_inner(note, lease, feedback, native_policy_matches).unwrap_or(false)
 }
@@ -108,7 +108,7 @@ fn validate_inner(
     note: &str,
     lease: &Value,
     feedback: &Value,
-    native_policy_matches: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native_policy_matches: &crate::workflow_policy::NativePolicyMatcher<'_>,
 ) -> Option<bool> {
     let lease = lease.as_object()?;
     let feedback = feedback.as_object()?;

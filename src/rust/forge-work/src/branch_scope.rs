@@ -91,9 +91,7 @@ pub fn canonical_branch_slug(branch_name: &str) -> Result<String, String> {
     }
     let stripped = collapsed.trim_matches(|c| matches!(c, '.' | '_' | '-'));
     let mut prefix: String = stripped.chars().take(40).collect();
-    prefix = prefix
-        .trim_end_matches(|c| matches!(c, '.' | '_' | '-'))
-        .to_string();
+    prefix = prefix.trim_end_matches(['.', '_', '-']).to_string();
     if prefix.is_empty() || !prefix.chars().next().unwrap().is_alphanumeric() {
         prefix = "b".to_string();
     }

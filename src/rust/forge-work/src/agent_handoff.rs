@@ -57,7 +57,7 @@ fn opt_uuid(row: &Value, key: &str) -> Option<Uuid> {
 pub fn handoff_changed_snapshot(
     original: &Value,
     catalog: &dyn WorkflowCatalog,
-    native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native: &crate::workflow_policy::NativePolicyMatcher<'_>,
 ) -> Result<Value, WorkError> {
     let mut selected = original.clone();
     for (entry, mode) in [("author_plan", "plan"), ("author_implement", "implement")] {
@@ -143,7 +143,7 @@ fn quota_source_in_tx(
 fn effective_in_tx(
     tx: &mut dyn WorkflowTx,
     catalog: &dyn WorkflowCatalog,
-    native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native: &crate::workflow_policy::NativePolicyMatcher<'_>,
     owner: &str,
     workflow: &Value,
     source: &Value,
@@ -217,7 +217,7 @@ fn effective_in_tx(
 pub struct AgentHandoffProvider {
     tx_factory: Box<dyn WorkflowTxFactory>,
     catalog: Box<dyn WorkflowCatalog>,
-    native: Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+    native: crate::workflow_policy::SharedNativePolicyMatcher,
     owner: String,
     scan_position: RefCell<Option<(String, Uuid)>>,
 }
@@ -226,7 +226,7 @@ impl AgentHandoffProvider {
     pub fn new(
         tx_factory: Box<dyn WorkflowTxFactory>,
         catalog: Box<dyn WorkflowCatalog>,
-        native: Box<dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool + Send + Sync>,
+        native: crate::workflow_policy::SharedNativePolicyMatcher,
         owner: String,
     ) -> Self {
         Self {
@@ -694,7 +694,7 @@ mod tests {
             &self,
             alias: &str,
             mode: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             if alias == "codex-author" {
                 Some(codex_recipe(mode))
@@ -708,7 +708,7 @@ mod tests {
             _alias: &str,
             _mode: &str,
             _model: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }

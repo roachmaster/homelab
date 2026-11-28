@@ -318,7 +318,7 @@ pub(crate) fn model_snapshot_from(
     rows: &[Value],
     workflow: &Value,
     catalog: &dyn WorkflowCatalog,
-    native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+    native: &crate::workflow_policy::NativePolicyMatcher<'_>,
     owner: &str,
 ) -> Result<Value, WorkError> {
     if rows.is_empty() {
@@ -389,7 +389,10 @@ impl ExecutionPolicyProvider {
 fn swallow(result: Result<Value, WorkError>) -> Result<(), WorkError> {
     match result {
         Ok(_) => Ok(()),
-        Err(WorkError::Rejected { status, .. }) if matches!(status, 403 | 409 | 503) => Ok(()),
+        Err(WorkError::Rejected {
+            status: 403 | 409 | 503,
+            ..
+        }) => Ok(()),
         Err(error) => Err(error),
     }
 }
@@ -1294,7 +1297,7 @@ mod tests {
             &self,
             _alias: &str,
             _mode: &str,
-            _native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            _native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             None
         }
@@ -1304,7 +1307,7 @@ mod tests {
             _alias: &str,
             mode: &str,
             model: &str,
-            native: &dyn Fn(Option<&str>, Option<&str>, Option<&str>) -> bool,
+            native: &crate::workflow_policy::NativePolicyMatcher<'_>,
         ) -> Option<PinnedRecipe> {
             let base = self
                 .bases
@@ -1609,7 +1612,14 @@ mod tests {
             },
         });
         assert_eq!(
-            model_snapshot_from(&[row.clone()], &workflow, &catalog(), &native, "owner").unwrap(),
+            model_snapshot_from(
+                std::slice::from_ref(&row),
+                &workflow,
+                &catalog(),
+                &native,
+                "owner"
+            )
+            .unwrap(),
             expected
         );
         // A tampered finish digest breaks the binding.
