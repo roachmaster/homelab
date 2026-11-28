@@ -884,18 +884,19 @@ impl PublicationWorker {
         while !self.stop.load(Ordering::SeqCst) {
             // Subscribe before scanning: install the wait drain so
             // long native CI waits keep the listener drained.
-            if let (Some(native_ci), Some(listener)) = (&self.native_ci, &listener) {
-                let drain_listener = std::sync::Arc::clone(listener);
-                native_ci.set_drain(Some(Box::new(move || {
-                    if let Ok(mut listener) = drain_listener.lock() {
-                        listener.wait(0.0);
-                    }
-                })));
-            }
+            let scope = match (&self.native_ci, &listener) {
+                (Some(native_ci), Some(listener)) => {
+                    let drain_listener = std::sync::Arc::clone(listener);
+                    Some(native_ci.listen_scope(Box::new(move || {
+                        if let Ok(mut listener) = drain_listener.lock() {
+                            listener.wait(0.0);
+                        }
+                    })))
+                }
+                _ => None,
+            };
             let outcome = self.run_until_idle(&listener);
-            if let Some(native_ci) = &self.native_ci {
-                native_ci.set_drain(None);
-            }
+            drop(scope);
             if outcome.is_err() {
                 eprintln!("Publication queue unavailable; no remote action replayed");
                 self.wait_stop(5.0);

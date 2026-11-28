@@ -294,12 +294,13 @@ impl NativeJenkinsVerification {
         })
     }
 
-    pub fn set_clock(&mut self, clock: Clock) {
+    /// Construction-time timing selection (a test env binds a fake
+    /// clock and wait); consumes and returns the verification so it
+    /// cannot be swapped on a live object.
+    pub fn with_timing(mut self, clock: Clock, wait: Wait) -> Self {
         self.clock = clock;
-    }
-
-    pub fn set_wait(&mut self, wait: Wait) {
         self.wait = wait;
+        self
     }
 
     fn now(&self) -> f64 {
@@ -319,13 +320,6 @@ impl NativeJenkinsVerification {
     pub fn listen_scope(&mut self, drain: Box<dyn FnMut() + Send>) -> ListenScope<'_> {
         self.drain = Some(drain);
         ListenScope { owner: self }
-    }
-
-    /// Set or clear the wait drain directly (the host run loop
-    /// installs it for the duration of a listen scope, where the
-    /// guard form cannot be held across the worker's own borrows).
-    pub fn set_drain(&mut self, drain: Option<Box<dyn FnMut() + Send>>) {
-        self.drain = drain;
     }
 
     fn scope(&self, value: &Value, job: &Value) -> Result<Map<String, Value>, PublicationError> {
@@ -487,10 +481,12 @@ impl Drop for ListenScope<'_> {
 }
 
 impl NativeJenkinsVerification {
-    /// Install the content-identity provider; construction with
-    /// the content-v2 protocol and no usable provider is refused,
-    /// mirroring the Python constructor's TypeError.
-    pub fn install_identities(
+    /// Bind the content-identity provider during construction;
+    /// construction with the content-v2 protocol and no usable
+    /// provider is refused, mirroring the Python constructor's
+    /// TypeError. Only create_native_jenkins calls this, before the
+    /// verification escapes the factory.
+    fn bind_identities(
         &mut self,
         provider: Option<NativeVerificationIdentityProvider>,
     ) -> Result<(), PublicationError> {
@@ -3051,7 +3047,7 @@ pub fn create_native_jenkins(
     verification.event_lookup = options.event_lookup;
     verification.jenkins_instance = options.jenkins_instance;
     verification
-        .install_identities(options.identity_provider)
+        .bind_identities(options.identity_provider)
         .map_err(|error| error.code().to_string())?;
     verification.branch_provider = options.branch_provider;
     Ok(verification)
@@ -3156,8 +3152,23 @@ impl SharedNativeCi {
         self.lock().publication_job(job)
     }
 
-    pub fn set_drain(&self, drain: Option<Box<dyn FnMut() + Send>>) {
-        self.lock().set_drain(drain);
+    /// Drain the owner's notification socket during long CI waits
+    /// for as long as the returned guard lives. The guard owns its
+    /// own handle to the verification (not a borrow of the caller),
+    /// so the host run loop can hold it across its own passes; the
+    /// drain is cleared when the guard drops, unwinding included.
+    pub fn listen_scope(&self, drain: Box<dyn FnMut() + Send>) -> SharedListenScope {
+        self.lock().drain = Some(drain);
+        SharedListenScope(SharedNativeCi(Arc::clone(&self.0)))
+    }
+}
+
+/// Guard returned by [`SharedNativeCi::listen_scope`].
+pub struct SharedListenScope(SharedNativeCi);
+
+impl Drop for SharedListenScope {
+    fn drop(&mut self) {
+        self.0.lock().drain = None;
     }
 }
 
