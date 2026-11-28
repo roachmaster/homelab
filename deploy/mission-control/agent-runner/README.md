@@ -14,8 +14,14 @@ Preserve frozen receipts; this documentation grants no new permissions.
 **Runtime checkpoint, November 28, 2026.** Reviewed main `6fa2e13d` runs schema
 54 and portal ABI 19. The runner API, four coding workers and publisher use the
 qualified Python release. This branch prepares Rust replacements. Workspace
-tabs persist in PostgreSQL through the Rust runner. The proxy, external delivery
-and Forge GPU inference worker each have a separate native executable.
+tabs persist in PostgreSQL through the Rust runner. In dispatch mode it accepts
+standalone GPU submissions at `/v1/runs`, reads their status and events, and
+serves the bounded synchronous `/v1/chat/completions` relay for standalone
+requests. The GPU worker runs on Forge, calls the local model server, and
+publishes its result under the claim's attempt token. The Mission Control
+runner completes the run and publishes its final event. The optional
+PostgreSQL proxy and the external-delivery service each have a separate
+native executable.
 The [agent work log](../../../AGENT_WORK.md) records test and deployment status.
 
 [AGY quota handoff to Codex](../../../docs/architecture/agent-quota-handoff.md)

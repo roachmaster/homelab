@@ -1,3 +1,31 @@
+## Rust deployment cutoff and preserved services — 2026-11-28
+
+The active deployment is still reviewed main `6fa2e13d`, database schema 54
+and portal ABI 19. The source candidate on Codex's feature branch removes the
+367 Python files formerly under `deploy/` and replaces the Jenkins verifier
+with Rust. The three services the operator asked to retain have native binaries.
+
+| Service | Native entry point | Qualification |
+|---|---|---|
+| PostgreSQL proxy | `forge-pg-proxy` | Role-scoped reads, writes and notification tests use disposable PostgreSQL. The optional proxy cutover remains separately controlled by migration 55. |
+| External delivery | `forge-external-delivery` | The ordinary service claimed and completed a queued source operation against PostgreSQL and a local Git fixture. Lease fencing and receipt replay were tested with the real database role. |
+| Forge GPU inference | `forge-gpu-worker` and the dispatch-mode `forge-runner` | A paired process test restored a workspace and completed asynchronous and synchronous requests against disposable PostgreSQL and a loopback model fixture. Events reached `queued`, `model_started` and `completed`. |
+
+The first native verifier branch rehearsal passed all 45 checks on `ba8996d3`.
+Later integration includes the standalone historical-verifier removal, external
+worker lease decoding, the proxy, GPU completion, and ABI 19 read projections.
+Production cutover requires reviewed CI for the integrated source, a fresh
+database backup, a drained runner queue, and matched runner, publisher, verifier
+and portal release actor configuration. Existing frozen receipts, including the
+journal for release `4d8ee580`, keep their original identities.
+
+The database rehearsal used a canonical schema 54 cluster and the data from
+an actual backup. Applying migrations 56 and 57 twice preserved the checksums
+of 72 application tables and the prior migration history, and revalidated all
+123 foreign keys. The proxy transport cutover and deferred digest-column removal
+have separate ownership. Private receipts for the database and services are in
+`/mnt/data/homelab-build/codex-deploy-cutoff.2vPP8iuP/`.
+
 ## Native v4 final local validation — 2026-11-28
 
 The six affected Rust packages passed 412 tests with zero failures or ignored
