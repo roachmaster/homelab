@@ -209,13 +209,30 @@ rules (0 errors).
 
 ## 4. Coverage
 
-The llvm-cov run at this commit was interrupted by a runtime restart
-before producing totals; a re-run is pending. The last completed
-measurement is the baseline taken before the mantra/BDD pass:
-workspace 53.5% lines (86,248 / 161,084); migration crates forge-work
-32.2%, forge-work-publication 33.8%, forge-work-worker 39.3%,
-forge-postgres 7.9% (live-DB-gated), forge-mcp-db 21.4%, forge-host
-22.1%, forge-mcp-host 0.0%; pre-existing crates mostly 74–97%.
-The test growth since that baseline (workspace 1,394 → 1,424 tests,
-including 42 new BDD scenarios and the forge-mcp-host suite) is not
-yet reflected in a coverage number.
+llvm-cov over the full workspace test run (1,424 passed / 0 failed),
+own code only (registry dependencies excluded), measured on the
+merged tree at `33bac6c7`:
+
+**Workspace: 55.5% lines (92,732 / 166,956)** — up from the 53.5%
+baseline (86,248 / 161,084) taken before the mantra/BDD pass.
+
+| Crate | Lines | vs baseline |
+|---|---|---|
+| forge-work | 37.6% | 32.2% |
+| forge-work-worker | 42.6% | 39.3% |
+| forge-work-publication | 34.3% | 33.8% |
+| forge-mcp-host | 32.3% | 0.0% |
+| forge-jenkins | 74.3% | — |
+| forge-usage | 80.7% | — |
+| forge-portal-release-actor | 38.1% | — |
+| forge-agent-driver | 44.2% | — |
+| forge-services | 24.0% | — |
+| forge-studio | 21.7% | — |
+| forge-host | 22.1% | 22.1% |
+| forge-mcp-db | 21.4% | 21.4% |
+| forge-postgres | 7.9% | 7.9% (live-DB-gated) |
+
+Pre-existing crates remain 68.8–97.7%. The low three are structural:
+forge-postgres is exercised against a live database, forge-host is
+composition wiring, and forge-mcp-db's OAuth surface awaits its own
+test pass.
