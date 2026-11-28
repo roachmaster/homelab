@@ -12,7 +12,7 @@ pub const LEGACY_PROFILE: &str = "forge-sdlc-jenkins-v1";
 pub const SCOPED_PROFILE: &str = "forge-sdlc-jenkins-v2";
 pub const CONTRACT_PATH: &str = "deploy/mission-control/agent-runner/work_ci_contract.py";
 
-/// forge-sdlc-jenkins-v[1-3]:(main|detached|branch/<slug>) or a
+/// `forge-sdlc-jenkins-v[1-3]:(main|detached|branch/<slug>)` or a
 /// 64-hex digest, as a full match (work_ci_contract's
 /// validate_gate_reference; forge-work's external_step carries the
 /// same matcher for the external workflow).
@@ -23,7 +23,7 @@ pub fn validate_gate_reference(value: &str) -> Result<String, String> {
     .map_err(|_| "Invalid delivery gate".to_string())
 }
 
-/// branch/<slug> where slug is
+/// `branch/<slug>` where slug is
 /// [a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])? as a full match.
 pub fn is_branch_slug(value: &str) -> bool {
     let chars: Vec<char> = value.chars().collect();

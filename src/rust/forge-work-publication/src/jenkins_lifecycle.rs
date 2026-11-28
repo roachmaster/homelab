@@ -794,13 +794,13 @@ pub fn map_stage_status(returncode: i64) -> &'static str {
     }
 }
 
-/// Producer delivery id: "<action_id>:<kind>" (plain form; the tracker
+/// Producer delivery id: `<action_id>:<kind>` (plain form; the tracker
 /// path above uses the digest form).
 pub fn producer_lifecycle_delivery_id(action_id: &str, kind: &str) -> String {
     format!("{action_id}:{kind}")
 }
 
-/// Producer stage delivery id: "<action_id>:<kind>:<index>".
+/// Producer stage delivery id: `<action_id>:<kind>:<index>`.
 pub fn producer_stage_delivery_id(action_id: &str, kind: &str, index: i64) -> String {
     format!("{action_id}:{kind}:{index}")
 }

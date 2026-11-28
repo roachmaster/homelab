@@ -229,7 +229,7 @@ pub fn digest(value: &str) -> DeliveryResult<String> {
 }
 
 /// The Jenkins gate is a named contract
-/// '<profile>:<branch_scope>'; a legacy 64-hex manifest
+/// `<profile>:<branch_scope>`; a legacy 64-hex manifest
 /// digest is still accepted.
 pub fn gate_ref(value: &str) -> DeliveryResult<String> {
     validate_gate_reference(&json!(value))

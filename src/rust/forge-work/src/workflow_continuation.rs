@@ -285,7 +285,7 @@ fn evidence_exhausted(events: &[Value]) -> bool {
 /// supplies the ready workflow store per call and the
 /// historical retry-evidence reader at construction. The
 /// profile -> configured-branch map comes from the worker
-/// configuration (Python reads flow.config.profiles[alias]
+/// configuration (Python reads `flow.config.profiles[alias]`
 /// .branch); it is injected because the coordinator config's
 /// catalog profiles carry no branch.
 pub struct WorkflowContinuation {

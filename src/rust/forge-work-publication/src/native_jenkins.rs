@@ -914,7 +914,7 @@ impl NativeJenkinsVerification {
 }
 
 /// Object-safe view of the worker's generic
-/// AgentBranchProvider<S> for composition.
+/// `AgentBranchProvider<S>` for composition.
 pub trait BranchProviderObject: Send {
     fn persistent_enabled(&self) -> bool;
     fn acquire(

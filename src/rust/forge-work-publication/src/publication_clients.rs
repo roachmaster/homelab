@@ -118,7 +118,7 @@ fn text_of<'a>(job: &'a Value, key: &str) -> &'a str {
 
 /// branch_name: an explicit validated branch, else the
 /// persistent policy branch for the job's profile, else the
-/// machinery-owned forge/task-<publication-id> fallback.
+/// machinery-owned `forge/task-<publication-id>` fallback.
 pub fn branch_name(job: &Value, config: Option<&PublicationConfig>) -> PublicationResult<String> {
     let explicit = job.get("branch_name").and_then(Value::as_str);
     if let Some(explicit) = explicit.filter(|text| !text.is_empty()) {

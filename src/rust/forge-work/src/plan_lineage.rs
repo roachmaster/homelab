@@ -133,7 +133,7 @@ fn evidence_valid(evidence: &Value, receipt: &Value, packet: &Value, task: &Valu
 /// supplies the ready workflow store per call and the evidence
 /// callable at construction. The profile -> configured-branch
 /// map comes from the worker configuration (Python reads
-/// flow.config.profiles[alias].branch); it is injected because
+/// `flow.config.profiles[alias].branch`); it is injected because
 /// the coordinator config's catalog profiles carry no branch
 /// (the WorkflowContinuation precedent).
 pub struct PlanLineageRecovery {

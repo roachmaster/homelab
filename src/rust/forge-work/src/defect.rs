@@ -66,7 +66,7 @@ fn text_ok(value: &Value, maximum: usize) -> bool {
 /// validate_defect: the validated defect document (a deep
 /// copy, as Python's JSON round-trip returns), or None for a
 /// feature task. Every rejection is 400 invalid_request with
-/// the defect.<field> reason.
+/// the `defect.<field>` reason.
 pub fn validate_defect(
     task_kind: &str,
     defect: Option<&Value>,

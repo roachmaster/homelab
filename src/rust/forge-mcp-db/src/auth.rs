@@ -1,5 +1,5 @@
 //! Bearer-token authentication and failed-attempt rate limiting
-//! (mcp_auth.py). Tokens look like hmcp_<id>_<secret>; only the
+//! (mcp_auth.py). Tokens look like `hmcp_<id>_<secret>`; only the
 //! SHA-256 of the full token is stored.
 
 use std::collections::{BTreeSet, HashMap};
