@@ -124,7 +124,14 @@ fn semantic_rules_catch_wiring_the_template_cannot_compile() {
 fn feature_files_parse_into_the_feature_schema() {
     use forge_scene::bdd::{check_voice, parse, FEATURE_SCHEMA};
     let schema: serde_json::Value = serde_json::from_str(FEATURE_SCHEMA).unwrap();
-    let feature = parse(include_str!("../features/dog.feature")).unwrap();
-    forge_scene::json_schema::validate(&schema, &feature.to_json()).unwrap();
-    assert!(check_voice(&feature).is_empty(), "{}", feature.title);
+    for source in [
+        include_str!("../features/dog.feature"),
+        include_str!("../features/forge_core_providers.feature"),
+        include_str!("../features/forge_jobs.feature"),
+        include_str!("../features/forge_template_renderers.feature"),
+    ] {
+        let feature = parse(source).unwrap();
+        forge_scene::json_schema::validate(&schema, &feature.to_json()).unwrap();
+        assert!(check_voice(&feature).is_empty(), "{}", feature.title);
+    }
 }
