@@ -44,7 +44,7 @@ fn provider_error(error: DeliveryError) -> ProviderError {
         DeliveryError::LeaseLost => {
             ProviderError::Other("Delivery worker lease is no longer active".to_string())
         }
-        DeliveryError::Artifacts(error) => ProviderError::Other(error.code.clone()),
+        DeliveryError::Artifacts(error) => ProviderError::SourceArtifacts(error),
     }
 }
 
@@ -404,6 +404,16 @@ impl PostMergeProviderFactory {
         execute: Box<dyn CommandExecutor>,
         git_port: std::sync::Arc<dyn crate::artifact_source::GitArtifactGitPort + Send + Sync>,
     ) -> Result<PostMergeVerificationProvider, ProviderError> {
+        self.create_with_observer(jenkins_execute, execute, git_port, None)
+    }
+
+    pub fn create_with_observer(
+        self,
+        jenkins_execute: Box<dyn CommandExecutor>,
+        execute: Box<dyn CommandExecutor>,
+        git_port: std::sync::Arc<dyn crate::artifact_source::GitArtifactGitPort + Send + Sync>,
+        observer: Option<Box<dyn crate::trusted_delivery::JenkinsObserverPort>>,
+    ) -> Result<PostMergeVerificationProvider, ProviderError> {
         let config = &self.config;
         let delivery_config_path = config
             .post_merge_jenkins_delivery_config
@@ -446,10 +456,33 @@ impl PostMergeProviderFactory {
         selected.state_root = config.state_root().join("post-merge-ci");
         let delivery = DeliveryProviderFactory {
             config: selected,
-            observer: None,
+            observer,
         }
         .create(jenkins_execute, execute, git_port)
         .map_err(provider_error)?;
         PostMergeVerificationProvider::new(delivery)
+    }
+}
+
+#[cfg(test)]
+mod source_error_tests {
+    use super::*;
+    #[test]
+    fn source_preparation_keeps_typed_rejection_across_the_normal_provider_boundary() {
+        let source = crate::trusted_delivery::SourceArtifactRejected::new(
+            &"a".repeat(40),
+            &"b".repeat(40),
+            &"b".repeat(40),
+            vec![(
+                "cache/fixture.pyc".into(),
+                "private_or_generated_artifact".into(),
+            )],
+            1,
+        )
+        .unwrap();
+        match provider_error(DeliveryError::Artifacts(Box::new(source.clone()))) {
+            ProviderError::SourceArtifacts(actual) => assert_eq!(*actual, source),
+            _ => panic!("source rejection must not become a transient text error"),
+        }
     }
 }

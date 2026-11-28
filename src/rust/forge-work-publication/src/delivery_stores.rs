@@ -18,6 +18,7 @@ pub fn error_code(error: &ProviderError, fallback: &str) -> String {
     match error {
         ProviderError::Publication(error) => error.code().to_string(),
         ProviderError::Other(_) => fallback.to_string(),
+        ProviderError::SourceArtifacts(error) => error.code.clone(),
     }
 }
 

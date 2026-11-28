@@ -962,6 +962,7 @@ impl forge_work_worker::agent_branch::PullRequestsPort for ClientPullRequests<'_
                     BranchError::Store(publication.code().to_string())
                 }
                 ProviderError::Other(message) => BranchError::Store(message),
+                ProviderError::SourceArtifacts(error) => BranchError::Store(error.code),
             },
         )
     }
@@ -1192,6 +1193,7 @@ pub(crate) fn is_ownership_conflict(error: &ProviderError) -> bool {
         ProviderError::Other(message) => {
             message.contains("ownership") || message.contains("BranchOwnershipConflict")
         }
+        ProviderError::SourceArtifacts(_) => false,
     }
 }
 
@@ -1863,6 +1865,7 @@ pub fn to_publication(error: ProviderError) -> PublicationError {
     match error {
         ProviderError::Publication(publication) => publication,
         ProviderError::Other(message) => PublicationError::new(&message),
+        ProviderError::SourceArtifacts(error) => PublicationError::new(&error.code),
     }
 }
 

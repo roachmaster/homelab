@@ -60,7 +60,7 @@ use forge_work_publication::native_jenkins::{
     SharedNativeCi,
 };
 use forge_work_publication::native_repair::BranchFirstRepairProvider;
-use forge_work_publication::post_merge::PostMergeWorker;
+use forge_work_publication::post_merge::{PostMergeWorker, StageEvidenceContext};
 use forge_work_publication::post_merge_provider::PostMergeProviderFactory;
 use forge_work_publication::publication::PublicationWorker;
 use forge_work_publication::publication_checks::IsolatedCheckRunner;
@@ -96,6 +96,7 @@ fn provider_string(error: ProviderError) -> String {
     match error {
         ProviderError::Publication(publication) => publication.to_string(),
         ProviderError::Other(message) => message,
+        ProviderError::SourceArtifacts(error) => error.code,
     }
 }
 
@@ -474,6 +475,43 @@ fn jenkins_events(
     ))
 }
 
+struct SharedJenkinsObserver(Arc<Mutex<Box<dyn JenkinsObserverPort>>>);
+
+impl JenkinsObserverPort for SharedJenkinsObserver {
+    fn find(
+        &mut self,
+        job: &str,
+        expected: &Value,
+    ) -> Result<
+        Option<(String, Value)>,
+        forge_work_publication::jenkins_observer::JenkinsObserverError,
+    > {
+        self.0
+            .lock()
+            .map_err(|_| {
+                forge_work_publication::jenkins_observer::JenkinsObserverError::Unavailable(
+                    "observer lock unavailable".into(),
+                )
+            })?
+            .find(job, expected)
+    }
+    fn assert_scope(
+        &mut self,
+        job: &str,
+        endpoint: &str,
+        parameters: &[String],
+    ) -> Result<(), forge_work_publication::jenkins_observer::JenkinsObserverError> {
+        self.0
+            .lock()
+            .map_err(|_| {
+                forge_work_publication::jenkins_observer::JenkinsObserverError::Unavailable(
+                    "observer lock unavailable".into(),
+                )
+            })?
+            .assert_scope(job, endpoint, parameters)
+    }
+}
+
 /// default_store_factory's handle set plus the factory's create():
 /// build the fully composed publication worker.
 pub fn create_publication_worker(
@@ -482,6 +520,12 @@ pub fn create_publication_worker(
     observer: Option<Box<dyn JenkinsObserverPort>>,
 ) -> FactoryResult<PublicationWorker> {
     validate_factory_selection(config, observer.is_some())?;
+    let observer = observer.map(|port| Arc::new(Mutex::new(port)));
+    let selected_observer = || {
+        observer.as_ref().map(|port| {
+            Box::new(SharedJenkinsObserver(Arc::clone(port))) as Box<dyn JenkinsObserverPort>
+        })
+    };
     let state_root = config.state_root();
     if !state_root.exists() {
         use std::os::unix::fs::DirBuilderExt;
@@ -556,7 +600,7 @@ pub fn create_publication_worker(
             identity_provider: make_identity_provider(config)?,
             branch_provider: make_branch_provider(config, &pg)?
                 .map(|provider| Box::new(provider) as Box<dyn BranchProviderObject>),
-            observer,
+            observer: selected_observer(),
             jenkins_execute: executor(),
             execute: executor(),
             git_port: git_port(),
@@ -699,7 +743,7 @@ pub fn create_publication_worker(
         let provider = PostMergeProviderFactory {
             config: config.clone(),
         }
-        .create(executor(), executor(), git_port())
+        .create_with_observer(executor(), executor(), git_port(), selected_observer())
         .map_err(provider_string)?;
         if config.source_observation_enabled {
             // A second delivery port over the same validated
@@ -716,7 +760,7 @@ pub fn create_publication_worker(
             selected.state_root = state_root.join("native-ci");
             let delivery = DeliveryProviderFactory {
                 config: selected,
-                observer: None,
+                observer: selected_observer(),
             }
             .create(executor(), executor(), git_port())
             .map_err(|error| error.to_string())?;
@@ -733,8 +777,14 @@ pub fn create_publication_worker(
         } else {
             delivery_store.clone()
         };
+        let stage_evidence = StageEvidenceContext {
+            results_root: Some(provider.delivery.config.results_root.clone()),
+            job_name: provider.delivery.config.jenkins_job.clone(),
+            port: Box::new(PgDeliveryWorkers::new(pg.clone())),
+        };
         let mut worker =
             PostMergeWorker::new(config.clone(), post_merge_store, Box::new(provider))?;
+        worker.stage_evidence = Some(stage_evidence);
         worker.stop = Arc::clone(&stop);
         post_merge = Some(worker);
     }
@@ -802,4 +852,61 @@ pub fn load_publication_config(path: &Path) -> FactoryResult<PublicationConfig> 
         &worker,
         Some(path.to_path_buf()),
     )
+}
+
+#[cfg(test)]
+mod observer_tests {
+    use super::*;
+    use forge_work_publication::jenkins_observer::JenkinsObserverError;
+    struct Observer(Arc<Mutex<Vec<String>>>);
+    impl JenkinsObserverPort for Observer {
+        fn find(
+            &mut self,
+            job: &str,
+            expected: &Value,
+        ) -> Result<Option<(String, Value)>, JenkinsObserverError> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{job}:{}", expected["action_id"].as_str().unwrap()));
+            Ok(None)
+        }
+        fn assert_scope(
+            &mut self,
+            job: &str,
+            endpoint: &str,
+            parameters: &[String],
+        ) -> Result<(), JenkinsObserverError> {
+            assert_eq!(endpoint, "https://ci.invalid");
+            assert_eq!(parameters, ["ACTION_ID"]);
+            self.0.lock().unwrap().push(format!("scope:{job}"));
+            Ok(())
+        }
+    }
+    #[test]
+    fn selected_observer_is_preserved_for_each_delivery_consumer() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let shared: Arc<Mutex<Box<dyn JenkinsObserverPort>>> =
+            Arc::new(Mutex::new(Box::new(Observer(calls.clone()))));
+        for consumer in ["native", "main", "source"] {
+            let mut port = SharedJenkinsObserver(shared.clone());
+            port.assert_scope(consumer, "https://ci.invalid", &["ACTION_ID".into()])
+                .unwrap();
+            assert!(port
+                .find(consumer, &json!({"action_id":consumer}))
+                .unwrap()
+                .is_none());
+        }
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [
+                "scope:native",
+                "native:native",
+                "scope:main",
+                "main:main",
+                "scope:source",
+                "source:source"
+            ]
+        );
+    }
 }

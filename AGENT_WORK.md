@@ -1,3 +1,29 @@
+## Rust publisher parity for deployment-source cutoff — 2026-11-28
+
+The Rust main-verification path retains typed permanent source rejection through
+the provider boundary and fails only exact unsubmitted preparation with a
+process_started=false receipt. Changed source identities and transient failures
+retain reconciliation. Protected main stage evidence is now actually composed
+into the PostgreSQL publisher; Root-owned receipt/log reads require matching
+hashes, source/request identity, checks, coverage and version, and an active
+lease before each write. Failed main summaries preserve a redacted UTF-8 tail
+and action/check/exit header within the existing 2048-byte limit. Evidence is
+still best-effort: terminal verification does not automatically retry missing
+telemetry, and no historical evidence is invented or backfilled.
+
+The configured paged Jenkins observer is preserved across native, main and
+source consumers via a synchronized ready port. Release automation takes at
+most eight sequential normal worker turns before yielding, stopping on idle,
+shutdown or error; ordinary claim/finish and actor fences remain authoritative.
+
+Validation on the isolated source: 84 publication unit tests plus 37 PostgreSQL
+adapter unit tests passed without ignored cases; strict all-target/all-feature
+Clippy for both crates passed. Tests cover permanent/transient/mismatched source,
+protected evidence identity/hash rejection, UTF-8/redacted tails, bounded release
+turns and selected-observer delegation. Logs: /mnt/data/homelab-build/rust-publisher-parity-tests-final.log
+and /mnt/data/homelab-build/rust-publisher-parity-clippy-final.log. No deployment,
+SQL migration, live state, model call or remote branch changed. Runner repair
+admission/config parity remains a separate required follow-up before cutover.
 ## Native v4 gate policy — isolated contract work, 2026-11-28
 
 The pure forge-jenkins::native_policy module defines an additive v4 profile,

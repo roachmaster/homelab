@@ -21,9 +21,85 @@ use crate::ci_contract::SCOPED_PROFILE;
 use crate::ci_phases::EVENT_PROFILE;
 use crate::cicd_artifacts::{extract_stage_evidence_from_receipt, StageEvidenceParams};
 use crate::delivery_stores::{error_code, PostMergeStorePort, RequireLease, StageEvidencePort};
+use crate::durable_files::read_private;
 use crate::publication_clients::ProviderError;
 use crate::publication_clients::PublicationError;
 use crate::publication_config::PublicationConfig;
+
+fn validate_main_evidence(
+    raw: &[u8],
+    log: &[u8],
+    request: &Value,
+    receipt: &Value,
+) -> Result<(Value, String), String> {
+    let receipt_sha = format!("{:x}", Sha256::digest(raw));
+    if receipt["check_receipt_sha256"].as_str() != Some(receipt_sha.as_str()) {
+        return Err("Protected main receipt changed".into());
+    }
+    let full: Value = serde_json::from_slice(raw).map_err(|_| "Invalid protected main receipt")?;
+    for key in [
+        "action_id",
+        "workflow_id",
+        "candidate_commit",
+        "candidate_tree",
+        "branch_scope",
+        "gate_manifest_sha256",
+        "verification_profile",
+        "correlation_id",
+    ] {
+        if full[key] != request[key] {
+            return Err("Protected main identity changed".into());
+        }
+    }
+    if full["expected_main"] != request["integration_base"]
+        || full["checks"] != receipt["checks"]
+        || full["coverage"] != receipt["coverage"]
+        || full["version"] != receipt["result_version"]
+        || full["cleanup_confirmed"] != true
+    {
+        return Err("Protected main evidence changed".into());
+    }
+    let log_sha = format!("{:x}", Sha256::digest(log));
+    if full["log_sha256"].as_str() != Some(log_sha.as_str())
+        || full["log_sha256"] != receipt["log_sha256"]
+    {
+        return Err("Protected main log changed".into());
+    }
+    Ok((full, receipt_sha))
+}
+
+/// Main-only diagnostic projection; generic diagnostics retain their head semantics.
+fn failed_check_diagnostic(request: &Value, receipt: &Value, summary: &str) -> String {
+    let failed: Vec<_> = receipt["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|check| Some((check["index"].as_i64()?, check["returncode"].as_i64()?)))
+        .filter(|(_, code)| *code != 0)
+        .collect();
+    if failed.is_empty() {
+        return diagnostic_text(summary, MAX_DIAGNOSTIC_BYTES);
+    }
+    let mut header = format!(
+        "Main verification failed: action {}",
+        request["action_id"].as_str().unwrap_or_default()
+    );
+    for (index, code) in failed {
+        header.push_str(&format!("; fixed check {index}, exit {code}"));
+    }
+    let marker = "\n[bounded diagnostic tail]\n";
+    let mut prefix = diagnostic_text(&header, MAX_DIAGNOSTIC_BYTES - marker.len() - 1);
+    prefix.push_str(marker);
+    let clean = diagnostic_text(summary, summary.len());
+    let mut begin = clean
+        .len()
+        .saturating_sub(MAX_DIAGNOSTIC_BYTES - prefix.len());
+    while !clean.is_char_boundary(begin) {
+        begin += 1;
+    }
+    prefix.push_str(&clean[begin..]);
+    prefix
+}
 
 pub const REQUEST_KEYS: [&str; 12] = [
     "action_id",
@@ -323,9 +399,18 @@ impl PostMergeWorker {
         }
     }
 
-    fn persist_stage_artifacts(&mut self, job: &Value, request: &Value, receipt: &Value) {
-        // Best-effort: any failure defers persistence to a
-        // later reconciliation (Python logs a warning).
+    fn persist_stage_artifacts(
+        &mut self,
+        job: &Value,
+        request: &Value,
+        receipt: &Value,
+        require_lease: RequireLease,
+    ) {
+        // Best-effort telemetry never grants CI authority. Terminal finish does
+        // not automatically retry missing evidence; retain that distinction.
+        if require_lease().is_err() {
+            return;
+        }
         let Some(context) = self.stage_evidence.as_mut() else {
             return;
         };
@@ -333,30 +418,26 @@ impl PostMergeWorker {
         if action_id.is_empty() || !receipt.is_object() {
             return;
         }
-        let mut full_receipt = receipt.clone();
-        let mut receipt_sha = receipt["check_receipt_sha256"].as_str().map(str::to_string);
-        let mut log_bytes: Option<Vec<u8>> = None;
-        if let Some(root) = &context.results_root {
-            let result_path = root.join(format!("{action_id}.json"));
-            if result_path.is_file() {
-                if let Ok(raw) = std::fs::read(&result_path) {
-                    if let Ok(parsed) = serde_json::from_slice::<Value>(&raw) {
-                        full_receipt = parsed;
-                        receipt_sha = Some(format!("{:x}", Sha256::digest(&raw)));
-                    }
-                }
-            }
-            let log_path = root.join(format!("{action_id}.log"));
-            if log_path.is_file() {
-                log_bytes = std::fs::read(&log_path).ok();
-            }
-        }
-        let receipt_sha = match receipt_sha {
-            Some(digest) if is_hex64(&digest) => digest,
-            _ => format!(
-                "{:x}",
-                Sha256::digest(forge_work::canonical::canonical_json(&full_receipt).as_bytes())
-            ),
+        let Some(root) = &context.results_root else {
+            return;
+        };
+        let evidence = (|| -> Result<_, String> {
+            let raw = read_private(
+                &root.join(format!("{action_id}.json")),
+                2 * 1024 * 1024,
+                Some(0),
+            )?;
+            let log = read_private(
+                &root.join(format!("{action_id}.log")),
+                64 * 1024 * 1024,
+                Some(0),
+            )?;
+            let (full, receipt_sha) = validate_main_evidence(&raw, &log, request, receipt)?;
+            Ok((full, log, receipt_sha))
+        })();
+        let Ok((full_receipt, log_bytes, receipt_sha)) = evidence else {
+            eprintln!("Main stage evidence unavailable for action {action_id}");
+            return;
         };
         let params = StageEvidenceParams {
             project_alias: request["project_alias"]
@@ -383,10 +464,19 @@ impl PostMergeWorker {
             build_number: receipt["build_number"].as_i64(),
             branch_name: Some("main".to_string()),
         };
-        let entries =
-            extract_stage_evidence_from_receipt(&full_receipt, log_bytes.as_deref(), &params);
+        let entries = extract_stage_evidence_from_receipt(&full_receipt, Some(&log_bytes), &params);
         for (evidence, chunks) in entries {
-            let _ = context.port.record_stage_evidence(&evidence, &chunks);
+            if require_lease().is_err() {
+                return;
+            }
+            if context
+                .port
+                .record_stage_evidence(&evidence, &chunks)
+                .is_err()
+            {
+                eprintln!("Main stage evidence persistence unavailable for action {action_id}");
+                return;
+            }
         }
     }
 
@@ -546,7 +636,32 @@ impl PostMergeWorker {
             }
             if request.is_none() {
                 require_start_lease().map_err(ProviderError::Publication)?;
-                let prepared = self.provider.prepare(job, require_start_lease)?;
+                let prepared = match self.provider.prepare(job, require_start_lease) {
+                    Err(ProviderError::SourceArtifacts(rejected)) => {
+                        if rejected.candidate_commit
+                            != job["merge_commit"].as_str().unwrap_or_default()
+                            || rejected.candidate_tree
+                                != job["merge_tree"].as_str().unwrap_or_default()
+                            || rejected.prepared_tree
+                                != job["merge_tree"].as_str().unwrap_or_default()
+                        {
+                            return Err(ProviderError::Other(
+                                "Source rejection does not match main preparation".into(),
+                            ));
+                        }
+                        let mut receipt = rejected.result()["receipt"].clone();
+                        receipt["process_started"] = json!(false);
+                        if serde_json::to_vec(&receipt).map_or(usize::MAX, |raw| raw.len()) > 65536
+                        {
+                            return Err(ProviderError::Other(
+                                "Oversized main source rejection receipt".into(),
+                            ));
+                        }
+                        finish("failed", &receipt, "Main source preparation rejected private or generated artifacts; the original failed main verification is retained. Publish a corrected source successor.", require_lease)?;
+                        return Ok(());
+                    }
+                    result => result?,
+                };
                 if prepared["status"].as_str() == Some("superseded") {
                     let observed = prepared["observed_main"].as_str().unwrap_or_default();
                     if !is_hex40(observed)
@@ -616,17 +731,22 @@ impl PostMergeWorker {
                 ));
             }
             if status == "passed" && !cancelling && passed_receipt(&request_value, &receipt) {
-                self.persist_stage_artifacts(job, &request_value, &receipt);
+                self.persist_stage_artifacts(job, &request_value, &receipt, require_lease);
                 finish("passed", &receipt, &summary, require_lease)?;
             } else if matches!(status.as_str(), "failed" | "cancelled")
                 && stopped_receipt(&request_value, &receipt)
             {
-                self.persist_stage_artifacts(job, &request_value, &receipt);
+                self.persist_stage_artifacts(job, &request_value, &receipt, require_lease);
                 let summary = previous["failure_summary"]
                     .as_str()
                     .unwrap_or(&summary)
                     .to_string();
-                finish("failed", &receipt, &summary, require_lease)?;
+                finish(
+                    "failed",
+                    &receipt,
+                    &failed_check_diagnostic(&request_value, &receipt, &summary),
+                    require_lease,
+                )?;
             } else if matches!(
                 status.as_str(),
                 "pending" | "failed" | "cancelled" | "passed"
@@ -742,3 +862,7 @@ mod tests {
         assert!(validate_request(&job, &changed).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "post_merge_runtime_tests.rs"]
+mod runtime_tests;

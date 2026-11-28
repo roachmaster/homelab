@@ -166,6 +166,20 @@ pub struct ReleaseWorker {
     pub stop: Arc<AtomicBool>,
 }
 
+fn bounded_release_turns<E>(
+    stop: &AtomicBool,
+    mut turn: impl FnMut() -> Result<bool, E>,
+) -> Result<bool, E> {
+    let mut worked = false;
+    for _ in 0..8 {
+        if stop.load(Ordering::SeqCst) || !turn()? {
+            break;
+        }
+        worked = true;
+    }
+    Ok(worked)
+}
+
 impl ReleaseWorker {
     pub fn new(
         config: PublicationConfig,
@@ -203,6 +217,12 @@ impl ReleaseWorker {
                 Ok(true)
             }
         }
+    }
+
+    /// At most eight sequential normal turns; each lease is closed before the next claim.
+    pub(crate) fn run_batch(&mut self) -> Result<bool, ProviderError> {
+        let stop = Arc::clone(&self.stop);
+        bounded_release_turns(&stop, || self.run_once())
     }
 
     pub fn process(&mut self, job: &Value) -> Result<(), ProviderError> {
@@ -467,5 +487,45 @@ mod tests {
         assert!(validate_plan(&identity, &plan).is_ok());
         plan["commit_sha"] = json!("f".repeat(40));
         assert!(validate_plan(&identity, &plan).is_err());
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    #[test]
+    fn release_turns_are_sequential_bounded_and_stop_on_idle_or_failure() {
+        let stop = AtomicBool::new(false);
+        let mut calls = 0;
+        assert!(bounded_release_turns::<()>(&stop, || {
+            calls += 1;
+            Ok(true)
+        })
+        .unwrap());
+        assert_eq!(calls, 8);
+        calls = 0;
+        assert!(bounded_release_turns::<()>(&stop, || {
+            calls += 1;
+            Ok(calls < 4)
+        })
+        .unwrap());
+        assert_eq!(calls, 4);
+        calls = 0;
+        assert_eq!(
+            bounded_release_turns(&stop, || {
+                calls += 1;
+                if calls == 2 {
+                    Err("failed")
+                } else {
+                    Ok(true)
+                }
+            }),
+            Err("failed")
+        );
+        assert_eq!(calls, 2);
+        stop.store(true, Ordering::SeqCst);
+        assert!(
+            !bounded_release_turns::<()>(&stop, || panic!("stopped batch must not claim")).unwrap()
+        );
     }
 }
