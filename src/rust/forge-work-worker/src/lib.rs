@@ -21,6 +21,7 @@ pub mod diagnostic;
 pub mod error;
 pub mod external_identity;
 pub mod gpu;
+pub mod grok_acp;
 pub mod grok_policy;
 pub mod lease;
 pub mod native_auth;

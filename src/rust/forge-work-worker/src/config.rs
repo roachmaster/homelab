@@ -49,6 +49,7 @@ pub struct WorkerConfig {
     pub codex_session_ttl_seconds: i64,
     pub usage_only_profiles: Vec<UsageOnlyProfile>,
     pub external_reviews: bool,
+    pub grok_transport: String,
     pub resource_profile: String,
     pub build_results_root: Option<PathBuf>,
     /// The file the configuration was loaded from (set by the host
@@ -254,6 +255,7 @@ pub fn parse_config(raw: &Value) -> Result<WorkerConfig, ConfigError> {
             "usage_only_profiles",
             "external_reviews",
             "resource_profile",
+            "grok_transport",
             "build_results_root",
         ],
     )?;
@@ -335,6 +337,16 @@ pub fn parse_config(raw: &Value) -> Result<WorkerConfig, ConfigError> {
         None => false,
     };
 
+    let grok_transport = match root.get("grok_transport") {
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| ConfigError::new("Invalid Grok transport selection"))?
+            .to_string(),
+        None => "headless-v1".to_string(),
+    };
+    if grok_transport != "headless-v1" && grok_transport != crate::grok_acp::SELECTION {
+        return Err(ConfigError::new("Invalid Grok transport selection"));
+    }
     let resource_profile = root
         .get("resource_profile")
         .and_then(|v| v.as_str())
@@ -549,6 +561,7 @@ pub fn parse_config(raw: &Value) -> Result<WorkerConfig, ConfigError> {
         codex_session_ttl_seconds,
         usage_only_profiles,
         external_reviews,
+        grok_transport,
         resource_profile,
         build_results_root: match root.get("build_results_root") {
             Some(value) if !value.is_null() => Some(absolute_path(value)?),
@@ -721,6 +734,7 @@ pub fn validated_copy(config: &WorkerConfig) -> Result<WorkerConfig, ConfigError
         "allow_implement": config.allow_implement,
         "autonomous_projects": autonomous,
         "external_reviews": config.external_reviews,
+        "grok_transport": config.grok_transport,
         "resource_profile": config.resource_profile,
         "build_results_root": opt_path(&config.build_results_root),
         "codex_session_ttl_seconds": config.codex_session_ttl_seconds,

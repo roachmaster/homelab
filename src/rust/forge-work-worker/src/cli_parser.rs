@@ -117,6 +117,13 @@ impl CliParser {
             .unwrap_or(false)
     }
 
+    pub fn grok_permission_cancelled(&self) -> bool {
+        self.grok_events
+            .as_ref()
+            .map(|e| e.permission_cancelled)
+            .unwrap_or(false)
+    }
+
     pub fn muse_cancelled(&self) -> bool {
         self.muse_events
             .as_ref()
@@ -475,6 +482,13 @@ impl CliParser {
             ));
         }
         if self.grok_cancelled() {
+            if self.grok_permission_cancelled() {
+                return Ok(outcome(
+                    "blocked_permission",
+                    String::new(),
+                    "Grok permission_cancelled: its headless permission gate cancelled a tool request; the process scope stopped.",
+                ));
+            }
             return Ok(outcome(
                 "cancelled",
                 String::new(),

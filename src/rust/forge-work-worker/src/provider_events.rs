@@ -40,6 +40,7 @@ pub struct GrokEvents {
     pub failure: Option<String>,
     pub cancelled: bool,
     pub saw_work: bool,
+    pub permission_cancelled: bool,
 }
 
 impl GrokEvents {
@@ -160,6 +161,12 @@ impl GrokEvents {
                     );
                     self.cancelled = stop.and_then(|v| v.as_str()) == Some("cancelled");
                 }
+                if self.cancelled
+                    && event.get("cancellationCategory").and_then(|v| v.as_str())
+                        == Some("permission_cancelled")
+                {
+                    self.permission_cancelled = true;
+                }
                 let incomplete = match event.get("usage_is_incomplete") {
                     None => false,
                     Some(Value::Bool(b)) => *b,
@@ -188,7 +195,7 @@ impl GrokEvents {
         Ok(())
     }
 
-    fn usage(value: Option<&Value>) -> Result<Option<Value>, String> {
+    pub(crate) fn usage(value: Option<&Value>) -> Result<Option<Value>, String> {
         let Some(value) = value else {
             return Ok(None);
         };
