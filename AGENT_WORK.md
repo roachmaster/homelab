@@ -37,6 +37,16 @@ turns and selected-observer delegation. Logs: /mnt/data/homelab-build/rust-publi
 and /mnt/data/homelab-build/rust-publisher-parity-clippy-final.log. No deployment,
 SQL migration, live state, model call or remote branch changed. Runner repair
 admission/config parity remains a separate required follow-up before cutover.
+## Native v4 protection conventions — 2026-11-28
+
+The shared native policy also declares common build/CI path conventions:
+.github/.cargo/tests/.config paths, nested equivalents, test_ names and fixed
+Cargo/build/toolchain basenames. This aligns the native verifier's source map
+with producer/worker protection; Rust authority crate prefixes remain additive.
+The canonical descriptor includes these closed fields, so its final checksum
+must be regenerated rather than reusing the initial policy checkpoint. Strict
+Clippy passed for the six affected Rust packages with all targets/features.
+
 ## Native v4 gate policy — isolated contract work, 2026-11-28
 
 The pure forge-jenkins::native_policy module defines an additive v4 profile,

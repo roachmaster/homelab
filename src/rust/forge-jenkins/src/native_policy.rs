@@ -349,6 +349,10 @@ pub fn native_stage_evidence(
 pub const NATIVE_PROTECTED_PATHS: &[&str] =
     &["Makefile", "src/rust/Cargo.toml", "src/rust/Cargo.lock"];
 pub const NATIVE_PROTECTED_PREFIXES: &[&str] = &[
+    ".github/",
+    ".cargo/",
+    "tests/",
+    ".config/",
     "src/rust/scripts/",
     "src/rust/forge-ci-verifier/",
     "src/rust/forge-jenkins/",
@@ -358,6 +362,7 @@ pub const NATIVE_PROTECTED_PREFIXES: &[&str] = &[
     "src/rust/forge-postgres/",
     "src/rust/forge-portal-release-actor/",
     "deploy/mission-control/sql/",
+    "deploy/mission-control/jenkins/",
 ];
 
 fn scope_kind(scope: &str) -> Result<&'static str, String> {
@@ -400,9 +405,33 @@ pub fn native_coverage(scope: &str) -> Result<Value, String> {
         "backend_suites":if kind=="main"{"rust"}else{"rust_memory"}}),
     )
 }
+pub const NATIVE_PROTECTED_SUBSTRINGS: &[&str] = &["/.cargo/", "/tests/", "/.config/"];
+pub const NATIVE_PROTECTED_NAME_PREFIXES: &[&str] = &["test_"];
+pub const NATIVE_PROTECTED_BASENAMES: &[&str] = &[
+    "Makefile",
+    "makefile",
+    "GNUmakefile",
+    "Cargo.toml",
+    "Cargo.lock",
+    "build.rs",
+    "rust-toolchain",
+    "rust-toolchain.toml",
+    "clippy.toml",
+    ".clippy.toml",
+    "rustfmt.toml",
+    ".rustfmt.toml",
+    "deny.toml",
+    "work_publication_checks.py",
+    "work_verification.py",
+    "work_verification_init.py",
+    "work_policy.py",
+    "work_external_delivery.py",
+];
 pub fn native_policy_descriptor() -> Value {
     sorted_json(json!({"version":1,"verification_profile":NATIVE_PROFILE,
         "protected_paths":NATIVE_PROTECTED_PATHS,"protected_prefixes":NATIVE_PROTECTED_PREFIXES,
+        "protected_basenames":NATIVE_PROTECTED_BASENAMES,"protected_substrings":NATIVE_PROTECTED_SUBSTRINGS,
+        "protected_name_prefixes":NATIVE_PROTECTED_NAME_PREFIXES,
         "branch_phases":phases_for_scope("branch/descriptor"),"main_phases":phases_for_scope("main"),
         "branch_coverage":native_coverage("branch/descriptor").expect("fixed scope"),
         "main_coverage":native_coverage("main").expect("fixed scope")}))
@@ -429,10 +458,16 @@ pub fn native_policy_sha256() -> String {
     format!("{:x}", Sha256::digest(raw))
 }
 pub fn native_protects(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or_default();
     NATIVE_PROTECTED_PATHS.contains(&path)
         || NATIVE_PROTECTED_PREFIXES
             .iter()
             .any(|p| path.starts_with(p))
+        || NATIVE_PROTECTED_SUBSTRINGS.iter().any(|p| path.contains(p))
+        || NATIVE_PROTECTED_BASENAMES.contains(&name)
+        || NATIVE_PROTECTED_NAME_PREFIXES
+            .iter()
+            .any(|p| name.starts_with(p))
 }
 
 #[cfg(test)]
@@ -495,5 +530,21 @@ mod tests {
         ]);
         assert!(native_stage_evidence("main", &json!(altered), None).is_err());
         assert!(native_stage_evidence("main", &json!(&checks[..45]), None).is_err());
+    }
+    #[test]
+    fn all_common_build_and_ci_protection_conventions_are_retained() {
+        for path in [
+            ".github/workflows/ci.yml",
+            "app/.cargo/config.toml",
+            "app/tests/check.rs",
+            "nested/.config/config.json",
+            "src/example/Cargo.toml",
+            "src/example/build.rs",
+            "src/example/test_security.rs",
+            "deploy/mission-control/jenkins/unit.service",
+        ] {
+            assert!(native_protects(path), "unprotected {path}");
+        }
+        assert!(!native_protects("src/rust/forge-ide-ui/src/page.rs"));
     }
 }
