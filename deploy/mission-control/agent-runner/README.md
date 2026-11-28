@@ -11,12 +11,12 @@ work. The named **legacy machinery-owned publication exception** retains
 explicit ephemeral policy, legacy identities or missing persistent resolution.
 Preserve frozen receipts; this documentation grants no new permissions.
 
-**Operating note — 26 November 2026:** the event/API runner is deliberately
-stopped and disabled at boot. Coding, publication and external-delivery workers
-are separate services and remain active; this is not a full queue/workflow pause.
-The live database reports schema40. Consolidated source in PR29 adds schema41
-branch/stage contracts and ABI16, with qualification/rollout still outstanding.
-See the [current system picture](../../../docs/design/implementation-status.md).
+**Runtime checkpoint, November 28, 2026.** Reviewed main `6fa2e13d` runs schema
+54 and portal ABI 19. The runner API, four coding workers and publisher use the
+qualified Python release. This branch prepares Rust replacements. Workspace
+tabs persist in PostgreSQL through the Rust runner. The proxy, external delivery
+and Forge GPU inference worker each have a separate native executable.
+The [agent work log](../../../AGENT_WORK.md) records test and deployment status.
 
 [AGY quota handoff to Codex](../../../docs/architecture/agent-quota-handoff.md)
 describes optional source-bound author delegation, retained Plans/workspaces,
@@ -401,8 +401,8 @@ model IDs and must include the default when set. The catalog offers only the
 default when the list is omitted. The API can accept new jobs while Forge is
 offline.
 
-Install `forge_gpu_worker.py` and `model_adapter.py` under
-`~/.local/lib/forge-gpu-worker/` on Forge with psycopg2 available to Python.
+Build the `forge-host` binary `forge-gpu-worker` for the Forge host and install it
+as `~/.local/lib/forge-gpu-worker/forge-gpu-worker`.
 Install `forge-gpu-worker.service` as a user unit. The unit expects
 `forge-postgres-tunnel.service` to forward Forge loopback port 15432 to
 Mission Control PostgreSQL, and `forge-llama.service` to serve the authenticated
