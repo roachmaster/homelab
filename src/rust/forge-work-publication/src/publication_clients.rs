@@ -1944,18 +1944,16 @@ impl GitRepositoryProvider {
         head: &str,
         expected_remote_head: Option<&str>,
         reservation: Option<&Value>,
-        pull_requests: Option<&mut dyn PublicationPullRequestsPort>,
+        pull_requests: &mut dyn PublicationPullRequestsPort,
     ) -> ProviderResult<()> {
         self.verify(repository, head)?;
         let branch = branch_name(job, Some(&self.config))?;
         let remote = self.remote_url(text_of(job, "project_alias"));
         if let Some(reservation) = reservation {
             self.branch_provider.verify_owner(reservation)?;
-            if let Some(pull_requests) = pull_requests {
-                let mut listing_job = job.clone();
-                listing_job["branch_name"] = json!(branch);
-                pull_requests.check_reserved_branch(&listing_job, reservation)?;
-            }
+            let mut listing_job = job.clone();
+            listing_job["branch_name"] = json!(branch);
+            pull_requests.check_reserved_branch(&listing_job, reservation)?;
             let lease_expected = expected_remote_head.unwrap_or("");
             let lease_arg = format!("--force-with-lease=refs/heads/{branch}:{lease_expected}");
             self.git(

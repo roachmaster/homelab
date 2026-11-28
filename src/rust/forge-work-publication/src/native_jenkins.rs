@@ -30,9 +30,13 @@ use crate::ci_contract::{
 use crate::ci_phases::EVENT_PROFILE;
 use crate::durable_files::{durable_json, effective_uid, read_private};
 use crate::identity_contract::content_policy_path;
-use crate::jenkins_lifecycle::{EventLookup, LifecycleTracker};
+use crate::jenkins_lifecycle::LifecycleTracker;
 use crate::merge::MergeNativeCiPort;
 use crate::native_identity_provider::NativeVerificationIdentityProvider;
+use crate::native_ports::{
+    select_identities, LifecycleRecording, NativeIdentityPort, NativePullRequestPort,
+    NoContentIdentity, NoLifecycleRecording, NoPullRequestProvider,
+};
 use crate::publication_clients::{
     branch_name, GitHubPullRequestClient, GitRepositoryProvider, ProviderError, PublicationError,
 };
@@ -246,23 +250,53 @@ pub struct NativeJenkinsVerification {
     pub candidates: ReviewedCandidateProvider,
     pub delivery: TrustedDeliveryPort,
     pub supervisor: Box<dyn SupervisorPort + Send>,
-    pub client: Option<GitHubPullRequestClient>,
-    pub identities: Option<NativeVerificationIdentityProvider>,
+    /// `NoPullRequestProvider` unless a GitHub client is selected.
+    pull_requests: Box<dyn NativePullRequestPort>,
+    /// `NoContentIdentity` unless a content identity is selected.
+    identities: Box<dyn NativeIdentityPort>,
     /// `SharedAgentBranches` unless persistent branches are selected.
     pub branch_provider: Box<dyn BranchProviderObject>,
-    pub emitter: Option<Emitter>,
-    pub event_lookup: Option<Arc<SharedEventLookup>>,
-    pub jenkins_instance: Option<String>,
+    /// `NoLifecycleRecording` unless Jenkins events are configured.
+    lifecycle: Box<dyn LifecycleRecording>,
     pub contract: CiGateContract,
     pub version: String,
     pub stop: Arc<AtomicBool>,
     clock: Clock,
     wait: Wait,
-    drain: Option<Box<dyn FnMut() + Send>>,
+    /// The listen drain; a no-op outside a listen scope.
+    drain: Box<dyn FnMut() + Send>,
     pub timeout: f64,
     pub cleanup_timeout: f64,
     reconciliation_warnings: HashMap<String, ((String, String), f64, i64)>,
     action_iterator: Option<VecDeque<PathBuf>>,
+}
+
+/// Native verification's selectable collaborators, bound at
+/// construction. Each unselected one is its null object.
+pub struct NativeCollaborators {
+    pub pull_requests: Box<dyn NativePullRequestPort>,
+    pub identities: Box<dyn NativeIdentityPort>,
+    pub branch_provider: Box<dyn BranchProviderObject>,
+    pub lifecycle: Box<dyn LifecycleRecording>,
+    pub stop: Arc<AtomicBool>,
+}
+
+impl Default for NativeCollaborators {
+    /// Nothing selected: no pull-request client, no content identity,
+    /// shared branches, no lifecycle recording, a fresh stop flag.
+    fn default() -> Self {
+        NativeCollaborators {
+            pull_requests: Box::new(NoPullRequestProvider::default()),
+            identities: Box::new(NoContentIdentity),
+            branch_provider: Box::new(SharedAgentBranches),
+            lifecycle: Box::new(NoLifecycleRecording),
+            stop: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+fn no_drain() -> Box<dyn FnMut() + Send> {
+    Box::new(|| {})
 }
 
 impl NativeJenkinsVerification {
@@ -274,6 +308,7 @@ impl NativeJenkinsVerification {
         candidates: ReviewedCandidateProvider,
         delivery: TrustedDeliveryPort,
         supervisor: Box<dyn SupervisorPort + Send>,
+        collaborators: NativeCollaborators,
     ) -> Result<Self, PublicationError> {
         let contract = contract_for_config(&delivery.config)
             .map_err(|error| PublicationError::new(&error.to_string()))?;
@@ -286,20 +321,18 @@ impl NativeJenkinsVerification {
             candidates,
             delivery,
             supervisor,
-            client: None,
-            identities: None,
-            branch_provider: Box::new(SharedAgentBranches),
-            emitter: None,
-            event_lookup: None,
-            jenkins_instance: None,
+            pull_requests: collaborators.pull_requests,
+            identities: collaborators.identities,
+            branch_provider: collaborators.branch_provider,
+            lifecycle: collaborators.lifecycle,
             contract,
             version,
-            stop: Arc::new(AtomicBool::new(false)),
+            stop: collaborators.stop,
             clock: Box::new(monotonic_now),
             wait: Box::new(|seconds| {
                 std::thread::sleep(std::time::Duration::from_secs_f64(seconds.max(0.0)))
             }),
-            drain: None,
+            drain: no_drain(),
             timeout: 3600.0,
             cleanup_timeout: 45.0,
             reconciliation_warnings: HashMap::new(),
@@ -321,9 +354,7 @@ impl NativeJenkinsVerification {
     }
 
     fn wait(&mut self, seconds: f64) {
-        if let Some(drain) = &mut self.drain {
-            drain();
-        }
+        (self.drain)();
         (self.wait)(seconds);
     }
 
@@ -331,7 +362,7 @@ impl NativeJenkinsVerification {
     /// long CI waits (Python's listen_scope context manager):
     /// the returned guard clears the drain on drop.
     pub fn listen_scope(&mut self, drain: Box<dyn FnMut() + Send>) -> ListenScope<'_> {
-        self.drain = Some(drain);
+        self.drain = drain;
         ListenScope { owner: self }
     }
 
@@ -452,12 +483,8 @@ impl NativeJenkinsVerification {
             return Err(err("native_ci_profile_changed"));
         }
         if let Some(reference) = binding.get("content_identity") {
-            let identities = self
-                .identities
-                .as_ref()
-                .ok_or_else(|| err("native_identity_provider_required"))?;
             let generation = text(reference, "generation");
-            let snapshot = identities.read(generation)?;
+            let snapshot = self.identities.read(generation)?;
             if !NativeVerificationIdentityProvider::reference_matches(reference, &snapshot)
                 || snapshot.get("scope") != binding.get("scope")
                 || snapshot["provenance"]["native_gate_manifest_sha256"]
@@ -510,27 +537,11 @@ impl<'a> ListenScope<'a> {
 
 impl Drop for ListenScope<'_> {
     fn drop(&mut self) {
-        self.owner.drain = None;
+        self.owner.drain = no_drain();
     }
 }
 
 impl NativeJenkinsVerification {
-    /// Bind the content-identity provider during construction;
-    /// construction with the content-v2 protocol and no usable
-    /// provider is refused, mirroring the Python constructor's
-    /// TypeError. Only create_native_jenkins calls this, before the
-    /// verification escapes the factory.
-    fn bind_identities(
-        &mut self,
-        provider: Option<NativeVerificationIdentityProvider>,
-    ) -> Result<(), PublicationError> {
-        if self.config.native_identity_protocol == "content-v2" && provider.is_none() {
-            return Err(err("Selected content identity provider is unavailable"));
-        }
-        self.identities = provider;
-        Ok(())
-    }
-
     fn expected_spool_request(
         &mut self,
         binding: &Value,
@@ -1363,9 +1374,7 @@ impl NativeJenkinsVerification {
                     &head,
                     remote.as_deref(),
                     Some(&reservation_json),
-                    self.client.as_mut().map(|client| {
-                        client as &mut dyn crate::publication_clients::PublicationPullRequestsPort
-                    }),
+                    self.pull_requests.branch_guard(),
                 );
                 match push_result {
                     Ok(()) => {}
@@ -1428,10 +1437,14 @@ impl NativeJenkinsVerification {
                 if stopped || !self.store.review_renew(job)? {
                     return Err(err("native_branch_scope_inactive"));
                 }
-                if let Err(error) = self
-                    .git
-                    .push(&selected, repository, &head, None, None, None)
-                {
+                if let Err(error) = self.git.push(
+                    &selected,
+                    repository,
+                    &head,
+                    None,
+                    None,
+                    &mut crate::publication_clients::NoPullRequests,
+                ) {
                     let _ = error;
                     if self
                         .git
@@ -1757,18 +1770,15 @@ impl NativeJenkinsVerification {
         job: &Value,
         repository: &Path,
     ) -> Result<Option<Value>, PublicationError> {
-        let mut identities = match self.identities.take() {
-            Some(identities) => identities,
-            None => return Ok(None),
-        };
-        let result = self.prepare_identity_inner(&mut identities, job, repository);
-        self.identities = Some(identities);
+        let mut identities = std::mem::replace(&mut self.identities, Box::new(NoContentIdentity));
+        let result = self.prepare_identity_inner(identities.as_mut(), job, repository);
+        self.identities = identities;
         result
     }
 
     fn prepare_identity_inner(
         &mut self,
-        identities: &mut NativeVerificationIdentityProvider,
+        identities: &mut dyn NativeIdentityPort,
         job: &Value,
         repository: &Path,
     ) -> Result<Option<Value>, PublicationError> {
@@ -1886,13 +1896,12 @@ impl NativeJenkinsVerification {
         repository: &Path,
         branch_scope: Option<&str>,
     ) -> Result<(String, String, String, String, String, String), PublicationError> {
-        let has_snapshot = self
-            .identities
-            .as_ref()
-            .map(|identities| identities.snapshot_exists(text(job, "review_id")))
-            .unwrap_or(false);
+        let has_snapshot = self.identities.snapshot_exists(text(job, "review_id"));
         if has_snapshot {
-            let mut identities = self.identities.take().expect("checked");
+            // Taken for the acquire; an early return leaves the null in
+            // place, as the taken Option did.
+            let mut identities =
+                std::mem::replace(&mut self.identities, Box::new(NoContentIdentity));
             let head = self
                 .git
                 .git_text(Some(repository), &["rev-parse", "HEAD"], false, 60.0)?;
@@ -1902,7 +1911,7 @@ impl NativeJenkinsVerification {
                 return Err(err("native_ci_candidate_changed"));
             }
             let snapshot = identities.acquire(job, repository, None)?;
-            self.identities = Some(identities);
+            self.identities = identities;
             let snapshot = self.frozen_executor(&snapshot)?;
             let provenance = &snapshot["provenance"];
             if let Some(expected) = branch_scope {
@@ -2054,16 +2063,13 @@ impl NativeJenkinsVerification {
         };
         let branch_scope = derive_branch_scope(&head, &expected_main, source_branch.as_deref())
             .map_err(|error| PublicationError::new(&error.to_string()))?;
-        let has_snapshot = self
-            .identities
-            .as_ref()
-            .map(|identities| identities.snapshot_exists(text(job, "review_id")))
-            .unwrap_or(false);
+        let has_snapshot = self.identities.snapshot_exists(text(job, "review_id"));
         let mut snapshot: Option<Value> = None;
         if has_snapshot {
-            let mut identities = self.identities.take().expect("checked");
+            let mut identities =
+                std::mem::replace(&mut self.identities, Box::new(NoContentIdentity));
             let acquired = identities.acquire(job, repository, None);
-            self.identities = Some(identities);
+            self.identities = identities;
             snapshot = Some(acquired?);
         }
         let plan = match &snapshot {
@@ -2458,39 +2464,9 @@ impl NativeJenkinsVerification {
     }
 
     fn lifecycle_tracker(&mut self, binding: &Value) -> Option<LifecycleTracker> {
-        if self.emitter.is_none() || self.jenkins_instance.is_none() {
-            return None;
-        }
-        let request = &binding["request"];
-        let action = text(request, "action_id").to_string();
-        let directory = self.directory(&action).ok()?;
-        let lookup = self.event_lookup.clone().map(|arc| {
-            Box::new(move |alias: &str, job: &str, sha: &str| arc(alias, job, sha))
-                as Box<EventLookup>
-        });
-        let mut tracker = LifecycleTracker::new(
-            directory,
-            &action,
-            text(request, "project_alias"),
-            self.jenkins_instance.as_deref().unwrap_or_default(),
-            &self.delivery.config.jenkins_job,
-            text(request, "candidate_commit"),
-            lookup,
-            binding["scope"]
-                .get("correlation_id")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string()),
-            request
-                .get("source_branch")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string()),
-            request
-                .get("branch_scope")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string()),
-        );
-        let _ = tracker.reconcile();
-        Some(tracker)
+        let directory = |action: &str| self.directory(action).ok();
+        self.lifecycle
+            .tracker(binding, &self.delivery.config.jenkins_job, &directory)
     }
 
     fn record_cancellation(&self, tracker: &mut Option<LifecycleTracker>, binding: &Value) {
@@ -3133,46 +3109,8 @@ impl NativeJenkinsVerification {
     }
 
     fn pr(&mut self, job: &Value) -> Result<(), PublicationError> {
-        let Some(client) = &mut self.client else {
-            return Err(err("native_ci_pull_request_provider_unavailable"));
-        };
-        let repository = self
-            .config
-            .repositories
-            .get(text(job, "project_alias"))
-            .cloned()
-            .unwrap_or_default();
-        let prefix = format!("https://github.com/{repository}/pull/");
-        let url = job
-            .get("pr_url")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let number = url.strip_prefix(&prefix).unwrap_or_default();
-        if number.is_empty()
-            || !number.chars().all(|character| character.is_ascii_digit())
-            || number
-                .parse::<i64>()
-                .map(|value| value < 1 || value.to_string() != number)
-                .unwrap_or(true)
-        {
-            return Err(err("native_ci_pull_request_changed"));
-        }
-        let target = validate_uid(text(job, "target_publication_id"))
-            .map_err(|_| err("native_ci_pull_request_changed"))?;
-        let mut identity = job.clone();
-        identity["publication_id"] = json!(target);
-        identity["target_publication_id"] = json!(target);
-        let value = client.api("GET", &format!("repos/{repository}/pulls/{number}"), None)?;
-        client.validated(&identity, text(job, "candidate_commit"), &value)?;
-        if value.get("state").and_then(Value::as_str) != Some("open")
-            || value
-                .get("merged_at")
-                .map(|value| !value.is_null())
-                .unwrap_or(false)
-        {
-            return Err(err("native_ci_pull_request_changed"));
-        }
-        Ok(())
+        self.pull_requests
+            .verify_open(&self.config.repositories, job)
     }
 
     fn reconciliation_warning(&mut self, directory: &Path, code: &str, error_type: &str) {
@@ -3326,11 +3264,13 @@ fn self_current(
 /// Composition inputs for create_native_jenkins: the Python
 /// factory's injectable factories become explicit parameters.
 pub struct NativeJenkinsOptions {
-    pub client: Option<GitHubPullRequestClient>,
-    pub stop: Option<Arc<AtomicBool>>,
-    pub emitter: Option<Emitter>,
-    pub event_lookup: Option<Arc<SharedEventLookup>>,
-    pub jenkins_instance: Option<String>,
+    /// `NoPullRequestProvider` when no GitHub client is selected.
+    pub pull_requests: Box<dyn NativePullRequestPort>,
+    pub stop: Arc<AtomicBool>,
+    /// `NoLifecycleRecording` when Jenkins events are not configured.
+    pub lifecycle: Box<dyn LifecycleRecording>,
+    /// The selected content-identity provider, validated against the
+    /// identity protocol at create (`select_identities`).
     pub identity_provider: Option<NativeVerificationIdentityProvider>,
     /// `SharedAgentBranches` unless persistent branches are selected.
     pub branch_provider: Box<dyn BranchProviderObject>,
@@ -3423,26 +3363,35 @@ pub fn create_native_jenkins(
     let delivery = factory
         .create(options.jenkins_execute, options.execute, options.git_port)
         .map_err(|error| error.to_string())?;
-    let mut verification = NativeJenkinsVerification::new(
+    // Identity selection is checked after construction, as before: a
+    // contract error from new() still wins over a missing provider.
+    let identities = select_identities(&config.native_identity_protocol, options.identity_provider);
+    let (identities, identity_error) = match identities {
+        Ok(identities) => (identities, None),
+        Err(error) => (
+            Box::new(NoContentIdentity) as Box<dyn NativeIdentityPort>,
+            Some(error),
+        ),
+    };
+    let verification = NativeJenkinsVerification::new(
         config.clone(),
         store,
         git,
         candidates,
         delivery,
         supervisor,
+        NativeCollaborators {
+            pull_requests: options.pull_requests,
+            identities,
+            branch_provider: options.branch_provider,
+            lifecycle: options.lifecycle,
+            stop: options.stop,
+        },
     )
     .map_err(|error| error.code().to_string())?;
-    verification.client = options.client;
-    if let Some(stop) = options.stop {
-        verification.stop = stop;
+    if let Some(error) = identity_error {
+        return Err(error.code().to_string());
     }
-    verification.emitter = options.emitter;
-    verification.event_lookup = options.event_lookup;
-    verification.jenkins_instance = options.jenkins_instance;
-    verification
-        .bind_identities(options.identity_provider)
-        .map_err(|error| error.code().to_string())?;
-    verification.branch_provider = options.branch_provider;
     Ok(verification)
 }
 
@@ -3500,11 +3449,7 @@ impl NativeCiPort for NativeJenkinsVerification {
     }
 
     fn identity_reference(&mut self, snapshot: &Value) -> Result<Value, ReviewError> {
-        if self.identities.is_none() {
-            return Err(ReviewError::other("native_identity_provider_required"));
-        }
-        NativeVerificationIdentityProvider::reference(snapshot)
-            .map_err(|error| ReviewError::other(error.code()))
+        self.identities.reference(snapshot)
     }
 }
 
@@ -3548,7 +3493,7 @@ impl SharedNativeCi {
     /// so the host run loop can hold it across its own passes; the
     /// drain is cleared when the guard drops, unwinding included.
     pub fn listen_scope(&self, drain: Box<dyn FnMut() + Send>) -> SharedListenScope {
-        self.lock().drain = Some(drain);
+        self.lock().drain = drain;
         SharedListenScope(SharedNativeCi(Arc::clone(&self.0)))
     }
 }
@@ -3558,7 +3503,7 @@ pub struct SharedListenScope(SharedNativeCi);
 
 impl Drop for SharedListenScope {
     fn drop(&mut self) {
-        self.0.lock().drain = None;
+        self.0.lock().drain = no_drain();
     }
 }
 

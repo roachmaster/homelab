@@ -62,6 +62,9 @@ use forge_work_publication::native_jenkins::{
     create_native_jenkins, BranchProviderObject, NativeJenkinsOptions, SharedAgentBranches,
     SharedEventLookup, SharedNativeCi,
 };
+use forge_work_publication::native_ports::{
+    JenkinsLifecycleRecording, LifecycleRecording, NoLifecycleRecording,
+};
 use forge_work_publication::native_repair::BranchFirstRepairProvider;
 use forge_work_publication::post_merge::PostMergeWorker;
 use forge_work_publication::post_merge_provider::PostMergeProviderFactory;
@@ -573,12 +576,16 @@ pub fn create_publication_worker(
             }
             None => (None, None, None, None),
         };
+        let lifecycle: Box<dyn LifecycleRecording> = match (emitter, event_lookup, instance) {
+            (Some(emitter), Some(lookup), Some(instance)) => {
+                Box::new(JenkinsLifecycleRecording::new(emitter, instance, lookup))
+            }
+            _ => Box::new(NoLifecycleRecording),
+        };
         let options = NativeJenkinsOptions {
-            client: Some(GitHubPullRequestClient::new(config.clone(), executor())),
-            stop: Some(Arc::clone(&stop)),
-            emitter,
-            event_lookup,
-            jenkins_instance: instance,
+            pull_requests: Box::new(GitHubPullRequestClient::new(config.clone(), executor())),
+            stop: Arc::clone(&stop),
+            lifecycle,
             identity_provider: make_identity_provider(config)?,
             branch_provider: select_branch_provider(config, &pg)?,
             observer,

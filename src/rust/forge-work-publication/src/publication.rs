@@ -680,10 +680,7 @@ impl PublicationWorker {
                         head,
                         existing_head,
                         Some(&reservation_json),
-                        Some(
-                            &mut self.pull_requests
-                                as &mut dyn crate::publication_clients::PublicationPullRequestsPort,
-                        ),
+                        &mut self.pull_requests,
                     )
                     .map_err(provider_failure)?;
                 if self
@@ -801,7 +798,14 @@ impl PublicationWorker {
                 }
                 self.require_lease(job, local_stop)?;
                 self.git
-                    .push(job, repository, head, None, None, None)
+                    .push(
+                        job,
+                        repository,
+                        head,
+                        None,
+                        None,
+                        &mut crate::publication_clients::NoPullRequests,
+                    )
                     .map_err(provider_failure)?;
                 if self
                     .git
